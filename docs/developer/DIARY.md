@@ -4,6 +4,64 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-09
 
+**Dropping the frontend tooling, and the npm awareness
+behind it**
+
+The CLI-only prune removed the web crate, the frontend and
+the E2E suite, but left every piece of tooling that served
+them: five `xtask` frontend modules, two dev-server shell
+scripts, and a set of `.gitignore` blocks for Playwright and
+Node. None of it could run -- there was nothing to point it
+at -- so it was pure carrying cost, and `/template-sync` had
+to reconcile all of it on every future sync.
+
+Deleting that much is easy. The interesting part was the
+second decision: whether the *npm awareness* in the tooling
+that survived should go too. `cargo xtask audit` ran
+`npm audit` only when `frontend/package.json` existed, and
+the dependency-cooldown gate watched a
+`frontend/package-lock.json` that will never appear. Both
+already degraded cleanly to nothing. Keeping them cost
+nothing at runtime; removing them meant deleting ~400 lines
+of working, tested code.
+
+Chose to remove. A half-supported second ecosystem is worse
+than none: it reads as a capability the project has, and the
+next person to touch `dep-age` would have to understand and
+maintain a code path that cannot fire. `xtask` is now
+Rust-only end to end -- `audit.rs` lost `NpmAudit` and its
+runner, `dep_age.rs` lost `npm_version_date` / `npm_versions`
+and the registry arm, and `gate.rs` lost `parse_npm_lock` and
+its lockfile entry.
+
+`Ecosystem` survives as a **single-variant enum**, and the
+`cargo` argument stays on the command line
+(`dep-age cargo serde`). That is deliberate: it keeps the
+command stable and means adding a second registry later
+needs no CLI change. It costs a one-armed `match` in three
+places, which is the honest price of that option.
+
+The one real trap was in `sync.rs`. Its `categorize` function
+lists `frontend/` and `e2e/` as boilerplate prefixes, and
+deleting them looks exactly as correct as everything else in
+this change. It would have been wrong: those prefixes
+classify paths in the **upstream rustbase diff**, which still
+has a frontend, so removing them would silently drop upstream
+frontend changes into the wrong bucket during
+`/template-sync`. Left in place with a comment saying why,
+since the next cleanup pass will be tempted the same way.
+
+Verified the survivors against the live registry rather than
+trusting the suite: `dep-age cargo serde` resolves and dates
+correctly, `--latest-aged` still prints a pin target, `audit`
+reports without an npm segment, `dep-age-check` is a clean
+no-op, and `dep-age npm vite` now fails at the CLI boundary
+with `invalid value 'npm' [possible values: cargo]` rather
+than panicking.
+
+Net: 784 lines deleted, and `cargo xtask --help` no longer
+advertises four commands that could not work.
+
 **Initial scaffold: a thin SSH control plane for agent VMs**
 
 Started bombyx from the

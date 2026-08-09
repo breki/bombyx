@@ -1,4 +1,4 @@
-//! `cargo xtask dep-age <npm|cargo> <package> [version]` --
+//! `cargo xtask dep-age cargo <package> [version]` --
 //! a dependency-cooldown helper.
 //!
 //! Reports how many days ago a package version was published
@@ -9,13 +9,13 @@
 //!
 //! Two entry points share the fetch + verdict machinery:
 //!
-//! - [`dep_age`] -- the on-demand `cargo xtask dep-age
-//!   <npm|cargo> <pkg> [version]` query for a single package.
+//! - [`dep_age`] -- the on-demand `cargo xtask dep-age cargo
+//!   <pkg> [version]` query for a single package.
 //! - [`check_changed_deps`] -- the `validate` gate. It checks
 //!   only the `(name, version)` pairs newly present in the
-//!   working-tree lockfiles versus `HEAD`, so it costs nothing
-//!   (no network) on the common commit that leaves the
-//!   lockfiles untouched, and fires exactly at the moment a
+//!   working-tree `Cargo.lock` versus `HEAD`, so it costs
+//!   nothing (no network) on the common commit that leaves
+//!   the lockfile untouched, and fires exactly at the moment a
 //!   dependency is adopted. A *whole-tree* continuous gate is
 //!   deliberately avoided -- it would flag every already-locked
 //!   version on every routine update; the changed-deps scope
@@ -42,12 +42,15 @@ pub use preflight::dep_preflight;
 /// days ago without a stated justification.
 const COOLDOWN_DAYS: i64 = 14;
 
-/// Package registry to query. clap renders the variants as
-/// `npm` / `cargo` and rejects anything else at the CLI
+/// Package registry to query.
+///
+/// One variant, deliberately: this is a Rust-only project,
+/// but keeping the enum and the CLI argument means adding a
+/// second registry later needs no change to the command
+/// line. clap rejects anything but `cargo` at the CLI
 /// boundary, so there is no runtime string validation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Ecosystem {
-    Npm,
     Cargo,
 }
 
@@ -59,7 +62,6 @@ pub fn dep_age(
 ) -> Result<(), String> {
     let json = fetch_registry(ecosystem, package)?;
     let (resolved, published) = match ecosystem {
-        Ecosystem::Npm => npm_version_date(&json, version)?,
         Ecosystem::Cargo => cargo_version_date(&json, version)?,
     };
 
@@ -94,14 +96,19 @@ fn cooldown_verdict(age: i64, msg: &str) -> Result<String, String> {
 }
 
 /// Percent-encode a package name as a single URL path segment.
-/// Everything outside the RFC-3986 unreserved set is encoded,
-/// so a scoped npm name (`@scope/name`) becomes `@scope%2Fname`
-/// -- the raw `/` splits the path and 404s the packument
-/// endpoint -- and a stray `?`/`#`/space hits a literal
-/// non-existent package instead of silently retargeting the
-/// request. `@` is kept literal to match npm's packument
-/// convention. crates.io names are `[A-Za-z0-9_-]` only, so
-/// encoding is a harmless no-op there.
+///
+/// crates.io names are `[A-Za-z0-9_-]` only, so this is a
+/// no-op on any real crate. It stays as a boundary guard: the
+/// name comes from the command line, and a stray `/`, `?`,
+/// `#`, `:` or space must hit a literal non-existent package
+/// rather than silently retarget the request to another
+/// endpoint.
+///
+/// The pass-through set is the RFC-3986 unreserved set plus
+/// `@`. `@` is a legal `pchar`, and the authority is already
+/// fixed by the literal `https://crates.io/...` prefix, so
+/// leaving it unencoded cannot move the request to another
+/// host.
 fn percent_encode_segment(s: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(s.len());
@@ -132,7 +139,6 @@ fn fetch_registry(
 ) -> Result<Value, String> {
     let package = percent_encode_segment(package);
     let url = match ecosystem {
-        Ecosystem::Npm => format!("https://registry.npmjs.org/{package}"),
         Ecosystem::Cargo => {
             format!("https://crates.io/api/v1/crates/{package}")
         }
@@ -161,26 +167,6 @@ fn fetch_registry(
     }
     serde_json::from_slice(&output.stdout)
         .map_err(|e| format!("failed to parse registry JSON: {e}"))
-}
-
-/// Resolve (version, publish-date) from an npm registry
-/// document. `version` defaults to `dist-tags.latest`.
-fn npm_version_date(
-    json: &Value,
-    version: Option<&str>,
-) -> Result<(String, String), String> {
-    let resolved = match version {
-        Some(v) => v.to_string(),
-        None => json["dist-tags"]["latest"]
-            .as_str()
-            .ok_or("npm: missing dist-tags.latest")?
-            .to_string(),
-    };
-    let date = json["time"][&resolved]
-        .as_str()
-        .ok_or_else(|| format!("npm: no publish time for version {resolved}"))?
-        .to_string();
-    Ok((resolved, date))
 }
 
 /// Resolve (version, publish-date) from a crates.io crate
@@ -255,7 +241,7 @@ fn age_in_days(published_days: i64, today: i64) -> i64 {
 
 /// Print the newest version of `package` that has cleared the
 /// cooldown, to stdout (bare, so a caller can capture it for
-/// `cargo update --precise` / `npm install <pkg>@<ver>`).
+/// `cargo update --precise`).
 /// Errors when the registry lists no aged version. This is the
 /// pin target for the `/update-deps` workflow: "the latest
 /// version outside the cooldown".
@@ -265,7 +251,6 @@ pub fn dep_age_latest(
 ) -> Result<(), String> {
     let json = fetch_registry(ecosystem, package)?;
     let versions = match ecosystem {
-        Ecosystem::Npm => npm_versions(&json),
         Ecosystem::Cargo => cargo_versions(&json),
     };
     match latest_aged(&versions, today_days()) {
@@ -344,55 +329,23 @@ fn cargo_versions(json: &Value) -> Vec<(String, i64)> {
         .unwrap_or_default()
 }
 
-/// `(version, publish-day)` for every non-prerelease version
-/// in an npm registry `time` map (excluding its `created` /
-/// `modified` sentinel keys). Entries with a missing /
-/// unparseable date are skipped.
-///
-/// npm keeps `time` entries for *unpublished* versions, which
-/// can no longer be installed, so a version is included only
-/// if it is also present in the document's `versions`
-/// (installable) manifest -- the npm analogue of the cargo
-/// `yanked` filter. If `versions` is absent (a malformed
-/// document), the cross-check is skipped rather than dropping
-/// everything.
-fn npm_versions(json: &Value) -> Vec<(String, i64)> {
-    let Some(time) = json["time"].as_object() else {
-        return Vec::new();
-    };
-    let installable = json["versions"].as_object();
-    time.iter()
-        .filter_map(|(k, val)| {
-            if k == "created" || k == "modified" || k.contains('-') {
-                return None;
-            }
-            if let Some(vers) = installable
-                && !vers.contains_key(k)
-            {
-                return None; // unpublished -> not installable
-            }
-            let day = parse_iso_date(val.as_str()?).ok()?;
-            Some((k.clone(), day))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn percent_encode_segment_handles_scoped_and_special() {
-        // Scoped npm name: the slash must encode so the
-        // packument endpoint resolves.
-        assert_eq!(percent_encode_segment("@scope/name"), "@scope%2Fname");
-        // Unreserved set passes through untouched.
+    fn percent_encode_segment_handles_special() {
+        // A `/` must encode rather than splitting the path
+        // and retargeting the request.
+        assert_eq!(percent_encode_segment("a/b"), "a%2Fb");
+        // Unreserved set (plus `@`) passes through untouched.
         assert_eq!(percent_encode_segment("serde"), "serde");
         assert_eq!(percent_encode_segment("pkg.name-1_2~x"), "pkg.name-1_2~x");
-        // Query/fragment/space bytes encode rather than
+        // Query/fragment/space/scheme bytes encode rather than
         // retargeting the request.
         assert_eq!(percent_encode_segment("a b"), "a%20b");
         assert_eq!(percent_encode_segment("q?x#y"), "q%3Fx%23y");
+        assert_eq!(percent_encode_segment("http://evil"), "http%3A%2F%2Fevil");
     }
 
     #[test]
@@ -444,24 +397,6 @@ mod tests {
         assert_eq!(age_in_days(pub_day, days_from_civil(2026, 6, 15)), 14);
         // Future publish date clamps to 0, not negative.
         assert_eq!(age_in_days(days_from_civil(2026, 7, 1), pub_day), 0);
-    }
-
-    #[test]
-    fn npm_version_date_resolves_latest() {
-        let json: Value = serde_json::from_str(
-            r#"{"dist-tags":{"latest":"1.2.3"},
-                "time":{"1.2.3":"2026-01-10T00:00:00Z",
-                        "1.0.0":"2020-01-01T00:00:00Z"}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            npm_version_date(&json, None).unwrap(),
-            ("1.2.3".into(), "2026-01-10T00:00:00Z".into())
-        );
-        assert_eq!(
-            npm_version_date(&json, Some("1.0.0")).unwrap().1,
-            "2020-01-01T00:00:00Z"
-        );
     }
 
     #[test]
@@ -557,46 +492,6 @@ mod tests {
         .unwrap();
         // Prerelease (rc) and yanked entries are dropped.
         let v = cargo_versions(&json);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].0, "1.2.0");
-    }
-
-    #[test]
-    fn npm_versions_skips_sentinels_and_prerelease() {
-        // No `versions` manifest -> the installable cross-check
-        // is skipped and all non-sentinel releases are kept.
-        let json: Value = serde_json::from_str(
-            r#"{"time":{
-                "created":"2020-01-01T00:00:00Z",
-                "modified":"2026-07-15T00:00:00Z",
-                "1.2.0":"2026-06-20T00:00:00Z",
-                "2.0.0-beta.1":"2026-07-01T00:00:00Z"
-            }}"#,
-        )
-        .unwrap();
-        // created/modified sentinels and the beta are dropped.
-        let mut v = npm_versions(&json);
-        v.sort();
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].0, "1.2.0");
-    }
-
-    #[test]
-    fn npm_versions_skips_unpublished() {
-        // `1.1.0` lingers in `time` but is absent from the
-        // installable `versions` manifest (unpublished) -- it
-        // must be dropped so the pin never targets it (RT-3).
-        let json: Value = serde_json::from_str(
-            r#"{
-                "versions":{"1.2.0":{"version":"1.2.0"}},
-                "time":{
-                    "1.1.0":"2026-05-01T00:00:00Z",
-                    "1.2.0":"2026-06-20T00:00:00Z"
-                }
-            }"#,
-        )
-        .unwrap();
-        let v = npm_versions(&json);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].0, "1.2.0");
     }

@@ -54,6 +54,11 @@ fn categorize(path: &str) -> &'static str {
         "clippy.toml",
     ];
     const CLAUDE_PREFIXES: &[&str] = &[".claude/"];
+    // `frontend/` and `e2e/` classify paths in the **upstream
+    // rustbase** diff, which still has both. They must stay
+    // even though this project has neither -- removing them
+    // would silently drop upstream frontend changes out of the
+    // Boilerplate bucket and into the fallback.
     const BOILERPLATE_PREFIXES: &[&str] = &["crates/", "frontend/", "e2e/"];
     const DOC_PREFIXES: &[&str] = &["docs/"];
     const DOC_FILES: &[&str] = &["README.md", "llms.txt"];

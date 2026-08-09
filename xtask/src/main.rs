@@ -9,11 +9,6 @@ mod dep_age;
 mod dupes;
 mod feedback;
 mod fmt_cmd;
-mod frontend;
-mod frontend_check;
-mod frontend_dupes;
-mod frontend_fmt;
-mod frontend_test;
 mod helpers;
 mod sync;
 mod test_cmd;
@@ -62,7 +57,7 @@ enum XCommand {
     Coverage,
     /// Run code duplication check (requires code-dupes)
     Dupes,
-    /// Security-advisory audit (RUSTSEC + npm); requires
+    /// Security-advisory audit (RUSTSEC); requires
     /// cargo-audit
     Audit,
     /// Report a dependency version's age and flag it if
@@ -89,23 +84,6 @@ enum XCommand {
     /// down to its newest aged version, before compiling
     /// (front-door remediation; requires curl + git + cargo)
     DepPreflight,
-    /// Type-check the frontend (svelte-check); skips
-    /// cleanly when there is no frontend
-    FrontendCheck,
-    /// Format the frontend with Prettier; skips cleanly
-    /// when there is no frontend
-    FrontendFmt {
-        /// Check formatting read-only instead of
-        /// auto-fixing in place
-        #[arg(long)]
-        check: bool,
-    },
-    /// Check frontend code duplication (requires jscpd);
-    /// skips cleanly when there is no frontend
-    FrontendDupes,
-    /// Run the frontend unit suite (vitest); skips cleanly
-    /// when there is no frontend
-    FrontendTest,
     /// Empty `target/{debug,release}/incremental/` while
     /// keeping the dirs themselves (manual invocation only)
     CleanCache,
@@ -207,12 +185,6 @@ fn main() {
         }
         XCommand::DepAgeCheck => dep_age::dep_age_check(),
         XCommand::DepPreflight => dep_age::dep_preflight(),
-        XCommand::FrontendCheck => frontend_check::frontend_check_cmd(),
-        XCommand::FrontendFmt { check } => {
-            frontend_fmt::frontend_fmt_cmd(check)
-        }
-        XCommand::FrontendDupes => frontend_dupes::frontend_dupes_cmd(),
-        XCommand::FrontendTest => frontend_test::frontend_test_cmd(),
         XCommand::CleanCache => clean_cache::clean_cache(),
         XCommand::BackfeedDiff {
             downstream_path,

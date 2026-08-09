@@ -19,7 +19,7 @@ const TOTAL_STEPS: usize = 7;
 /// cooldown fails the gate *before* the compile steps
 /// (Clippy, Test, Coverage) build -- and run its build
 /// script -- on the too-new crate. It is free when the
-/// lockfiles are unchanged (no network, ~0.1s), so on the
+/// lockfile is unchanged (no network, ~0.1s), so on the
 /// common no-dep-change commit its early placement costs
 /// nothing; it only reaches the network on a commit that
 /// actually adopts a dependency, and even then a
@@ -131,7 +131,7 @@ fn run_test() -> Result<String, String> {
 }
 
 /// Security-advisory step -- fails on any vulnerability
-/// (RUSTSEC or npm). Advisory warnings are informational,
+/// (RUSTSEC). Advisory warnings are informational,
 /// and a connectivity / missing-tool failure degrades to a
 /// printed warning rather than failing the gate, so an
 /// offline machine or fresh CI run is not blocked by a

@@ -28,9 +28,8 @@
 //! in-resolver `-Zmin-publish-age` (nightly) does that
 //! automatically. See the supply-chain notes in `CLAUDE.md`.
 //!
-//! Scope: Rust / crates.io only. The frontend (`npm`) tree has
-//! its own resolution quirks (`ERESOLVE`, the `cd frontend`
-//! trap) and is left to `/update-deps`.
+//! Scope: Rust / crates.io, which is the whole dependency
+//! tree -- this is a Rust-only project.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;

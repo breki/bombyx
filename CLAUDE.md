@@ -46,8 +46,8 @@ cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
-cargo xtask dep-age <eco> <pkg> [ver]  # one package's publish age
-cargo xtask dep-age <eco> <pkg> --latest-aged  # newest ver past cooldown
+cargo xtask dep-age cargo <pkg> [ver]  # one package's publish age
+cargo xtask dep-age cargo <pkg> --latest-aged  # newest ver past cooldown
 cargo xtask dep-age-check     # cooldown-gate changed deps (vs HEAD)
 cargo xtask dep-preflight     # pin changed deps past cooldown pre-build
 cargo xtask backfeed-diff <ds-path>      # downstream feedback since watermark
@@ -93,17 +93,26 @@ two do not drift.
 
 ## Environment Constraints
 
-Declare machine-level assumptions here so the assistant does
-not reach for tools that are not present. Fill in each
-project's truths (Python, Node, Docker, cloud CLIs --
-anything an assistant might invoke reflexively); name the
-tool, its availability, and the allowed alternative. Example
-shape:
+Machine-level assumptions, so the assistant does not reach
+for tools that are not present:
 
-- *(placeholder)* "Python is not installed. Do not invoke
-  `python`/`python3`/`py`; use PowerShell, Bash, or Rust
-  (`xtask`) for scripting." Replace with this project's
-  actual constraints, or leave empty if none.
+- **Node / npm / Playwright are not used.** This is a
+  CLI-only project; the template's frontend and E2E suite
+  were removed, and so was every piece of tooling that
+  served them -- there are no `frontend-*` subcommands and
+  nothing in `xtask` knows about npm. Do not invoke `npm`,
+  `npx` or `playwright`.
+- **`scripts/e2e.sh` does not exist.** The end-to-end check
+  for this project is running bombyx against a real VM host
+  (Definition of Done item 3), not a script.
+- **The VM host is remote and not always reachable.** Any
+  command that actually talks to it (`ssh`, `scp`, `vagrant`)
+  may fail for reasons unrelated to the change under test.
+  Prefer `--dry-run` for argv-level checks, and say so
+  explicitly when a claim rests on a dry run rather than a
+  real push.
+- **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
+  Keep non-trivial logic in `xtask` -- see "Shell wrappers".
 
 ## Collaboration
 
@@ -130,6 +139,13 @@ shape:
   problem statement (save those for the option
   descriptions). It states *what the decision means*, not
   *how it is implemented*.
+- **Recommend, do not survey.** When you have a defensible
+  preference among the options, put it first and label it
+  "(Recommended)", and give the one-line reason. An evenly
+  weighted menu pushes the judgement back onto the user and
+  usually costs a round-trip ("what do you recommend?").
+  Ask without a recommendation only when the choice genuinely
+  turns on preference or context you do not have.
 
 ## Coding Standards
 
@@ -263,11 +279,11 @@ just when the code compiles:
    DB degrades to a warning
 7. **Dependency cooldown** (`cargo xtask dep-age-check`) --
    fails when a dependency added or bumped since `HEAD` was
-   published within the 14-day window; unchanged lockfiles
-   make it a no-op
+   published within the 14-day window; an unchanged
+   lockfile makes it a no-op
 
 The dependency-cooldown gate runs **first** (it is a no-op
-on unchanged lockfiles, and fails fast on a within-cooldown
+on an unchanged lockfile, and fails fast on a within-cooldown
 dependency before anything compiles it); after it the gates
 run cheapest-first (Fmt, Duplication, Clippy) before the
 expensive dynamic gates (Tests, Coverage, then the network
@@ -601,35 +617,37 @@ copies drift silently from `Cargo.toml`. If a version
 mention is unavoidable in user-facing prose, embed it
 as a sentinel comment (`<!-- version: 0.5.0 -->`) so a
 script can rewrite both on release, or pull the value
-from `Cargo.toml` via the build (Vite supports this
-for the frontend; CLI binaries can use `env!("CARGO_PKG_VERSION")`).
+from `Cargo.toml` via the build -- a CLI binary can use
+`env!("CARGO_PKG_VERSION")`.
 
 ## Supply-chain hygiene
 
 Four `cargo xtask` commands guard the dependency tree:
 
 - **`cargo xtask audit`** runs `cargo audit` (RUSTSEC) over
-  `Cargo.lock` and `npm audit` over the frontend, failing on
-  any vulnerability (advisory *warnings* -- unsound /
-  unmaintained / yanked -- are reported, not fatal). It runs
-  late in `validate`, so **`validate` needs `cargo-audit`
-  installed (`cargo install cargo-audit`) and network access**
-  to the advisory DB / npm registry.
-- **`cargo xtask dep-age <npm|cargo> <package> [version]`**
+  `Cargo.lock`, failing on any vulnerability (advisory
+  *warnings* -- unsound / unmaintained / yanked -- are
+  reported, not fatal). It runs late in `validate`, so
+  **`validate` needs `cargo-audit` installed
+  (`cargo install cargo-audit`) and network access** to the
+  advisory DB.
+- **`cargo xtask dep-age cargo <package> [version]`**
   reports how many days ago a version was published (on-demand,
   a single package). Add **`--latest-aged`** to instead print
   the **highest** version that has cleared the cooldown
   (selected by version, not publish date) -- the pin target the
-  `/update-deps` workflow feeds to `cargo update --precise` /
-  `npm install <pkg>@<ver>`.
+  `/update-deps` workflow feeds to `cargo update --precise`.
+  The `cargo` argument names the registry; it is the only one
+  supported, and is kept so adding a second later needs no
+  change to the command line.
 - **`cargo xtask dep-age-check`** enforces the cooldown as the
   **first** `validate` step, so a dependency adopted within the
   cooldown fails the gate before the compile steps (Clippy,
   Test, Coverage) build and run its build script. It checks
   **only the dependencies added or version-bumped in the working
-  tree versus `HEAD`** (both lockfiles), so it fires exactly when
-  a dependency is adopted and costs nothing -- no network -- on a
-  commit that leaves the lockfiles untouched. A *whole-tree* gate is
+  tree versus `HEAD`**, so it fires exactly when a dependency is
+  adopted and costs nothing -- no network -- on a commit that
+  leaves `Cargo.lock` untouched. A *whole-tree* gate is
   deliberately avoided: it would flag every already-locked
   version on every routine update. Like `audit`, an
   unreachable registry / missing `HEAD` baseline degrades to a
@@ -673,8 +691,8 @@ justification -- that window is when a compromised or
 malicious release is most likely still live. Security fixes
 are exempt (the fix's urgency outweighs the cooldown). Check
 a candidate before adding it:
-`cargo xtask dep-age cargo <crate> <version>` (or `npm`); it
-exits non-zero when the version is within the cooldown.
+`cargo xtask dep-age cargo <crate> <version>`; it exits
+non-zero when the version is within the cooldown.
 
 `validate` enforces this automatically for changed deps via
 the `dep-age-check` step above. When you *do* adopt a
@@ -687,10 +705,10 @@ validate`.
 
 **`cargo update` interaction.** The gate checks *every*
 newly-locked registry dependency, **transitive ones included**
--- so it is a no-op only on commits that leave the lockfiles
+-- so it is a no-op only on commits that leave `Cargo.lock`
 untouched, not on every "routine" commit. A lockfile-churning
-update (`cargo update`, `npm update`) can bump many transitive
-crates to versions published within the cooldown, and the gate
+update (`cargo update`) can bump many transitive crates to
+versions published within the cooldown, and the gate
 will fail listing all of them. That is intended -- a bulk
 update is exactly when a freshly-published (possibly
 compromised) transitive release slips in. The recommended

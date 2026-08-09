@@ -1,18 +1,18 @@
 //! Changed-dependency cooldown gate -- the `validate` step.
 //!
 //! Checks only the `(name, version)` pairs newly present in
-//! the working-tree lockfiles versus `HEAD`, so it costs
+//! the working-tree `Cargo.lock` versus `HEAD`, so it costs
 //! nothing (no network) on the common commit that leaves the
-//! lockfiles untouched, and fires exactly at the moment a
+//! lockfile untouched, and fires exactly at the moment a
 //! dependency is adopted. A *whole-tree* continuous gate is
 //! deliberately avoided -- it would flag every already-locked
 //! version on every routine update.
 //!
 //! Scope caveat: the check covers **every** newly-locked
 //! registry dependency, transitive ones included. A
-//! lockfile-churning update (`cargo update` / `npm update`)
-//! therefore can flag many fresh transitive versions at once;
-//! see `RUSTBASE_DEP_AGE_ALLOW` and the supply-chain notes in
+//! lockfile-churning update (`cargo update`) therefore can
+//! flag many fresh transitive versions at once; see
+//! `RUSTBASE_DEP_AGE_ALLOW` and the supply-chain notes in
 //! `CLAUDE.md` for the intended workflow.
 //!
 //! The shared registry-fetch and date-verdict machinery lives
@@ -22,11 +22,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
 
-use serde_json::Value;
-
 use super::{
     COOLDOWN_DAYS, Ecosystem, age_in_days, cargo_version_date, fetch_registry,
-    npm_version_date, parse_iso_date, today_days,
+    parse_iso_date, today_days,
 };
 use crate::helpers::workspace_root;
 
@@ -178,42 +176,6 @@ fn unquote(s: &str) -> String {
     s.trim().trim_matches('"').to_string()
 }
 
-/// Extract `(name, version)` pairs from an npm lockfile
-/// (`lockfileVersion` 2/3 `packages` map), **registry-sourced
-/// packages only**. The map is keyed by install path
-/// (`node_modules/<name>`, `node_modules/a/node_modules/b`);
-/// the name is the segment after the final `node_modules/`.
-///
-/// Only entries whose `resolved` is an `http(s)` tarball URL
-/// are returned -- the root package (empty key), workspace
-/// links (`link: true`, relative `resolved`) and `file:` deps
-/// have no npm-registry publish date to check. An unparseable
-/// / older-format lockfile yields an empty list (nothing to
-/// check).
-fn parse_npm_lock(text: &str) -> Vec<(String, String)> {
-    let Ok(json) = serde_json::from_str::<Value>(text) else {
-        return Vec::new();
-    };
-    let Some(packages) = json["packages"].as_object() else {
-        return Vec::new();
-    };
-    packages
-        .iter()
-        .filter(|(key, _)| !key.is_empty())
-        .filter(|(_, val)| {
-            val["resolved"]
-                .as_str()
-                .is_some_and(|r| r.starts_with("http"))
-        })
-        .filter_map(|(key, val)| {
-            let name = key.rsplit("node_modules/").next().unwrap_or(key);
-            val["version"]
-                .as_str()
-                .map(|v| (name.to_string(), v.to_string()))
-        })
-        .collect()
-}
-
 /// `(name, version)` pairs present in `new` but not in `old`
 /// -- both freshly added packages and version bumps of an
 /// existing package (the bumped tuple is simply not in `old`).
@@ -251,16 +213,12 @@ pub(super) fn git_show(rel: &str) -> Option<String> {
 /// cooldown. Thin wrapper over the shared fetch + date +
 /// verdict helpers; the branchy logic lives in those
 /// (already unit-tested) pieces.
-fn check_one(eco: Ecosystem, name: &str, version: &str) -> DepOutcome {
-    let json = match fetch_registry(eco, name) {
+fn check_one(name: &str, version: &str) -> DepOutcome {
+    let json = match fetch_registry(Ecosystem::Cargo, name) {
         Ok(j) => j,
         Err(e) => return DepOutcome::Unavailable(e),
     };
-    let dated = match eco {
-        Ecosystem::Npm => npm_version_date(&json, Some(version)),
-        Ecosystem::Cargo => cargo_version_date(&json, Some(version)),
-    };
-    let published = match dated {
+    let published = match cargo_version_date(&json, Some(version)) {
         Ok((_, p)) => p,
         Err(e) => return DepOutcome::Unavailable(e),
     };
@@ -278,25 +236,35 @@ fn check_one(eco: Ecosystem, name: &str, version: &str) -> DepOutcome {
 }
 
 /// Diff one lockfile against `HEAD` and append an outcome per
-/// newly-adopted dependency. A missing current file means the
-/// ecosystem is absent (skip); a missing `HEAD` baseline with
-/// the file present is surfaced as a warning (can't diff).
+/// newly-adopted dependency.
+///
+/// Both "cannot read the lockfile" and "no `HEAD` baseline to
+/// diff against" are surfaced as **warnings**, never as a
+/// silent return. This gate exists to fail loudly on an
+/// un-vetted dependency, so a condition that stops it
+/// checking must never leave the caller printing a green
+/// `Dep-age OK` -- that reads to an operator as evidence the
+/// dependency was vetted.
 fn collect_changes(
-    eco: Ecosystem,
     rel: &str,
     parser: fn(&str) -> Vec<(String, String)>,
     allow: &HashSet<String>,
     outcomes: &mut Vec<(String, DepOutcome)>,
     warnings: &mut Vec<String>,
 ) {
-    let Ok(current_text) = fs::read_to_string(workspace_root().join(rel))
-    else {
-        return; // no such lockfile -> ecosystem absent
+    let current_text = match fs::read_to_string(workspace_root().join(rel)) {
+        Ok(t) => t,
+        Err(e) => {
+            warnings.push(format!(
+                "{rel}: cannot read ({e}) -- skipping the cooldown check"
+            ));
+            return;
+        }
     };
     let Some(baseline_text) = git_show(rel) else {
         warnings.push(format!(
-            "{rel}: no HEAD baseline to diff against -- skipping cooldown \
-             check for this lockfile"
+            "{rel}: no HEAD baseline to diff against -- skipping the \
+             cooldown check"
         ));
         return;
     };
@@ -308,7 +276,7 @@ fn collect_changes(
         let outcome = if allow.contains(&label) {
             DepOutcome::Allowed
         } else {
-            check_one(eco, &name, &version)
+            check_one(&name, &version)
         };
         outcomes.push((label, outcome));
     }
@@ -316,25 +284,16 @@ fn collect_changes(
 
 /// Run the changed-dependency cooldown gate: check only the
 /// `(name, version)` pairs newly present in the working-tree
-/// lockfiles versus `HEAD`. Free (no network) when the
-/// lockfiles are unchanged.
+/// `Cargo.lock` versus `HEAD`. Free (no network) when the
+/// lockfile is unchanged.
 pub fn check_changed_deps() -> DepAgeResult {
     let allow = parse_allow(std::env::var(ALLOW_ENV).ok().as_deref());
     let mut outcomes: Vec<(String, DepOutcome)> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
     collect_changes(
-        Ecosystem::Cargo,
         "Cargo.lock",
         parse_cargo_lock,
-        &allow,
-        &mut outcomes,
-        &mut warnings,
-    );
-    collect_changes(
-        Ecosystem::Npm,
-        "frontend/package-lock.json",
-        parse_npm_lock,
         &allow,
         &mut outcomes,
         &mut warnings,
@@ -402,36 +361,6 @@ dependencies = [
             parse_cargo_lock(lock),
             vec![("aho-corasick".into(), "1.1.2".into())]
         );
-    }
-
-    #[test]
-    fn parse_npm_lock_registry_only_skipping_root_and_links() {
-        let lock = r#"{"lockfileVersion":3,"packages":{
-            "":{"name":"frontend","version":"0.0.0"},
-            "node_modules/vite":{"version":"8.0.1",
-                "resolved":"https://registry.npmjs.org/vite/-/vite-8.0.1.tgz"},
-            "node_modules/vite/node_modules/esbuild":{"version":"0.24.0",
-                "resolved":"https://registry.npmjs.org/esbuild/-/esbuild-0.24.0.tgz"},
-            "node_modules/local":{"version":"1.0.0","link":true,
-                "resolved":"../local"}
-        }}"#;
-        let mut pkgs = parse_npm_lock(lock);
-        pkgs.sort();
-        // Root ("") and the local link (relative `resolved`)
-        // dropped; nested name is the final path segment.
-        assert_eq!(
-            pkgs,
-            vec![
-                ("esbuild".into(), "0.24.0".into()),
-                ("vite".into(), "8.0.1".into()),
-            ]
-        );
-    }
-
-    #[test]
-    fn parse_npm_lock_bad_json_is_empty() {
-        assert!(parse_npm_lock("not json").is_empty());
-        assert!(parse_npm_lock("{}").is_empty());
     }
 
     #[test]

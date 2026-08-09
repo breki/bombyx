@@ -23,4 +23,18 @@ plan, decisions, and outcome.
 - `agent-vlan` -- move VMs onto an isolated VLAN with a
   router-enforced egress allowlist.
 
+- **todo-summary-truncation** -- todo done truncates a wrapped summary
+  cargo xtask todo add wraps a long summary across several lines in the Pending
+  bullet, but todo done only carries the first line into the Done entry, so the
+  text is cut mid-sentence. Seen on drop-frontend-tooling, whose Done entry
+  reads 'Delete leftover frontend tooling from the'. Fix in xtask with a test:
+  rejoin the wrapped continuation lines when reading a pending bullet. The
+  --summary override cannot repair an entry after the fact, since done refuses a
+  slug that is no longer pending.
+
 ## Done
+
+- [**drop-frontend-tooling**](issues/drop-frontend-tooling.md)
+  -- Delete leftover frontend tooling from the
+  (2026-08-09)
+

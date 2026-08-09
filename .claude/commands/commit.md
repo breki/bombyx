@@ -1,6 +1,6 @@
 ---
 description: Commit current changes following project conventions
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(scripts/e2e.sh*), Bash(cargo xtask*), Read, Edit, Agent, AskUserQuestion, Skill(retrospect)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git config:*), Bash(cargo xtask*), Read, Edit, Agent, AskUserQuestion, Skill(retrospect)
 ---
 
 Commit the current changes following the project's git commit
@@ -23,6 +23,11 @@ gate.
    - `git diff` for unstaged changes
    - `git diff --cached` for staged changes
    - `git log --oneline -5` for recent commit style reference
+   - `git config user.email` to confirm an author identity
+     exists. It costs nothing when set, and when it is not,
+     `git commit` fails at the very end -- after the reviews,
+     the fixes and the gates have all run. Resolve it while
+     the reviewers are still working, not after.
 
 2. **Review changes** - Analyze what was changed and determine:
    - The commit type: feat, fix, chore, refactor, docs, test,
@@ -198,14 +203,16 @@ gate.
      only changes, CI/lint config tweaks invisible to
      users, docs-only edits.
 
-6. **E2E tests** -- Run `scripts/e2e.sh` to verify the
-   full stack works end-to-end. The script kills stale
-   servers and runs Playwright, which auto-starts both
-   backend and frontend using test data (not production
-   data).
-   - If E2E tests **fail**, ask the user whether to
-     commit anyway or abort.
-   - Skip if no frontend or API changes in the diff.
+6. **E2E tests** -- **Not applicable to this project.**
+   bombyx is CLI-only: the template's frontend, backend and
+   Playwright suite were removed, and `scripts/e2e.sh` does
+   not exist. Skip this step without comment.
+
+   The equivalent verification here is Definition of Done
+   item 3 -- running the real thing against a real VM host.
+   `--dry-run` proves the argv, not that the remote accepts
+   it, so for any change to the commands bombyx emits, say
+   plainly in the summary whether that check has been done.
 
 7. **Fix line endings** - After staging, check for CRLF
    warnings. All text files must use LF line endings.
