@@ -1,0 +1,58 @@
+# Rust
+target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/settings.local.json
+
+# Environment
+.env
+.env.*
+
+# Coverage
+coverage.xml
+coverage.json
+*.profraw
+*.profdata
+
+# Frontend (covered by frontend/.gitignore, belt-and-suspenders)
+/frontend/node_modules/
+/frontend/dist/
+
+# Port config (local override)
+.ports
+
+# Deploy config (local override; .deploy.sample is committed)
+.deploy
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# E2E test data (copied from fixtures at runtime)
+/test-data/
+
+# Node (root-level, for Playwright)
+/node_modules/
+/package-lock.json
+
+# mise local overrides
+.mise.local.toml
+
+# Vagrant machine state. Holds the VM's identity: it belongs
+# to whichever host booted the VM, never to the repo, and
+# bombyx excludes it from the push for the same reason.
+.vagrant/

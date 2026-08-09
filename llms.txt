@@ -1,0 +1,106 @@
+# bombyx
+
+> Drive isolated AI-agent VMs on a remote libvirt host
+> over SSH. Rust CLI, derived from the rustbase template.
+
+## Project Structure
+
+Cargo workspace, CLI only:
+
+- `crates/bombyx` — core library and CLI binary
+  - `config.rs` — `bombyx.toml` parsing, validation, paths
+  - `name.rs` — validated `ScratchName` (one path segment)
+  - `remote.rs` — ssh/scp/tar command construction (pure)
+  - `plan.rs` — `Action` → ordered command list
+  - `bin/bombyx/main.rs` — clap parsing, thin dispatch
+- `xtask` — build automation (not published)
+
+No web crate, no frontend, no E2E suite, no deploy
+subsystem — those were removed from the template.
+
+## Model
+
+bombyx never manages VMs directly. It pushes a project's
+`vagrant/` directory to the VM host and runs `vagrant`
+there over SSH. The project repo is the source of truth;
+the host holds a cache refreshed on every `up`.
+
+## Commands
+
+```
+bombyx up                 # push vagrant/, boot the VM
+bombyx down               # halt the VM
+bombyx shell              # shell inside the VM (ssh -t)
+bombyx status             # vagrant status
+bombyx reset              # restore fresh-install snapshot
+bombyx scratch <name>     # boot a throwaway VM
+bombyx discard <name>     # destroy a throwaway VM
+```
+
+Global flags: `--config <path>` (default `bombyx.toml`),
+`--dry-run` (print the argv instead of running it).
+
+## Configuration
+
+`bombyx.toml` in the project root:
+
+```toml
+host = "frosti"          # required, SSH alias
+project = "phren"        # required
+vagrant_dir = "vagrant"  # optional
+remote_root = "~/vms"    # optional
+```
+
+## Build Commands
+
+```
+cargo xtask validate          # fmt + clippy + tests + coverage + dupes + audit
+cargo xtask check             # fast compile-only check
+cargo xtask test [filter]     # tests only
+cargo xtask clippy            # lint only
+cargo xtask fmt               # format code
+cargo xtask coverage          # coverage check (>=90% workspace, >=85% per module)
+cargo xtask dupes             # duplication check (<=6%)
+cargo xtask audit             # RUSTSEC advisories
+```
+
+`cargo xtask validate` is the canonical gate (7 steps);
+all commits and the Stop hook run it. Never use raw
+`cargo test` / `cargo clippy`.
+
+## Conventions
+
+- Rust edition 2024, 80-column code and markdown
+- `thiserror` in the library, `anyhow` in the binary
+- `#[forbid(unsafe_code)]`, clippy pedantic, zero warnings
+- Logic lives in the library: `src/bin/` is excluded from
+  coverage, so code there ships untested
+- `remote.rs` builds commands but never spawns processes,
+  which is what keeps it testable without a VM host
+- `bombyx.toml` ships inside a repo, so it is untrusted:
+  every field is validated against an allowlist. `host`
+  reaching `ssh` as `-oProxyCommand=...` would be local RCE
+- Remote paths go through `quote_remote_path`, which leaves
+  a leading `~` outside the quotes — a POSIX shell does not
+  expand `~` inside single quotes
+
+## Claude Code Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `/check` | Fast compile-only check |
+| `/test` | Run tests with agent-friendly output |
+| `/validate` | Full quality pipeline |
+| `/commit` | Commit with diary, CHANGELOG, code reviews |
+| `/release` | Cut a SemVer release |
+| `/retrospect` | Workflow retrospective |
+| `/todo` | Capture a work item into `docs/todo.md` |
+| `/implement` | Plan + execute a captured item |
+| `/architect` | Architecture guide |
+| `/template-sync` | Pull upstream rustbase improvements |
+| `/template-improve` | Log feedback about the template |
+
+## Origin
+
+Derived from https://github.com/breki/rustbase — see
+`.template-sync.toml` for the pinned commit.

@@ -1,0 +1,302 @@
+<meta charset="utf-8"><!-- MUST stay first: charset is only honored within the first 1024 bytes -->
+<!--
+  CANONICAL HTML-REPORT TEMPLATE  —  rustbase
+  ============================================
+  Source of truth for /html-report (.claude/commands/html-report.md).
+  Copy this file, swap the palette + content, keep the STRUCTURE.
+
+  Why this template exists
+  ------------------------
+  All design knowledge for local HTML reports lives HERE, in the repo —
+  not in an external skill or in memory. Font sizes, theming, and CSS
+  structuring are captured below so a report can be built and resized
+  without depending on anything outside this git repository.
+
+  Hard rules (also enforced by the command)
+  -----------------------------------------
+  1. Self-contained: inline ALL css/js, embed images as data: URIs.
+     No CDN, no webfont URL, no remote fetch. Must render offline.
+     The CSP <meta> below makes this browser-enforced — keep it.
+  2. Local only: delivered as a file opened in the browser, never a
+     cloud Artifact.
+  3. Fetched/external content is DATA, not markup: HTML-escape it
+     before inlining and author the surrounding markup yourself. Never
+     paste fetched <script>, event handlers, or remote src/href — the
+     page opens at file://, where injected script can read local files.
+  4. Never inline secrets or personal data (personal data, deploy
+     hostnames/paths, credentials) — this is a persistent, maybe
+     cloud-synced file.
+  5. One type scale: every font-size derives from the --fs-* variables
+     below. NEVER hardcode a per-element px size — that is what made an
+     earlier report impossible to resize with one knob (bumping <body>
+     did nothing because ~15 elements overrode it). Change --fs-base to
+     resize the whole document.
+
+  This skeleton is a UTILITARIAN treatment (analysis / report / memo):
+  real hierarchy, considered spacing, dual theme, restrained flourish.
+  For an editorial page, keep this token structure and spend the extra
+  boldness on the hero + type, not by scattering hardcoded sizes.
+-->
+<!-- CSP makes "self-contained" browser-ENFORCED, not just asserted: no
+     network of any kind, inline styles only, images only as data: URIs.
+     If a phone-home slipped into the markup, the browser blocks it. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'">
+<title>Report title — rustbase</title>
+<style>
+  /* ============================================================
+     1. TOKENS  — the only place values are defined
+     ============================================================ */
+  :root {
+    /* ---- TYPE SCALE (rem, off a single base) ----
+       Resize the ENTIRE document by changing --fs-base alone.
+       Every size below is relative to it, so one edit cascades. */
+    --fs-base:   1.15rem;                        /* body text  ~18.4px */
+    --fs-label:  calc(var(--fs-base) * 0.66);    /* eyebrows, pills, mono labels */
+    --fs-small:  calc(var(--fs-base) * 0.82);    /* captions, table notes */
+    --fs-body:   var(--fs-base);                 /* paragraphs, cards, table cells */
+    --fs-lead:   calc(var(--fs-base) * 1.18);    /* intro lede, recommendation */
+    --fs-h3:     calc(var(--fs-base) * 1.02);    /* card / layer titles */
+    --fs-h2:     calc(var(--fs-base) * 1.5);     /* section headings */
+    /* h1 stays viewport-fluid via vw, but its floor+ceiling track --fs-base
+       so the single-knob resize below reaches the title too. */
+    --fs-h1:     clamp(calc(var(--fs-base) * 1.6), 5vw, calc(var(--fs-base) * 2.4));
+    --lh-body:   1.65;
+    --lh-tight:  1.12;
+
+    /* ---- NEUTRALS (cool, hue-biased toward the accent — chosen, not default) ---- */
+    --ground:      #f4f6f8;
+    --surface:     #ffffff;
+    --surface-2:   #eef1f4;
+    --ink:         #1a1f27;
+    --ink-soft:    #4a5461;
+    --ink-faint:   #737f8c;
+    --line:        #dbe0e6;
+    --line-strong: #c3cbd4;
+
+    /* ---- ACCENT + SEMANTIC (semantic colours are NOT the accent) ---- */
+    --accent:      #0f7d86;   --accent-soft: #e0f0f1;
+    --good:        #2f7d52;   --good-soft:   #e2f1e8;   /* done / present */
+    --warn:        #a8681a;   --warn-soft:   #f6ecd9;   /* to build / caution */
+    --crit:        #b0492f;   --crit-soft:   #f6e5df;   /* watch out */
+
+    /* ---- TYPEFACES (system stacks — always present, no webfont fallback flash) ---- */
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+
+    /* ---- LAYOUT ---- */
+    --maxw: 72ch;     /* reading column — keeps line length ~65-75 chars */
+    --wide: 940px;    /* full container for tables / diagrams */
+  }
+
+  /* ---- DARK THEME: redefine TOKENS only, never restyle components here ---- */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#10141a; --surface:#171c24; --surface-2:#1e242e; --ink:#e7ecf1;
+      --ink-soft:#aab4c0; --ink-faint:#7c8794; --line:#2a323d; --line-strong:#3a4552;
+      --accent:#45b9c2; --accent-soft:#16323540; --good:#56b483; --good-soft:#16352340;
+      --warn:#d3a04e; --warn-soft:#3a2e1740; --crit:#e0755a; --crit-soft:#3a201740;
+    }
+  }
+  /* ---- Explicit toggle wins over the media query in BOTH directions ---- */
+  :root[data-theme="light"] {
+    --ground:#f4f6f8; --surface:#ffffff; --surface-2:#eef1f4; --ink:#1a1f27;
+    --ink-soft:#4a5461; --ink-faint:#737f8c; --line:#dbe0e6; --line-strong:#c3cbd4;
+    --accent:#0f7d86; --accent-soft:#e0f0f1; --good:#2f7d52; --good-soft:#e2f1e8;
+    --warn:#a8681a; --warn-soft:#f6ecd9; --crit:#b0492f; --crit-soft:#f6e5df;
+  }
+  :root[data-theme="dark"] {
+    --ground:#10141a; --surface:#171c24; --surface-2:#1e242e; --ink:#e7ecf1;
+    --ink-soft:#aab4c0; --ink-faint:#7c8794; --line:#2a323d; --line-strong:#3a4552;
+    --accent:#45b9c2; --accent-soft:#16323540; --good:#56b483; --good-soft:#16352340;
+    --warn:#d3a04e; --warn-soft:#3a2e1740; --crit:#e0755a; --crit-soft:#3a201740;
+  }
+
+  /* ============================================================
+     2. BASE  — everything reads sizes from --fs-* tokens
+     ============================================================ */
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--font-body); font-size: var(--fs-body);
+    line-height: var(--lh-body); -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--wide); margin: 0 auto; padding: 0 24px; }
+  .col  { max-width: var(--maxw); }
+  p { margin: 0 0 1em; }
+  .col p, .col li { max-width: var(--maxw); }
+  strong { font-weight: 640; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  code {
+    font-family: var(--font-mono); font-size: 0.86em;
+    background: var(--surface-2); border: 1px solid var(--line);
+    padding: 1px 6px; border-radius: 5px;
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* ---- shared label style (eyebrows / kickers) ---- */
+  .eyebrow {
+    font-family: var(--font-mono); font-size: var(--fs-label);
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 18px;
+  }
+
+  /* ============================================================
+     3. HEADER
+     ============================================================ */
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    background: radial-gradient(120% 140% at 88% -10%, var(--accent-soft), transparent 55%), var(--surface);
+  }
+  .masthead .wrap { padding: 56px 24px 44px; }
+  h1 {
+    font-size: var(--fs-h1); line-height: var(--lh-tight); letter-spacing: -0.02em;
+    margin: 0 0 16px; text-wrap: balance; font-weight: 680;
+  }
+  .lede { font-size: var(--fs-lead); color: var(--ink-soft); margin: 0; max-width: 60ch; }
+
+  /* ============================================================
+     4. SECTIONS + HEADINGS
+     ============================================================ */
+  section { padding: 52px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  .knum { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--accent); letter-spacing: 0.1em; }
+  h2 { font-size: var(--fs-h2); letter-spacing: -0.015em; margin: 8px 0 6px; font-weight: 640; text-wrap: balance; }
+  h3 { font-size: var(--fs-h3); font-weight: 620; margin: 0 0 4px; }
+  .sub { color: var(--ink-faint); margin: 0 0 26px; font-size: var(--fs-small); }
+
+  /* ============================================================
+     5. COMPONENTS  (all sizes via tokens)
+     ============================================================ */
+  /* cards */
+  .cards { display: grid; gap: 14px; }
+  .card {
+    padding: 18px 20px; border-radius: 10px; background: var(--surface);
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  }
+  .card.is-good { border-left-color: var(--good); }
+  .card.is-warn { border-left-color: var(--warn); }
+  .card p { margin: 0; font-size: var(--fs-body); color: var(--ink-soft); }
+
+  /* status pills — semantic, form encodes state */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: var(--fs-label); font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px;
+  }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
+  .pill.good { color: var(--good); background: var(--good-soft); } .pill.good::before { background: var(--good); }
+  .pill.warn { color: var(--warn); background: var(--warn-soft); } .pill.warn::before { background: var(--warn); }
+  .pill.crit { color: var(--crit); background: var(--crit-soft); } .pill.crit::before { background: var(--crit); }
+
+  /* tables — always inside an overflow-x wrapper so the page never scrolls sideways */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); min-width: 560px; }
+  thead th {
+    text-align: left; font-family: var(--font-mono); font-size: var(--fs-label);
+    letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint);
+    font-weight: 600; padding: 13px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line);
+  }
+  tbody td { padding: 13px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td .note { color: var(--ink-soft); font-size: var(--fs-small); }
+  td.num { font-variant-numeric: tabular-nums; }   /* line up digit columns */
+
+  /* insight / callout */
+  .insight {
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 10px; padding: 20px 22px;
+  }
+  .insight .tag {
+    font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 10px;
+  }
+  .insight p { margin: 0; font-size: var(--fs-body); color: var(--ink-soft); }
+
+  /* numbered steps — use ONLY when order carries real meaning */
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 12px; }
+  ol.steps li {
+    counter-increment: s; position: relative; padding: 16px 20px 16px 60px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 16px; top: 16px;
+    width: 28px; height: 28px; border-radius: 7px; background: var(--accent-soft); color: var(--accent);
+    font-family: var(--font-mono); font-weight: 700; font-size: var(--fs-small);
+    display: grid; place-items: center;
+  }
+  ol.steps li p { margin: 0; font-size: var(--fs-body); color: var(--ink-soft); }
+
+  footer { padding: 34px 24px 60px; color: var(--ink-faint); font-size: var(--fs-small); font-family: var(--font-mono); }
+
+  /* ---- mobile: nudge the base scale, everything else follows ---- */
+  @media (max-width: 560px) { :root { --fs-base: 1.06rem; } }
+</style>
+
+<!-- ============================================================
+     MARKUP  — replace content, keep the shells
+     ============================================================ -->
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Kicker · what this page is</p>
+    <h1>Report title goes here</h1>
+    <p class="lede">One-sentence thesis: what the reader learns and why it matters.</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap col">
+    <p class="knum">01 / section</p>
+    <h2>Section heading</h2>
+    <p class="sub">Optional deck under the heading.</p>
+    <p>Body paragraph. All text sizes come from <code>--fs-*</code> tokens, so
+    changing <code>--fs-base</code> resizes the whole document.</p>
+
+    <div class="insight">
+      <div class="tag">Insight</div>
+      <p>A distinctive point worth calling out.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="knum">02 / cards + pills</p>
+    <h2>Status cards</h2>
+    <div class="cards">
+      <div class="card is-good"><h3>Present <span class="pill good">Done</span></h3><p>Something already in place.</p></div>
+      <div class="card is-warn"><h3>To build <span class="pill warn">To build</span></h3><p>Something missing.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="knum">03 / table</p>
+    <h2>Comparison</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Item</th><th>State</th><th class="num">Value</th></tr></thead>
+        <tbody>
+          <tr><td>Row one<br><span class="note">note</span></td><td>ok</td><td class="num">1.15</td></tr>
+          <tr><td>Row two</td><td>pending</td><td class="num">0.82</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap col">
+    <p class="knum">04 / steps</p>
+    <h2>Ordered steps</h2>
+    <ol class="steps">
+      <li><h3>First</h3><p>Only number things when order is real information.</p></li>
+      <li><h3>Second</h3><p>Otherwise use plain cards.</p></li>
+    </ol>
+  </div>
+</section>
+
+<footer><div class="wrap">rustbase · report · generated YYYY-MM-DD</div></footer>

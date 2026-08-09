@@ -1,0 +1,16 @@
+{
+  "skills": [
+    {
+      "name": "architect",
+      "description": "Project overview, structure, and conventions. Use when planning features, onboarding, or making architectural decisions.",
+      "path": "architect/SKILL.md",
+      "type": "project"
+    },
+    {
+      "name": "web-dev",
+      "description": "Web development patterns for Axum backend, Svelte 5 frontend, Vite configuration, and Playwright E2E testing. Use when debugging frontend/backend issues, writing E2E tests, or adding API endpoints.",
+      "path": "web-dev/SKILL.md",
+      "type": "project"
+    }
+  ]
+}

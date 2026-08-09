@@ -1,0 +1,45 @@
+# Identifiers that clippy::doc_markdown should not flag
+# as needing backticks in doc comments.
+#
+# Curated list of terms that recur in Rust infra code
+# and would otherwise force every doc comment that
+# mentions them to backtick each occurrence. Projects
+# derived from this template should append their own
+# domain-specific identifiers (product names, acronyms,
+# external systems) rather than redefining the list.
+doc-valid-idents = [
+    # clippy's built-in defaults are preserved; the
+    # entries below are additions.
+    "..",
+    "PowerShell",
+    "WebSocket",
+    "WebSockets",
+    "JSON",
+    "JSONL",
+    "YAML",
+    "TOML",
+    "XML",
+    "HTML",
+    "CSS",
+    "FFI",
+    "ABI",
+    "macOS",
+    "GitHub",
+    "GitLab",
+    "OAuth",
+    "stdin",
+    "stdout",
+    "stderr",
+    "cdylib",
+    "rlib",
+    "Tokio",
+    "Axum",
+    "Svelte",
+    "Vite",
+    "Playwright",
+    "Cargo",
+    "rustc",
+    "rustfmt",
+    "rustup",
+    "Clippy",
+]

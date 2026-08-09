@@ -1,0 +1,30 @@
+# Template sync metadata.
+#
+# This file is the anchor for the /template-sync skill.
+# It records which commit of the upstream rustbase
+# template this project was derived from and which
+# commit was last synced in. Both are bumped by
+# /template-sync after a successful sync; do not edit
+# manually.
+#
+# See `.claude/commands/template-sync.md` for the full
+# sync workflow, including conflict handling and the
+# divergence cross-reference against
+# `docs/developer/template-feedback.md`.
+#
+# Sibling skill: `/template-improve` logs feedback
+# observations about the upstream template into
+# `docs/developer/template-feedback.md` so they can
+# eventually flow back upstream.
+
+[template]
+repo = "https://github.com/breki/rustbase"
+
+# Commit SHA this project was created from.
+created-from = "f40582fc18f58ad251cea7a44630569192e05e62"
+
+# Commit SHA last synced to.
+last-synced = "f40582fc18f58ad251cea7a44630569192e05e62"
+
+# Human-readable version at last sync.
+last-synced-version = "0.17.0"

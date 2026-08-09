@@ -1,0 +1,21 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Used only for the canonical
+# `FILE_ATTRIBUTE_REPARSE_POINT` constant in
+# `clean_cache::is_reparse_or_symlink` -- pulling the
+# value from windows-sys avoids a hand-typed Win32
+# magic number diverging from the OS header.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }

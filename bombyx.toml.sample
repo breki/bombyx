@@ -1,0 +1,27 @@
+# Sample bombyx project configuration.
+#
+# Copy this to `bombyx.toml` in the ROOT OF THE PROJECT you
+# want a VM for -- not here. Each project carries its own
+# config next to the `vagrant/` directory it describes.
+
+# SSH host alias of the VM host, resolved through your
+# ~/.ssh/config. bombyx never handles addresses or keys.
+host = "frosti"
+
+# Project name. Doubles as the VM's directory name on the
+# host, e.g. ~/vms/phren.
+project = "phren"
+
+# Directory in THIS repo holding the Vagrantfile and
+# provisioning scripts. Pushed to the host on every `up`,
+# which is what keeps the repo the source of truth.
+vagrant_dir = "vagrant"
+
+# Root on the VM host under which project directories are
+# created. Scratch VMs land in
+# <remote_root>/scratch/<project>/<name>, so the same scratch
+# name in two projects cannot collide.
+#
+# A leading `~` is expanded by the remote shell; anywhere else
+# it is rejected, as are shell metacharacters.
+remote_root = "~/vms"

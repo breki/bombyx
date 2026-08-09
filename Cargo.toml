@@ -1,0 +1,73 @@
+[workspace]
+members = ["crates/bombyx", "xtask"]
+resolver = "2"
+
+[workspace.lints.rust]
+warnings = "deny"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "deny", priority = -1 }
+cargo_common_metadata = "deny"
+multiple_crate_versions = "allow"
+# Allowed pedantic lints (adjust per project):
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+
+# Extra paths to exclude from the coverage gate, merged with
+# `cargo xtask coverage`'s baseline (which already ignores
+# src/main.rs and src/bin/). Each entry is a regex fragment
+# passed to `cargo llvm-cov --ignore-filename-regex`. Use this
+# for hardware-bound leaf modules that can't run under llvm-cov
+# in CI (see CLAUDE.md "Coverage exceptions for hardware-bound
+# code"); the template itself needs none. Use single-quoted
+# TOML literal strings so backslashes reach the regex verbatim.
+# [workspace.metadata.coverage]
+# ignore = ['src[/\\]audio[/\\]playback\.rs']
+
+[profile.test]
+opt-level = 1
+
+# `[profile.release]` is intentionally left at cargo
+# defaults. Shipped binaries (deploys, `cargo install`,
+# CI release artifacts) must use the fully-optimised
+# profile, and silently inheriting `incremental = true`
+# / `codegen-units = 256` for release builds slows
+# every downstream binary for no iteration-speed gain.
+#
+# For fast local iteration when you genuinely want a
+# release-shaped build but optimised for compile time
+# (e.g. profiling a debug-noisy workload), use the
+# `release-fast` profile below:
+#
+#   cargo build --profile release-fast
+#
+# Tradeoffs you accept by selecting `release-fast`:
+# - `incremental = true` -- the cargo book documents
+#   that incremental compilation can degrade
+#   optimisation quality.
+#   <https://doc.rust-lang.org/cargo/reference/profiles.html#incremental>
+# - `codegen-units = 256` (vs default 16) splits the
+#   crate into many small units, which limits LLVM's
+#   cross-unit inlining and other interprocedural
+#   optimisations. Empirical runtime cost in one
+#   rustbase-derived webapp (Ledgerstone) was <5%, but
+#   workloads vary -- benchmark before relying on the
+#   number.
+#
+# Never use `release-fast` for deployed binaries.
+# Profile shape is pinned (rather than only overriding
+# the iteration-speed knobs) so the <5% empirical
+# overhead figure above remains comparable across cargo
+# versions if `[profile.release]` defaults shift in the
+# future.
+[profile.release-fast]
+inherits = "release"
+incremental = true
+codegen-units = 256
+lto = false
+debug = false
+strip = "none"
