@@ -32,6 +32,16 @@ plan, decisions, and outcome.
   --summary override cannot repair an entry after the fact, since done refuses a
   slug that is no longer pending.
 
+- **phantom-deploy-command** -- cargo xtask deploy is documented but does not
+  exist
+  CLAUDE.md and .claude/commands/release.md and implement.md all describe cargo
+  xtask deploy as the thing that gates shipping (it refuses unless HEAD is on a
+  matching annotated tag), but no deploy subcommand exists in xtask -- it went
+  with the template's deploy subsystem during the CLI-only prune. .gitignore
+  still carries .deploy for the same reason. Either implement it or strip the
+  references; leaving canon describing a gate that cannot run is worse than
+  either.
+
 ## Done
 
 - [**drop-frontend-tooling**](issues/drop-frontend-tooling.md)

@@ -159,6 +159,15 @@ for tools that are not present:
 - All public items must have doc comments
 - Wrap markdown at 80 characters per line
 - Maximum code line width: 80 characters (`rustfmt.toml`)
+- **After removing a capability, re-grep for it.** The
+  compiler finds the code that referenced it; nothing finds
+  the *prose* that described it -- clap `///` help, module
+  docs, `CLAUDE.md`, `.claude/commands/`. Before handing a
+  removal to review, run `grep -rni "<term>" .` and check
+  every surviving hit is deliberate. Stale help text is a
+  false claim about what the tool does, and stale wording
+  around a deleted branch is what makes the next reader
+  believe a bug is intentional.
 
 ## Test-Driven Development
 

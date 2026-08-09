@@ -91,17 +91,16 @@ particular:
   Development" for the full rule.
 - **Test level -- prefer the cheapest that proves
   the behaviour.** Rust unit tests for library
-  logic, integration tests for CLI behaviour,
-  Vitest unit/component tests for frontend logic.
-  Reach for a Playwright E2E test only when the
-  behaviour genuinely requires a real browser:
-  full-page navigation, multi-route flows, real
-  network boundaries, focus or keyboard
-  interactions that depend on the actual DOM, or a
-  bug that only reproduces end-to-end. Note the
-  choice briefly in the issue doc's
-  `## Test strategy` section. Use the `web-dev`
-  skill when writing E2E tests.
+  logic; integration tests (`--dry-run` against the
+  real binary) for CLI behaviour. This is a CLI-only
+  project: there is no browser, no Vitest and no
+  Playwright suite. Note the choice briefly in the
+  issue doc's `## Test strategy` section.
+- **A dry run is not a real run.** `--dry-run`
+  proves the argv, not that the VM host accepts it.
+  For anything that changes the commands bombyx
+  emits, say plainly in the issue doc whether it has
+  been exercised against a real host.
 - **All tests must pass.** Fix pre-existing failures
   you encounter; do not work around them.
 - **Update `Status:`** in `docs/issues/<slug>.md` to
@@ -114,9 +113,10 @@ particular:
 
 ## Phase 3 -- Finalise
 
-1. Run `cargo xtask validate`. All checks must pass
-   (fmt, clippy, tests, coverage >= 90%, duplication
-   <= 6%, frontend type-check).
+1. Run `cargo xtask validate`. All seven gates must
+   pass: dependency cooldown, fmt, duplication
+   <= 6%, clippy, tests, coverage >= 90%, and the
+   RUSTSEC audit.
 
 2. If the change affects developer workflow or skills,
    update the relevant files under `.claude/commands/`
@@ -177,12 +177,15 @@ particular:
      longer exists. When in doubt, skip; `/commit`
      will spawn fresh reviewers when it runs.
 
-6. Verify the change manually. For UI / API
-   changes, exercise the feature in a browser (run
-   the backend + frontend dev servers; see
-   `CLAUDE.md` "Frontend Development"). For
-   deployment-affecting changes consider running
-   `cargo xtask deploy` against a staging target.
+6. Verify the change manually -- actually run it,
+   do not infer from a green suite. For a change to
+   the commands bombyx emits, that means a real
+   push against a real VM host (Definition of Done
+   item 3); `--dry-run` only proves the argv. For a
+   change to `xtask`, run the affected subcommands
+   and check their real output, including a failure
+   path where one exists. Report plainly what was
+   exercised and what was not.
 
 7. Commit with `/commit`. If pre-launched reviewers
    from step 5 are still in flight, `/commit` should
