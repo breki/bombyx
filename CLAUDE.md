@@ -677,6 +677,16 @@ For any script that runs more than ~30 seconds
   notification, or a `Monitor` with a line-buffered grep for
   progress; reserve `| tail -N` for already-finished
   commands.
+- **Caller side** -- **never pipe a command whose exit status
+  is the thing being verified.** A shell pipeline reports only
+  its *last* command's status, so `cmd | tee log` returns
+  `tee`'s success even when `cmd` failed. A real
+  `bombyx provision` run against the VM host failed on the
+  remote side and was read as passing for exactly this reason;
+  the failure was visible only in the log text. Redirect
+  (`cmd > log 2>&1`) or run the command bare and read the
+  captured output, and when the status matters, print it
+  (`echo "EXIT=$?"`).
 
 ## Lints: `doc_markdown` allowlist via `clippy.toml`
 
