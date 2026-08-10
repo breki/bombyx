@@ -6,7 +6,8 @@
 //!   `slug -- summary`, so a caller can see what is queued
 //!   cheaply.
 //! - `add` appends a new bullet under `## Pending`, refusing a
-//!   slug that already exists (pending or done).
+//!   slug that already exists (pending or done) and a summary
+//!   that would not fit on one line.
 //! - `done` moves a pending bullet to the top of `## Done`
 //!   (newest first), stamping the date and linking it to
 //!   `issues/<slug>.md`.
@@ -37,7 +38,9 @@ pub enum TodoAction {
         /// Short kebab-case topic slug (must be unique).
         #[arg(long)]
         slug: String,
-        /// One-line summary (<= 80 chars recommended).
+        /// One-line summary. Must fit on one line with the
+        /// slug inside 80 columns, or the command errors and
+        /// tells you the budget -- put detail in --body.
         #[arg(long)]
         summary: String,
         /// Optional longer body, wrapped and indented under the
@@ -124,26 +127,15 @@ fn add(
 ) -> Result<(), String> {
     require_nonempty("todo --slug", slug)?;
     require_nonempty("todo --summary", summary)?;
-    let content = read_todo()?;
-    if slug_exists(&content, slug) {
-        return Err(format!(
-            "slug '{slug}' already exists in docs/todo.md; pick another"
-        ));
-    }
-    let label = if issue {
-        format!("[**{slug}**](issues/{slug}.md)")
-    } else {
-        format!("**{slug}**")
-    };
-    let mut bullet = wrap_markdown(
-        &format!("{label} -- {summary}"),
-        "- ",
-        "  ",
-        MARKDOWN_WIDTH,
-    );
+    // Render the bullet before reading the file, so a bad
+    // argument fails the same way with or without a readable
+    // docs/todo.md.
+    let mut bullet = bullet_lines(slug, summary, issue)?;
     if let Some(body) = body {
         bullet.extend(wrap_markdown(body, "  ", "  ", MARKDOWN_WIDTH));
     }
+    let content = read_todo()?;
+    check_slug_free(&content, slug)?;
     let updated = add_pending(&content, bullet)?;
     write_todo(&updated)?;
     println!("Added pending todo '{slug}'.");
@@ -171,30 +163,113 @@ fn section_body(lines: &[String], heading: &str) -> Option<(usize, usize)> {
     section_bounds(lines, heading).map(|(h, end)| (h + 1, end))
 }
 
-/// Slug of a top-level bullet's first line:
-/// `- **foo** -- summary` or `- [**foo**](issues/foo.md) …` ->
-/// `foo`. The linked form is recognized by its `[**…**](`
-/// structure; the plain form additionally requires the `** -- `
-/// separator, so a bullet that merely uses `**bold**` for
-/// emphasis (e.g. `- **NOTE:** …`) is not mistaken for a slug.
-fn parse_slug(line: &str) -> Option<String> {
+/// Separator between a bullet's slug and its summary.
+const SEP: &str = " -- ";
+
+/// Whether `slug` has the kebab-case shape the `--slug` flag
+/// documents.
+///
+/// This is what keeps prose out of the queue. The delimiters
+/// alone are too weak a guard: inline code in a sentence, as in
+/// `` - `bombyx.toml` -- lives at the repo root ``, is
+/// structurally identical to a backticked entry. Requiring the
+/// captured text to look like a slug rejects it, and rejects a
+/// space-bearing capture that `done` would otherwise splice
+/// into a link path.
+fn valid_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// The text sitting in a bullet's slug position, before any
+/// shape check.
+///
+/// Recognizes the three spellings the file uses:
+/// `- **foo** -- summary` (written by `add`),
+/// `` - `foo` -- summary `` (hand-written), and
+/// `- [**foo**](issues/foo.md)` (written by `done`). The bold
+/// and backticked forms require the [`SEP`] separator.
+fn raw_slug(line: &str) -> Option<String> {
     if let Some(rest) = line.strip_prefix("- [**") {
         let end = rest.find("**")?;
         return Some(rest[..end].to_owned());
     }
-    let rest = line.strip_prefix("- **")?;
-    let end = rest.find("**")?;
-    if rest[end..].starts_with("** -- ") {
-        Some(rest[..end].to_owned())
-    } else {
-        None
+    for (open, close) in [("- **", "**"), ("- `", "`")] {
+        let Some(rest) = line.strip_prefix(open) else {
+            continue;
+        };
+        let end = rest.find(close)?;
+        return rest[end + close.len()..]
+            .starts_with(SEP)
+            .then(|| rest[..end].to_owned());
     }
+    None
+}
+
+/// Slug of a top-level bullet's first line, or `None` when the
+/// bullet is not a queue entry.
+fn parse_slug(line: &str) -> Option<String> {
+    raw_slug(line).filter(|s| valid_slug(s))
+}
+
+/// Renders `<lead> <summary>` on exactly one line of at most
+/// `width` `char`s, or reports why it cannot.
+///
+/// A summary has to occupy one line, because the body is
+/// written with the same two-space indent a wrapped summary
+/// would use: allow the wrap and the two become
+/// indistinguishable on read-back.
+///
+/// Interior whitespace is collapsed, so a summary containing a
+/// newline cannot splice an extra bullet into the file.
+///
+/// The error names the remaining budget but no remediation --
+/// the flag to reach for differs per caller, so each adds its
+/// own hint.
+fn summary_line(
+    lead: &str,
+    summary: &str,
+    width: usize,
+) -> Result<String, String> {
+    let summary = summary.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lead_width = lead.chars().count() + 1;
+    if lead_width >= width {
+        return Err(format!(
+            "'{lead}' is {lead_width} columns wide on its own, leaving no \
+             room for a summary within {width}"
+        ));
+    }
+    let line = format!("{lead} {summary}");
+    let len = line.chars().count();
+    if len > width {
+        return Err(format!(
+            "summary is too long: {len} columns, limit {width}; it must fit \
+             on one line, so keep it to {} characters after '{lead}'",
+            width - lead_width
+        ));
+    }
+    Ok(line)
+}
+
+/// The `- <label> -- <summary>` first line of a Pending bullet.
+fn pending_line(label: &str, summary: &str) -> Result<String, String> {
+    summary_line(&format!("- {label} --"), summary, MARKDOWN_WIDTH)
+        .map_err(|e| format!("{e}; move the detail into --body"))
+}
+
+/// The `  -- <summary>` continuation used when the slug's label
+/// takes the whole first line.
+fn continuation_line(summary: &str) -> Result<String, String> {
+    summary_line("  --", summary, MARKDOWN_WIDTH)
+        .map_err(|e| format!("{e}; pass a shorter --summary"))
 }
 
 /// The summary after the ` -- ` separator on a bullet's first
 /// line, or empty when absent.
 fn parse_summary(line: &str) -> String {
-    line.split_once(" -- ")
+    line.split_once(SEP)
         .map_or_else(String::new, |(_, s)| s.trim().to_owned())
 }
 
@@ -235,6 +310,39 @@ fn parse_section(content: &str, heading: &str) -> Vec<(String, String)> {
         i = j;
     }
     out
+}
+
+/// The lines of a new Pending bullet.
+///
+/// A plain entry fits `- **slug** -- summary` on one line. An
+/// `--issue` entry cannot: its label carries the slug twice
+/// (`- [**slug**](issues/slug.md) --` is 24 columns plus twice
+/// the slug), which for an ordinary slug leaves no room for a
+/// summary at all. Those take the same two-line shape `done`
+/// writes -- label alone, then a `  -- summary` continuation --
+/// which `parse_section` already reads.
+fn bullet_lines(
+    slug: &str,
+    summary: &str,
+    issue: bool,
+) -> Result<Vec<String>, String> {
+    if issue {
+        return Ok(vec![
+            format!("- [**{slug}**](issues/{slug}.md)"),
+            continuation_line(summary)?,
+        ]);
+    }
+    Ok(vec![pending_line(&format!("**{slug}**"), summary)?])
+}
+
+/// Rejects a slug already used anywhere in the file.
+fn check_slug_free(content: &str, slug: &str) -> Result<(), String> {
+    if slug_exists(content, slug) {
+        return Err(format!(
+            "slug '{slug}' already exists in docs/todo.md; pick another"
+        ));
+    }
+    Ok(())
 }
 
 /// Whether `slug` heads any bullet anywhere in the file.
@@ -300,12 +408,7 @@ fn move_to_done(
     let (d_start, _) = section_body(&lines, "## Done")
         .ok_or("docs/todo.md has no '## Done' section")?;
     let mut entry = vec![format!("- [**{slug}**](issues/{slug}.md)")];
-    entry.extend(wrap_markdown(
-        &format!("-- {done_summary}"),
-        "  ",
-        "  ",
-        MARKDOWN_WIDTH,
-    ));
+    entry.push(continuation_line(&done_summary)?);
     entry.push(format!("  ({date})"));
     // `d_start` is the line after "## Done"; if it is the
     // customary blank, insert past it so we keep heading + blank.
@@ -347,6 +450,152 @@ mod tests {
   (2026-01-01)
 ";
 
+    /// A file mixing the two bullet spellings: hand-written
+    /// entries use backticks, `todo add` writes bold.
+    const MIXED: &str = "\
+# TODO
+
+## Pending
+
+- `hand-written` -- typed by a human
+  with a continuation line
+- `second-hand` -- also typed
+- **generated** -- written by todo add
+
+## Done
+
+- [**old-task**](issues/old-task.md)
+  -- did old
+  (2026-01-01)
+";
+
+    #[test]
+    fn parse_slug_accepts_a_backticked_slug() {
+        assert_eq!(
+            parse_slug("- `hand-written` -- typed by a human").as_deref(),
+            Some("hand-written")
+        );
+    }
+
+    #[test]
+    fn parse_slug_ignores_backticked_code_without_a_summary() {
+        // Inline code in a prose bullet is not a slug.
+        assert_eq!(parse_slug("- `cargo xtask todo` is the entry point"), None);
+    }
+
+    #[test]
+    fn list_does_not_silently_drop_backticked_entries() {
+        // The defect: hand-written entries were invisible to
+        // `todo list`, so it reported an incomplete queue as
+        // complete.
+        let got = parse_section(MIXED, "## Pending");
+        let slugs: Vec<&str> = got.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(slugs, vec!["hand-written", "second-hand", "generated"]);
+        assert_eq!(got[0].1, "typed by a human");
+    }
+
+    #[test]
+    fn slug_exists_finds_a_backticked_entry() {
+        assert!(slug_exists(MIXED, "hand-written"));
+        assert!(slug_exists(MIXED, "generated"));
+    }
+
+    #[test]
+    fn check_slug_free_rejects_a_backticked_collision() {
+        // Without backtick support this would allow a duplicate.
+        let err = check_slug_free(MIXED, "second-hand").unwrap_err();
+        assert!(err.contains("second-hand"), "got: {err}");
+        assert!(err.contains("already exists"), "got: {err}");
+        assert!(check_slug_free(MIXED, "brand-new").is_ok());
+    }
+
+    #[test]
+    fn parse_slug_rejects_prose_in_inline_code() {
+        // The delimiters alone are too weak a guard: a sentence
+        // using inline code has the same shape as an entry.
+        assert_eq!(parse_slug("- `bombyx.toml` -- lives at the root"), None);
+        assert_eq!(parse_slug("- `cargo xtask deploy` -- missing"), None);
+        assert_eq!(parse_slug("- `` -- x"), None);
+        assert_eq!(parse_slug("- **Not A Slug** -- x"), None);
+    }
+
+    #[test]
+    fn summary_line_collapses_interior_whitespace() {
+        // A newline would otherwise be written verbatim and
+        // splice a second bullet into the file.
+        let got = summary_line("- **s** --", "a\n- **ghost** -- injected", 80)
+            .unwrap();
+        assert_eq!(got.lines().count(), 1, "must be one line: {got:?}");
+        assert_eq!(got, "- **s** -- a - **ghost** -- injected");
+    }
+
+    #[test]
+    fn issue_bullet_uses_two_lines_so_a_long_slug_still_fits() {
+        // The linked label carries the slug twice and leaves no
+        // room for a summary beside it.
+        let slug = "todo-tooling-format-mismatch";
+        let got = bullet_lines(slug, "a real summary", true).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                format!("- [**{slug}**](issues/{slug}.md)"),
+                "  -- a real summary".to_owned(),
+            ]
+        );
+        // And the shape round-trips through the reader.
+        let doc = format!("## Pending\n\n{}\n{}\n\n## Done\n", got[0], got[1]);
+        assert_eq!(
+            parse_section(&doc, "## Pending"),
+            vec![(slug.to_owned(), "a real summary".to_owned())]
+        );
+    }
+
+    #[test]
+    fn plain_bullet_stays_on_one_line() {
+        let got = bullet_lines("short", "a summary", false).unwrap();
+        assert_eq!(got, vec!["- **short** -- a summary".to_owned()]);
+    }
+
+    #[test]
+    fn move_to_done_finds_a_backticked_pending_entry() {
+        let out =
+            move_to_done(MIXED, "hand-written", "2026-08-10", None).unwrap();
+        assert!(!out.contains("- `hand-written`"));
+        assert!(!out.contains("with a continuation line"));
+        assert!(out.contains("  -- typed by a human"));
+        assert!(out.contains("  (2026-08-10)"));
+    }
+
+    #[test]
+    fn summary_line_keeps_a_short_summary_on_one_line() {
+        let got = summary_line("- **slug** --", "short and sweet", 80).unwrap();
+        assert_eq!(got, "- **slug** -- short and sweet");
+    }
+
+    #[test]
+    fn summary_line_refuses_a_summary_that_would_wrap() {
+        // A wrapped summary is indistinguishable from the first
+        // body line when read back, so it must be refused at
+        // write time rather than silently truncated at read time.
+        let lead = "- **slug** --";
+        let budget = 80 - lead.chars().count() - 1;
+        let err = summary_line(lead, &"x".repeat(80), 80).unwrap_err();
+        assert!(err.contains("too long"), "got: {err}");
+        assert!(
+            err.contains(&budget.to_string()),
+            "must state the budget: {err}"
+        );
+        // The remediation hint belongs to the caller, not here.
+        assert!(!err.contains("--body"), "hint leaked into helper: {err}");
+    }
+
+    #[test]
+    fn summary_line_counts_characters_not_bytes() {
+        // 20 multi-byte chars must not be judged as 40+ columns.
+        let s = "é".repeat(20);
+        assert!(summary_line("- **s** --", &s, 40).is_ok());
+    }
+
     #[test]
     fn parses_pending_slugs_and_summaries() {
         let got = parse_section(SAMPLE, "## Pending");
@@ -376,8 +625,9 @@ mod tests {
 
     #[test]
     fn add_pending_appends_after_last_bullet() {
-        let bullet =
-            wrap_markdown("**gamma** -- do gamma", "- ", "  ", MARKDOWN_WIDTH);
+        // Built the way `add` builds it, so the placement logic
+        // is verified against a bullet production can emit.
+        let bullet = bullet_lines("gamma", "do gamma", false).unwrap();
         let out = add_pending(SAMPLE, bullet).unwrap();
         // Lands after beta, before the Done heading.
         let gamma = out.find("- **gamma** -- do gamma").unwrap();
@@ -427,6 +677,15 @@ mod tests {
     fn move_to_done_errors_on_unknown_slug() {
         let err = move_to_done(SAMPLE, "nope", "2026-07-23", None).unwrap_err();
         assert!(err.contains("nope"));
+    }
+
+    #[test]
+    fn add_rejects_an_overlong_summary_before_any_io() {
+        // Argument errors must not depend on docs/todo.md being
+        // readable, so the render happens before the read.
+        let err = add("real-slug", &"x".repeat(200), None, false).unwrap_err();
+        assert!(err.contains("too long"), "got: {err}");
+        assert!(err.contains("--body"), "caller hint missing: {err}");
     }
 
     #[test]

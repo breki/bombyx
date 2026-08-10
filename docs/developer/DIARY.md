@@ -4,6 +4,57 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-10
 
+**Making the work queue tell the truth**
+
+Fixed the `cargo xtask todo` defect found during the first real
+run, before touching anything else, on the grounds that a queue
+which silently omits items is worse than no queue: every other
+decision about what to do next was being made from a list that
+was quietly incomplete.
+
+The reader now accepts all three bullet spellings the file has
+always contained, rather than only the two that `todo add` and
+`todo done` write. `todo list` went from six entries to nine,
+and three of the six it did show had summaries cut off
+mid-phrase.
+
+The truncation half turned out to be more interesting than the
+original note suggested. My first guess was to rejoin the
+wrapped continuation lines when reading, but that cannot work:
+`add` wrote a wrapped summary with a two-space indent and wrote
+the `--body` with the same two-space indent, so the second line
+of a summary and the first line of a body are structurally
+identical. No reader can tell them apart. The ambiguity had to
+be removed at the source instead, by keeping the summary on one
+line and refusing one that would not fit. That converts the
+CLI's advisory "80 chars recommended" into a checked contract,
+and the error names the exact budget left after the slug.
+
+Closed the item with the repaired tool, which felt like the
+right test of it.
+
+The reviewers then found two regressions in the fix itself,
+both from the same cause: replacing `wrap_markdown` with a
+strict one-liner threw away two things wrapping had been doing
+incidentally. First, `add --issue` builds a label carrying the
+slug twice, so for an ordinary slug the label alone nearly
+fills the line and the summary had a budget of zero -- a
+documented flag went from working to impossible. It now uses
+the same two-line shape `done` writes, label then indented
+summary. Second, `wrap_markdown` split on whitespace, which
+quietly collapsed newlines; the replacement did not, so a
+summary containing a newline was written verbatim and spliced a
+second bullet into the file. A crafted `--summary` could have
+planted a phantom entry, or a colliding slug that blocks a
+legitimate `add`. Interior whitespace is now collapsed before
+the width is measured.
+
+Worth noting what kind of mistake that was. Neither regression
+was in the logic I was thinking about; both were in behaviour I
+removed without noticing it was load-bearing. That is the
+characteristic risk of replacing a general-purpose helper with
+a stricter one.
+
 **The first real run**
 
 bombyx has now driven a real VM on a real host, end to end.

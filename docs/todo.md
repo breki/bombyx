@@ -14,41 +14,13 @@ plan, decisions, and outcome.
 
 ## Pending
 
-- `wire-frosti` -- frosti is on WiFi; VLAN tagging needs
-  it wired. Prerequisite for the agent VLAN.
-- `packer-box` -- bake a base box so `scratch` is fast
-  enough to actually get used.
-- `agent-vlan` -- move VMs onto an isolated VLAN with a
-  router-enforced egress allowlist.
+- `wire-frosti` -- frosti is on WiFi, and VLAN tagging needs it wired.
+  Prerequisite for the agent VLAN.
+- `packer-box` -- bake a base box so `scratch` boots fast enough to use.
+- `agent-vlan` -- isolate VMs on a VLAN with an egress allowlist.
+  Enforced at the router.
 
-- **todo-tooling-format-mismatch** -- todo list and done ignore
-  backticked entries, and done truncates wrapped summaries
-  Two defects in `cargo xtask todo`, one root cause: the reader and the
-  writer disagree about the bullet format.
-
-  1. `todo add` writes `- **slug** -- summary`, but the four original
-     hand-written entries use `` - `slug` -- summary ``. The parser only
-     recognises the bold form, so `todo list` silently omitted
-     `wire-frosti`, `first-real-run`, `packer-box` and `agent-vlan` from
-     the moment they were written, and `todo done first-real-run` fails
-     with "no pending todo with slug". A listing that quietly drops
-     entries is worse than one that errors: it was reported as the
-     complete list several times. Accept both spellings when reading,
-     and normalise on write.
-  2. `todo add` wraps a long summary across lines, but `done` carries
-     only the first line into the Done entry, cutting it mid-sentence.
-     See the `drop-frontend-tooling` entry under Done, which reads
-     "Delete leftover frontend tooling from the". Rejoin continuation
-     lines when reading a pending bullet. Note `--summary` cannot repair
-     an entry after the fact, because `done` refuses a slug that is no
-     longer pending.
-
-  Both need unit tests over fixture markdown covering each bullet
-  spelling. Until this is fixed, `docs/todo.md` cannot be trusted as a
-  work queue, which makes it the highest-priority item here.
-
-- **phantom-deploy-command** -- cargo xtask deploy is documented but does not
-  exist
+- **phantom-deploy-command** -- cargo xtask deploy is documented but missing
   CLAUDE.md and .claude/commands/release.md and implement.md all describe cargo
   xtask deploy as the thing that gates shipping (it refuses unless HEAD is on a
   matching annotated tag), but no deploy subcommand exists in xtask -- it went
@@ -137,6 +109,10 @@ plan, decisions, and outcome.
   together.
 
 ## Done
+
+- [**todo-tooling-format-mismatch**](issues/todo-tooling-format-mismatch.md)
+  -- todo list and done now read backticked entries too
+  (2026-08-10)
 
 - **first-real-run** -- drove bombyx against a real libvirt host
   (frosti, Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt 0.12.2).
