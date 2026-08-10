@@ -22,6 +22,12 @@ vagrant_dir = "vagrant"
 # <remote_root>/scratch/<project>/<name>, so the same scratch
 # name in two projects cannot collide.
 #
+# Must be an anchored path (starting with `~` or `/`) at least
+# one directory deep, with no `.` or `..` segment. bombyx
+# creates, writes into and -- on teardown -- deletes the
+# directory it derives from this value, so a root like `/`, `~`
+# or `~/.` is refused when the config loads.
+#
 # A leading `~` is expanded by the remote shell; anywhere else
 # it is rejected, as are shell metacharacters.
 remote_root = "~/vms"

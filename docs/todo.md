@@ -68,6 +68,19 @@ plan, decisions, and outcome.
   first successful up. The first is more useful: the snapshot should be taken at
   a known-good point, which is exactly after up completes.
 
+- **done-links-may-dangle** -- todo done can write a dangling issue link
+  cargo xtask todo done always renders the Done entry as
+  [**slug**](issues/slug.md), whether or not that file exists. Items completed
+  through /implement have a doc so the link resolves; anything closed outside
+  that flow gets a dead link. Seen twice: first-real-run was hand-written into
+  Done without a link precisely to dodge this, and todo-tooling-format-mismatch
+  got an issue doc partly so the generated link would resolve. Options: omit the
+  link when docs/issues/<slug>.md is absent, which needs an existence check
+  passed in from the caller since move_to_done is otherwise pure over the
+  markdown; or keep it unconditional and have /implement guarantee the doc
+  exists before finalising. The second matches current intent but is enforced
+  nowhere.
+
 ## Done
 
 - [**discard-leaves-dir**](issues/discard-leaves-dir.md)

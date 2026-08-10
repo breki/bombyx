@@ -216,6 +216,17 @@ re-deriving a style.
 - All public items must have doc comments
 - Wrap markdown at 80 characters per line
 - Maximum code line width: 80 characters (`rustfmt.toml`)
+- **Validate a field's invariants where the field
+  lives.** Put the rule in the module that owns the
+  value -- `Config::validate` for a config field --
+  not at each use site. A check bolted onto one
+  call site leaves every other path disagreeing with
+  it: a depth floor placed on the removal path once
+  left the same `remote_root` illegal to delete but
+  legal to write, so `up` would happily `mkdir -p
+  /etc`. Validating once also keeps the error next to
+  the field name and avoids threading a `Result`
+  through callers that have nothing to decide.
 - **After removing a capability, re-grep for it.** The
   compiler finds the code that referenced it; nothing finds
   the *prose* that described it -- clap `///` help, module
@@ -276,6 +287,19 @@ behaviour-change discipline. The cost of an
 unnecessary red step is low; the cost of skipping a
 real red step (and shipping a test that always
 passed) is high.
+
+**Input guards: enumerate the family first.** When
+adding a check that rejects bad input, write the test
+table before the check, listing the whole family the
+guard claims to cover -- for a path that means `.`,
+`..`, empty, unrooted, too shallow, doubled and
+trailing slash. Fixing only the case that prompted
+the work and then describing the guard in general
+terms is how a guard comes to claim more than it
+does: a `remote_root` check once rejected `..` but
+not `.`, and the doc comment asserted it stopped a
+hostile root reaching a top-level directory. `/.`
+defeated it in five characters.
 
 ## Commits and releases
 
