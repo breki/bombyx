@@ -79,6 +79,11 @@ and this project adheres to
   the project VM. Vagrant provisions only when it first creates a VM, so every
   later `up` shipped an edited provisioning script to the host without executing
   it -- and the push reported success. Requires a VM that already exists.
+- `scripts/agent-vm-firewall.sh`, an nftables ruleset for the VM host that keeps
+  agent VMs off its LAN, overlay networks, Docker and its own services while
+  leaving outbound internet working. Read-only by default; `apply`, `persist`
+  and `revert` are explicit. Documented in `docs/vm-host-setup.md`, and marked
+  unverified until it has been applied to a real host.
 
 ### Changed
 

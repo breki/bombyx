@@ -4,6 +4,82 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-10
 
+**The agent VM could reach the whole house**
+
+Setting up the first real agent VM raised an obvious question --
+what can it actually talk to? -- and the answer was worse than
+expected. vagrant-libvirt puts guests on a NAT'd network where
+**the VM host is the gateway**, and because the host routes for
+the guest, everything the host can reach the guest can reach.
+On frosti that meant the home LAN and its router, the tailnet,
+Docker networks, other libvirt networks, and frosti's own
+services -- `sshd` and libvirtd included, since the gateway is
+just an address a guest can connect to.
+
+That last part is the one that stings. The VM exists on the
+assumption that the code inside it may be hostile. The machine
+controlling it should not be one hop away with its SSH port
+open. And the VM host holds a broadly scoped credential, so the
+containment protected the workstation's credentials while
+leaving a path to a machine holding other credentials.
+
+`scripts/agent-vm-firewall.sh` closes it with an nftables table
+of its own, so libvirt's rules are untouched and one command
+removes the lot. Two rules in it look optional and are not: the
+`established,related` accept on the input chain is what lets a
+guest answer a connection *the host started*, which is exactly
+how `vagrant ssh` works -- drop it and every bombyx command that
+touches a VM dies -- and the DHCP/DNS accepts keep dnsmasq
+reachable, without which the guest silently has no network at
+all.
+
+Writing it meant arguing with `CLAUDE.md`, which prefers a
+written record over a setup script. The exception holds here for
+a narrow reason worth stating: the objection is that a stale
+script fails part-way through as root having changed some things
+and not others. This one loads a single self-contained table and
+does nothing else, so it either takes effect or it does not.
+`docs/vm-host-setup.md` still carries the explanation; the
+script is only the convenience.
+
+Marked *(unverified)*, because `sudo` on frosti needs a password
+and cannot run from a bombyx session. `show` was exercised for
+real; `apply` was not, and saying so is cheaper than discovering
+later that the file implied more confidence than it had.
+
+The first draft drew **22 review findings across 270 lines**,
+which is the number worth remembering. Several were the same
+shape: the tool whose entire job is isolation could silently
+stop isolating. `apply` truncated the rules file and deleted the
+loaded table *before* validating the new one, so a parse error
+left the host with nothing; `persist` ordered its unit after
+libvirt when the hazard is `nftables.service`; the IPv4 denylist
+said nothing about IPv6, so a LAN with native IPv6 stayed
+reachable by global address while the IPv4-only verification
+snippet passed. The rewrite validates with `nft -c` first, loads
+declare-then-delete as one transaction, orders after
+`nftables.service`, and refuses IPv6 outright.
+
+Two smaller ones are worth repeating because they are habits
+rather than bugs. `usage()` printed its own header by slicing
+line numbers out of `$0`, and the range had already drifted past
+the comment into `set -euo pipefail` -- help text that was
+literally shell source. And the doc reproduced the whole
+ruleset, which had already diverged from what the script
+generates. Both are the same mistake: a second copy of something
+that has one source of truth.
+
+Two corrections landed while writing it, both from checking
+rather than reasoning. Guests on the *same* bridge still reach
+each other -- that traffic is bridged at layer 2 and the forward
+hook never sees it -- so a scratch VM sits beside a project VM
+unseparated. And an earlier claim that the deploy key was
+repo-scoped was wrong: the VM host's `ssh_config` names a personal
+account-level key, and `IdentitiesOnly=yes` does not
+exclude identities named in the config, so the first test
+authenticated as the account. `-F /dev/null` gives the honest
+answer.
+
 **`bombyx provision`, and a failing first run that was worth
 more than a passing one**
 

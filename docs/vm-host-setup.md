@@ -337,6 +337,223 @@ reason that it is not running. To fix it, either install
 Vagrant somewhere already on that default `PATH`, or add a
 symlink into `/usr/local/bin`.
 
+## Keeping agent VMs off your home network *(unverified)*
+
+By default an agent VM can reach far more of your network than
+its purpose suggests, and nothing warns you about it. This
+section explains what it can reach and how to cut that down. The
+rules below have not yet been applied to a running host, so
+treat them as a starting point rather than a recipe that is
+known to work.
+
+### What a VM can reach by default
+
+vagrant-libvirt puts guests on a NAT'd network of its own --
+`virbr1`, usually `192.168.121.0/24` -- on which **the VM host
+itself is the gateway**. Because the host routes for the guest,
+everything the host can reach, the guest can reach too. On a
+typical workstation-turned-VM-host that includes:
+
+- the home LAN the host sits on, and so the router, any NAS,
+  printers and every other machine on it;
+- a Tailscale or other overlay network, if one is configured;
+- Docker networks on the host;
+- other libvirt networks, and so sibling VMs;
+- the host's own services, including `sshd` and libvirtd,
+  because the gateway address is a normal address the guest can
+  connect to.
+
+That last point deserves emphasis. An agent VM exists on the
+assumption that the code inside it may be hostile. The machine
+that controls it should therefore not be one hop away with its
+SSH port open, and by default it is.
+
+Find out what applies to your host before changing anything:
+
+```bash
+virsh -c qemu:///system net-dumpxml vagrant-libvirt | grep -E 'bridge|ip address'
+ip -4 -o addr show scope global      # every network the host is on
+```
+
+### Blocking it on the host with nftables
+
+`scripts/agent-vm-firewall.sh` in the bombyx repository writes
+the rules, detecting the bridge and gateway from the libvirt
+network rather than assuming them. The rules themselves are not
+reproduced here on purpose: a second copy drifts from the first,
+and the stale one is the one someone pastes into a root shell.
+Run `show` to see exactly what would be loaded on your host.
+
+**Do not run it out of `/tmp`.** That directory is
+world-writable, so between copying the file and running it under
+`sudo` there is a window in which any other local account can
+replace it -- and it then runs as root on the machine this whole
+exercise is meant to protect. Install it somewhere only root can
+write:
+
+```bash
+scp scripts/agent-vm-firewall.sh <host>:~/
+ssh -t <host> 'sudo install -o root -g root -m 0755 \
+    ~/agent-vm-firewall.sh /usr/local/sbin/agent-vm-firewall'
+
+ssh <host> 'agent-vm-firewall show'          # changes nothing
+ssh -t <host> 'sudo agent-vm-firewall apply'
+ssh -t <host> 'sudo agent-vm-firewall persist'
+```
+
+`show` is the default action and is read-only. `status` reports
+whether the rules are loaded *and* still match the network they
+were written for. `revert` removes the rules, the file and the
+systemd unit.
+
+The rest of this section explains what those rules do, which is
+worth reading once even if you only ever run the script.
+
+The rules live in an nftables table of their own, so libvirt's
+rules are untouched and the whole thing comes out in one
+command. The load is written as declare-then-delete inside a
+single file, which makes it one transaction: if any rule fails
+to parse, nftables rolls back and whatever was already in force
+stays in force.
+
+Four details are worth understanding rather than copying.
+
+**Every blocking rule matches the guest bridge.** Traffic
+arriving on the host's own LAN interface is never considered, so
+applying these rules cannot interrupt the SSH session you are
+applying them from. That property is what makes this safe to try
+on a machine you only reach remotely.
+
+**The `established,related` rule in the input chain is not
+optional.** bombyx works by having the host connect *into* the
+guest. The guest's replies arrive on the guest bridge and would
+be caught by the final drop. Without that first rule, every
+bombyx command that touches the VM stops working, and the cause
+is not obvious from the symptom.
+
+**Dropping DHCP and DNS silently strands the guest.** libvirt's
+dnsmasq serves both from the gateway address, so those two
+accepts are what keep the VM addressable and able to resolve
+names at all. They are pinned to that one address rather than
+written by port alone, so they do not also expose every other
+resolver the host happens to run -- a container publishing port
+53, for instance.
+
+**Rules do not apply to connections that are already open.**
+Both chains accept established traffic, so a guest that already
+holds a socket to your LAN keeps it until it closes, and a
+hostile guest chooses when that is. The script clears those
+entries with `conntrack` after loading the rules; if `conntrack`
+is not installed it says so, and restarting the guests achieves
+the same thing.
+
+To undo everything: `sudo agent-vm-firewall revert`.
+
+### Checking that it worked
+
+Run these inside the VM, with `bombyx shell`. Substitute your
+own router and gateway addresses.
+
+```bash
+curl -sS -m 5 https://example.com >/dev/null && echo "internet: ok"
+getent hosts github.com >/dev/null && echo "dns: ok"
+timeout 3 bash -c 'cat </dev/tcp/192.168.1.1/80'  || echo "LAN blocked: good"
+timeout 3 bash -c 'cat </dev/tcp/192.168.121.1/22' || echo "host blocked: good"
+curl -6 -sS -m 5 https://example.com >/dev/null \
+  && echo "ipv6: REACHABLE, unexpected" || echo "ipv6: refused, as intended"
+```
+
+The last three are the point of the exercise: a VM that can
+still open a connection to the router, or to the host's SSH
+port, has not been contained. The IPv6 check matters because an
+IPv4-only test suite passes happily while an IPv6 route to the
+same LAN devices stays open -- which is why these rules refuse
+IPv6 outright rather than listing private ranges.
+
+### Making it survive a reboot
+
+Debian and Ubuntu ship an `/etc/nftables.conf` that begins with
+`flush ruleset`. That single line causes two different problems,
+and both are worth knowing because neither reports an error.
+
+Folding these rules into that file wipes **libvirt's** rules as
+well on any boot where libvirt started first, and VM networking
+breaks in a way that looks unrelated to the change you made. So
+`persist` writes its own systemd unit instead, and puts the
+rules in `/etc/agent-vm-firewall/` rather than `/etc/nftables.d/`
+-- some distributions have `nftables.conf` glob that second
+directory, which would pull the rules back into the service
+being avoided.
+
+The other problem runs the other way. If `nftables.service` is
+enabled and happens to start *second*, its `flush ruleset`
+deletes this table and the guests are unrestricted, silently.
+The unit is therefore ordered `After=nftables.service`. It is
+deliberately not ordered against libvirt: the rules do not need
+the bridge to exist, since nftables accepts an interface name
+for an interface that is not there, and the daemon is called
+`libvirtd` on some hosts and `virtnetworkd` on others.
+
+**Reboot and run `sudo agent-vm-firewall status` afterwards.**
+Persistence is the one part of this that cannot be confirmed
+without a reboot, and a silent failure here leaves you believing
+the guest is contained when it is not.
+
+### What this does and does not buy
+
+Five limits are worth stating plainly, because the rules look
+more complete than they are.
+
+**Guests on the same bridge can still reach each other.** Two
+VMs on the same libvirt network exchange frames at layer 2,
+which the `forward` hook never sees, so these rules do not
+separate them. That matters when a scratch VM running untrusted
+code sits beside a persistent project VM. Separating them needs
+either a libvirt network per VM, or filtering in the `bridge`
+family rather than `inet`. Guests on a *different* libvirt
+network are blocked, because that traffic is routed.
+
+**What is blocked is a list of address ranges, not "everything
+private".** The IPv4 side covers the RFC1918 ranges, the
+carrier-grade NAT range that Tailscale and similar use,
+link-local, loopback and multicast. A LAN numbered out of public
+IPv4 space is not covered, and neither is anything else that
+does not appear in that list. IPv6 is handled differently and
+more bluntly: *all* of it is refused from the guest bridge,
+because a home network with native IPv6 gives the router and
+every device a global address that no private-range list would
+catch. That is only correct while the guest network is
+IPv4-only, which the script checks and refuses to proceed
+without.
+
+**Only the one libvirt network is protected.** The rules name a
+single bridge. A guest booted onto a different libvirt network
+is not restricted at all, and `bombyx` does not stop a project
+from defining one. `status` re-checks that the named bridge
+still exists and still belongs to the network, because nftables
+happily accepts a rule naming an interface that is gone -- which
+would list perfectly while matching nothing.
+
+**A guest cannot reach services on the host, including ones it
+may want.** The input chain drops everything the guest starts.
+NFS synced folders are the case to watch: a guest mounting an
+export from the host will hang rather than fail clearly. The
+Vagrantfile in each project decides whether that applies, and
+bombyx does not control it. Disabling the default synced folder
+avoids the problem entirely, which is what the jutro VM does.
+
+**The enforcement lives on the machine being protected.** A
+guest that escalates to root on the VM host can remove these
+rules. Enforcing the same policy at the router -- a separate
+VLAN for agent VMs with an allowlist for outbound traffic --
+does not have that weakness, because the device applying the
+rules is not the device under attack.
+
+Treat this as the version you can have today. It closes the
+guest-to-LAN and guest-to-host paths, which is most of the
+exposure, and it costs nothing to keep in place once a VLAN
+exists.
+
 ## Configuration for each project
 
 Setting up the host is something you do once per machine.

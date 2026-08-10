@@ -56,6 +56,23 @@ plan, decisions, and outcome.
   exists before finalising. The second matches current intent but is enforced
   nowhere.
 
+- **host-network-isolation** -- apply and verify the nftables rules on frosti
+  docs/vm-host-setup.md now documents an nftables ruleset that keeps agent VMs
+  off the home LAN, the tailnet, Docker and the VM host's own services, while
+  leaving outbound internet working. It is marked unverified: the rules were
+  derived from frosti's actual network layout (virbr1 on 192.168.121.0/24, host
+  on 192.168.1.10 via wlp4s0, plus tailscale0 and docker0) but have not been
+  applied, because sudo on frosti needs a password and cannot run from a bombyx
+  session. Run `agent-vm-firewall apply`, then the in-VM verification snippet
+  including the IPv6 check, then `persist` -- and reboot and run `status`, since
+  persistence is the one part that cannot be confirmed any other way and fails
+  silently. Only then drop the unverified marker from the heading. Watch for two
+  things the review flagged as untested in both directions: whether the input
+  drop breaks anything the guest starts against the host, and whether `nft -c`
+  accepts the generated ruleset on this nft version. This is a host-level
+  stopgap for agent-vlan, not a replacement: enforcement sits on the machine
+  being protected.
+
 ## Done
 
 - [**provision-command**](issues/provision-command.md)
