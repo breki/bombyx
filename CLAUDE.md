@@ -147,6 +147,63 @@ for tools that are not present:
   Ask without a recommendation only when the choice genuinely
   turns on preference or context you do not have.
 
+## Documentation style
+
+Applies to everything under `docs/`, to `README.md`, and to
+module-level doc comments. "Write plainly" from
+**Collaboration** above holds here too, plus the 80-column
+wrap from **Coding Standards** below.
+
+**`docs/vm-host-setup.md` is the reference example.** When
+writing or reviewing a document, match it rather than
+re-deriving a style.
+
+- **Prefer comprehensibility over brevity.** This is the
+  explicit trade: a longer document that a reader
+  understands on the first pass beats a compact one they
+  have to decode. Terseness is not a virtue in documentation
+  the way it is in a commit subject.
+- **Write full sentences, not telegraphic notes.** "A record,
+  not a script" is a worse opening than a short paragraph
+  saying what the document is and why it is not a script.
+  Avoid stacking clauses behind dashes and colons to save a
+  line.
+- **Spend the words on what is not obvious.** Assume a
+  competent practitioner: do not explain what `apt` or a
+  Unix group is. Do explain the thing that cost you an hour
+  -- the misleading symptom, the renamed package, the flag
+  whose absence is destructive. That asymmetry is the whole
+  value of the document.
+- **Explain the mechanism, not just the symptom.** "Vagrant
+  is not on the non-interactive `PATH`" is a fact; saying
+  which kind of shell `ssh host "cmd"` starts, and which
+  startup files it therefore skips, is what lets a reader
+  diagnose the next variant themselves.
+- **No idioms or showy phrasing.** "Load-bearing",
+  "belt-and-braces", "footgun", "crown jewel" all read as
+  clever and cost the reader a translation step. Say
+  "a precaution rather than a requirement".
+- **Headings state their content.** "Why the non-interactive
+  PATH causes trouble" beats "The PATH trap".
+- **Record why, not only what.** A decision explained in the
+  document is a decision nobody re-litigates six months
+  later. The reason `vm-host-setup.md` is a document and not
+  an install script is written down *in it*.
+- **Separate the stable from the volatile.** Requirements
+  change slowly; package names change every release. Split
+  them into different sections so a reader knows which part
+  to distrust.
+- **Say what you have not verified.** Mark untested steps
+  *(unverified)* inline, and give environment-dependent
+  documents a header naming what they were checked against
+  and when. A document that quietly implies more confidence
+  than it has is worse than one with gaps.
+- **Prefer a written record over a setup script** for
+  anything that provisions a machine. A stale document is
+  visibly stale and a human adapts; a stale script fails
+  part-way through, as root, having already changed some
+  things and not others.
+
 ## Coding Standards
 
 - Rust edition 2024

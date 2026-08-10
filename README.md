@@ -45,6 +45,12 @@ Two rules shape the design:
 cargo install --path crates/bombyx
 ```
 
+That installs the CLI on your workstation. The VM host needs
+libvirt, Vagrant and its `libvirt` provider -- see
+[docs/vm-host-setup.md](docs/vm-host-setup.md), which also
+covers the non-interactive `PATH` trap that makes Vagrant
+invisible to bombyx while still working when you log in.
+
 ## Configure
 
 Drop a `bombyx.toml` in the project you want a VM for:

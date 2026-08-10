@@ -2,6 +2,82 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-10
+
+**The first real run**
+
+bombyx has now driven a real VM on a real host, end to end.
+Until today everything it did was proven only by unit tests
+and by `--dry-run`, which shows the argv it would execute but
+says nothing about whether the far end accepts it. That gap
+was the oldest open item on the list, and closing it was worth
+the effort: it confirmed the fixes and it found three things
+the tests could not.
+
+Set up frosti first: Ubuntu 24.04 with QEMU, libvirt, Vagrant
+2.4.9 and vagrant-libvirt 0.12.2. Two things about that are
+worth remembering. Ubuntu 24.04 does not package Vagrant at
+all, so it has to come from HashiCorp's repository, and
+`qemu-kvm` has been renamed `qemu-system-x86`. All of it is
+written up in `docs/vm-host-setup.md`.
+
+Then ran the whole surface against a throwaway project:
+`up`, `status`, `shell`, `down`, `scratch`, `discard` and
+`reset`, plus a second `up` to check that pushing twice is
+safe, and a deliberate `discard ../../../../etc` to see the
+name validation refuse it.
+
+**Everything the reviewers made us fix, held up.** The most
+satisfying one was the tilde. The remote shell resolved
+`~/'vms/vmtest'` to `/home/igor/vms/vmtest`, and no directory
+literally named `~` was created anywhere. That was the bug
+that 82 unit tests had asserted *into* place, so seeing the
+corrected form work against a real shell is the clearest
+possible answer to why a real run was needed.
+
+The rest of the push behaved as designed. After two pushes the
+`Vagrantfile` sat directly in `~/vms/vmtest/`, with no nested
+`vagrant/` directory, so the `scp -r` nesting problem is
+genuinely gone. The VM's `.vagrant` identity directory
+survived the second push with its domain id intact, which is
+the `--exclude=./.vagrant` fix working. No push archive was
+left behind on either end. Scratch VMs landed in
+`~/vms/scratch/vmtest/pr-1234`, scoped by project as intended.
+Exit codes propagated: `status` against a directory that did
+not exist returned 1 and named the command that failed.
+
+Vagrant's own log gave the neatest confirmation that the seam
+works, describing the domain it built as
+`Source: /home/igor/vms/vmtest/Vagrantfile` -- the file bombyx
+had pushed, in the directory bombyx had created. And
+`bombyx shell` reached all the way inside, printing
+`vmtest / vagrant / 6.8.0-136-generic` from the guest.
+
+**Three findings.** `discard` destroys the VM but leaves the
+scratch directory sitting on the host, which makes the
+README's claim that "nothing survives" untrue as written.
+`reset` restores a snapshot called `fresh-install` that no
+bombyx command ever creates, so on a new project it can only
+fail -- it does fail cleanly, but the workflow has a hole in
+it. Both are captured.
+
+The third is more embarrassing and more useful.
+`cargo xtask todo` writes entries as `**slug**` but its reader
+only recognises that same bold form, and the four
+hand-written entries in `docs/todo.md` use backticks instead.
+So `todo list` has been silently omitting them since the day
+they were written, `todo done first-real-run` could not find
+the very item this work closed, and I reported that truncated
+list as complete more than once without noticing it disagreed
+with the file.
+
+That is the same shape as the tilde bug and as the libvirt
+check I wrote earlier today, which passed by connecting to a
+per-user libvirt instance rather than the system one and so
+proved nothing. Three times in two days, the failure was not
+a red result. It was a green one that did not mean what it
+appeared to mean.
+
 ### 2026-08-09
 
 **Dropping the frontend tooling, and the npm awareness
