@@ -477,10 +477,12 @@ was in the module written to close a security hole.
   comment claimed to prevent; and four incidents narrated in four
   places each now have one home and pointers.
 
-Deferred: splitting `doctor.rs` into a directory module
-(`aq-2026-08-10-doctor-module-size`). It is right, and it is a
-1300-line reorganisation that would bury the fixes above in a diff
-nobody can review. Its own commit.
+Deferred at the time, and done in the very next commit: splitting
+`doctor.rs` into a directory module
+(`aq-2026-08-10-doctor-module-size`). It was the right change and a
+1300-line reorganisation, which would have buried the fixes above
+in a diff nobody could review. Separating them cost one commit and
+made both readable.
 
 ### Fourth review round, scoped to the rewritten guards
 

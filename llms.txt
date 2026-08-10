@@ -13,7 +13,12 @@ Cargo workspace, CLI only:
   - `remote.rs` — ssh/scp/tar command construction (pure)
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `plan.rs` — `Action` → ordered command list
-  - `doctor.rs` — probe outcomes, report, exit code (pure)
+  - `doctor.rs` — the check model; submodules own the rest
+    - `doctor/probes.rs` — which probes run, reading a result
+    - `doctor/readonly.rs` — proving a probe script writes nothing
+    - `doctor/text.rs` — host text made safe to print, clipping
+    - `doctor/local.rs` — the workstation-side checks
+    - `doctor/report.rs` — collecting and rendering findings
   - `tool.rs` — `PATH` lookup, never the working directory
   - `bin/bombyx/main.rs` — clap parsing, thin dispatch
 - `xtask` — build automation (not published)

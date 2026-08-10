@@ -105,8 +105,9 @@ pub fn command(cfg: &Config, tool: &str) -> RemoteCommand {
 /// is exactly how an earlier version of this probe passed on a
 /// `fish` shell.
 ///
-/// The verdict lives in `crate::doctor::posix_shell_verdict`,
-/// because the token has to be *checked*, not merely printed.
+/// The verdict lives in
+/// `crate::doctor::probes::posix_shell_verdict`, because the
+/// token has to be *checked*, not merely printed.
 #[must_use]
 pub fn posix_shell(cfg: &Config) -> RemoteCommand {
     probe(cfg, "x=1; if [ \"$x\" = 1 ]; then printf 'posix\\n'; fi")

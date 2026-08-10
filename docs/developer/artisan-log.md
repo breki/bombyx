@@ -4,6 +4,20 @@ Quality (Artisan) review findings. Newest first.
 
 ## aq-2026-08-10-doctor-module-size
 
+**Status:** Resolved 2026-08-10, in the commit after the one that
+deferred it. `doctor.rs` is now a directory module of five
+submodules, with the public names re-exported so no caller
+changed.
+
+Measured before `#[cfg(test)]`, in lines of code (blanks and
+comments excluded): `readonly.rs` 193, `probes.rs` 97,
+`report.rs` 79, `doctor.rs` 68, `local.rs` 62, `text.rs` 36.
+`readonly.rs` is still the outlier this entry was about, and it
+is left whole deliberately: it holds one concern, declares no
+types, and most of its bulk is the explanation of why each entry
+in the blocklist is there. Splitting it would separate the list
+from that explanation.
+
 **Category:** Module size / cohesion
 
 `crates/bombyx/src/doctor.rs` is ~840 lines of production code
