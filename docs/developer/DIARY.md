@@ -4,6 +4,71 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-10
 
+**`bombyx provision`, and a failing first run that was worth
+more than a passing one**
+
+Setting up the first real agent VM turned up a gap. `bombyx up`
+pushes the project's `vagrant/` directory to the host, but
+vagrant provisions a machine only when it first creates it --
+every later `vagrant up` skips the provisioners, whether the VM
+was halted or running. So an edited `provision.sh` reached the
+host and nothing executed it -- and the push reported success,
+which is what made it hard to see.
+
+I had this wrong in the first draft of every doc string, writing
+that `up` skips provisioning on a VM that is "already running".
+The review caught it. The wrong rule is worse than no rule: it
+tells someone with a *halted* VM that the caveat does not apply
+to them, so they run `up`, watch it boot, and walk back into the
+same silent failure. The only way to apply a provisioning edit was
+`ssh frosti` and `vagrant provision` by hand, which contradicts
+the one thing bombyx is for: the operator stays on the
+workstation.
+
+`bombyx provision` closes it. The implementation is small --
+`boot()` became `push_then()`, taking the closing vagrant
+subcommand, so `up`, `scratch` and `provision` share one push
+sequence. That sharing is the point rather than tidiness:
+`scratch` had already drifted once into booting an empty
+directory, and a separately-written `provision` would have been
+free to skip the push and re-run the stale copy on the host,
+which is the exact bug it exists to fix.
+
+The real run against frosti **failed**, and that was the more
+useful outcome. A bug in the VM's own provisioning script made
+`vagrant provision` exit 1, and bombyx surfaced vagrant's output
+and propagated the non-zero exit rather than reporting success.
+A clean first run would have proved less: error propagation got
+exercised for free, on a path I had not written a test for.
+
+Two lessons from that failure, neither about bombyx:
+
+- The guest script checked for existing swap with a bare
+  `swapon --show`. `swapon` lives in `/usr/sbin`, which is not
+  on the `PATH` a non-interactive shell gives an unprivileged
+  user, so the check failed with "command not found" instead of
+  answering -- and under `set -e` inside `if !` that reads as
+  "no swap", so the script tried to re-create a swapfile that
+  was live. It is the same non-interactive `PATH` trap
+  `vm-host-setup.md` documents for vagrant, one level down in
+  the guest. The creation step had worked on the first run only
+  because `sudo swapon` gets root's `PATH`.
+- I piped the first run through `tee`, so the exit status I read
+  was `tee`'s, not bombyx's -- a pipeline reports only its last
+  command. Never pipe the command whose exit code is the thing
+  being verified.
+
+The symptom that started all of this was arrow keys printing
+`^[[A` inside the VM. Two plausible causes were wrong before the
+right one: the PTY was fine (`ssh -t` already allocated one) and
+`TERM` was fine (`xterm-256color`, present in the guest's
+terminfo). The cause was the box creating its user with
+`/bin/sh`, which on Debian is dash -- no line editing at all.
+The tell was in the prompt the whole time: a bare `$ ` rather
+than bash's `user@host:dir$`. Worth remembering that dash never
+consults `TERM` or terminfo, which is exactly why both checks
+came back clean.
+
 **A doc gate, because two broken links had been sitting there**
 
 `cargo doc` reported two broken documentation links in this repo:

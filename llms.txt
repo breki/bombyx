@@ -37,6 +37,7 @@ the host holds a cache refreshed on every `up`.
 
 ```
 bombyx up                 # push vagrant/, boot the VM
+bombyx provision          # push vagrant/, re-run provisioning
 bombyx down               # halt the VM
 bombyx shell              # shell inside the VM (ssh -t)
 bombyx status             # vagrant status

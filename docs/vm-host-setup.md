@@ -205,6 +205,40 @@ Turn it on once:
 virsh -c qemu:///system pool-autostart default
 ```
 
+## A warning that appears on every vagrant command
+
+Once the provider is installed, every vagrant command prints a
+line like this before doing anything else:
+
+```
+[fog][WARNING] Unrecognized arguments: libvirt_ip_command
+```
+
+It is harmless, and it is worth knowing that in advance because
+it appears at the top of otherwise successful output, where a
+reader naturally looks for the cause of a problem.
+
+The warning comes from `fog-libvirt`, the library the provider
+uses to talk to libvirt. `vagrant-libvirt` passes it an option
+called `libvirt_ip_command` that current versions of
+`fog-libvirt` no longer accept, so the library reports the
+unrecognized argument and carries on. Nothing is skipped as a
+result.
+
+The cause is a version mismatch between two gems that
+`vagrant plugin install` resolves separately: it installs the
+newest `fog-libvirt` alongside whatever `vagrant-libvirt`
+release you asked for. Seen with `vagrant-libvirt 0.12.2` and
+`fog-libvirt 0.15.0` in August 2026, which is what a fresh host
+set up from this page gets today.
+
+Do not try to fix it by pinning `fog-libvirt` to an older
+release. That means overriding dependency resolution inside
+Vagrant's embedded Ruby, and a pin that resolves badly breaks
+the provider completely -- a much worse outcome than one line
+of noise. It will stop appearing when `vagrant-libvirt`
+releases a version that no longer passes the option.
+
 ## Checking that it worked
 
 The quickest check is `bombyx doctor`, run from a project

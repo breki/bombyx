@@ -105,6 +105,23 @@ fn up_never_hands_scp_a_windows_drive_letter() {
 }
 
 #[test]
+fn provision_pushes_then_runs_vagrant_provision() {
+    // The gap this command closes: `up` ships an edited
+    // provisioning script and `vagrant up` on a running VM
+    // never executes it, so the push reports success while
+    // nothing was applied.
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "provision"]);
+    assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
+    assert!(lines[0].contains("mkdir -p ~/'vms/phren'"));
+    assert!(
+        lines[4].ends_with("cd ~/'vms/phren' && vagrant 'provision'\""),
+        "{}",
+        lines[4]
+    );
+}
+
+#[test]
 fn scratch_pushes_into_a_project_scoped_dir() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "scratch", "pr-1234"]);

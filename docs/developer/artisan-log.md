@@ -2,6 +2,32 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-10-push-expectation-duplication
+
+**Category:** Craftsmanship (test duplication)
+
+`plan.rs`'s `up_makes_the_dir_then_pushes_then_boots` and
+`provision_pushes_then_reprovisions` each spell out the same
+five-command expected script as a hand-escaped literal block,
+differing only in the trailing `vagrant 'up'` versus
+`vagrant 'provision'`. The review suggested an
+`expected_push(dir, subcommand)` helper, so the one-token
+difference is visible at the call site and a change to the push
+sequence lands once instead of twice.
+
+Deferred deliberately. The literal blocks are meant to be dumb
+pins: they read as the exact shell bombyx emits, which is what
+makes them useful as documentation, and two independently
+written expectations cannot both drift the same wrong way, which
+one shared builder can. The duplication is bounded -- a third
+exact-script test would change this judgement -- and
+`provision_and_up_take_the_same_shape` now carries the "these
+two differ only in their last step" claim that the helper would
+have made visible.
+
+Revisit if a third caller of `push_then` gains its own
+exact-script test.
+
 ## aq-2026-08-10-doctor-module-size
 
 **Status:** Resolved 2026-08-10, in the commit after the one that

@@ -20,6 +20,20 @@ use crate::remote::{self, PushArchive, RemoteCommand};
 pub enum Action {
     /// Push the Vagrant dir and boot the project VM.
     Up,
+    /// Push the Vagrant dir and re-run provisioning on the
+    /// project VM.
+    ///
+    /// Separate from [`Action::Up`] because vagrant provisions
+    /// a machine only when it first creates it. Every later
+    /// `vagrant up` skips the provisioners -- whether the VM
+    /// was halted or running -- so an edited script reaches the
+    /// host and nothing executes it, while the push reports
+    /// success.
+    ///
+    /// Requires a machine that already exists: `vagrant
+    /// provision` has nothing to provision on a VM that was
+    /// never booted, so `up` comes first.
+    Provision,
     /// Halt the project VM.
     Down,
     /// Open a shell inside the project VM.
@@ -43,7 +57,7 @@ impl Action {
     /// directory, and so needs a local archive.
     #[must_use]
     pub fn pushes(&self) -> bool {
-        matches!(self, Self::Up | Self::Scratch(_))
+        matches!(self, Self::Up | Self::Provision | Self::Scratch(_))
     }
 }
 
@@ -59,7 +73,20 @@ pub fn plan(
     archive: &PushArchive,
 ) -> Vec<RemoteCommand> {
     match action {
-        Action::Up => boot(cfg, &cfg.remote_project_dir(), local_dir, archive),
+        Action::Up => push_then(
+            cfg,
+            &cfg.remote_project_dir(),
+            local_dir,
+            archive,
+            &["up"],
+        ),
+        Action::Provision => push_then(
+            cfg,
+            &cfg.remote_project_dir(),
+            local_dir,
+            archive,
+            &["provision"],
+        ),
         Action::Down => vec![remote::vagrant(cfg, &["halt"])],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
         Action::Status => vec![remote::vagrant(cfg, &["status"])],
@@ -73,9 +100,13 @@ pub fn plan(
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir()),
-        Action::Scratch(name) => {
-            boot(cfg, &cfg.remote_scratch_dir(name), local_dir, archive)
-        }
+        Action::Scratch(name) => push_then(
+            cfg,
+            &cfg.remote_scratch_dir(name),
+            local_dir,
+            archive,
+            &["up"],
+        ),
         Action::Discard(name) => tear_down(cfg, &cfg.remote_scratch_dir(name)),
     }
 }
@@ -102,22 +133,30 @@ fn tear_down(cfg: &Config, dir: &str) -> Vec<RemoteCommand> {
 }
 
 /// Ensures `dir` exists on the host, pushes the project's
-/// Vagrant directory into it, and boots the VM.
+/// Vagrant directory into it, then runs `vagrant` with `args`
+/// there.
 ///
-/// Shared by `up` and `scratch`: a scratch VM needs the same
-/// Vagrantfile as a persistent one, just in a throwaway
-/// directory. Routing both through one helper is what keeps
-/// `scratch` from drifting back into booting an empty
-/// directory.
-fn boot(
+/// Shared by `up`, `scratch` and `provision`, which differ only
+/// in the directory they target and the vagrant arguments they
+/// end with. Routing all three through one helper is what keeps
+/// the push from drifting: every caller ships the local
+/// directory first, so vagrant always acts on the working tree
+/// rather than on whatever a previous run left behind.
+///
+/// `args` is a slice rather than one string, matching
+/// [`remote::vagrant_in`]. A single string would turn a
+/// two-word invocation into one quoted argument, which fails on
+/// the host after the push has already changed state.
+fn push_then(
     cfg: &Config,
     dir: &str,
     local_dir: &Path,
     archive: &PushArchive,
+    args: &[&str],
 ) -> Vec<RemoteCommand> {
     let mut cmds = vec![remote::ensure_dir(cfg, dir)];
     cmds.extend(remote::push_dir(cfg, local_dir, dir, archive));
-    cmds.push(remote::vagrant_in(cfg, dir, &["up"]));
+    cmds.push(remote::vagrant_in(cfg, dir, args));
     cmds
 }
 
@@ -176,6 +215,48 @@ mod tests {
         assert_eq!(programs, vec!["ssh", "tar", "scp", "ssh", "ssh"]);
         assert!(cmds[0].args[1].contains("mkdir -p"));
         assert!(cmds.last().unwrap().args[1].ends_with("vagrant 'up'"));
+    }
+
+    #[test]
+    fn provision_pushes_then_reprovisions() {
+        // Pins the literal shell, so the command's whole effect
+        // on the host is readable in one place.
+        assert_eq!(
+            scripts(&Action::Provision),
+            vec![
+                "ssh frosti \"mkdir -p ~/'vms/phren'\"",
+                "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
+                 /repo/vagrant --exclude=./.vagrant \
+                 --exclude=./.git .",
+                "cd /work && scp .bombyx-push-42.tar.gz \
+                 frosti:.bombyx-push-42.tar.gz",
+                "ssh frosti \"{ cd ~/'vms/phren' && tar -xzf \
+                 ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
+                 ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
+                "ssh frosti \"cd ~/'vms/phren' && vagrant 'provision'\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn provision_and_up_take_the_same_shape() {
+        // The invariant the shared helper exists to keep: the
+        // two differ in their last step and nowhere else. A
+        // `provision` that grew its own push logic could skip
+        // the push and re-run the stale copy on the host --
+        // the bug the command was added to fix.
+        let up = run(&Action::Up);
+        let pr = run(&Action::Provision);
+        assert_eq!(up.len(), pr.len());
+        assert_eq!(up[..up.len() - 1], pr[..pr.len() - 1]);
+        assert_eq!(
+            up.last().unwrap().args[1],
+            "cd ~/'vms/phren' && vagrant 'up'"
+        );
+        assert_eq!(
+            pr.last().unwrap().args[1],
+            "cd ~/'vms/phren' && vagrant 'provision'"
+        );
     }
 
     #[test]
@@ -292,9 +373,14 @@ mod tests {
     }
 
     #[test]
-    fn only_booting_actions_need_an_archive() {
+    fn only_pushing_actions_need_an_archive() {
+        // Named for pushing rather than booting: `provision`
+        // needs the archive without booting anything, so tying
+        // the rule to "boots" would have made it the exception
+        // instead of a third member of the set.
         assert!(Action::Up.pushes());
         assert!(Action::Scratch(scratch("x")).pushes());
+        assert!(Action::Provision.pushes());
         for a in [
             Action::Down,
             Action::Status,

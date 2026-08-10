@@ -58,6 +58,10 @@ plan, decisions, and outcome.
 
 ## Done
 
+- [**provision-command**](issues/provision-command.md)
+  -- re-run provisioning on a running VM
+  (2026-08-10)
+
 - [**doctor-preflight**](issues/doctor-preflight.md)
   -- bombyx doctor: read-only preflight checks
   (2026-08-10)

@@ -17,6 +17,7 @@ booting, so the host cannot silently drift.
 
 ```bash
 bombyx up                 # push vagrant/, boot the VM
+bombyx provision          # push vagrant/, re-run provisioning
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot

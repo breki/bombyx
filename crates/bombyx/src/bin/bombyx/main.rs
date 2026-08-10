@@ -44,6 +44,13 @@ struct Cli {
 enum Cmd {
     /// Push the Vagrant dir and boot the project VM
     Up,
+    /// Push the Vagrant dir and re-run provisioning
+    ///
+    /// Vagrant provisions only when it first creates a VM, so
+    /// every later `up` ships an edited provisioning script to
+    /// the host without executing it. This applies it. The VM
+    /// must already exist: run `up` first.
+    Provision,
     /// Halt the project VM
     Down,
     /// Open a shell inside the project VM
@@ -144,6 +151,7 @@ fn run_id() -> String {
 fn action_of(cmd: &Cmd, cfg: &Config) -> Result<Action> {
     Ok(match cmd {
         Cmd::Up => Action::Up,
+        Cmd::Provision => Action::Provision,
         Cmd::Down => Action::Down,
         Cmd::Shell => Action::Shell,
         Cmd::Status => Action::Status,

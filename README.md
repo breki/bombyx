@@ -73,6 +73,7 @@ usernames or keys itself.
 ```bash
 bombyx doctor             # check the preconditions, change nothing
 bombyx up                 # push vagrant/, boot the VM
+bombyx provision          # push vagrant/, re-run provisioning
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
@@ -82,6 +83,22 @@ bombyx destroy phren      # destroy the VM and remove its dir
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
 ```
+
+`provision` exists because `up` provisions a VM only when it
+first creates one. Every later `vagrant up` skips the
+provisioners -- whether the VM was halted or running -- so
+editing `vagrant/provision.sh` and running `up` again ships the
+new script to the host and never executes it. The push reports
+success, which is what makes the gap easy to miss.
+
+`provision` pushes the directory exactly as `up` does, then
+runs `vagrant provision` instead of `vagrant up`. The VM has to
+exist already: on one that was never booted, `provision`
+creates the remote directory and ships the archive before
+vagrant reports it has nothing to provision, so run `up` first.
+It applies to the project VM only -- a scratch VM is
+disposable, so the answer there is `discard` followed by
+`scratch`.
 
 `destroy` takes the project name as confirmation and refuses if
 it does not match `project` in `bombyx.toml`. `down` halts a VM

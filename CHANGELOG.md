@@ -75,6 +75,10 @@ and this project adheres to
   the shell bombyx gets. A `vagrant` installed outside that shell's `PATH` works
   when you log in and type it, and is invisible to bombyx -- and vagrant cannot
   report this itself, because it is not running.
+- `bombyx provision` pushes the Vagrant directory and re-runs provisioning on
+  the project VM. Vagrant provisions only when it first creates a VM, so every
+  later `up` shipped an edited provisioning script to the host without executing
+  it -- and the push reported success. Requires a VM that already exists.
 
 ### Changed
 
