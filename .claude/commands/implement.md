@@ -113,10 +113,10 @@ particular:
 
 ## Phase 3 -- Finalise
 
-1. Run `cargo xtask validate`. All seven gates must
+1. Run `cargo xtask validate`. All eight gates must
    pass: dependency cooldown, fmt, duplication
-   <= 6%, clippy, tests, coverage >= 90%, and the
-   RUSTSEC audit.
+   <= 6%, clippy, doc links, tests, coverage >= 90%,
+   and the RUSTSEC audit.
 
 2. If the change affects developer workflow or skills,
    update the relevant files under `.claude/commands/`

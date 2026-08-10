@@ -6,6 +6,7 @@ mod clean_cache;
 mod clippy_cmd;
 mod coverage;
 mod dep_age;
+mod doc_cmd;
 mod dupes;
 mod feedback;
 mod fmt_cmd;
@@ -30,6 +31,8 @@ enum XCommand {
     Check,
     /// Run clippy (deny warnings)
     Clippy,
+    /// Check doc comments build and every doc link resolves
+    Doc,
     /// Run all tests
     Test {
         /// Optional test filter
@@ -43,7 +46,7 @@ enum XCommand {
         #[arg(long)]
         ignored: bool,
     },
-    /// Run fmt + clippy + tests + coverage + duplication
+    /// Run fmt + clippy + doc + tests + coverage + duplication
     Validate {
         /// Check formatting read-only (`fmt --check`)
         /// instead of auto-fixing it in place. Use in CI
@@ -157,6 +160,7 @@ fn main() {
     let result = match cli.command {
         XCommand::Check => check::check(),
         XCommand::Clippy => clippy_cmd::clippy(),
+        XCommand::Doc => doc_cmd::doc(),
         XCommand::Test {
             filter,
             verbose,

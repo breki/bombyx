@@ -4,13 +4,14 @@ use crate::audit;
 use crate::clippy_cmd;
 use crate::coverage;
 use crate::dep_age;
+use crate::doc_cmd;
 use crate::dupes;
 use crate::fmt_cmd;
 use crate::helpers::{elapsed_str, step_output};
 use crate::test_cmd;
 
 /// Total number of validation steps.
-const TOTAL_STEPS: usize = 7;
+const TOTAL_STEPS: usize = 8;
 
 /// Run all validation steps with concise stepwise
 /// output.
@@ -31,7 +32,9 @@ const TOTAL_STEPS: usize = 7;
 /// expensive dynamic gates (Test, Coverage) last, so a fast
 /// check's failure is not gated behind the multi-minute
 /// instrumented Coverage run. Fmt leads the static gates
-/// because it rewrites whitespace that later checks read. The
+/// because it rewrites whitespace that later checks read. Doc
+/// closes them: rustdoc reuses the metadata Clippy's check has
+/// just produced, so it costs about a second. The
 /// Audit step is network-dependent, so it runs last (after
 /// Coverage) with the same degrade-to-warning treatment as
 /// Dep-age -- a positive vulnerability finding still fails the
@@ -52,11 +55,12 @@ pub fn validate(check: bool) -> Result<(), String> {
     run_step(2, "Fmt", "fmt", || run_fmt(check))?;
     run_step(3, "Duplication", "dupes", run_duplication)?;
     run_step(4, "Clippy", "clippy", run_clippy)?;
+    run_step(5, "Doc", "doc", run_doc)?;
 
     // ... expensive dynamic gates last.
-    run_step(5, "Test (xtask only)", "test", run_test)?;
-    run_step(6, "Coverage", "coverage", run_coverage)?;
-    run_step(7, "Audit", "audit", run_audit)?;
+    run_step(6, "Test (xtask only)", "test", run_test)?;
+    run_step(7, "Coverage", "coverage", run_coverage)?;
+    run_step(8, "Audit", "audit", run_audit)?;
 
     println!("Validate OK ({})", elapsed_str(overall_start));
     Ok(())
@@ -113,6 +117,23 @@ fn run_clippy() -> Result<String, String> {
                 eprintln!("  {line}");
             }
             Err(err)
+        }
+    }
+}
+
+/// Doc step -- returns empty detail on success.
+///
+/// Grouped with the cheap static gates: rustdoc reuses the
+/// metadata `cargo check` already produced, so both passes
+/// together cost about a second on a warm target directory.
+fn run_doc() -> Result<String, String> {
+    match doc_cmd::doc_check()? {
+        None => Ok(String::new()),
+        Some(failure) => {
+            for line in failure.items.iter().take(5) {
+                eprintln!("  {line}");
+            }
+            Err(failure.summary)
         }
     }
 }

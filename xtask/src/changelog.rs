@@ -210,7 +210,19 @@ fn insert_new_block(
                 .is_some_and(|k| k.order() > kind.order())
         })
         .unwrap_or(u_end);
-    let mut block = vec![kind.heading().to_owned(), String::new()];
+    let mut block = Vec::new();
+    // A heading needs a blank line above it. When the new block
+    // lands at the end of `[Unreleased]`, the line above is the
+    // last bullet of the previous kind rather than a blank, and
+    // without this the heading is glued to that bullet -- which
+    // renders as body text, not a heading. The skeleton the tests
+    // used had a blank there, so the bug only appeared once a
+    // real file grew a bullet at the boundary.
+    if at > 0 && !lines[at - 1].trim().is_empty() {
+        block.push(String::new());
+    }
+    block.push(kind.heading().to_owned());
+    block.push(String::new());
     block.extend(bullet);
     block.push(String::new());
     lines.splice(at..at, block);
@@ -250,6 +262,31 @@ mod tests {
         assert!(out.contains(
             "## [0.1.0] - 2026-01-01\n\n### Added\n\n- First release.\n"
         ));
+    }
+
+    #[test]
+    fn a_new_heading_at_the_section_end_keeps_its_blank_line() {
+        // The real-file shape the skeleton above does not have:
+        // `[Unreleased]` ends with a bullet, not a blank. Without
+        // a blank line the heading is glued to that bullet and
+        // renders as body text rather than a heading.
+        let start = "\
+# Changelog
+
+## [Unreleased]
+
+### Changed
+
+- an existing entry
+
+## [0.1.0] - 2026-01-01
+";
+        let out = insert_bullet(start, ChangelogKind::Fixed, "a fix").unwrap();
+        assert!(
+            out.contains("- an existing entry\n\n### Fixed\n\n- a fix\n"),
+            "{out}"
+        );
+        assert!(!out.contains("entry\n### Fixed"), "{out}");
     }
 
     #[test]

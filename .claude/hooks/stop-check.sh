@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Stop hook: runs a fast-path subset of validate when
 # Rust files have been modified -- fmt-check + clippy
-# + tests.
+# + doc + tests.
+#
+# The doc gate is included for the same reason as
+# fmt-check: it is cheap (~1.3s warm, two rustdoc passes
+# reusing the metadata clippy just produced) and it
+# catches a class nothing else does. A broken doc link
+# is a warning to rustdoc, so it builds clean and is
+# invisible until someone reads the docs.
 #
 # Coverage and duplication are intentionally skipped:
 # coverage alone adds ~15s per invocation on a small
@@ -67,5 +74,6 @@ run_stage() {
 
 run_stage "cargo fmt --check" cargo fmt --all -- --check \
   && run_stage "cargo xtask clippy" cargo xtask clippy \
+  && run_stage "cargo xtask doc" cargo xtask doc \
   && run_stage "cargo xtask test" cargo xtask test \
   || exit 2

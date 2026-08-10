@@ -13,7 +13,7 @@ enum Scope {
     XtaskOnly,
 }
 
-/// Options for [`test`]. Grouped so adding the next flag
+/// Options for [`test()`]. Grouped so adding the next flag
 /// (`--locked`, `--no-fail-fast`, ...) doesn't widen the
 /// function signature.
 #[derive(Clone, Copy, Default)]

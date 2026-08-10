@@ -38,10 +38,11 @@ removed. `/template-sync` will default those paths to
 
 ```bash
 cargo xtask check             # fast compile check
-cargo xtask validate          # fmt + clippy + tests + coverage
+cargo xtask validate          # fmt + clippy + doc + tests + coverage
 cargo xtask test [filter]     # tests only
 cargo xtask test --ignored    # run #[ignore]-tagged tests
 cargo xtask clippy            # lint only
+cargo xtask doc               # doc build + doc-link check
 cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
 cargo xtask dupes             # code duplication check
@@ -360,14 +361,16 @@ just when the code compiles:
    unrelated drift into the working tree)
 2. **No warnings**:
    `cargo clippy --all-targets -- -D warnings`
-3. **All tests pass**: `cargo test`
-4. **Coverage >= 90%**
-5. **Code duplication <= 6%** (production code, tests
+3. **Documentation builds and every doc link resolves**
+   (`cargo xtask doc`) -- see "Doc gate" below
+4. **All tests pass**: `cargo test`
+5. **Coverage >= 90%**
+6. **Code duplication <= 6%** (production code, tests
    excluded)
-6. **Security audit** (RUSTSEC; `cargo xtask audit`) --
+7. **Security audit** (RUSTSEC; `cargo xtask audit`) --
    a positive vulnerability fails; an unreachable advisory
    DB degrades to a warning
-7. **Dependency cooldown** (`cargo xtask dep-age-check`) --
+8. **Dependency cooldown** (`cargo xtask dep-age-check`) --
    fails when a dependency added or bumped since `HEAD` was
    published within the 14-day window; an unchanged
    lockfile makes it a no-op
@@ -375,10 +378,35 @@ just when the code compiles:
 The dependency-cooldown gate runs **first** (it is a no-op
 on an unchanged lockfile, and fails fast on a within-cooldown
 dependency before anything compiles it); after it the gates
-run cheapest-first (Fmt, Duplication, Clippy) before the
+run cheapest-first (Fmt, Duplication, Clippy, Doc) before the
 expensive dynamic gates (Tests, Coverage, then the network
 Audit), and a failed step prints the single command to
 re-run just that gate.
+
+### Doc gate: two rustdoc passes, not one
+
+`cargo xtask doc` runs rustdoc **twice** under
+`RUSTDOCFLAGS=-D warnings`: once normally, and once with
+`--document-private-items`. That is not belt-and-braces. A
+broken doc link fails in one of two ways and neither pass
+catches both:
+
+- A link **inside a private module** naming something not in
+  scope. The public pass never renders a private module's docs,
+  so it reports nothing at all.
+- A **public page linking to a private item**. This is an error
+  in the public pass and perfectly legal in the private one --
+  rustdoc even suggests `--document-private-items` to make it
+  resolve.
+
+Both cases were live in this repo when the gate was added, and
+each was invisible to the other pass. If you are tempted to drop
+one pass to save a second, note that the remaining one will keep
+reporting success on the class it cannot see.
+
+The `-D warnings` is what makes it a gate: rustdoc's link lints
+are warnings by default, so a broken link otherwise builds
+cleanly and the docs quietly stop navigating.
 
 ## Semantic Versioning
 

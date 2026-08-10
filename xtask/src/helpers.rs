@@ -237,6 +237,27 @@ pub fn run_cargo_capture(args: &[&str]) -> Result<Output, String> {
         .map_err(|e| format!("failed to run {bin}: {e}"))
 }
 
+/// Run a cargo command with extra environment variables and
+/// capture its output.
+///
+/// Exists for `RUSTDOCFLAGS`, which is the only way to turn
+/// rustdoc's link lints from warnings into errors -- there is no
+/// command-line flag for it, so the doc gate cannot be expressed
+/// with [`run_cargo_capture`] alone.
+pub fn run_cargo_capture_env(
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<Output, String> {
+    let bin = cargo_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.args(args).env("CARGO_TERM_COLOR", "never");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.output()
+        .map_err(|e| format!("failed to run {bin}: {e}"))
+}
+
 /// Run a cargo command, streaming output to the
 /// terminal. Used for `--verbose` mode and fmt.
 pub fn run_cargo_stream(args: &[&str]) -> Result<(), String> {

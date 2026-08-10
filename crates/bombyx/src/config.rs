@@ -9,7 +9,9 @@
 //! attacker-controlled data the moment you clone or check out
 //! someone else's branch. Every field is therefore validated
 //! against an explicit allowlist rather than trusted -- see
-//! [`Config::validate`].
+//! `Config::validate`, which every constructor runs. Not a
+//! doc link: `validate` is private, and rustdoc rejects a
+//! public page pointing at a private item.
 
 use std::path::{Path, PathBuf};
 

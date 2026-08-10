@@ -90,3 +90,11 @@ and this project adheres to
   `tar.exe` was workstation code execution -- in `doctor`, the command the docs
   say to run first in a fresh clone. Resolving up front also means a missing
   tool fails before `up` has created the remote directory.
+
+### Fixed
+
+- Two broken links in the API documentation: `config`'s module page pointed at
+  the private `Config::validate`, and an xtask doc comment linked `test`
+  ambiguously (both a function and an attribute macro). Neither failed the
+  build, because rustdoc reports link problems as warnings.
+

@@ -4,6 +4,46 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-10
 
+**A doc gate, because two broken links had been sitting there**
+
+`cargo doc` reported two broken documentation links in this repo:
+`config`'s module page pointed at the private `Config::validate`,
+and an xtask doc comment linked `test`, which is both a function
+and an attribute macro. Neither had ever failed anything, because
+rustdoc reports link problems as *warnings* — so the docs build
+cleanly and quietly stop navigating.
+
+Fixing the two links was a minute. The interesting half was that
+nothing caught them, so `cargo xtask doc` now exists and runs as
+the fifth `validate` gate and in the Stop hook.
+
+It runs rustdoc **twice**, and that is the part worth writing
+down, because it looks like belt-and-braces and is not. A broken
+link fails in one of two ways and neither pass sees both:
+
+- A link inside a *private* module naming something out of scope.
+  The public pass never renders a private module's docs, so it
+  reports nothing at all.
+- A *public* page linking to a private item. That is an error in
+  the public pass and perfectly legal in the private one —
+  rustdoc even suggests `--document-private-items` to make it
+  resolve.
+
+I measured this rather than assuming it: breaking the link in
+`doctor::text` gave 0 errors in the public pass and 2 in the
+private one. Had I shipped one pass, the gate would have reported
+success on a whole class it cannot see — which is the same shape
+as every bug this feature produced, so it seemed worth not
+repeating.
+
+Adding the CHANGELOG entry then found a third thing: `cargo xtask
+changelog add` glued a newly created `### Fixed` heading directly
+onto the last bullet of the previous section, because it always
+assumed a blank line above the insertion point. The skeleton the
+tests used had one; a real file that ends `[Unreleased]` with a
+bullet does not. A heading with no blank line above it renders as
+body text. Fixed, with a test using the real-file shape.
+
 **`bombyx doctor`, and three rounds of learning to distrust a
 green result**
 

@@ -69,17 +69,18 @@ remote_root = "~/vms"    # optional
 ## Build Commands
 
 ```
-cargo xtask validate          # fmt + clippy + tests + coverage + dupes + audit
+cargo xtask validate          # fmt + clippy + doc + tests + coverage + dupes + audit
 cargo xtask check             # fast compile-only check
 cargo xtask test [filter]     # tests only
 cargo xtask clippy            # lint only
+cargo xtask doc               # doc build + doc-link check
 cargo xtask fmt               # format code
 cargo xtask coverage          # coverage check (>=90% workspace, >=85% per module)
 cargo xtask dupes             # duplication check (<=6%)
 cargo xtask audit             # RUSTSEC advisories
 ```
 
-`cargo xtask validate` is the canonical gate (7 steps);
+`cargo xtask validate` is the canonical gate (8 steps);
 all commits and the Stop hook run it. Never use raw
 `cargo test` / `cargo clippy`.
 
