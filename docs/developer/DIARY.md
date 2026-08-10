@@ -4,6 +4,93 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-10
 
+**`bombyx doctor`, and three rounds of learning to distrust a
+green result**
+
+`bombyx up` changes state before it runs `vagrant`: it creates a
+directory on the host and ships a tarball there. So a host
+missing a piece reported it half-way through, and the worst case
+-- `bash: vagrant: command not found` -- is one that **nothing
+else can report**, because vagrant cannot tell you it is
+invisible to a non-interactive shell when it is not running.
+`bombyx doctor` now checks eleven things up front, changes
+nothing, and runs every probe rather than stopping at the first
+failure.
+
+The feature was small. Getting it *honest* took three review
+rounds, and the same mistake kept coming back in different
+clothes: **a check that passes while proving less than it
+claims.**
+
+- The first libvirt check was `virsh list --all`, which for a
+  non-root user silently answers from a per-user
+  `qemu:///session` instance. It would have passed with no group
+  membership at all.
+- The login-shell probe printed `$SHELL` and passed on any zero
+  exit, so a `fish` login shell -- the exact state it existed to
+  catch -- reported `ok`. It now makes the shell *run* a POSIX
+  construct and print a token, which is checked.
+- The project-directory probe passed on a *file* named `~/vms`.
+  Verified before the fix: doctor printed `all checks passed`
+  and `up` then died on its first command.
+- The provider probe kept only `grep`'s exit status, discarding
+  vagrant's own, and matched an unanchored substring.
+- The directory walk tested `-e`, which is false for a dangling
+  symlink, so it stepped *past* one to a writable parent and
+  passed -- while `mkdir -p` fails there with `File exists`.
+
+So the module's governing rule is written at the top of
+`doctor.rs`: a probe must carry a verdict, not a value. Where the
+shell cannot decide, the verdict is applied in Rust and tested.
+
+The second recurring shape was **hand-rolling something with
+more edge cases than it looks like it has.** Four separate
+findings -- executable permission bits, `PATHEXT` ordering,
+quoted `PATH` entries, backtracking past a candidate that
+matches by name but cannot run -- were one mistake in a
+hand-written `PATH` search. The fix was to delete the search and
+take the `which` crate, keeping only the decision that is
+bombyx's own, expressed as a subtraction: **never search the
+working directory.** On Windows the OS search includes it, and
+`doctor` is the command the documentation tells you to run first
+in a fresh clone -- so a repo shipping a `tar.exe` was
+workstation code execution. That resolution now applies to the
+push path too, and it is done up front, so a missing `tar` fails
+before `up` has created anything on the host.
+
+I made the same mistake once more while fixing it. The provider
+probe's two failures (vagrant absent vs plugin absent) used to
+read identically, so I composed a better message with a `tail`
+subshell -- and it broke against a real host, because a `PATH`
+broken enough to hide `vagrant` hides `tail` too, and the reason
+came back empty. Printing the label *before* vagrant's own
+output instead makes vagrant's last line the reason and needs no
+extra tool. That one is worth remembering: I only found it
+because I ran the failure path against frosti rather than
+reasoning about it.
+
+Which is the other lesson. Every claim in this feature that
+turned out to be false was one a passing test suite had already
+endorsed.
+
+Four review rounds in total, and the last two each found a bug
+inside the fix from the round before. Round three found that the
+`PATH` module written to stop the working directory being searched
+could still return a relative path and execute it: with no
+absolute entry on `PATH` the filtered list is an empty string, and
+`split_paths("")` yields one *empty* entry rather than none, which
+on Unix means the working directory. Round four, scoped to only
+the guards round three had rewritten, found that my new read-only
+check had *regressed* against the substring version it replaced --
+it stopped at `sudo` and so read `sudo mkdir -p "$d"` as
+read-only -- plus a panic on non-ASCII input and a `>&file`
+redirection I had wrongly classified as harmless.
+
+So the rule I would keep from this: when a review finds that a
+guard covers a sample of its input family rather than the family,
+the rewrite needs its own review. Twice now the fix has been the
+new bug, and both times a scoped re-review found it in one pass.
+
 **Teardown, and a latent hole that the feature would have
 turned into a weapon**
 

@@ -6,6 +6,8 @@
 //! (quoting, paths, command composition) unit-testable
 //! without a VM host.
 
+pub mod probe;
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -331,11 +333,7 @@ mod tests {
     use crate::name::ScratchName;
 
     fn cfg() -> Config {
-        Config::parse(
-            "host = \"frosti\"\nproject = \"phren\"\n",
-            Path::new("bombyx.toml"),
-        )
-        .unwrap()
+        Config::for_tests()
     }
 
     fn archive() -> PushArchive {

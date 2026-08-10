@@ -11,7 +11,10 @@ Cargo workspace, CLI only:
   - `config.rs` — `bombyx.toml` parsing, validation, paths
   - `name.rs` — validated `ScratchName` (one path segment)
   - `remote.rs` — ssh/scp/tar command construction (pure)
+  - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `plan.rs` — `Action` → ordered command list
+  - `doctor.rs` — probe outcomes, report, exit code (pure)
+  - `tool.rs` — `PATH` lookup, never the working directory
   - `bin/bombyx/main.rs` — clap parsing, thin dispatch
 - `xtask` — build automation (not published)
 
@@ -32,6 +35,7 @@ bombyx up                 # push vagrant/, boot the VM
 bombyx down               # halt the VM
 bombyx shell              # shell inside the VM (ssh -t)
 bombyx status             # vagrant status
+bombyx doctor             # check preconditions, read-only
 bombyx reset              # restore fresh-install snapshot
 bombyx destroy <project>  # destroy the VM, remove its dir
 bombyx scratch <name>     # boot a throwaway VM

@@ -71,6 +71,7 @@ usernames or keys itself.
 ## Use
 
 ```bash
+bombyx doctor             # check the preconditions, change nothing
 bombyx up                 # push vagrant/, boot the VM
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
@@ -118,6 +119,67 @@ when the config loads rather than at teardown.
 
 A scratch VM lives in `<remote_root>/scratch/<project>/<name>`,
 so the same name in two projects does not collide.
+
+Run `bombyx doctor` first on a new host. `up` creates a
+directory and ships a tarball before it runs `vagrant`, so
+without it a missing piece is reported half-way through:
+
+```console
+$ bombyx doctor
+  local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
+  local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
+  local   scp               ok    C:\Windows\System32\OpenSSH
+  local   Vagrantfile       ok
+  frosti  ssh               ok
+  frosti  login shell       ok    posix
+  frosti  tar               ok    /usr/bin/tar
+  frosti  scp               ok    /usr/bin/scp
+  frosti  vagrant           ok    /usr/bin/vagrant
+  frosti  project dir       ok    /home/igor (will create /home/igor/vms/phren)
+  frosti  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
+all checks passed
+```
+
+It runs every check rather than stopping at the first failure,
+and exits non-zero if any fails. It **creates, deletes and
+modifies nothing** — with one honest exception worth naming: the
+provider check runs `vagrant plugin list`, and on a host where
+vagrant has never run as that user, vagrant itself creates
+`~/.vagrant.d`. bombyx disables vagrant's version-checkpoint call
+so the probe neither writes more than that nor stalls on a
+firewalled endpoint. When SSH itself fails the remaining host checks are
+skipped rather than each waiting on a dead host. Locally it does
+execute `tar` and `ssh` to read their versions, so it is not a
+no-op on your workstation.
+
+The `vagrant` line is the one that earns the command: it asks
+the **non-interactive** shell, which is the one bombyx gets.
+Vagrant installed outside that `PATH` works when you log in and
+type it, and is invisible to bombyx — and vagrant cannot report
+that itself, because it is not running.
+
+Each check is built to carry a verdict rather than a value,
+because a probe that merely reports something passes on the
+state it exists to catch. `login shell` makes the host *run* a
+POSIX construct instead of printing `$SHELL`; `libvirt
+provider` checks vagrant's own exit status and matches an
+anchored plugin name, because `vagrant plugin list` exits zero
+even with nothing installed.
+
+The local lines name the directory each tool came from. bombyx
+resolves `tar`, `ssh` and `scp` against `PATH` explicitly rather
+than leaving it to the operating system, which on Windows
+searches the working directory first — and bombyx runs inside a
+repository whose contents arrive with whatever branch you
+checked out.
+
+Every command resolves what it needs the same way, all of it
+before running any step. So a missing `tar` stops `up` before it
+has created the directory on the host, rather than after.
+
+See [docs/vm-host-setup.md](docs/vm-host-setup.md) for what to
+do about each failure; `doctor` reports facts and leaves the
+remedies to the guide.
 
 Two lifecycles, on purpose:
 

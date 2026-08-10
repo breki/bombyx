@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use crate::config::Config;
+use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, PushArchive, RemoteCommand};
 
@@ -27,6 +28,8 @@ pub enum Action {
     Status,
     /// Restore the project VM's `fresh-install` snapshot.
     Reset,
+    /// Check bombyx's preconditions without changing anything.
+    Doctor,
     /// Destroy the project VM and remove its directory.
     Destroy,
     /// Boot a throwaway VM.
@@ -64,6 +67,11 @@ pub fn plan(
             cfg,
             &["snapshot", "restore", "fresh-install"],
         )],
+        // Host probes only. The local checks read this
+        // filesystem and spawn a `--version` call, so there is no
+        // command line a dry run could print that would describe
+        // them honestly.
+        Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir()),
         Action::Scratch(name) => {
             boot(cfg, &cfg.remote_scratch_dir(name), local_dir, archive)
@@ -118,11 +126,7 @@ mod tests {
     use super::*;
 
     fn cfg() -> Config {
-        Config::parse(
-            "host = \"frosti\"\nproject = \"phren\"\n",
-            Path::new("bombyx.toml"),
-        )
-        .unwrap()
+        Config::for_tests()
     }
 
     fn run(action: &Action) -> Vec<RemoteCommand> {
@@ -273,6 +277,21 @@ mod tests {
     }
 
     #[test]
+    fn doctor_delegates_rather_than_listing_probes_itself() {
+        // All this arm may do is delegate. Open-coding a list
+        // here is what would let `--dry-run` advertise a probe
+        // the live runner does not send. The CLI-level test
+        // asserts the binary's own output against the same
+        // function, which is the half that constrains the
+        // binary rather than the library.
+        assert_eq!(
+            run(&Action::Doctor),
+            doctor::probe_commands(&doctor::host_probes(&cfg()))
+        );
+        assert!(!run(&Action::Doctor).is_empty());
+    }
+
+    #[test]
     fn only_booting_actions_need_an_archive() {
         assert!(Action::Up.pushes());
         assert!(Action::Scratch(scratch("x")).pushes());
@@ -282,6 +301,7 @@ mod tests {
             Action::Shell,
             Action::Reset,
             Action::Destroy,
+            Action::Doctor,
             Action::Discard(scratch("x")),
         ] {
             assert!(!a.pushes(), "{a:?} must not need an archive");

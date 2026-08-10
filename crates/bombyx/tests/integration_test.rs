@@ -161,6 +161,184 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
 }
 
 #[test]
+fn doctor_dry_run_lists_read_only_probes() {
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "doctor"]);
+    // One line per probe, and every probe accounted for. An
+    // embedded newline in a script would split the dry run and,
+    // worse, could smuggle a second command past a reader.
+    assert_eq!(lines.len(), 7, "{lines:?}");
+    for l in &lines {
+        // Asserted per line rather than "some line has each
+        // option": the loose form is satisfied by seven different
+        // lines each carrying one option. What each option
+        // prevents is documented at `remote::probe::probe`.
+        for opt in [
+            "BatchMode=yes",
+            "ConnectTimeout=10",
+            "LogLevel=ERROR",
+            "ServerAliveInterval=5",
+            "ServerAliveCountMax=3",
+        ] {
+            assert!(l.contains(opt), "{opt} missing from {l:?}");
+        }
+        // And none of them may change the host. The list of what
+        // that means lives in the library, so this test and the
+        // unit test over the builders cannot disagree.
+        assert_eq!(bombyx::doctor::mutating_token(l), None, "{l:?}");
+    }
+    // The probe the command exists for.
+    assert!(
+        lines.iter().any(|l| l.contains("command -v 'vagrant'")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_push_archive_really_excludes_dot_vagrant_and_dot_git() {
+    // The exclusions are the reason a stale local `.vagrant`
+    // cannot overwrite the host's copy and orphan a running VM.
+    // Asserting the `--exclude` flags appear in the argv proves
+    // only that bombyx asked; `tar` implementations disagree
+    // about pattern matching, so this runs the real one and
+    // reads the archive back.
+    let project = TempDir::new().unwrap();
+    let vagrant_dir = project.path().join("vagrant");
+    std::fs::create_dir_all(vagrant_dir.join(".vagrant")).unwrap();
+    std::fs::create_dir_all(vagrant_dir.join(".git")).unwrap();
+    std::fs::write(vagrant_dir.join("Vagrantfile"), "# vm").unwrap();
+    std::fs::write(vagrant_dir.join(".vagrant/machine-id"), "x").unwrap();
+    std::fs::write(vagrant_dir.join(".git/HEAD"), "y").unwrap();
+
+    let work = TempDir::new().unwrap();
+    let archive = bombyx::remote::PushArchive::new(work.path(), "test");
+    let cfg = bombyx::config::Config::parse(
+        "host = \"frosti\"\nproject = \"phren\"\n",
+        std::path::Path::new("bombyx.toml"),
+    )
+    .unwrap();
+    let cmds = bombyx::plan::plan(
+        &bombyx::plan::Action::Up,
+        &cfg,
+        &vagrant_dir,
+        &archive,
+    );
+    let pack = cmds
+        .iter()
+        .find(|c| c.program == "tar")
+        .expect("up must pack an archive");
+
+    // Resolved the same way bombyx resolves it, so this exercises
+    // the `tar` a real push would use rather than whichever one
+    // the OS search happens to prefer.
+    let tar = bombyx::tool::resolve("tar").expect("tar must be on PATH");
+    let status = std::process::Command::new(&tar)
+        .args(&pack.args)
+        .current_dir(pack.dir.as_ref().unwrap())
+        .status()
+        .unwrap();
+    assert!(status.success(), "packing failed: {status}");
+
+    let listed = std::process::Command::new(&tar)
+        .args(["-tzf", &archive.name])
+        .current_dir(work.path())
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let names = String::from_utf8_lossy(&listed.stdout);
+    assert!(names.contains("Vagrantfile"), "{names}");
+    assert!(!names.contains(".vagrant"), "{names}");
+    assert!(!names.contains(".git"), "{names}");
+}
+
+/// The tag in the report row for `scope` and `name`.
+///
+/// Asserting on the row rather than on substrings of the whole
+/// report: `contains("Vagrantfile")` matches the name column,
+/// which is printed for a pass, a failure and a skip alike, and
+/// `contains("FAIL")` is satisfied by any other failing check. An
+/// earlier version of this test asserted both and passed whatever
+/// `vagrantfile_finding` returned.
+///
+/// The scope is part of the key because it has to be: `ssh` and
+/// `tar` each name both a local check and a host probe, so
+/// matching on the name alone silently answers about the local
+/// one.
+fn row_tag<'a>(
+    lines: &'a [String],
+    scope: &str,
+    name: &str,
+) -> Option<&'a str> {
+    lines.iter().find_map(|l| {
+        // `<scope>  <name>  <tag>  [detail]`, columns padded.
+        let rest = l.trim_start().strip_prefix(scope)?;
+        let rest = rest.strip_prefix(' ')?.trim_start();
+        // Guard against `tar` matching a `tar-x` row.
+        let after = rest.strip_prefix(name)?.strip_prefix(' ')?;
+        after.split_whitespace().next()
+    })
+}
+
+#[test]
+fn doctor_judges_the_local_vagrantfile_check_on_its_own() {
+    // The local checks must be evaluated independently of the
+    // host, so a typo in `vagrant_dir` is caught whether or not
+    // the VM host answers. Both cases are asserted, because only
+    // the pair rules out a check that always returns the same
+    // thing.
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("bombyx.toml"),
+        "host = \"nosuchhost.invalid\"\nproject = \"phren\"\n",
+    )
+    .unwrap();
+
+    let missing = bombyx_in(&dir).args(["doctor"]).assert().failure();
+    let out = String::from_utf8(missing.get_output().stdout.clone()).unwrap();
+    let lines: Vec<String> = out.lines().map(str::to_owned).collect();
+    assert_eq!(
+        row_tag(&lines, "local", "Vagrantfile"),
+        Some("FAIL"),
+        "{out}"
+    );
+
+    std::fs::create_dir(dir.path().join("vagrant")).unwrap();
+    std::fs::write(dir.path().join("vagrant/Vagrantfile"), "# vm").unwrap();
+    let present = bombyx_in(&dir).args(["doctor"]).assert().failure();
+    let out = String::from_utf8(present.get_output().stdout.clone()).unwrap();
+    let lines: Vec<String> = out.lines().map(str::to_owned).collect();
+    assert_eq!(row_tag(&lines, "local", "Vagrantfile"), Some("ok"), "{out}");
+    // Still a failing run overall -- the host does not resolve --
+    // which is what makes the row assertion the load-bearing one.
+    assert_eq!(
+        row_tag(&lines, "nosuchhost.invalid", "ssh"),
+        Some("FAIL"),
+        "{out}"
+    );
+}
+
+#[test]
+fn doctor_dry_run_prints_exactly_the_commands_a_live_run_sends() {
+    // The invariant behind "--dry-run goes through `plan`": the
+    // binary must not be able to advertise a probe list the live
+    // runner would not use. Compared against the library's own
+    // rendering of `host_probes`, through the real CLI.
+    let dir = project_dir();
+    let printed = dry_run(&dir, &["--dry-run", "doctor"]);
+    let cfg = bombyx::config::Config::parse(
+        "host = \"frosti\"\nproject = \"phren\"\n",
+        std::path::Path::new("bombyx.toml"),
+    )
+    .unwrap();
+    let expected: Vec<String> =
+        bombyx::doctor::probe_commands(&bombyx::doctor::host_probes(&cfg))
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+    assert_eq!(printed, expected);
+}
+
+#[test]
 fn a_dangerous_remote_root_is_refused_at_load() {
     // Each of these once produced a teardown outside the
     // configured root, or at a depth the floor claimed to

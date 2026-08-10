@@ -5,11 +5,16 @@
 //! subcommand to its commands lives in `bombyx::plan`, where
 //! it is covered by tests.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use bombyx::config::Config;
+use bombyx::doctor::{
+    self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
+};
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
 use bombyx::remote::{PushArchive, RemoteCommand};
@@ -47,6 +52,8 @@ enum Cmd {
     Status,
     /// Restore the project VM to its `fresh-install` snapshot
     Reset,
+    /// Check bombyx's preconditions, changing nothing
+    Doctor,
     /// Destroy the project VM and remove its directory
     ///
     /// Takes the project name as confirmation, since this
@@ -108,8 +115,19 @@ fn run() -> Result<ExitCode> {
         &run_id(),
     );
 
-    let commands = plan(&action, &cfg, &local_dir, &archive);
-    execute(&commands, cli.dry_run)
+    // Every action renders its dry run the same way, through
+    // `plan`, so no subcommand can describe a run it would not
+    // perform -- doctor included. Ordered so the two doctor
+    // paths are exclusive: a dry run never builds the probe
+    // structs, and a live run never builds their command lines
+    // twice.
+    if cli.dry_run {
+        return execute(&plan(&action, &cfg, &local_dir, &archive), true);
+    }
+    if matches!(action, Action::Doctor) {
+        return Ok(doctor_run(&cfg, &local_dir));
+    }
+    execute(&plan(&action, &cfg, &local_dir, &archive), false)
 }
 
 /// Returns a string distinguishing this run from any other
@@ -130,6 +148,7 @@ fn action_of(cmd: &Cmd, cfg: &Config) -> Result<Action> {
         Cmd::Shell => Action::Shell,
         Cmd::Status => Action::Status,
         Cmd::Reset => Action::Reset,
+        Cmd::Doctor => Action::Doctor,
         Cmd::Destroy { project } => {
             confirm_destroy(project.as_deref(), cfg)?;
             Action::Destroy
@@ -186,12 +205,34 @@ fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
 /// `ssh` transport failure (255) remains distinguishable from
 /// whatever the remote `vagrant` returned.
 fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<ExitCode> {
-    for cmd in commands {
-        if dry_run {
+    if dry_run {
+        for cmd in commands {
             println!("{cmd}");
-            continue;
         }
-        let mut child = std::process::Command::new(&cmd.program);
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    // Resolve every program before running any of them, through
+    // `tool` -- never the working directory; see that module.
+    //
+    // Up front, because resolving inside the loop would let `up`
+    // create the remote directory and only then discover that
+    // `tar` is missing: the change-state-then-fail behaviour the
+    // whole `doctor` command exists to prevent.
+    let mut resolved: HashMap<&str, PathBuf> = HashMap::new();
+    for cmd in commands {
+        if let Entry::Vacant(slot) = resolved.entry(&cmd.program) {
+            let found =
+                bombyx::tool::resolve(&cmd.program).ok_or_else(|| {
+                    anyhow!("{}", doctor::not_on_path(&cmd.program))
+                })?;
+            slot.insert(found);
+        }
+    }
+
+    for cmd in commands {
+        let mut child =
+            std::process::Command::new(&resolved[cmd.program.as_str()]);
         child.args(&cmd.args);
         if let Some(dir) = &cmd.dir {
             child.current_dir(dir);
@@ -205,6 +246,80 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Runs every precondition probe and prints the report.
+///
+/// Deliberately thin. Every decision -- the probe list, reading a
+/// result, the skip cascade, rendering, the exit code -- lives in
+/// `bombyx::doctor`, for the reason its module doc gives. What is
+/// left here is process spawning.
+fn doctor_run(cfg: &Config, local_dir: &Path) -> ExitCode {
+    let mut report = Report::default();
+    report.add(local_tool("tar", Some("--version")));
+    report.add(local_tool("ssh", Some("-V")));
+    report.add(local_tool("scp", None));
+    report.add(doctor::vagrantfile_finding(local_dir));
+    report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
+
+    print!("{}", report.render(&cfg.host));
+    if report.ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Runs one host probe, turning a spawn failure into a finding.
+///
+/// Propagating the error instead would discard the whole report
+/// -- including findings already gathered -- for the most likely
+/// local misconfiguration there is, `ssh` missing from `PATH`.
+/// A diagnostic that refuses to diagnose is worse than a wrong
+/// answer.
+fn spawn_probe(p: &HostProbe) -> Outcome {
+    // No bare-name fallback. Spawning the unresolved name goes
+    // straight back through the OS search that `tool` exists to
+    // avoid -- and doctor is the command run first in a fresh
+    // clone, so it is the worst place to reintroduce it.
+    let Some(program) = bombyx::tool::resolve(&p.command.program) else {
+        return Outcome::Fail(doctor::not_on_path(&p.command.program));
+    };
+    match std::process::Command::new(&program)
+        .args(&p.command.args)
+        .output()
+    {
+        Ok(o) => doctor::classify(&ProbeResult::from_output(&o), p.verdict),
+        Err(e) => Outcome::Fail(doctor::cannot_run(
+            &p.command.program,
+            &e.to_string(),
+        )),
+    }
+}
+
+/// Looks a tool up on this workstation and, where there is a
+/// version to ask for, asks.
+///
+/// Spawning only. What the results *mean* -- absent, present,
+/// present but unusable, present but uncommunicative -- is
+/// `doctor::local_tool_finding`'s job, for the same reason
+/// `doctor_run` is thin.
+///
+/// `version_arg` is per tool: `tar` answers `--version`, OpenSSH
+/// `ssh` answers `-V`, and `scp` answers neither -- asking it
+/// prints a usage message that would land in the report as noise.
+fn local_tool(name: &str, version_arg: Option<&str>) -> Finding {
+    let resolved = bombyx::tool::resolve(name);
+    let version = match (resolved.as_deref(), version_arg) {
+        (Some(path), Some(arg)) => {
+            match std::process::Command::new(path).arg(arg).output() {
+                Ok(o) => VersionAnswer::Answered(ProbeResult::from_output(&o)),
+                Err(e) => VersionAnswer::WouldNotStart(e.to_string()),
+            }
+        }
+        _ => VersionAnswer::NotAsked,
+    };
+    doctor::local_tool_finding(name, resolved.as_deref(), &version)
 }
 
 /// Maps a child's exit status onto this process's exit code,

@@ -159,6 +159,22 @@ impl Config {
         Ok(cfg)
     }
 
+    /// The config every module's tests use.
+    ///
+    /// One copy, next to the type it builds. The same four lines
+    /// were written out in four test modules, so adding a required
+    /// field meant four identical edits and the two literals were
+    /// pinned in four places.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn for_tests() -> Self {
+        Self::parse(
+            "host = \"frosti\"\nproject = \"phren\"\n",
+            Path::new("bombyx.toml"),
+        )
+        .expect("the shared test config must be valid")
+    }
+
     /// Loads a configuration from a file.
     ///
     /// # Errors

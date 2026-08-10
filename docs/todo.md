@@ -29,31 +29,6 @@ plan, decisions, and outcome.
   references; leaving canon describing a gate that cannot run is worse than
   either.
 
-- **doctor-preflight** -- bombyx doctor: preflight the host before a push
-  Add a doctor subcommand that verifies bombyx's own preconditions and reports
-  each as a pass/fail line, without stopping at the first failure. Probes: ssh
-  <host> true (alias resolves, key auth works non-interactively); command -v
-  vagrant over NON-interactive ssh, which is the one nothing else can report --
-  vagrant cannot tell you it is invisible to a non-login shell, and today that
-  surfaces mid-push as a bare command not found after a directory and tarball
-  have already been shipped; command -v tar on the host; tar present locally;
-  remote_root exists or is creatable; and a purely local check that vagrant_dir
-  exists and holds a Vagrantfile, which catches a typo'd bombyx.toml instantly.
-  Scope OUT host provisioning: VT-x, /dev/kvm, RAM, disk, libvirtd and the
-  vagrant-libvirt plugin are the VM host's business, not a thin SSH wrapper's.
-  Scope OUT remediation text: printing apt install hints needs a per-distro
-  database that rots (Ubuntu 24.04 dropped vagrant from its archive, others did
-  not) -- report the fact precisely and let the operator decide. Design note:
-  this does not fit the existing executor. Every current action runs commands,
-  stops at the first failure and propagates the exit code, so execute() only
-  inspects status; doctor needs .output() per probe and must run all of them.
-  Suggested shape, matching the existing pure-construction split: remote.rs
-  builds the probe commands, a new doctor.rs owns a pure probe-results-to-report
-  function (the branchy part, so the tested part), main.rs runs and prints.
-  Roughly 150-200 lines with tests. Sequencing: implement AFTER first-real-run
-  -- driving the sequence by hand once more will likely surface probes not yet
-  thought of, and building the doctor first risks shipping an incomplete one.
-
 - **reset-needs-snapshot** -- reset depends on a snapshot nothing creates
   bombyx reset runs vagrant snapshot restore fresh-install, but no bombyx
   command ever creates that snapshot. On a freshly booted VM the command fails
@@ -82,6 +57,10 @@ plan, decisions, and outcome.
   nowhere.
 
 ## Done
+
+- [**doctor-preflight**](issues/doctor-preflight.md)
+  -- bombyx doctor: read-only preflight checks
+  (2026-08-10)
 
 - [**discard-leaves-dir**](issues/discard-leaves-dir.md)
   -- discard now removes the scratch directory too

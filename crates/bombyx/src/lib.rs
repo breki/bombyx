@@ -9,6 +9,8 @@
 //! See `docs/` for the isolation strategy this implements.
 
 pub mod config;
+pub mod doctor;
 pub mod name;
 pub mod plan;
 pub mod remote;
+pub mod tool;

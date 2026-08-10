@@ -2,6 +2,37 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-10-doctor-module-size
+
+**Category:** Module size / cohesion
+
+`crates/bombyx/src/doctor.rs` is ~840 lines of production code
+plus ~490 of tests, and holds five concerns that barely touch
+each other: the data model (`Scope`, `Outcome`, `ProbeResult`,
+`VersionAnswer`, `Finding`), the probe list and cascade, the
+read-only guard (`MUTATING_COMMANDS` and the small shell
+tokenizer), untrusted-text handling (`sanitize`, `clip`), the
+local-tool findings, and the renderer. `remote/probe.rs` was
+split out on exactly this reasoning during the same review; the
+argument applies one level up.
+
+The suggested shape is a directory module: `doctor.rs` keeps the
+model, with `doctor/probes.rs`, `doctor/readonly.rs`,
+`doctor/text.rs`, `doctor/local.rs` and `doctor/report.rs`, each
+carrying its own `mod tests` and each well under 300 lines.
+Public names re-exported from `doctor` so no caller changes.
+
+**Deferred deliberately, not rejected.** It is a pure
+reorganisation of ~1300 lines with no behavioural effect, and it
+arrived in the same round as six verified correctness and
+security fixes (the `PATH` resolution hole, the unsearchable-
+directory false pass, the read-only guard, the report's
+character allowlist, the detail-budget collapse, the dead dry-run
+arm). Folding a whole-file move into that commit would bury those
+fixes in a diff nobody can review, and a mechanical slip during
+the move would put verified behaviour at risk. It should be its
+own commit, with no other change in it.
+
 ## aq-2026-08-09-collect-changes-generality
 
 **Category:** API design / leftover generality

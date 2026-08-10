@@ -66,6 +66,15 @@ and this project adheres to
   at teardown, so the write path (`mkdir`, `tar -xzf`) and the removal path
   agree on which roots are usable. `bombyx.toml` travels inside a repo, and
   bombyx deletes the directory it derives from this value.
+- `bombyx doctor` checks the preconditions before they cost anything. `up`
+  creates a remote directory and ships a tarball before running `vagrant`, so a
+  missing piece was reported half-way through. It runs every check rather than
+  stopping at the first failure, changes nothing on the host, and exits non-zero
+  if any fails.
+- `doctor` asks the host's **non-interactive** shell where `vagrant` is. That is
+  the shell bombyx gets. A `vagrant` installed outside that shell's `PATH` works
+  when you log in and type it, and is invisible to bombyx -- and vagrant cannot
+  report this itself, because it is not running.
 
 ### Changed
 
@@ -75,3 +84,9 @@ and this project adheres to
 - Teardown is re-runnable. `destroy` and `discard` skip the VM destroy when the
   directory holds no Vagrantfile instead of failing, so an interrupted first
   push can no longer strand a directory that no bombyx command could remove.
+- Every command resolves the programs it needs (`ssh`, `scp`, `tar`) against
+  `PATH` before running any of them, and never against the working directory. On
+  Windows the OS search includes the current directory, so a repo shipping a
+  `tar.exe` was workstation code execution -- in `doctor`, the command the docs
+  say to run first in a fresh clone. Resolving up front also means a missing
+  tool fails before `up` has created the remote directory.

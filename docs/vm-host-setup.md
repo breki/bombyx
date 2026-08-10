@@ -33,16 +33,17 @@ you fix them in different places.
 ### What bombyx itself needs
 
 This list is short and it rarely changes. It is also exactly
-what `bombyx doctor` will check, once that exists.
+what `bombyx doctor` checks, so you rarely need to work through
+it by hand.
 
 | Where | Requirement |
 |-------|-------------|
 | Host | `sshd` running, key auth working *non-interactively* |
 | Host | A POSIX login shell (`bash` or `sh`, not `csh` or `fish`) |
-| Host | `tar` available on `PATH` |
+| Host | `tar` and `scp` available on `PATH` |
 | Host | `vagrant` available on the **non-interactive** `PATH` |
-| Host | `remote_root` (default `~/vms`) writable |
-| Local | `ssh`, `scp` and `tar` |
+| Host | The project directory writable, or its nearest parent |
+| Local | `ssh`, `scp` and `tar` on `PATH` |
 
 ### What the host needs in order to run VMs at all
 
@@ -206,8 +207,26 @@ virsh -c qemu:///system pool-autostart default
 
 ## Checking that it worked
 
-Run these from your workstation rather than on the host
-itself. That is the point of them: they test the same path
+The quickest check is `bombyx doctor`, run from a project
+directory. It probes every precondition in this page's first
+table plus the Vagrant provider plugin, changes nothing on the
+host, and names each failure without offering a remedy — the
+remedies are here:
+
+```console
+$ bombyx doctor
+  local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
+  frosti  ssh               ok
+  frosti  login shell       ok    posix
+  frosti  vagrant           ok    /usr/bin/vagrant
+  frosti  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
+all checks passed
+```
+
+The manual equivalents are below, and remain useful when you
+want to see the raw output or are setting up before bombyx is
+installed. Run them from your workstation rather than on the
+host itself. That is the point of them: they test the same path
 that bombyx uses, instead of the more forgiving one you get
 when you log in and type commands by hand.
 
