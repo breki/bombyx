@@ -114,6 +114,13 @@ for tools that are not present:
   real push.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
+- **Test an SSH identity with `-F /dev/null`.**
+  `IdentitiesOnly=yes` does not exclude identities named
+  in `ssh_config`, so `ssh -i key -o IdentitiesOnly=yes`
+  on a host with a `Host github.com / IdentityFile ...`
+  entry authenticates with *that* key and reports
+  success for a key the far side has never seen. Ignoring
+  the config is what makes the answer honest.
 
 ## Collaboration
 
@@ -228,6 +235,15 @@ re-deriving a style.
   /etc`. Validating once also keeps the error next to
   the field name and avoids threading a `Result`
   through callers that have nothing to decide.
+- **After fixing a bug, grep the file for the same
+  shape.** A bug class rarely appears once. A guard
+  calling `swapon` without `sudo` -- invisible on the
+  non-interactive `PATH` -- was fixed, explained in a
+  comment, and then repeated twenty lines later with
+  `ldconfig`, costing a whole verification cycle. The
+  fix is mechanical: before re-running anything, search
+  for the other instances of the pattern you just
+  corrected.
 - **After removing a capability, re-grep for it.** The
   compiler finds the code that referenced it; nothing finds
   the *prose* that described it -- clap `///` help, module

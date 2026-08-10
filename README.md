@@ -278,10 +278,19 @@ Gates: clippy pedantic with zero warnings, 90% coverage
 
 ## Status
 
-Early. The command surface works and is covered by tests,
-but it has not yet been driven against a real VM host --
-`--dry-run` proves the argv, not that the remote side
-accepts it.
+Early, but no longer untested against reality. Every
+command has been driven against a real libvirt host
+(Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt 0.12.2):
+`doctor`, `up`, `provision`, `shell`, `status`, `down`,
+`reset`, `destroy`, `scratch` and `discard`, including
+repeat runs for idempotency and a rejected traversal.
+
+Two things are still worth knowing. `reset` restores a
+`fresh-install` snapshot that no bombyx command creates,
+so it fails on a VM you have not snapshotted by hand.
+And `scratch` boots from the same base box as everything
+else, so a throwaway VM costs a full boot until there is
+a pre-baked image.
 
 ## Origin
 
