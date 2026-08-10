@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use bombyx::config::Config;
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
@@ -47,6 +47,15 @@ enum Cmd {
     Status,
     /// Restore the project VM to its `fresh-install` snapshot
     Reset,
+    /// Destroy the project VM and remove its directory
+    ///
+    /// Takes the project name as confirmation, since this
+    /// discards the warm caches the persistent lifecycle
+    /// exists to keep.
+    Destroy {
+        /// Must match `project` in `bombyx.toml`
+        project: Option<String>,
+    },
     /// Boot a throwaway VM for untrusted work
     Scratch {
         /// Name for the scratch VM, e.g. `pr-1234`
@@ -73,7 +82,7 @@ fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     let cfg = Config::load(&cli.config)
         .with_context(|| format!("loading {}", cli.config.display()))?;
-    let action = action_of(&cli.command)?;
+    let action = action_of(&cli.command, &cfg)?;
 
     // `tar` runs from the archive directory, so the source
     // directory has to be absolute.
@@ -114,13 +123,17 @@ fn run_id() -> String {
 
 /// Converts the parsed subcommand into a library action,
 /// validating any user-supplied VM name.
-fn action_of(cmd: &Cmd) -> Result<Action> {
+fn action_of(cmd: &Cmd, cfg: &Config) -> Result<Action> {
     Ok(match cmd {
         Cmd::Up => Action::Up,
         Cmd::Down => Action::Down,
         Cmd::Shell => Action::Shell,
         Cmd::Status => Action::Status,
         Cmd::Reset => Action::Reset,
+        Cmd::Destroy { project } => {
+            confirm_destroy(project.as_deref(), cfg)?;
+            Action::Destroy
+        }
         Cmd::Scratch { name } => Action::Scratch(vm_name(name)?),
         Cmd::Discard { name } => Action::Discard(vm_name(name)?),
     })
@@ -128,6 +141,41 @@ fn action_of(cmd: &Cmd) -> Result<Action> {
 
 fn vm_name(raw: &str) -> Result<ScratchName> {
     ScratchName::parse(raw).with_context(|| format!("invalid VM name {raw:?}"))
+}
+
+/// Requires `given` to name the configured project, and always
+/// reports the target being destroyed.
+///
+/// `down` halts a VM and `reset` rolls it back; `destroy`
+/// throws away the warm caches and installed tooling that make
+/// the persistent lifecycle worth having, so it asks for a
+/// deliberate act rather than a flag.
+///
+/// Printing the resolved target is the more important half.
+/// The name alone confirms nothing an attacker could not have
+/// chosen: `project` comes from the same `bombyx.toml` that
+/// decides which directory is deleted, so a repo can name
+/// itself after a VM you care about. What the operator can
+/// check against reality is `<host>:<dir>`, so that is shown on
+/// both the refusal and the confirmed path.
+fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
+    let target = format!("{}:{}", cfg.host, cfg.remote_project_dir());
+    match given {
+        Some(name) if name == cfg.project => {
+            eprintln!("bombyx: destroying {target}");
+            Ok(())
+        }
+        Some(name) => bail!(
+            "{name:?} does not match the project in this directory \
+             ({:?}); refusing to destroy {target}",
+            cfg.project
+        ),
+        None => bail!(
+            "destroy needs the project name to confirm: run \
+             `bombyx destroy {}` -- target is {target}",
+            cfg.project
+        ),
+    }
 }
 
 /// Runs (or, for a dry run, prints) each command in order,

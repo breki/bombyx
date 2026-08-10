@@ -117,6 +117,74 @@ fn scratch_pushes_into_a_project_scoped_dir() {
 }
 
 #[test]
+fn destroy_needs_the_project_name_to_confirm() {
+    // A bare `destroy` must refuse, name what to type, and name
+    // the target -- the target is the part the operator can
+    // check, since `project` comes from the same file that
+    // picks the directory.
+    let dir = project_dir();
+    bombyx_in(&dir)
+        .args(["--dry-run", "destroy"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("bombyx destroy phren"));
+}
+
+#[test]
+fn destroy_rejects_a_mismatched_project_name() {
+    let dir = project_dir();
+    bombyx_in(&dir)
+        .args(["--dry-run", "destroy", "not-phren"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not match"));
+}
+
+#[test]
+fn destroy_wires_the_subcommand_through_to_a_teardown() {
+    // The unit tests pin the exact command strings; this checks
+    // the CLI reaches them and prints the resolved target.
+    let dir = project_dir();
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "destroy", "phren"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert_eq!(stdout.lines().count(), 2, "{stdout:?}");
+    assert!(stdout.contains("rm -rf ~/'vms/phren'"));
+    // The target the operator can check against reality.
+    assert!(
+        stderr.contains("frosti:~/vms/phren"),
+        "must name the target: {stderr:?}"
+    );
+}
+
+#[test]
+fn a_dangerous_remote_root_is_refused_at_load() {
+    // Each of these once produced a teardown outside the
+    // configured root, or at a depth the floor claimed to
+    // forbid. They must fail before any command is built, on
+    // every subcommand -- not just the destructive ones.
+    for root in ["~/..", "/.", "~/.", "/", "~", "vms"] {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("bombyx.toml"),
+            format!(
+                "host = \"frosti\"\nproject = \"etc\"\n\
+                 remote_root = {root:?}\n"
+            ),
+        )
+        .unwrap();
+        bombyx_in(&dir)
+            .args(["--dry-run", "up"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("remote_root"));
+    }
+}
+
+#[test]
 fn scratch_rejects_a_traversing_name() {
     // Quoting stops injection but not traversal: without
     // validation this extracts the local tree over /etc.

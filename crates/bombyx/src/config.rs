@@ -82,6 +82,30 @@ fn is_remote_path_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '~')
 }
 
+/// Fewest real segments `remote_root` must contain.
+///
+/// One, so `<root>/<project>` is always at least two deep.
+/// bombyx deletes that directory on teardown, and two segments
+/// is the floor below which a configuration mistake stops being
+/// recoverable: it keeps a root of `/` or `~` from making the
+/// target a top-level or home-adjacent directory.
+const MIN_ROOT_SEGMENTS: usize = 1;
+
+/// The meaningful segments of a remote path.
+///
+/// Drops the leading `~` root marker and any empty segment left
+/// by a doubled or trailing slash, so counting the result
+/// measures real depth rather than characters. A `.` segment is
+/// deliberately *kept*: the caller's job is to reject it, and
+/// filtering it here would let `~/.` pass as depth one.
+pub(crate) fn path_segments(path: &str) -> Vec<&str> {
+    path.strip_prefix('~')
+        .unwrap_or(path)
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// A bombyx project configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -212,6 +236,57 @@ impl Config {
             is_remote_path_char,
             "letters, digits, `.`, `_`, `-`, `/` or `~`",
         )?;
+        // Everything below exists because bombyx *deletes* the
+        // directory it derives from `remote_root`. All of it is
+        // enforced once, here, so every command agrees on which
+        // roots are usable -- gating only the removal would
+        // leave `up` free to extract a tarball into `/etc` while
+        // teardown refused to touch it. `bombyx.toml` travels
+        // inside a repo, so this is attacker-controlled input.
+        //
+        // The root must be anchored. An unrooted value resolves
+        // against the SSH login directory, which makes the depth
+        // below meaningless.
+        if !(self.remote_root.starts_with('~')
+            || self.remote_root.starts_with('/'))
+        {
+            return Err(ConfigError::Invalid {
+                field: "remote_root",
+                reason: "must start with `~` or `/`; a relative \
+                         path resolves against the login \
+                         directory"
+                    .to_owned(),
+            });
+        }
+
+        // `..` escapes the root outright. `.` is subtler and was
+        // the hole in the first version of this check: it adds a
+        // segment without adding depth, so `remote_root = "/."`
+        // with `project = "etc"` counted as two segments deep
+        // while resolving to `/etc`.
+        let segments = path_segments(&self.remote_root);
+        if let Some(bad) = segments.iter().find(|s| **s == "." || **s == "..") {
+            return Err(ConfigError::Invalid {
+                field: "remote_root",
+                reason: format!(
+                    "must not contain a `{bad}` segment; it changes \
+                     where the path resolves without changing how \
+                     deep it looks"
+                ),
+            });
+        }
+
+        if segments.len() < MIN_ROOT_SEGMENTS {
+            return Err(ConfigError::Invalid {
+                field: "remote_root",
+                reason: format!(
+                    "must be at least {MIN_ROOT_SEGMENTS} directory \
+                     deep, so the project directory bombyx creates \
+                     and deletes is not a top-level one"
+                ),
+            });
+        }
+
         // A `~` is only expanded by the remote shell in
         // leading position; anywhere else it is a literal
         // character and almost certainly a mistake.
@@ -427,6 +502,84 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// Asserts `remote_root` is refused as an invalid field.
+    fn assert_root_rejected(root: &str) {
+        let src =
+            format!("host = \"f\"\nproject = \"p\"\nremote_root = {root:?}\n");
+        let err = parse(&src).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ConfigError::Invalid {
+                    field: "remote_root",
+                    ..
+                }
+            ),
+            "remote_root {root:?} must be rejected, got {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_traversal_segment_in_remote_root() {
+        // `rm -rf` on a teardown path would otherwise escape the
+        // configured root: `remote_root = "~/.."` with
+        // `project = "igor"` targets the whole home directory.
+        for root in ["~/..", "/srv/../..", "~/vms/../other"] {
+            assert_root_rejected(root);
+        }
+    }
+
+    #[test]
+    fn rejects_a_single_dot_segment_in_remote_root() {
+        // A `.` adds a segment without adding depth. This was
+        // the hole in the first version of the guard: `"/."`
+        // with `project = "etc"` looked two segments deep and
+        // resolved to `/etc`.
+        for root in ["/.", "~/.", "/././etc", "~/./x", "~/vms/."] {
+            assert_root_rejected(root);
+        }
+    }
+
+    #[test]
+    fn rejects_an_unrooted_remote_root() {
+        // A relative root resolves against the SSH login
+        // directory, which makes the depth check meaningless.
+        for root in ["..", ".", "vms", "vms/deep"] {
+            assert_root_rejected(root);
+        }
+    }
+
+    #[test]
+    fn rejects_a_remote_root_with_no_real_depth() {
+        // `/` or `~` would put the project directory -- which
+        // bombyx creates, writes into, and deletes -- at the top
+        // level or directly in the home directory.
+        for root in ["/", "~", "~/", "//", "///"] {
+            assert_root_rejected(root);
+        }
+    }
+
+    #[test]
+    fn accepts_rooted_remote_roots_of_real_depth() {
+        // The dotted name is the important one: the check is per
+        // segment, not a substring search.
+        for root in ["~/vms", "~/vms.d", "/srv/vms", "/srv/vms/deep", "~/v/"] {
+            let src = format!(
+                "host = \"f\"\nproject = \"p\"\nremote_root = {root:?}\n"
+            );
+            assert!(parse(&src).is_ok(), "remote_root {root:?} must parse");
+        }
+    }
+
+    #[test]
+    fn path_segments_measures_depth_not_characters() {
+        assert_eq!(path_segments("~/vms/phren"), vec!["vms", "phren"]);
+        assert_eq!(path_segments("//x//y"), vec!["x", "y"]);
+        assert_eq!(path_segments("~"), Vec::<&str>::new());
+        // `.` is kept, so a caller can reject it.
+        assert_eq!(path_segments("~/./x"), vec![".", "x"]);
     }
 
     #[test]

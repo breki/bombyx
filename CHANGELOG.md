@@ -57,3 +57,21 @@ and this project adheres to
   failure stays distinguishable from what `vagrant` returned.
 - Scratch VMs are scoped per project (`<remote_root>/scratch/<project>/<name>`),
   so the same scratch name in two projects no longer resolves to one directory.
+- `bombyx destroy <project>` destroys the persistent project VM and removes its
+  directory on the host. The ephemeral lifecycle was symmetric
+  (`scratch`/`discard`) but the persistent one was not: `up` created and nothing
+  removed. It takes the project name as confirmation and refuses a mismatch.
+- `remote_root` must now be an anchored path (`~` or `/`) of at least one
+  directory, with no `.` or `..` segment. Rejected when the config loads, not
+  at teardown, so the write path (`mkdir`, `tar -xzf`) and the removal path
+  agree on which roots are usable. `bombyx.toml` travels inside a repo, and
+  bombyx deletes the directory it derives from this value.
+
+### Changed
+
+- `discard` now removes the scratch directory after destroying the VM, so the
+  README's claim that nothing survives a scratch VM is true. Previously the
+  directory and its pushed Vagrantfile were left behind, one per discarded VM.
+- Teardown is re-runnable. `destroy` and `discard` skip the VM destroy when the
+  directory holds no Vagrantfile instead of failing, so an interrupted first
+  push can no longer strand a directory that no bombyx command could remove.

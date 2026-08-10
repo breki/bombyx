@@ -27,6 +27,8 @@ pub enum Action {
     Status,
     /// Restore the project VM's `fresh-install` snapshot.
     Reset,
+    /// Destroy the project VM and remove its directory.
+    Destroy,
     /// Boot a throwaway VM.
     Scratch(ScratchName),
     /// Destroy a throwaway VM.
@@ -62,15 +64,33 @@ pub fn plan(
             cfg,
             &["snapshot", "restore", "fresh-install"],
         )],
+        Action::Destroy => tear_down(cfg, &cfg.remote_project_dir()),
         Action::Scratch(name) => {
             boot(cfg, &cfg.remote_scratch_dir(name), local_dir, archive)
         }
-        Action::Discard(name) => vec![remote::vagrant_in(
-            cfg,
-            &cfg.remote_scratch_dir(name),
-            &["destroy", "-f"],
-        )],
+        Action::Discard(name) => tear_down(cfg, &cfg.remote_scratch_dir(name)),
     }
+}
+
+/// Destroys the VM defined in `dir`, then removes `dir`.
+///
+/// Shared by `destroy` and `discard`, which differ only in
+/// which directory they target. The order is load-bearing:
+/// `vagrant` runs *inside* the directory, so removing it first
+/// would leave nothing to run in.
+///
+/// The destroy step tolerates a directory with no Vagrantfile,
+/// which is reachable without any unusual input -- an
+/// interrupted first push leaves the directory created but
+/// empty. A bare `vagrant destroy -f` fails there, and since
+/// `execute` stops at the first failure the removal would never
+/// run, leaving a directory no bombyx command could clear.
+/// Skipping the destroy instead makes teardown re-runnable.
+fn tear_down(cfg: &Config, dir: &str) -> Vec<RemoteCommand> {
+    vec![
+        remote::destroy_vm_if_present(cfg, dir),
+        remote::remove_dir(cfg, dir),
+    ]
 }
 
 /// Ensures `dir` exists on the host, pushes the project's
@@ -201,13 +221,54 @@ mod tests {
     }
 
     #[test]
-    fn discard_destroys_the_scratch_dir() {
+    fn discard_destroys_the_vm_then_removes_the_dir() {
+        // Order is the assertion. `vagrant` runs *inside* the
+        // directory, so removing it first would leave nothing
+        // to run in.
         let cmds = run(&Action::Discard(scratch("pr-1234")));
-        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds.len(), 2);
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/scratch/phren/pr-1234' && vagrant \
-             'destroy' '-f'"
+            "cd ~/'vms/scratch/phren/pr-1234' && if [ -f Vagrantfile ]; \
+             then vagrant destroy -f; fi"
+        );
+        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/phren/pr-1234'");
+    }
+
+    #[test]
+    fn destroy_destroys_the_vm_then_removes_the_dir() {
+        let cmds = run(&Action::Destroy);
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(
+            cmds[0].args[1],
+            "cd ~/'vms/phren' && if [ -f Vagrantfile ]; then \
+             vagrant destroy -f; fi"
+        );
+        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/phren'");
+    }
+
+    #[test]
+    fn destroy_and_discard_take_the_same_shape() {
+        // Compare step *kinds*, not program names: both plans
+        // are two ssh calls, so comparing programs would pass
+        // through exactly the drift this guards against.
+        let kinds = |cmds: &[RemoteCommand]| -> Vec<&'static str> {
+            cmds.iter()
+                .map(|c| {
+                    if c.args[1].contains("vagrant destroy") {
+                        "destroy"
+                    } else if c.args[1].starts_with("rm -rf") {
+                        "remove"
+                    } else {
+                        "other"
+                    }
+                })
+                .collect()
+        };
+        assert_eq!(kinds(&run(&Action::Destroy)), vec!["destroy", "remove"]);
+        assert_eq!(
+            kinds(&run(&Action::Discard(scratch("x")))),
+            vec!["destroy", "remove"]
         );
     }
 
@@ -220,6 +281,7 @@ mod tests {
             Action::Status,
             Action::Shell,
             Action::Reset,
+            Action::Destroy,
             Action::Discard(scratch("x")),
         ] {
             assert!(!a.pushes(), "{a:?} must not need an archive");

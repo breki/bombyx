@@ -54,23 +54,6 @@ plan, decisions, and outcome.
   -- driving the sequence by hand once more will likely surface probes not yet
   thought of, and building the doctor first risks shipping an incomplete one.
 
-- **discard-leaves-dir** -- discard destroys the VM but leaves its directory
-  bombyx discard runs vagrant destroy -f, which removes the domain and the
-  .vagrant machine folder, but leaves the scratch directory itself on the host.
-  After discard pr-1234, ~/vms/scratch/vmtest/pr-1234/ still holds the pushed
-  Vagrantfile and a .vagrant skeleton. Verified live on frosti during
-  first-real-run. This matters because README.md says of scratch VMs: 'Nothing
-  survives, which is the point: malware that persists to survive credential
-  rotation has nothing to persist to.' That claim is now inaccurate. The
-  leftover is not itself a security hole -- the VM disk is gone and the
-  directory only holds a Vagrantfile bombyx pushed there -- but directories
-  accumulate one per discarded VM, and the README overstates what discard
-  guarantees. Decide between two fixes: have discard remove the directory after
-  a successful destroy (rm -rf on a path built from a validated ScratchName, so
-  the traversal guard is load-bearing), or soften the README claim to match what
-  the code does. Prefer the first; the point of scratch is that it leaves
-  nothing.
-
 - **reset-needs-snapshot** -- reset depends on a snapshot nothing creates
   bombyx reset runs vagrant snapshot restore fresh-install, but no bombyx
   command ever creates that snapshot. On a freshly booted VM the command fails
@@ -85,30 +68,15 @@ plan, decisions, and outcome.
   first successful up. The first is more useful: the snapshot should be taken at
   a known-good point, which is exactly after up completes.
 
-- **destroy-project-vm** -- no way to destroy a persistent project VM
-  bombyx can create a persistent project VM with up but cannot remove one. The
-  ephemeral lifecycle is symmetric (scratch creates, discard destroys); the
-  persistent one is not: up creates, down only halts, and reset restores a
-  snapshot. Removing a project VM today means abandoning bombyx and running
-  vagrant destroy -f over ssh by hand, which is what happened when tearing down
-  the first-real-run test VM. That contradicts the README's premise that you
-  stay on your workstation. Implementation is small and fits the existing shape:
-  an Action::Destroy mapping to vagrant_in(cfg, and cfg.remote_project_dir(),
-  and [destroy, -f]) -- the same construction discard already uses for scratch.
-  Design decisions, both deliberate: (1) It must be harder to type than discard,
-  because the two differ in consequence -- a scratch VM is disposable by
-  definition, a project VM holds warm caches and installed tooling, which is the
-  whole reason the persistent lifecycle exists. Proposal: require the project
-  name as a confirmation argument, so bombyx destroy phren proceeds only when
-  phren matches project in bombyx.toml, and a bare bombyx destroy refuses and
-  names what to type. That reuses the existing validation, adds no interactive
-  prompt (bombyx has none anywhere today, and --dry-run is its review
-  mechanism), and mirrors the type-the-name guard GitHub uses. (2) Whether
-  destroy also removes the host directory is the same question as
-  discard-leaves-dir and must be answered identically for both. Do the two items
-  together.
-
 ## Done
+
+- [**discard-leaves-dir**](issues/discard-leaves-dir.md)
+  -- discard now removes the scratch directory too
+  (2026-08-10)
+
+- [**destroy-project-vm**](issues/destroy-project-vm.md)
+  -- destroy the project VM and remove its directory
+  (2026-08-10)
 
 - [**todo-tooling-format-mismatch**](issues/todo-tooling-format-mismatch.md)
   -- todo list and done now read backticked entries too

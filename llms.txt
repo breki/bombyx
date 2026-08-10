@@ -33,9 +33,15 @@ bombyx down               # halt the VM
 bombyx shell              # shell inside the VM (ssh -t)
 bombyx status             # vagrant status
 bombyx reset              # restore fresh-install snapshot
+bombyx destroy <project>  # destroy the VM, remove its dir
 bombyx scratch <name>     # boot a throwaway VM
-bombyx discard <name>     # destroy a throwaway VM
+bombyx discard <name>     # destroy a throwaway VM, remove its dir
 ```
+
+`destroy` requires the project name as confirmation.
+`destroy` and `discard` both `rm -rf` the host directory after
+destroying the VM; `remote_root` therefore rejects `..`, and
+`remote::remove_dir` refuses a target under two segments deep.
 
 Global flags: `--config <path>` (default `bombyx.toml`),
 `--dry-run` (print the argv instead of running it).

@@ -272,6 +272,48 @@ pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
     RemoteCommand::new("ssh", &[&cfg.host, &script])
 }
 
+/// Builds the `ssh` command that destroys the VM defined in
+/// `dir`, doing nothing when there is no Vagrantfile there.
+///
+/// The guard makes teardown idempotent. A bare
+/// `vagrant destroy -f` exits non-zero in a directory with no
+/// Vagrantfile, which an interrupted first push leaves behind,
+/// and that failure would stop the removal step that follows.
+#[must_use]
+pub fn destroy_vm_if_present(cfg: &Config, dir: &str) -> RemoteCommand {
+    let script = format!(
+        "cd {dir} && if [ -f Vagrantfile ]; then vagrant destroy -f; fi",
+        dir = quote_remote_path(dir),
+    );
+    RemoteCommand::new("ssh", &[&cfg.host, &script])
+}
+
+/// Builds the `ssh` command that recursively removes `dir` on
+/// the VM host.
+///
+/// This is the widest-reaching command bombyx emits: its blast
+/// radius is bounded by a path rather than by Vagrant's notion
+/// of a machine. Nothing is checked here, deliberately --
+/// `Config::validate` rejects a `remote_root` that is
+/// unrooted, contains a `.` or `..` segment, or is too shallow,
+/// so every path derived from a loaded `Config` is already at
+/// least two real segments deep. Validating once at the layer
+/// that owns `remote_root` is what keeps the write path
+/// (`mkdir`, `tar -xzf`) and this removal path agreeing about
+/// which roots are usable.
+///
+/// The `debug_assert` catches a caller that builds a path some
+/// other way; it is not the safety mechanism.
+#[must_use]
+pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
+    debug_assert!(
+        crate::config::path_segments(dir).len() >= 2,
+        "remove_dir given a path shallower than Config permits: {dir:?}"
+    );
+    let script = format!("rm -rf {}", quote_remote_path(dir));
+    RemoteCommand::new("ssh", &[&cfg.host, &script])
+}
+
 /// Builds the `ssh` command that opens an interactive shell
 /// inside the project's VM.
 ///
@@ -540,6 +582,41 @@ mod tests {
     fn ensure_dir_quotes_an_absolute_dir() {
         let c = ensure_dir(&cfg(), "/srv/vms/p");
         assert_eq!(c.args[1], "mkdir -p '/srv/vms/p'");
+    }
+
+    #[test]
+    fn remove_dir_quotes_the_path_and_keeps_the_tilde() {
+        let c = remove_dir(&cfg(), "~/vms/phren");
+        assert_eq!(c.program, "ssh");
+        assert_eq!(c.args[0], "frosti");
+        assert_eq!(c.args[1], "rm -rf ~/'vms/phren'");
+    }
+
+    #[test]
+    fn remove_dir_removes_an_absolute_path() {
+        let c = remove_dir(&cfg(), "/srv/vms/phren");
+        assert_eq!(c.args[1], "rm -rf '/srv/vms/phren'");
+    }
+
+    #[test]
+    fn remove_dir_quotes_injection_in_the_path() {
+        // Config rejects these characters, so this is the
+        // second line of defence rather than the first.
+        let c = remove_dir(&cfg(), "~/vms/a b; rm /");
+        assert_eq!(c.args[1], "rm -rf ~/'vms/a b; rm /'");
+    }
+
+    #[test]
+    fn destroy_tolerates_a_directory_with_no_vagrantfile() {
+        // An interrupted first push leaves the directory made
+        // but empty. A bare `vagrant destroy -f` fails there,
+        // and would stop the removal that follows.
+        let c = destroy_vm_if_present(&cfg(), "~/vms/phren");
+        assert_eq!(
+            c.args[1],
+            "cd ~/'vms/phren' && if [ -f Vagrantfile ]; then \
+             vagrant destroy -f; fi"
+        );
     }
 
     #[test]

@@ -76,10 +76,45 @@ bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
 bombyx down               # halt the VM
+bombyx destroy phren      # destroy the VM and remove its dir
 
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
 ```
+
+`destroy` takes the project name as confirmation and refuses if
+it does not match `project` in `bombyx.toml`. `down` halts a VM
+and `reset` rolls it back; `destroy` throws away the warm caches
+and installed tooling that make a persistent VM worth keeping,
+so it asks for a deliberate act rather than a flag.
+
+**Read the target it prints, not the name you typed.** Both the
+refusal and the confirmation print the resolved
+`<host>:<directory>`:
+
+```console
+$ bombyx destroy
+bombyx: destroy needs the project name to confirm: run
+`bombyx destroy phren` -- target is frosti:~/vms/phren
+```
+
+The name on its own proves less than it appears to, because
+`project` comes from the same `bombyx.toml` that decides which
+directory is deleted -- a repo you cloned can name itself after
+a VM you care about. The printed target is the part you can
+check against reality.
+
+Both `destroy` and `discard` remove the VM's directory on the
+host after destroying the VM. Nothing in that directory is
+unique -- bombyx pushed it there, or `vagrant` generated it,
+and your repo holds the original. Teardown is re-runnable: a
+directory with no Vagrantfile is removed rather than treated as
+an error, so an interrupted push cannot leave one stranded.
+
+`remote_root` must be an anchored path at least one directory
+deep, with no `.` or `..` segment. bombyx deletes the directory
+it derives from it, so a root of `/`, `~` or `~/.` is refused
+when the config loads rather than at teardown.
 
 A scratch VM lives in `<remote_root>/scratch/<project>/<name>`,
 so the same name in two projects does not collide.

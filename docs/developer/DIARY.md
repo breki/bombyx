@@ -4,6 +4,100 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-10
 
+**Teardown, and a latent hole that the feature would have
+turned into a weapon**
+
+bombyx could create a persistent VM but not remove one. The
+ephemeral lifecycle was symmetric -- `scratch` makes a VM and
+`discard` destroys it -- while the persistent one was not:
+`up` created, `down` only halted, `reset` rolled back, and
+nothing removed. Tearing down the test VM from the first real
+run meant abandoning bombyx and running `vagrant destroy -f`
+over SSH by hand, which is exactly what the tool exists to
+avoid. So `bombyx destroy <project>` now exists, and both it
+and `discard` remove the VM's directory on the host once the
+VM is gone. That last part makes the README's claim that
+nothing survives a scratch VM true; before, the directory and
+its pushed Vagrantfile stayed behind, one per discarded VM.
+
+The interesting part was not the feature. It was what planning
+the feature turned up.
+
+Adding `rm -rf` to the command set meant looking hard at how
+the target path gets built, and that surfaced something
+already in the code: `remote_root` was never checked for a
+`..` segment. `remote_root = "~/.."` parsed cleanly and
+produced `mkdir -p ~/'../phren'`. On its own that is a
+nuisance -- a directory in the wrong place. Combined with
+`rm -rf` it becomes `rm -rf ~/'../igor'`, which is a home
+directory. And `bombyx.toml` travels inside a project repo, so
+its contents are attacker-controlled from the moment you check
+out someone else's branch.
+
+Worth naming the shape of that: the bug was already there and
+was genuinely harmless. The new feature would not have
+introduced it; it would have changed its severity from
+cosmetic to catastrophic. A latent defect's blast radius is a
+function of what else the program can do, so adding a
+destructive capability means re-auditing the inputs that feed
+it, not just the new code.
+
+So the `..` rejection landed first, as its own step, with a
+test that failed against the old code to prove the hole was
+real. `remove_dir` then got a second, independent guard: it
+refuses a target fewer than two path segments below `~` or
+`/`, so even a careless `remote_root` cannot turn a teardown
+into deleting a top-level directory. Two guards rather than
+one, because they fail differently -- the first stops escaping
+the root, the second stops the root itself being too shallow
+to be safe.
+
+Then the reviewers took the guard apart, and they were right
+to. Three findings are worth keeping.
+
+**The floor I had just added was bypassable in five
+characters.** It counted textual path segments and I had
+rejected `..` but not `.`. So `remote_root = "/."` with
+`project = "etc"` looked two segments deep, passed, and emitted
+`rm -rf '/./etc'` -- which is `rm -rf /etc`. Chaining dots
+inflates the count arbitrarily. I had written a doc comment
+claiming the floor stopped exactly this.
+
+**And it was only half a guard.** The floor lived in
+`remove_dir`, so the same configuration was illegal to delete
+but legal to write: `remote_root = "/"` made `bombyx up` emit
+`mkdir -p '/etc'` and extract a tarball into it, while
+`destroy` refused to touch the same path. Overwriting `/etc` is
+no better than deleting it. Both reviewers said independently
+that the check belonged in `Config::validate`, and moving it
+there fixed the asymmetry and removed the `Result` cascade the
+guard had pushed through `remove_dir`, `tear_down`, `plan` and
+`main` -- so the final version is both safer and smaller.
+
+**The confirmation confirmed the wrong thing.** I had claimed
+that typing the project name catches running `destroy` from the
+wrong directory. It does not: `project` is read from the same
+`bombyx.toml` that decides which directory gets deleted, so a
+repo can name itself after a VM you care about, and typing the
+name it chose proves nothing. `destroy` now prints the resolved
+`<host>:<directory>` on both the refusal and the confirmation,
+because that is the value the operator can check against
+reality. The README claim was corrected rather than defended.
+
+One more, unprompted by any hostile input: an interrupted first
+push leaves a directory with no Vagrantfile, where
+`vagrant destroy -f` exits non-zero forever. Since teardown
+stops at the first failure, the removal never ran and no bombyx
+command could clear that directory. The destroy step now skips
+when there is no Vagrantfile, so teardown is re-runnable.
+
+Verified against frosti rather than inferred: a real `destroy`
+removed the domain and `~/vms/vmtest`, a real `discard` removed
+`~/vms/scratch/vmtest/pr-9`, both left the parent tree intact,
+and a deliberately stranded directory with no Vagrantfile was
+cleared with exit 0. The three bypasses were each re-run after
+the fix and now fail when the config loads.
+
 **Making the work queue tell the truth**
 
 Fixed the `cargo xtask todo` defect found during the first real
