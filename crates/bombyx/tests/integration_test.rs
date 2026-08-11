@@ -105,6 +105,44 @@ fn up_never_hands_scp_a_windows_drive_letter() {
 }
 
 #[test]
+fn a_local_config_overrides_the_committed_host() {
+    // `host` is per-developer: a team shares one `bombyx.toml`
+    // but each member has their own VM host. Without an
+    // override the committed file names one person's machine.
+    let dir = project_dir();
+    std::fs::write(dir.path().join("bombyx.local.toml"), "host = \"fusion\"\n")
+        .unwrap();
+
+    let lines = dry_run(&dir, &["--dry-run", "status"]);
+    assert!(lines[0].starts_with("ssh fusion "), "{}", lines[0]);
+    // The rest of the committed config still applies.
+    assert!(lines[0].contains("~/'vms/phren'"), "{}", lines[0]);
+}
+
+#[test]
+fn a_local_config_is_optional() {
+    // The overwhelmingly common case is not having one, so its
+    // absence must not be an error.
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "status"]);
+    assert!(lines[0].starts_with("ssh frosti "), "{}", lines[0]);
+}
+
+#[test]
+fn a_broken_local_config_is_reported() {
+    // Silently ignoring it would send commands to the host the
+    // override exists to replace.
+    let dir = project_dir();
+    std::fs::write(dir.path().join("bombyx.local.toml"), "host = ").unwrap();
+
+    bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("bombyx.local.toml"));
+}
+
+#[test]
 fn provision_pushes_then_runs_vagrant_provision() {
     // The gap this command closes: `up` ships an edited
     // provisioning script and `vagrant up` on a running VM

@@ -2,6 +2,31 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-11-config-module-size
+
+**Category:** Module size / cohesion
+
+`crates/bombyx/src/config.rs` passed 900 lines with the overlay
+work, and now holds three public types (`ConfigError`, `Config`,
+`Overlay`), the charset and path validators, the overlay
+discovery and reading helpers, and roughly half the file in
+tests.
+
+The suggestion was a `config/overlay.rs` submodule holding
+`Overlay`, `local_config_path`, `read_optional` and their tests,
+re-exported from `config`, matching the existing `doctor/` and
+`remote/` split.
+
+Deferred because the same commit was closing a live security
+hole in this file (`vagrant_dir` accepting an absolute path, so
+`up` archived it), and moving code around a fix makes both
+harder to review. The validation rules are the part worth
+protecting from churn.
+
+Revisit when the next change touches this module for a reason
+other than a fix -- the split is a good one, it just should not
+ride along with a security patch.
+
 ## aq-2026-08-10-push-expectation-duplication
 
 **Category:** Craftsmanship (test duplication)

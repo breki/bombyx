@@ -84,6 +84,12 @@ and this project adheres to
   leaving outbound internet working. Read-only by default; `apply`, `persist`
   and `revert` are explicit. Documented in `docs/vm-host-setup.md`, and marked
   unverified until it has been applied to a real host.
+- A `bombyx.local.toml` beside the config overrides any of its fields, so a team
+  can commit one `bombyx.toml` while each member points at their own VM host.
+  Every field in it is optional and the file itself is optional; `--config
+  x.toml` reads `x.local.toml`. Validation runs after the merge, so an override
+  is subject to the same checks as the committed file rather than a way around
+  them.
 
 ### Changed
 
@@ -106,4 +112,11 @@ and this project adheres to
   the private `Config::validate`, and an xtask doc comment linked `test`
   ambiguously (both a function and an attribute macro). Neither failed the
   build, because rustdoc reports link problems as warnings.
+- `vagrant_dir` must now be a plain relative path. It is joined onto the working
+  directory, and `Path::join` discards the left side for an absolute operand, so
+  a repo shipping `vagrant_dir = "C:/Users/you/.ssh"` made a plain `bombyx up`
+  tar that directory and scp it to the host named in the same file. Rooted
+  paths, drive letters, `~` and `..` are all refused; a Windows drive is checked
+  explicitly because it is not absolute on Unix and the file travels between
+  platforms.
 

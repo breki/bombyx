@@ -2,6 +2,87 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-11
+
+**`vagrant_dir` would tar whatever you pointed it at**
+
+Found by the red team while reviewing the config overlay, and
+much worse than the thing it was reviewing.
+
+`vagrant_dir` was checked for being non-empty and not starting
+with `-`, and nothing else. `main.rs` does
+`current_dir().join(&cfg.vagrant_dir)`, and `Path::join` with an
+absolute operand *discards the left side*. So a `bombyx.toml`
+saying `vagrant_dir = "C:/Users/igor/.ssh"` made a plain
+`bombyx up` run:
+
+```
+tar -czf ... -C C:/Users/igor/.ssh .
+scp ... frosti:...
+```
+
+Reproduced live before fixing it. `bombyx.toml` travels inside a
+repo -- the module doc has said so since the beginning, and the
+`host` charset check exists because of it -- so this was a clone
+away from shipping the operator's private keys to a host the
+same file named.
+
+The guard is `check_project_relative`, and the test enumerates
+the family rather than the case that prompted it: `/etc`,
+`\Windows`, `C:/...`, `c:\...`, `~/.ssh`, `../../.ssh`,
+`vagrant/../../.ssh` and `./vagrant`. The Windows drive letter
+is checked explicitly instead of relying on `Path::is_absolute`,
+because that answers per-platform: `C:/x` is *not* absolute on
+Unix, and the same config file is read on both.
+
+Worth noting what the existing conventions did and did not
+catch. "Validate a field's invariants where the field lives" put
+the fix in one obvious place. But `remote_root` -- the field
+that reaches `rm -rf` -- had a careful depth and traversal
+guard, while `vagrant_dir`, which reaches `tar`, had none. The
+dangerous-looking field got the attention.
+
+**A committed config cannot name everyone's VM host**
+
+The question that produced this was about jutro rather than
+bombyx: the provisioning script hardcoded a git identity, and
+"how does a second person use this?" has an obvious answer --
+they cannot, their agent's commits would be authored as me.
+
+jutro already had the pattern, twice: `.deploy.sample` and
+`.ports.sample` are committed, `.deploy` and `.ports` are
+gitignored, each saying "copy this and customize". So the VM
+config follows it, and the Vagrantfile reads `vagrant/local.env`
+if it is there.
+
+One level up, `bombyx.toml` has the same problem and no answer
+at all. `host` is per-developer -- everyone has their own VM
+host -- while `project` and the rest are shared. The only escape
+hatch was `--config`, which means either committing a file
+nobody can use or every developer maintaining an untracked copy
+of the whole thing.
+
+So `bombyx.local.toml` beside the config now overrides any of
+its fields. The detail worth recording is the *order*:
+validation runs after the merge, not before. Validating the base
+first would make the overlay the one path into the config that
+skips the charset check on `host` -- and `host` is passed to
+`ssh` as the first positional argument, where a leading `-` is
+read as an option. There is a test asserting an overlay cannot
+smuggle one through.
+
+The other decision was the filename. A fixed `bombyx.local.toml`
+would ignore `--config`; deriving it by inserting `.local`
+before the extension means `staging.toml` looks for
+`staging.local.toml`, so the override is always named after the
+file it overrides.
+
+Verified against frosti rather than by dry run, and the shape of
+the check is the point: a committed config naming
+`unreachable-host-xyz`, an overlay naming `frosti`, and a real
+`bombyx status` that came back with live VM state. A dry run
+would have proved only that the argv said `frosti`.
+
 ### 2026-08-10
 
 **The agent VM could reach the whole house**

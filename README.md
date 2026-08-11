@@ -68,6 +68,37 @@ remote_root = "~/vms"    # root on the host for project dirs
 `~/.ssh/config` -- bombyx never handles addresses,
 usernames or keys itself.
 
+### Per-developer overrides
+
+`bombyx.toml` is meant to be committed, but `host` is
+personal: a team shares one project and each member has
+their own VM host. Put the difference in a
+`bombyx.local.toml` beside it, and gitignore that:
+
+```toml
+host = "fusion"          # mine; the committed file names someone else's
+```
+
+Every field is optional there, and only the ones present
+are replaced. The file is optional too -- most projects
+never need one. The name is derived from the config's, so
+`--config staging.toml` looks for `staging.local.toml`
+and the override is always named after what it overrides.
+
+bombyx prints one line to stderr when an override is in
+force. That matters more than it sounds: a typo in the
+*filename* silently falls back to the committed host,
+which on a team is a colleague's machine -- and `destroy`
+runs `rm -rf` there.
+
+Validation runs *after* the merge, so an override is
+subject to exactly the same checks as the committed file
+rather than being a way around them. That includes the
+rule that `vagrant_dir` must stay inside the project: it
+is joined onto the working directory, and an absolute
+path would silently replace it, making `up` archive
+somewhere else entirely.
+
 ## Use
 
 ```bash

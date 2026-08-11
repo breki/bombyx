@@ -67,6 +67,21 @@ vagrant_dir = "vagrant"  # optional
 remote_root = "~/vms"    # optional
 ```
 
+`bombyx.local.toml` beside it overrides any of those
+fields and must be gitignored -- `host` is per-developer
+while the rest is shared. Optional; every field in it is
+optional. `--config x.toml` reads `x.local.toml` (the
+extension is replaced, not preserved). Validation runs
+after the merge, so an override cannot bypass the checks
+on the committed file, and bombyx prints one stderr line
+naming the override when it is in force.
+
+`vagrant_dir` must be a plain relative path. It is joined
+onto the working directory and `Path::join` discards the
+left side for an absolute operand, so an absolute value
+made `up` archive that directory instead -- a repo could
+tar `~/.ssh` and scp it to the host it also named.
+
 ## Build Commands
 
 ```

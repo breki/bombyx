@@ -31,3 +31,16 @@ vagrant_dir = "vagrant"
 # A leading `~` is expanded by the remote shell; anywhere else
 # it is rejected, as are shell metacharacters.
 remote_root = "~/vms"
+
+# PER-DEVELOPER OVERRIDES
+#
+# This file is meant to be committed, but `host` is personal:
+# everyone on a project has their own VM host. Put yours in a
+# `bombyx.local.toml` beside this one and gitignore it:
+#
+#   # bombyx.local.toml
+#   host = "fusion"
+#
+# Every field above can be overridden there and every one is
+# optional, so name only what differs. The file itself is
+# optional; most projects never need one.

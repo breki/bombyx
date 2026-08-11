@@ -96,6 +96,25 @@ fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     let cfg = Config::load(&cli.config)
         .with_context(|| format!("loading {}", cli.config.display()))?;
+
+    // Say when the committed config is not the one in force.
+    //
+    // Overriding `host` silently is the failure that costs
+    // most: a typo in the override's *filename* falls back to
+    // the committed host, which on a team is a colleague's
+    // machine -- and `destroy` runs `vagrant destroy` and
+    // `rm -rf` there. One line on stderr makes the two states
+    // distinguishable without reading either file.
+    if let Some(local) = bombyx::config::local_config_path(&cli.config)
+        && local.is_file()
+    {
+        eprintln!(
+            "bombyx: {} overrides {}",
+            local.display(),
+            cli.config.display()
+        );
+    }
+
     let action = action_of(&cli.command, &cfg)?;
 
     // `tar` runs from the archive directory, so the source
