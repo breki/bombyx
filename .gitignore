@@ -27,9 +27,6 @@ coverage.json
 *.profraw
 *.profdata
 
-# Deploy config (local override; .deploy.sample is committed)
-.deploy
-
 # mise local overrides
 .mise.local.toml
 

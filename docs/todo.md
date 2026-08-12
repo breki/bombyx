@@ -20,15 +20,6 @@ plan, decisions, and outcome.
 - `agent-vlan` -- isolate VMs on a VLAN with an egress allowlist.
   Enforced at the router.
 
-- **phantom-deploy-command** -- cargo xtask deploy is documented but missing
-  CLAUDE.md and .claude/commands/release.md and implement.md all describe cargo
-  xtask deploy as the thing that gates shipping (it refuses unless HEAD is on a
-  matching annotated tag), but no deploy subcommand exists in xtask -- it went
-  with the template's deploy subsystem during the CLI-only prune. .gitignore
-  still carries .deploy for the same reason. Either implement it or strip the
-  references; leaving canon describing a gate that cannot run is worse than
-  either.
-
 - **reset-needs-snapshot** -- reset depends on a snapshot nothing creates
   bombyx reset runs vagrant snapshot restore fresh-install, but no bombyx
   command ever creates that snapshot. On a freshly booted VM the command fails
@@ -74,6 +65,10 @@ plan, decisions, and outcome.
   being protected.
 
 ## Done
+
+- [**phantom-deploy-command**](issues/phantom-deploy-command.md)
+  -- stripped the references; bombyx has no deploy step
+  (2026-08-12)
 
 - [**provision-command**](issues/provision-command.md)
   -- re-run provisioning on a running VM

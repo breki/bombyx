@@ -7,9 +7,9 @@ Cut a SemVer release: bump the version, promote the
 `[Unreleased]` block in `CHANGELOG.md` to a dated release
 section, validate, commit, and tag.
 
-`/release` is the prerequisite for `cargo xtask deploy` --
-the deploy task refuses to ship a `HEAD` that is not on a
-`vX.Y.Z` tag matching `Cargo.toml`.
+A release here is the tag and nothing more. bombyx is a
+CLI installed with `cargo install`, so there is no deploy
+step for a release to gate.
 
 ## Usage
 
@@ -33,11 +33,10 @@ the deploy task refuses to ship a `HEAD` that is not on a
 2. **Check `[Unreleased]` has content** -- Read
    `CHANGELOG.md`. If the `[Unreleased]` section is empty
    or contains only empty subheadings, abort with
-   "nothing to release". Reason: a release with no
-   user-visible changes is a deploy in disguise; if the
-   user wants to ship the same version with no changes,
-   they should just `cargo xtask deploy` (which will pass
-   the tag check on the existing tag).
+   "nothing to release". Reason: a version number is a
+   description of what changed, and bumping it when
+   nothing did makes it bookkeeping instead. The existing
+   tag already names this code.
 
 3. **Determine the bump:**
    - If the user passed `major` / `minor` / `patch`, use
@@ -129,9 +128,9 @@ the deploy task refuses to ship a `HEAD` that is not on a
 11. **Tell the user what to do next** -- print:
     - The new version and tag name
     - The CHANGELOG bullets that were released
-    - "Next: `cargo xtask deploy` will now accept this
-      HEAD." (or "Push with `git push && git push
-      --tags`" if appropriate)
+    - "Push with `git push && git push --tags`" -- the
+      tag is the release, so an unpushed one has shipped
+      nothing
 
 ## Rules
 

@@ -201,6 +201,15 @@ re-deriving a style.
   change slowly; package names change every release. Split
   them into different sections so a reader knows which part
   to distrust.
+- **A rule stated in prose needs a test using the same
+  example.** Documentation that describes a
+  transformation -- how a name is derived, what a path
+  becomes -- is written from intent and drifts from the
+  code silently. Three files claimed `.local` was
+  inserted "before the extension" while the code
+  replaced the extension outright, and only review
+  caught it. Add the doc's own example to the test
+  table, and the two cannot disagree for long.
 - **Say what you have not verified.** Mark untested steps
   *(unverified)* inline, and give environment-dependent
   documents a header naming what they were checked against
@@ -235,6 +244,15 @@ re-deriving a style.
   /etc`. Validating once also keeps the error next to
   the field name and avoids threading a `Result`
   through callers that have nothing to decide.
+- **Guarding one field? Check its siblings.** A rule
+  protects a *primitive*, not a field name, so every
+  value that reaches the same primitive needs it.
+  `remote_root` reaches `rm -rf` and got a careful depth
+  and traversal guard; `vagrant_dir` reaches `tar -C`
+  and got none, so an absolute value made `bombyx up`
+  archive `~/.ssh` and ship it to the host named in the
+  same file. The dangerous-*looking* field had the
+  attention, and the one beside it did not.
 - **After fixing a bug, grep the file for the same
   shape.** A bug class rarely appears once. A guard
   calling `swapon` without `sudo` -- invisible on the
@@ -345,14 +363,16 @@ Committing and releasing are separate:
   `[Unreleased]` to a dated section, runs
   `cargo xtask validate` as the **release gate**, commits
   the bookkeeping, and creates an **annotated** tag
-  (`git tag -a vX.Y.Z`; a lightweight tag is invisible to
-  the deploy guard's `git describe --exact-match`).
-- **`cargo xtask deploy`** refuses to ship unless `HEAD`
-  is on a `vX.Y.Z` annotated tag matching
-  `crates/bombyx/Cargo.toml` and the working tree is
-  clean -- so "publish to production" is tied to "cut a
-  release" by the build, not by memory. Run `/release`
-  first.
+  (`git tag -a vX.Y.Z`; annotated rather than lightweight,
+  so the tag carries a date and author and is what
+  `git describe` finds).
+
+There is no deploy step. bombyx is a CLI installed with
+`cargo install`, so a release is the tag -- nothing is
+pushed to a server afterwards. The template this project
+came from had `cargo xtask deploy` gating exactly that,
+and the prose describing it outlived the subsystem by
+several weeks.
 
 ## Definition of Done
 

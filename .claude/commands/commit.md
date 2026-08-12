@@ -9,8 +9,7 @@ conventions.
 `/commit` is a save-point, not a release event. It does **not**
 bump the version, sync `Cargo.lock`, or run
 `cargo xtask validate`. Those belong to `/release`, which is
-invoked separately (and is required before
-`cargo xtask deploy`). `/commit` itself never runs
+invoked separately. `/commit` itself never runs
 `cargo xtask validate`; if you want the full gate on a
 work-in-progress, run it manually at your own shell (outside
 this flow). `/release` runs it as the authoritative release
