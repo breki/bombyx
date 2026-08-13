@@ -76,6 +76,22 @@ outranked it. Since teardown deletes a directory on the winner,
 bombyx now also prints `host <name> from --host` /
 `from BOMBYX_HOST` when the value came from outside both files.
 
+**`cargo xtask check` was not checking the tests**
+
+Noticed while changing `Config::load`'s signature: `check`
+reported `Check OK`, and `cargo xtask test` then produced five
+`E0061` errors in the test targets. `cargo check --workspace`
+without `--all-targets` does not compile tests, benches or
+examples -- so the gate advertised as the fast type-check was
+blind to exactly the code a signature change breaks, and the
+breakage surfaced only from the slower step.
+
+It now passes `--all-targets`, verified by reintroducing the
+same breakage in a test call site and watching `check` fail on
+it. The cost is a slightly slower `check`; the alternative is a
+gate that reports success on the class of change it is most
+often run for.
+
 **The docs grew a tutorial, and the README shrank**
 
 `docs/usage.md` took the command reference out of the README

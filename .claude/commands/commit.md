@@ -197,6 +197,34 @@ gate.
      columns. `--breaking` prefixes `**BREAKING:**` so
      `/release` infers a major bump from the accumulated
      `[Unreleased]` entries.
+   - **Confirm the behaviour shipped before you feed
+     the major-bump inference.** Two inputs reach it,
+     not one: `--breaking` and a non-empty
+     `### Removed`. The rule protects the *inference*,
+     so it applies to both -- avoiding `--breaking`
+     and then filing `--kind removed` for the same
+     never-shipped behaviour produces exactly the
+     spurious major bump it is meant to prevent.
+
+     The check is: `git tag` (no tags at all means
+     nothing has ever been released), and when tags do
+     exist, `git log <latest-tag>..HEAD` or the
+     `[Unreleased]` block -- behaviour introduced since
+     the last release never shipped either.
+
+     When it did not ship, *correct the existing
+     bullet* instead of adding a new one, and say which
+     you did and why in the summary. Nothing is
+     breaking for users who never saw the old
+     behaviour.
+
+     Correcting a bullet is the one case that **is** a
+     hand edit: `cargo xtask changelog` only appends,
+     so there is no mechanical path for it. Re-read the
+     `[Unreleased]` block afterwards and check you have
+     not split a subsection or left a duplicate
+     `### <kind>` heading -- the hazard the bullet above
+     warns about.
    - Skip only for commits with no user-observable
      effect: pure refactors, internal tooling, test-
      only changes, CI/lint config tweaks invisible to

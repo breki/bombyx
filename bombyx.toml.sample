@@ -35,15 +35,7 @@ remote_root = "~/vms"
 
 # WHERE THE VM HOST GOES INSTEAD
 #
-# bombyx looks in four places, and takes the first that names
-# one:
-#
-#   1. `--host vmhost-b`         a one-off run
-#   2. `BOMBYX_HOST=vmhost-b`    a shell, CI, or an agent
-#   3. `bombyx.local.toml`       this project only; gitignore it
-#   4. your own config.toml      every project -- the usual one
-#
-# The per-developer file is the one to set up once:
+# Set it once, in your own file outside any repo:
 #
 #   Linux/macOS  ~/.config/bombyx/config.toml
 #   Windows      %APPDATA%\bombyx\config.toml
@@ -54,12 +46,8 @@ remote_root = "~/vms"
 # `host` is an SSH alias, resolved through your ~/.ssh/config,
 # so bombyx never handles addresses, usernames or keys.
 #
-# A project that needs a different machine from your usual one
-# gets a `bombyx.local.toml` beside this file:
-#
-#   # bombyx.local.toml
-#   host = "other-vmhost"
-#
-# Every field above can also be overridden there, and every one
-# is optional, so name only what differs. The file itself is
-# optional; most projects never need one.
+# Three other sources override that when you need them --
+# `--host`, `BOMBYX_HOST`, and a gitignored `bombyx.local.toml`
+# beside this file, which can also override any field above.
+# "Where bombyx looks for the host" in README.md gives the full
+# order; it is deliberately documented in one place.

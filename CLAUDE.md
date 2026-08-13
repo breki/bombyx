@@ -37,7 +37,7 @@ removed. `/template-sync` will default those paths to
 ## Build Commands
 
 ```bash
-cargo xtask check             # fast compile check
+cargo xtask check             # type-check all targets, run none
 cargo xtask validate          # fmt + clippy + doc + tests + coverage
 cargo xtask test [filter]     # tests only
 cargo xtask test --ignored    # run #[ignore]-tagged tests
@@ -121,6 +121,23 @@ for tools that are not present:
   entry authenticates with *that* key and reports
   success for a key the far side has never seen. Ignoring
   the config is what makes the answer honest.
+- **Single-quote any `$` you pass through PowerShell.**
+  A double-quoted string is expanded before the argument
+  reaches the program, and the two cases fail differently.
+  A variable PowerShell defines, such as the automatic
+  `$HOME`, becomes a path -- so a real home directory
+  lands in the file. Anything else becomes the empty
+  string *silently*, which is the worse half: it leaves
+  plausible-looking text behind. Note that an environment
+  variable is *not* a bare `$NAME` in PowerShell -- it is
+  `$env:NAME` -- so `$XDG_CONFIG_HOME` is simply an
+  undefined variable and expands to nothing at all. A
+  `cargo xtask changelog add` call describing
+  `$XDG_CONFIG_HOME/bombyx` wrote a bare `/bombyx` into
+  `CHANGELOG.md`, next to an expanded home path from the
+  same line. Backslash does not escape `$` in PowerShell;
+  backtick does. Use a single-quoted string, or a Bash
+  heredoc, whenever the text contains `$`.
 
 ## Collaboration
 
@@ -475,7 +492,7 @@ a fresh empty `[Unreleased]` above it.
 
 | Skill | Purpose |
 |-------|---------|
-| `/check` | Fast compilation check (no tests) |
+| `/check` | Type-check all targets, incl. tests; runs none |
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline with stepwise progress |
 | `/commit` | Save-point commit with diary, CHANGELOG, and code review (no version bump) |

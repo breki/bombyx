@@ -133,10 +133,33 @@ Four sources, first match wins:
 If none of them names a host, bombyx stops and lists all four
 rather than guessing.
 
-`BOMBYX_CONFIG_HOME` moves the per-developer directory, which
-is useful for keeping two setups apart. An exported-but-empty
-`BOMBYX_HOST` counts as unset, since that is what a shell
-script means by it.
+**This section is the authoritative list** -- the sample config
+and `llms.txt` point here rather than repeating it, so there is
+one place to correct when it changes.
+
+Your `config.toml` lives in the first of these that the
+environment names:
+
+| Variable | Config file |
+|----------|-------------|
+| `BOMBYX_CONFIG_HOME` | `$BOMBYX_CONFIG_HOME/config.toml` |
+| `%APPDATA%` (Windows only) | `%APPDATA%\bombyx\config.toml` |
+| `XDG_CONFIG_HOME` | `$XDG_CONFIG_HOME/bombyx/config.toml` |
+| `HOME` | `$HOME/.config/bombyx/config.toml` |
+
+`BOMBYX_CONFIG_HOME` is there for keeping two setups apart.
+`%APPDATA%` is consulted **only** on Windows: it is often
+exported under WSL and Wine too, and honouring it there would
+read a Windows config directory in preference to
+`$HOME/.config`.
+
+Each of those values must be an anchored path. A blank or
+relative one counts as unset and the next row is tried, because
+a relative path resolves against the working directory -- which
+on this tool means taking the VM host out of whatever repo you
+happen to be in. An exported-but-empty `BOMBYX_HOST` counts as
+unset for the same reason: that is what a shell script means by
+it.
 
 ### Per-project overrides
 

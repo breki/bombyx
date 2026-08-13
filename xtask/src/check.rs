@@ -9,13 +9,32 @@ const MAX_ERROR_LINES: usize = 10;
 /// `Cargo.lock`, missing network).
 const STDERR_TAIL_LINES: usize = 20;
 
-/// Run `cargo check` with concise output.
+/// Check argument list.
+///
+/// `--all-targets` is deliberate, and it costs time: without
+/// it cargo compiles only the lib and bin targets, so a
+/// changed function signature printed `Check OK` while five
+/// call sites in the *test* targets failed to compile, and
+/// the breakage surfaced only from the slower `test` step. The
+/// extra targets cost seconds; a green `Check` that means
+/// nothing costs a whole cycle.
+///
+/// This is the same target set [`crate::clippy_cmd`] compiles.
+/// The remaining difference is the lint pass, not the
+/// coverage -- which is the honest reason to keep both.
+const CHECK_ARGS: &[&str] = &[
+    "check",
+    "--workspace",
+    "--all-targets",
+    "--message-format=short",
+];
+
+/// Type-check every target, without running tests.
 ///
 /// Prints `Check OK` on success or `FAILED: N error(s)`
 /// with the first few error lines on failure.
 pub fn check() -> Result<(), String> {
-    let output =
-        run_cargo_capture(&["check", "--workspace", "--message-format=short"])?;
+    let output = run_cargo_capture(CHECK_ARGS)?;
 
     if output.status.success() {
         println!("Check OK");
@@ -64,6 +83,17 @@ pub fn check() -> Result<(), String> {
 /// The `aborting due to` summary is excluded (anchored to
 /// its exact form so a user error whose message merely
 /// contains "aborting" survives).
+///
+/// `could not compile` is excluded for the same reason, and
+/// `--all-targets` is what made it necessary: cargo emits one
+/// of those lines *per failing target*, so a single broken
+/// signature in a crate with a lib, a bin and two integration
+/// tests produced four of them. Counted as errors they
+/// overstate `FAILED: N compilation error(s)`, and they fill
+/// slots in the `MAX_ERROR_LINES` window that should hold the
+/// path-prefixed diagnostics the caller can act on. A run with
+/// nothing but summary lines still reports, through the
+/// no-matched-lines branch that dumps the stderr tail.
 fn extract_error_lines(stderr: &str) -> Vec<&str> {
     stderr
         .lines()
@@ -74,6 +104,7 @@ fn extract_error_lines(stderr: &str) -> Vec<&str> {
                 || l.starts_with("error:")
         })
         .filter(|l| !l.starts_with("error: aborting due to"))
+        .filter(|l| !l.starts_with("error: could not compile"))
         .collect()
 }
 
@@ -89,6 +120,16 @@ fn stderr_tail(stderr: &str, n: usize) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_compiles_the_test_targets() {
+        // The regression this pins: without `--all-targets`,
+        // `check` reported `Check OK` while five call sites in
+        // the test targets failed to compile. A later edit
+        // trimming the argv to make `check` faster would
+        // otherwise reintroduce it with the whole gate green.
+        assert!(CHECK_ARGS.contains(&"--all-targets"));
+    }
 
     const SAMPLE_STDERR: &str = "\
 error[E0425]: cannot find value `foo` in this scope
@@ -170,11 +211,29 @@ error: aborting due to 1 previous error";
     fn includes_plain_error_lines() {
         let stderr = "\
 error[E0425]: cannot find value `foo`
-error: could not compile `rustbase`
+error: expected `;`, found `}`
 error: aborting due to 1 previous error";
         let errors = extract_error_lines(stderr);
         assert_eq!(errors.len(), 2);
         assert!(errors[0].contains("E0425"));
-        assert!(errors[1].contains("could not compile"));
+        assert!(errors[1].contains("expected"));
+    }
+
+    #[test]
+    fn per_target_compile_summaries_do_not_inflate_the_count() {
+        // `--all-targets` makes cargo emit one `could not
+        // compile` line per failing target, so one broken
+        // signature in a crate with a lib, a bin and two
+        // integration tests printed four of them. Counted as
+        // errors they overstate the total and crowd the real
+        // diagnostics out of the printed window.
+        let stderr = "\
+crates/bombyx/src/config.rs:45:12: error[E0061]: this function takes 2 arguments
+error: could not compile `bombyx` (lib) due to 1 previous error
+error: could not compile `bombyx` (lib test) due to 1 previous error
+error: could not compile `bombyx` (test \"integration_test\") due to 1 error";
+        let errors = extract_error_lines(stderr);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("E0061"));
     }
 }

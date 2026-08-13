@@ -27,7 +27,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum XCommand {
-    /// Fast compilation check (no tests)
+    /// Type-check all targets without running tests
     Check,
     /// Run clippy (deny warnings)
     Clippy,

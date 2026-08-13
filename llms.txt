@@ -71,22 +71,21 @@ remote_root = "~/vms"    # optional
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a
 committed value is wrong for everyone but its author -- and
-`destroy` runs `rm -rf` on whatever host is in force. Four
-sources, first match wins:
+`destroy` runs `rm -rf` on whatever host is in force. It is
+resolved from `--host`, `BOMBYX_HOST`, `bombyx.local.toml`
+and a per-developer `config.toml`, in that order; see "Where
+bombyx looks for the host" in `README.md` for the authoritative
+list, and `resolve_host` in `config.rs` for the code.
 
-1. `--host <alias>`
-2. `BOMBYX_HOST` (blank counts as unset)
-3. `bombyx.local.toml` beside the project file, gitignored
-4. `config.toml` in the per-developer config dir:
-   `%APPDATA%\bombyx` on Windows, else
-   `$XDG_CONFIG_HOME/bombyx` or `$HOME/.config/bombyx`.
-   `BOMBYX_CONFIG_HOME` relocates it
-
-None of them set is an error naming all four. `Config::load`
-takes a `HostSources` carrying the flag, the env value and
-the config dir, so precedence is unit-testable without
-mutating the process environment; the binary is the only
-thing that reads `std::env`.
+None of them set is an error naming every source.
+`Config::load` takes a `HostSources` carrying the flag, the
+env value and the config dir, and returns the winning
+`HostOrigin`, so precedence is unit-testable without mutating
+the process environment and the binary reports the winner
+rather than re-deriving it; the binary is the only thing that
+reads `std::env`. A config dir from the environment must be an
+anchored path -- a relative one would resolve against the
+working directory and take the host out of the repo.
 
 `bombyx.local.toml` overrides any field and must be
 gitignored. Optional; every field in it is optional.
@@ -106,7 +105,7 @@ tar `~/.ssh` and scp it to the host it also named.
 
 ```
 cargo xtask validate          # fmt + clippy + doc + tests + coverage + dupes + audit
-cargo xtask check             # fast compile-only check
+cargo xtask check             # type-check all targets, run none
 cargo xtask test [filter]     # tests only
 cargo xtask clippy            # lint only
 cargo xtask doc               # doc build + doc-link check
@@ -140,7 +139,7 @@ all commits and the Stop hook run it. Never use raw
 
 | Skill | Purpose |
 |-------|---------|
-| `/check` | Fast compile-only check |
+| `/check` | Type-check all targets, running none |
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline |
 | `/commit` | Commit with diary, CHANGELOG, code reviews |
