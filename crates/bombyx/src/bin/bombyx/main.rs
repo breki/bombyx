@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
-use bombyx::config::Config;
+use bombyx::config::{Config, HostOrigin};
 use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
@@ -31,6 +31,10 @@ struct Cli {
     /// Path to the project config
     #[arg(short, long, default_value = CONFIG_FILE)]
     config: PathBuf,
+
+    /// SSH alias of the VM host, overriding your config.toml
+    #[arg(long)]
+    host: Option<String>,
 
     /// Print the command that would run, without running it
     #[arg(long)]
@@ -94,17 +98,37 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
-    let cfg = Config::load(&cli.config)
-        .with_context(|| format!("loading {}", cli.config.display()))?;
+
+    // The VM host is not in the project file: it belongs to
+    // whoever is driving bombyx, not to the repo. Highest
+    // precedence first -- flag, environment, then the two files
+    // `Config::load` reads.
+    let env_host = std::env::var(bombyx::config::HOST_ENV).ok();
+    let user_dir = bombyx::config::user_config_dir();
+    let sources = bombyx::config::HostSources {
+        flag: cli.host.as_deref(),
+        env: env_host.as_deref(),
+        user_config_dir: user_dir.as_deref(),
+    };
+
+    // The `loading <file>` context is added only for errors that
+    // are really about that file. A host error is not: the host
+    // cannot come from the project config at all, so prefixing
+    // `loading bombyx.toml:` told the operator to edit the one
+    // file that must not carry a host.
+    let (cfg, host_origin) =
+        Config::load(&cli.config, &sources).map_err(|err| match err {
+            e @ (bombyx::config::ConfigError::HostMissing { .. }
+            | bombyx::config::ConfigError::HostInProjectFile { .. }
+            | bombyx::config::ConfigError::InvalidHost { .. }) => anyhow!(e),
+            e => anyhow::Error::new(e)
+                .context(format!("loading {}", cli.config.display())),
+        })?;
 
     // Say when the committed config is not the one in force.
-    //
-    // Overriding `host` silently is the failure that costs
-    // most: a typo in the override's *filename* falls back to
-    // the committed host, which on a team is a colleague's
-    // machine -- and `destroy` runs `vagrant destroy` and
-    // `rm -rf` there. One line on stderr makes the two states
-    // distinguishable without reading either file.
+    // A typo in the override's *filename* silently falls back
+    // to the committed values, and one line on stderr makes the
+    // two states distinguishable without reading either file.
     if let Some(local) = bombyx::config::local_config_path(&cli.config)
         && local.is_file()
     {
@@ -113,6 +137,23 @@ fn run() -> Result<ExitCode> {
             local.display(),
             cli.config.display()
         );
+    }
+
+    // And say which source the host came from, using the winner
+    // the library reports rather than re-testing the sources
+    // here. Re-deriving it duplicated the precedence rule in the
+    // one place no library test could reach, so a change to the
+    // ranking would have left this line naming the old winner --
+    // and `destroy` runs `rm -rf` on whichever host really won.
+    //
+    // Printed unless it came from the per-developer file, which
+    // is the ordinary case and would be noise on every command.
+    // That also covers the gap the notice above leaves: an
+    // overlay setting only `remote_root` prints "overrides", and
+    // the host it does *not* set is reported here instead of
+    // being silently attributed to that file.
+    if host_origin != HostOrigin::UserFile {
+        eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }
 
     let action = action_of(&cli.command, &cfg)?;

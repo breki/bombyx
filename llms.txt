@@ -54,27 +54,47 @@ destroying the VM; `remote_root` therefore rejects `..`, and
 `remote::remove_dir` refuses a target under two segments deep.
 
 Global flags: `--config <path>` (default `bombyx.toml`),
-`--dry-run` (print the argv instead of running it).
+`--host <alias>`, `--dry-run` (print the argv instead of
+running it).
 
 ## Configuration
 
-`bombyx.toml` in the project root:
+`bombyx.toml` in the project root. Committed, and carries
+**no `host`** -- one there is an error, not a warning:
 
 ```toml
-host = "frosti"          # required, SSH alias
-project = "phren"        # required
+project = "myproject"    # required
 vagrant_dir = "vagrant"  # optional
 remote_root = "~/vms"    # optional
 ```
 
-`bombyx.local.toml` beside it overrides any of those
-fields and must be gitignored -- `host` is per-developer
-while the rest is shared. Optional; every field in it is
-optional. `--config x.toml` reads `x.local.toml` (the
-extension is replaced, not preserved). Validation runs
-after the merge, so an override cannot bypass the checks
-on the committed file, and bombyx prints one stderr line
-naming the override when it is in force.
+The VM host belongs to the developer, not the project: each
+person has their own hardware on their own network, so a
+committed value is wrong for everyone but its author -- and
+`destroy` runs `rm -rf` on whatever host is in force. Four
+sources, first match wins:
+
+1. `--host <alias>`
+2. `BOMBYX_HOST` (blank counts as unset)
+3. `bombyx.local.toml` beside the project file, gitignored
+4. `config.toml` in the per-developer config dir:
+   `%APPDATA%\bombyx` on Windows, else
+   `$XDG_CONFIG_HOME/bombyx` or `$HOME/.config/bombyx`.
+   `BOMBYX_CONFIG_HOME` relocates it
+
+None of them set is an error naming all four. `Config::load`
+takes a `HostSources` carrying the flag, the env value and
+the config dir, so precedence is unit-testable without
+mutating the process environment; the binary is the only
+thing that reads `std::env`.
+
+`bombyx.local.toml` overrides any field and must be
+gitignored. Optional; every field in it is optional.
+`--config x.toml` reads `x.local.toml` (the extension is
+replaced, not preserved). Validation runs after the merge,
+so an override cannot bypass the checks on the committed
+file, and bombyx prints one stderr line naming the override
+when it is in force.
 
 `vagrant_dir` must be a plain relative path. It is joined
 onto the working directory and `Path::join` discards the

@@ -192,16 +192,16 @@ mod tests {
         assert_eq!(
             scripts(&Action::Up),
             vec![
-                "ssh frosti \"mkdir -p ~/'vms/phren'\"",
+                "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
                  /repo/vagrant --exclude=./.vagrant \
                  --exclude=./.git .",
                 "cd /work && scp .bombyx-push-42.tar.gz \
-                 frosti:.bombyx-push-42.tar.gz",
-                "ssh frosti \"{ cd ~/'vms/phren' && tar -xzf \
+                 vmhost:.bombyx-push-42.tar.gz",
+                "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
                  ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
                  ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
-                "ssh frosti \"cd ~/'vms/phren' && vagrant 'up'\"",
+                "ssh vmhost \"cd ~/'vms/myproject' && vagrant 'up'\"",
             ]
         );
     }
@@ -224,16 +224,16 @@ mod tests {
         assert_eq!(
             scripts(&Action::Provision),
             vec![
-                "ssh frosti \"mkdir -p ~/'vms/phren'\"",
+                "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
                  /repo/vagrant --exclude=./.vagrant \
                  --exclude=./.git .",
                 "cd /work && scp .bombyx-push-42.tar.gz \
-                 frosti:.bombyx-push-42.tar.gz",
-                "ssh frosti \"{ cd ~/'vms/phren' && tar -xzf \
+                 vmhost:.bombyx-push-42.tar.gz",
+                "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
                  ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
                  ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
-                "ssh frosti \"cd ~/'vms/phren' && vagrant 'provision'\"",
+                "ssh vmhost \"cd ~/'vms/myproject' && vagrant 'provision'\"",
             ]
         );
     }
@@ -251,11 +251,11 @@ mod tests {
         assert_eq!(up[..up.len() - 1], pr[..pr.len() - 1]);
         assert_eq!(
             up.last().unwrap().args[1],
-            "cd ~/'vms/phren' && vagrant 'up'"
+            "cd ~/'vms/myproject' && vagrant 'up'"
         );
         assert_eq!(
             pr.last().unwrap().args[1],
-            "cd ~/'vms/phren' && vagrant 'provision'"
+            "cd ~/'vms/myproject' && vagrant 'provision'"
         );
     }
 
@@ -273,20 +273,23 @@ mod tests {
     #[test]
     fn scratch_targets_a_project_scoped_dir() {
         let cmds = run(&Action::Scratch(scratch("pr-1234")));
-        assert_eq!(cmds[0].args[1], "mkdir -p ~/'vms/scratch/phren/pr-1234'");
+        assert_eq!(
+            cmds[0].args[1],
+            "mkdir -p ~/'vms/scratch/myproject/pr-1234'"
+        );
     }
 
     #[test]
     fn down_halts_without_pushing() {
         let cmds = run(&Action::Down);
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0].args[1], "cd ~/'vms/phren' && vagrant 'halt'");
+        assert_eq!(cmds[0].args[1], "cd ~/'vms/myproject' && vagrant 'halt'");
     }
 
     #[test]
     fn status_queries_the_project_dir() {
         let cmds = run(&Action::Status);
-        assert_eq!(cmds[0].args[1], "cd ~/'vms/phren' && vagrant 'status'");
+        assert_eq!(cmds[0].args[1], "cd ~/'vms/myproject' && vagrant 'status'");
     }
 
     #[test]
@@ -294,7 +297,7 @@ mod tests {
         let cmds = run(&Action::Reset);
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/phren' && vagrant 'snapshot' 'restore' \
+            "cd ~/'vms/myproject' && vagrant 'snapshot' 'restore' \
              'fresh-install'"
         );
     }
@@ -314,10 +317,10 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/scratch/phren/pr-1234' && if [ -f Vagrantfile ]; \
+            "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f Vagrantfile ]; \
              then vagrant destroy -f; fi"
         );
-        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/phren/pr-1234'");
+        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/myproject/pr-1234'");
     }
 
     #[test]
@@ -326,10 +329,10 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/phren' && if [ -f Vagrantfile ]; then \
+            "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
              vagrant destroy -f; fi"
         );
-        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/phren'");
+        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/myproject'");
     }
 
     #[test]

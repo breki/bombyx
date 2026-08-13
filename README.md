@@ -7,6 +7,21 @@ SSH.
 that spins the cocoon. The tool builds the enclosure; the
 agent works inside it.
 
+## Contents
+
+- [Why](#why)
+- [Model](#model)
+- [Install](#install)
+- [Configure](#configure)
+  - [Why `host` is not in `bombyx.toml`](#why-host-is-not-in-bombyxtoml)
+  - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
+  - [Per-project overrides](#per-project-overrides)
+- [Use](#use)
+- [Development](#development)
+- [Status](#status)
+- [Origin](#origin)
+- [License](#license)
+
 ## Why
 
 Running an AI coding agent on your daily driver puts your
@@ -23,7 +38,7 @@ workstation.
 ## Model
 
 ```
-perun (workstation)          frosti (VM host)
+workstation                  vmhost (VM host)
   bombyx  ──── ssh ────►  vagrant ──► agent VM
      │                                    │
      └── pushes vagrant/ ─────────────────┘
@@ -36,7 +51,7 @@ Two rules shape the design:
    pushes it to the host before booting, so the host holds
    a cache that cannot silently drift.
 2. **Wrap, don't reimplement.** bombyx composes `ssh`,
-   `scp` and `vagrant`. If it breaks, `ssh frosti` and
+   `scp` and `vagrant`. If it breaks, `ssh vmhost` and
    `vagrant up` by hand still work.
 
 ## Install
@@ -51,53 +66,109 @@ libvirt, Vagrant and its `libvirt` provider -- see
 covers the non-interactive `PATH` trap that makes Vagrant
 invisible to bombyx while still working when you log in.
 
+If this is your first setup, follow
+[docs/tutorial.md](docs/tutorial.md) instead of the sections
+below. It goes through all three pieces in order -- the
+workstation, the VM host, and a sample project with a
+`Vagrantfile` and a provisioning script -- and ends with a VM
+you can open a shell into.
+
 ## Configure
+
+There are two pieces, and the split is the point. The project
+file describes the *project* and is committed. Which machine
+runs the VMs is yours, and is configured once, outside any
+repo.
 
 Drop a `bombyx.toml` in the project you want a VM for:
 
 ```toml
-host = "frosti"          # SSH host alias of the VM host
-project = "phren"        # VM + directory name on the host
+project = "myproject"    # VM + directory name on the host
 
 # optional, shown with defaults
 vagrant_dir = "vagrant"  # dir in this repo with the Vagrantfile
 remote_root = "~/vms"    # root on the host for project dirs
 ```
 
-`host` is an SSH alias, resolved through your
-`~/.ssh/config` -- bombyx never handles addresses,
-usernames or keys itself.
-
-### Per-developer overrides
-
-`bombyx.toml` is meant to be committed, but `host` is
-personal: a team shares one project and each member has
-their own VM host. Put the difference in a
-`bombyx.local.toml` beside it, and gitignore that:
+Then name your own VM host once, in a file outside the repo:
 
 ```toml
-host = "fusion"          # mine; the committed file names someone else's
+# ~/.config/bombyx/config.toml
+# Windows: %APPDATA%\bombyx\config.toml
+host = "my-vmhost"
 ```
 
-Every field is optional there, and only the ones present
-are replaced. The file is optional too -- most projects
-never need one. The name is derived from the config's, so
-`--config staging.toml` looks for `staging.local.toml`
-and the override is always named after what it overrides.
+`host` is an SSH alias, resolved through your `~/.ssh/config` --
+bombyx never handles addresses, usernames or keys itself.
 
-bombyx prints one line to stderr when an override is in
-force. That matters more than it sounds: a typo in the
-*filename* silently falls back to the committed host,
-which on a team is a colleague's machine -- and `destroy`
-runs `rm -rf` there.
+### Why `host` is not in `bombyx.toml`
 
-Validation runs *after* the merge, so an override is
-subject to exactly the same checks as the committed file
-rather than being a way around them. That includes the
-rule that `vagrant_dir` must stay inside the project: it
-is joined onto the working directory, and an absolute
-path would silently replace it, making `up` archive
-somewhere else entirely.
+**A `host` key in `bombyx.toml` is refused, not ignored.** A
+project is shared; a VM host is not. Every developer has their
+own hardware on their own network, so a committed `host` can
+only ever be right for the person who wrote it, and is wrong
+for everyone who clones after them. That is not a cosmetic
+problem: `bombyx destroy` runs `vagrant destroy` and `rm -rf`
+on whatever host is in force.
+
+Refusing it also keeps the value out of reach of a cloned
+repo. `host` is handed to `ssh` as its first argument, and
+`ssh` reads a leading `-` as an option -- so a repo shipping
+`host = "-oProxyCommand=..."` used to be able to run code on
+your workstation from a bare `bombyx status`. The charset check
+that stopped that is still there, but the value no longer
+arrives from the repo at all.
+
+### Where bombyx looks for the host
+
+Four sources, first match wins:
+
+| | Source | Use |
+|-|--------|-----|
+| 1 | `--host vmhost-b` | a one-off run |
+| 2 | `BOMBYX_HOST=vmhost-b` | a shell, CI, or an agent |
+| 3 | `bombyx.local.toml` | this project only; gitignore it |
+| 4 | your `config.toml` | every project -- the usual one |
+
+If none of them names a host, bombyx stops and lists all four
+rather than guessing.
+
+`BOMBYX_CONFIG_HOME` moves the per-developer directory, which
+is useful for keeping two setups apart. An exported-but-empty
+`BOMBYX_HOST` counts as unset, since that is what a shell
+script means by it.
+
+### Per-project overrides
+
+`bombyx.local.toml`, beside the project file and gitignored,
+overrides any field for one project -- a second VM host for
+one repo, a different `remote_root` on one machine:
+
+```toml
+host = "other-vmhost"    # just this project
+remote_root = "/srv/vms"
+```
+
+Every field is optional there, and only the ones present are
+replaced. The file is optional too -- most projects never need
+one. The name is derived from the config's, so
+`--config staging.toml` looks for `staging.local.toml` and the
+override is always named after what it overrides.
+
+bombyx prints one line to stderr when an override file is in
+force, so the two states are distinguishable without opening
+either file. It prints a second line naming where the host came
+from, unless that was your own `config.toml` -- the ordinary
+case, and not worth a line on every command. Between them, the
+host that `destroy` would run `rm -rf` on is always visible
+without reasoning about precedence.
+
+Validation runs *after* the merge, so an override is subject to
+exactly the same checks as the committed file rather than being
+a way around them. That includes the rule that `vagrant_dir`
+must stay inside the project: it is joined onto the working
+directory, and an absolute path would silently replace it,
+making `up` archive somewhere else entirely.
 
 ## Use
 
@@ -109,125 +180,11 @@ bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
 bombyx down               # halt the VM
-bombyx destroy phren      # destroy the VM and remove its dir
+bombyx destroy myproject  # destroy the VM and remove its dir
 
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
 ```
-
-`provision` exists because `up` provisions a VM only when it
-first creates one. Every later `vagrant up` skips the
-provisioners -- whether the VM was halted or running -- so
-editing `vagrant/provision.sh` and running `up` again ships the
-new script to the host and never executes it. The push reports
-success, which is what makes the gap easy to miss.
-
-`provision` pushes the directory exactly as `up` does, then
-runs `vagrant provision` instead of `vagrant up`. The VM has to
-exist already: on one that was never booted, `provision`
-creates the remote directory and ships the archive before
-vagrant reports it has nothing to provision, so run `up` first.
-It applies to the project VM only -- a scratch VM is
-disposable, so the answer there is `discard` followed by
-`scratch`.
-
-`destroy` takes the project name as confirmation and refuses if
-it does not match `project` in `bombyx.toml`. `down` halts a VM
-and `reset` rolls it back; `destroy` throws away the warm caches
-and installed tooling that make a persistent VM worth keeping,
-so it asks for a deliberate act rather than a flag.
-
-**Read the target it prints, not the name you typed.** Both the
-refusal and the confirmation print the resolved
-`<host>:<directory>`:
-
-```console
-$ bombyx destroy
-bombyx: destroy needs the project name to confirm: run
-`bombyx destroy phren` -- target is frosti:~/vms/phren
-```
-
-The name on its own proves less than it appears to, because
-`project` comes from the same `bombyx.toml` that decides which
-directory is deleted -- a repo you cloned can name itself after
-a VM you care about. The printed target is the part you can
-check against reality.
-
-Both `destroy` and `discard` remove the VM's directory on the
-host after destroying the VM. Nothing in that directory is
-unique -- bombyx pushed it there, or `vagrant` generated it,
-and your repo holds the original. Teardown is re-runnable: a
-directory with no Vagrantfile is removed rather than treated as
-an error, so an interrupted push cannot leave one stranded.
-
-`remote_root` must be an anchored path at least one directory
-deep, with no `.` or `..` segment. bombyx deletes the directory
-it derives from it, so a root of `/`, `~` or `~/.` is refused
-when the config loads rather than at teardown.
-
-A scratch VM lives in `<remote_root>/scratch/<project>/<name>`,
-so the same name in two projects does not collide.
-
-Run `bombyx doctor` first on a new host. `up` creates a
-directory and ships a tarball before it runs `vagrant`, so
-without it a missing piece is reported half-way through:
-
-```console
-$ bombyx doctor
-  local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
-  local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
-  local   scp               ok    C:\Windows\System32\OpenSSH
-  local   Vagrantfile       ok
-  frosti  ssh               ok
-  frosti  login shell       ok    posix
-  frosti  tar               ok    /usr/bin/tar
-  frosti  scp               ok    /usr/bin/scp
-  frosti  vagrant           ok    /usr/bin/vagrant
-  frosti  project dir       ok    /home/igor (will create /home/igor/vms/phren)
-  frosti  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
-all checks passed
-```
-
-It runs every check rather than stopping at the first failure,
-and exits non-zero if any fails. It **creates, deletes and
-modifies nothing** — with one honest exception worth naming: the
-provider check runs `vagrant plugin list`, and on a host where
-vagrant has never run as that user, vagrant itself creates
-`~/.vagrant.d`. bombyx disables vagrant's version-checkpoint call
-so the probe neither writes more than that nor stalls on a
-firewalled endpoint. When SSH itself fails the remaining host checks are
-skipped rather than each waiting on a dead host. Locally it does
-execute `tar` and `ssh` to read their versions, so it is not a
-no-op on your workstation.
-
-The `vagrant` line is the one that earns the command: it asks
-the **non-interactive** shell, which is the one bombyx gets.
-Vagrant installed outside that `PATH` works when you log in and
-type it, and is invisible to bombyx — and vagrant cannot report
-that itself, because it is not running.
-
-Each check is built to carry a verdict rather than a value,
-because a probe that merely reports something passes on the
-state it exists to catch. `login shell` makes the host *run* a
-POSIX construct instead of printing `$SHELL`; `libvirt
-provider` checks vagrant's own exit status and matches an
-anchored plugin name, because `vagrant plugin list` exits zero
-even with nothing installed.
-
-The local lines name the directory each tool came from. bombyx
-resolves `tar`, `ssh` and `scp` against `PATH` explicitly rather
-than leaving it to the operating system, which on Windows
-searches the working directory first — and bombyx runs inside a
-repository whose contents arrive with whatever branch you
-checked out.
-
-Every command resolves what it needs the same way, all of it
-before running any step. So a missing `tar` stops `up` before it
-has created the directory on the host, rather than after.
-
-See [docs/vm-host-setup.md](docs/vm-host-setup.md) for what to
-do about each failure; `doctor` reports facts and leaves the
-remedies to the guide.
 
 Two lifecycles, on purpose:
 
@@ -239,57 +196,17 @@ Two lifecycles, on purpose:
   survive credential rotation has nothing to persist to.
 
 Every command accepts `--dry-run`, which prints the exact
-`ssh`/`scp` invocation instead of running it:
+`ssh`/`scp` invocation instead of running it. Run `bombyx
+doctor` first on a new host: `up` creates a directory and ships
+a tarball before it runs `vagrant`, so without it a missing
+piece is reported half-way through.
 
-```console
-$ bombyx --dry-run up
-ssh frosti "mkdir -p ~/'vms/phren'"
-cd /tmp/.tmpAL8i && tar -czf .bombyx-push-4821-729551000.tar.gz -C /repo/vagrant --exclude=./.vagrant --exclude=./.git .
-cd /tmp/.tmpAL8i && scp .bombyx-push-4821-729551000.tar.gz frosti:.bombyx-push-4821-729551000.tar.gz
-ssh frosti "{ cd ~/'vms/phren' && tar -xzf ~/'.bombyx-push-4821-729551000.tar.gz'; }; rc=\$?; rm -f ~/'.bombyx-push-4821-729551000.tar.gz'; exit \$rc"
-ssh frosti "cd ~/'vms/phren' && vagrant 'up'"
-```
-
-The output is real shell: each argument is printed bare only
-when it is unambiguous, and quoted otherwise, so what you
-read is what runs.
-
-The push ships a tar archive rather than using `scp -r`,
-which copies *into* an existing destination and would nest
-the directory one level deeper on every push. Extracting a
-tar overwrites in place, so repeated pushes are idempotent.
-`rsync` would also work but is not present on a stock
-Windows workstation; `tar`, `scp` and `ssh` are.
-
-Details that look fussy and are not:
-
-- **The tilde sits outside the quotes** (`~/'vms/phren'`). A
-  POSIX shell does not expand `~` inside single quotes, so
-  the obvious `'~/vms/phren'` would create a directory
-  literally named `~`. Quoting only the rest keeps the path
-  injection-proof *and* expandable.
-- **The archive keeps a bare name** and `tar`/`scp` run in
-  its directory. `scp` reads everything before the first
-  colon as a host name, so handing it a Windows path
-  (`C:\Users\...`) would make it dial a host called `C`.
-- **`.vagrant/` is excluded from the archive.** It holds the
-  VM's identity on the host; shipping a local copy would
-  orphan the running VM. `.git/` is excluded because there is
-  no reason to ship it.
-- **Cleanup is unconditional** (`rc=$?; rm -f ...`), so a
-  failed extract does not leave a corrupt archive in the
-  directory `vagrant up` runs in.
-
-The tradeoff of extracting in place: a file deleted locally
-is not removed from the host. Run `vagrant destroy` and
-re-push if the remote tree needs pruning.
-
-`bombyx.toml` travels inside a repo, so it is treated as
-untrusted input: `host` must look like an SSH alias (a value
-starting with `-` would otherwise be read by `ssh` as an
-option such as `-oProxyCommand=...`, running code on your
-workstation), and a scratch name must be a single path
-segment, so `../../etc` is refused rather than quoted.
+[docs/usage.md](docs/usage.md) is the full reference. It covers
+why `provision` is a separate command, why `destroy` asks for
+the project name, what teardown removes, how to read the
+`doctor` report, and how the push is built -- including the
+quoting details that keep a config file from running code on
+your workstation.
 
 ## Development
 

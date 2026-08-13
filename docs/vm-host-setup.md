@@ -250,10 +250,10 @@ remedies are here:
 ```console
 $ bombyx doctor
   local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
-  frosti  ssh               ok
-  frosti  login shell       ok    posix
-  frosti  vagrant           ok    /usr/bin/vagrant
-  frosti  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
+  vmhost  ssh               ok
+  vmhost  login shell       ok    posix
+  vmhost  vagrant           ok    /usr/bin/vagrant
+  vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
 all checks passed
 ```
 
@@ -565,7 +565,17 @@ Vagrantfile.
 bombyx does not ship either of them, because the project
 repository is meant to be the source of truth for how its VM
 is built. See `bombyx.toml.sample`, and the **Configure**
-section of `README.md`.
+section of `README.md`. [tutorial.md](tutorial.md) writes both
+files from scratch and boots the result, if you would rather
+follow a worked example than assemble one.
+
+One thing that does *not* go in the project's file is the name
+of this host. `bombyx.toml` is committed and a VM host is
+personal, so bombyx refuses a `host` key there and reads it
+from a per-developer `config.toml` instead --
+`~/.config/bombyx/config.toml`, or `%APPDATA%\bombyx` on
+Windows. **Where bombyx looks for the host** in `README.md`
+lists the four sources and their order.
 
 ## Other distributions
 

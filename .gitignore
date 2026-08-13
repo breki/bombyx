@@ -30,9 +30,11 @@ coverage.json
 # mise local overrides
 .mise.local.toml
 
-# Per-developer config override. `host` is personal, so this
-# never belongs in the repo -- and a tracked one would be
-# applied on checkout by everyone who clones.
+# Per-project config override. It usually carries a `host`,
+# which is personal, so this never belongs in the repo -- and a
+# tracked one would be applied on checkout by everyone who
+# clones. (A `host` in the committed `bombyx.toml` is refused
+# outright; see "Configure" in README.md.)
 bombyx.local.toml
 
 # Vagrant machine state. Holds the VM's identity: it belongs

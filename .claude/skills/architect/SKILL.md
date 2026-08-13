@@ -64,9 +64,14 @@ bombyx/
 
 ### `config` -- project configuration
 
-Parses `bombyx.toml`: `host`, `project`, `vagrant_dir`,
-`remote_root`. Typed errors via `thiserror`. Computes
-remote paths (`remote_project_dir`, `remote_scratch_dir`).
+Parses `bombyx.toml`: `project`, `vagrant_dir`,
+`remote_root` -- and *refuses* `host`, which belongs to the
+developer rather than the repo. `host` is resolved
+separately from `--host`, `BOMBYX_HOST`,
+`bombyx.local.toml` or the per-developer `config.toml`, in
+that order (`HostSources`). Typed errors via `thiserror`.
+Computes remote paths (`remote_project_dir`,
+`remote_scratch_dir`).
 
 ### `remote` -- command construction
 

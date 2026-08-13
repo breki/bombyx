@@ -300,9 +300,9 @@ mod tests {
 
     #[test]
     fn dir_writable_walks_up_and_never_creates() {
-        let c = dir_writable(&cfg(), "~/vms/phren");
+        let c = dir_writable(&cfg(), "~/vms/myproject");
         let script = c.args.last().unwrap();
-        assert!(script.starts_with("d=~/'vms/phren';"), "{script}");
+        assert!(script.starts_with("d=~/'vms/myproject';"), "{script}");
         // Each failure names itself, so five distinct host
         // states stop collapsing into one "not found".
         for named in [
@@ -320,7 +320,7 @@ mod tests {
         // testing only that would carry on to a writable parent
         // and report success -- while `mkdir -p` fails with
         // `File exists`.
-        let c = dir_writable(&cfg(), "~/vms/phren");
+        let c = dir_writable(&cfg(), "~/vms/myproject");
         let script = c.args.last().unwrap();
         assert!(
             script.contains("[ ! -e \"$p\" ] && [ ! -L \"$p\" ]"),

@@ -34,14 +34,16 @@ and this project adheres to
 - `scratch` pushes before booting; it would otherwise run
   `vagrant up` in an empty directory.
 - Config and CLI input is validated against an allowlist before it reaches a
-  command line. `bombyx.toml` travels inside a repo, so a `host` of
-  `-oProxyCommand=...` would otherwise be read by `ssh` as an option and run
-  code on the workstation; a scratch name must be a single path segment, so
-  `../../etc` is refused rather than quoted into a traversal.
-- Remote paths keep a leading `~` outside the quotes (`~/'vms/phren'`). A POSIX
-  shell does not expand `~` inside single quotes, so a fully quoted path created
-  a directory literally named `~` while `scp` wrote to the real home directory
-  -- the two halves of `up` targeted different places.
+  command line. A `host` of `-oProxyCommand=...` would otherwise be read by
+  `ssh` as an option and run code on the workstation, so the charset is
+  restricted whichever source supplied it; a scratch name must be a single path
+  segment, so `../../etc` is refused rather than quoted into a traversal.
+  `bombyx.toml` travels inside a repo, which is why every field it *can* carry
+  is treated as untrusted.
+- Remote paths keep a leading `~` outside the quotes (`~/'vms/myproject'`). A
+  POSIX shell does not expand `~` inside single quotes, so a fully quoted path
+  created a directory literally named `~` while `scp` wrote to the real home
+  directory -- the two halves of `up` targeted different places.
 - The push archive gets a per-run name in a private temporary directory, and
   `tar` and `scp` run in that directory with a bare file name. This keeps
   concurrent runs from colliding, keeps a co-user from pre-creating the path,
@@ -84,12 +86,32 @@ and this project adheres to
   leaving outbound internet working. Read-only by default; `apply`, `persist`
   and `revert` are explicit. Documented in `docs/vm-host-setup.md`, and marked
   unverified until it has been applied to a real host.
-- A `bombyx.local.toml` beside the config overrides any of its fields, so a team
-  can commit one `bombyx.toml` while each member points at their own VM host.
-  Every field in it is optional and the file itself is optional; `--config
-  x.toml` reads `x.local.toml`. Validation runs after the merge, so an override
-  is subject to the same checks as the committed file rather than a way around
-  them.
+- A `bombyx.local.toml` beside the config overrides any of its fields, so one
+  project can point at a different machine, or use a different `remote_root`,
+  without touching the committed file. Every field in it is optional and the
+  file itself is optional; `--config x.toml` reads `x.local.toml`. Validation
+  runs after the merge, so an override is subject to the same checks as the
+  committed file rather than a way around them.
+- The VM host is resolved from four sources, first match winning: `--host`, the
+  `BOMBYX_HOST` environment variable (blank counts as unset), a gitignored
+  per-project `bombyx.local.toml`, and a per-developer `config.toml` --
+  `%APPDATA%\bombyx` on Windows, else `$XDG_CONFIG_HOME/bombyx` or
+  `$HOME/.config/bombyx`, relocatable with `BOMBYX_CONFIG_HOME`. With none of
+  them set, bombyx stops and names all four instead of guessing. A config
+  directory from the environment must be an *anchored* path; a blank or relative
+  one counts as unset, since it would otherwise resolve against the working
+  directory and take the host out of whatever repo bombyx ran in. The
+  per-developer file may be a symlink, as every dotfile manager makes it.
+- bombyx names the source the host came from, unless it was the per-developer
+  `config.toml` (the ordinary case, and noise on every command). With a
+  `bombyx.local.toml` present, the override notice alone read as though that
+  file's host was in force even when the flag, the environment, or nothing in
+  it at all had decided the host. An error about a bad host names the file or
+  flag that supplied it rather than the project config, which is the one file
+  forbidden to carry one.
+- `docs/tutorial.md`: an end-to-end walkthrough covering the workstation, the VM
+  host and a sample project with a Vagrantfile and provisioning script.
+  `docs/usage.md`: the full command reference, split out of the README.
 
 ### Changed
 
@@ -105,6 +127,12 @@ and this project adheres to
   `tar.exe` was workstation code execution -- in `doctor`, the command the docs
   say to run first in a fresh clone. Resolving up front also means a missing
   tool fails before `up` has created the remote directory.
+- `host` is no longer read from `bombyx.toml`, and a `host` key there is now
+  refused with an error naming where to move it. The VM host belongs to whoever
+  drives bombyx, not to the project: each developer has their own hardware on
+  their own network, and `destroy` runs `vagrant destroy` and `rm -rf` on
+  whichever host is in force, so a committed value aimed everyone's teardown at
+  one person's machine.
 
 ### Fixed
 

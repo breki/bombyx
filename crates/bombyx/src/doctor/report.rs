@@ -201,14 +201,14 @@ mod tests {
         // escaped runs of spaces is unreadable, so a wrong
         // expectation is as easy to write as a right one.
         assert_eq!(
-            r.render("frosti").lines().collect::<Vec<_>>(),
+            r.render("vmhost").lines().collect::<Vec<_>>(),
             vec![
                 "  local   tar  ok    bsdtar 3.8.4",
-                "  frosti  ssh  ok",
+                "  vmhost  ssh  ok",
                 "all checks passed",
             ]
         );
-        for line in r.render("frosti").lines() {
+        for line in r.render("vmhost").lines() {
             assert_eq!(line, line.trim_end());
         }
     }

@@ -2,7 +2,47 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-13-config-parse-is-test-only
+
+**Category:** API design / test-only public surface
+
+`Config::parse(source: &str, path: &Path, host: &str)` is public
+and has no production caller. Its only users are `for_tests` and
+two integration tests; `main.rs` goes through `Config::load`.
+
+Two things follow. The signature takes two adjacent `&str` with
+different meanings, so `parse(host, path, source)` compiles and
+fails at run time with a confusing charset error. And it hardcodes
+`&HostSources::default()` when refusing a `host` key, so the same
+repo mistake produces a less helpful message than `load` gives --
+the per-developer `config.toml` is not named.
+
+The suggestion was either a `Host` newtype carrying the charset
+check (which would also stop the argument swap), or demoting
+`parse` to a test-only constructor and having the integration
+tests use `Config::load` against a temp fixture like the rest of
+the suite.
+
+Deferred because the commit that raised it already changed this
+module's public surface twice over (`load` gained a `HostSources`
+parameter and a `HostOrigin` return), and a newtype for `host`
+touches every construction site. Worth doing as its own change,
+where the diff is about the type and nothing else.
+
 ## aq-2026-08-11-config-module-size
+
+*(Flagged again on 2026-08-13, larger: the host-resolution work
+added `ProjectFile`, `UserFile`, `HostSources`, `HostOrigin`,
+three constants, five free functions and ~450 lines of tests, and
+the file is past 1900 lines. The suggested split is now
+`config/host.rs` for everything host-resolution -- the constants,
+`HostSources`, `HostOrigin`, `UserFile`, `user_config_dir`,
+`config_dir_from`, `is_anchored_dir`, `resolve_host`,
+`host_places`, `host_problem` and their tests -- leaving
+`config.rs` as the project-file parser and orchestrator. Deferred
+for the same reason as before: that commit was fixing two real
+defects in this file, and moving the code around the fixes makes
+both harder to review.)*
 
 **Category:** Module size / cohesion
 

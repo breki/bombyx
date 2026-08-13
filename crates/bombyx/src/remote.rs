@@ -112,11 +112,11 @@ pub fn shell_quote(value: &str) -> String {
 /// wrong. Leaving the path unquoted allows injection; quoting
 /// the whole path suppresses tilde expansion, because a POSIX
 /// shell does **not** expand `~` inside single quotes -- so
-/// `mkdir -p '~/vms/phren'` silently creates a directory
+/// `mkdir -p '~/vms/myproject'` silently creates a directory
 /// literally named `~` in the home directory.
 ///
 /// The fix is to leave only the tilde outside the quotes:
-/// `~/'vms/phren'`. Everything an attacker could influence
+/// `~/'vms/myproject'`. Everything an attacker could influence
 /// stays quoted, and the shell still expands the home
 /// directory.
 #[must_use]
@@ -344,14 +344,14 @@ mod tests {
         push_dir(
             &cfg(),
             Path::new("/repo/vagrant"),
-            "~/vms/phren",
+            "~/vms/myproject",
             &archive(),
         )
     }
 
     #[test]
     fn quotes_a_plain_value() {
-        assert_eq!(shell_quote("phren"), "'phren'");
+        assert_eq!(shell_quote("myproject"), "'myproject'");
     }
 
     #[test]
@@ -386,7 +386,7 @@ mod tests {
     fn remote_path_keeps_a_leading_tilde_unquoted() {
         // The whole point: `'~/vms'` is a literal `~`
         // directory, not the home directory.
-        assert_eq!(quote_remote_path("~/vms/phren"), "~/'vms/phren'");
+        assert_eq!(quote_remote_path("~/vms/myproject"), "~/'vms/myproject'");
     }
 
     #[test]
@@ -417,8 +417,8 @@ mod tests {
     fn builds_a_vagrant_command() {
         let c = vagrant(&cfg(), &["up"]);
         assert_eq!(c.program, "ssh");
-        assert_eq!(c.args[0], "frosti");
-        assert_eq!(c.args[1], "cd ~/'vms/phren' && vagrant 'up'");
+        assert_eq!(c.args[0], "vmhost");
+        assert_eq!(c.args[1], "cd ~/'vms/myproject' && vagrant 'up'");
     }
 
     #[test]
@@ -426,7 +426,7 @@ mod tests {
         let c = vagrant(&cfg(), &["snapshot", "restore", "fresh-install"]);
         assert_eq!(
             c.args[1],
-            "cd ~/'vms/phren' && vagrant 'snapshot' 'restore' \
+            "cd ~/'vms/myproject' && vagrant 'snapshot' 'restore' \
              'fresh-install'"
         );
     }
@@ -442,7 +442,7 @@ mod tests {
         );
         assert_eq!(
             c.args[1],
-            "cd ~/'vms/scratch/phren/pr-1234' && vagrant \
+            "cd ~/'vms/scratch/myproject/pr-1234' && vagrant \
              'destroy' '-f'"
         );
     }
@@ -504,7 +504,7 @@ mod tests {
         let cmds = push_dir(
             &cfg(),
             Path::new("/repo/vagrant"),
-            "~/vms/phren",
+            "~/vms/myproject",
             &archive,
         );
         for arg in &cmds[1].args {
@@ -519,7 +519,7 @@ mod tests {
     fn push_copies_the_archive_to_the_remote_home() {
         assert_eq!(
             push()[1].args,
-            vec![".bombyx-push-42.tar.gz", "frosti:.bombyx-push-42.tar.gz"]
+            vec![".bombyx-push-42.tar.gz", "vmhost:.bombyx-push-42.tar.gz"]
         );
     }
 
@@ -529,7 +529,7 @@ mod tests {
         // archive inside the tree `vagrant up` runs in.
         assert_eq!(
             push()[2].args[1],
-            "{ cd ~/'vms/phren' && tar -xzf \
+            "{ cd ~/'vms/myproject' && tar -xzf \
              ~/'.bombyx-push-42.tar.gz'; }; rc=$?; rm -f \
              ~/'.bombyx-push-42.tar.gz'; exit $rc"
         );
@@ -584,16 +584,16 @@ mod tests {
 
     #[test]
     fn remove_dir_quotes_the_path_and_keeps_the_tilde() {
-        let c = remove_dir(&cfg(), "~/vms/phren");
+        let c = remove_dir(&cfg(), "~/vms/myproject");
         assert_eq!(c.program, "ssh");
-        assert_eq!(c.args[0], "frosti");
-        assert_eq!(c.args[1], "rm -rf ~/'vms/phren'");
+        assert_eq!(c.args[0], "vmhost");
+        assert_eq!(c.args[1], "rm -rf ~/'vms/myproject'");
     }
 
     #[test]
     fn remove_dir_removes_an_absolute_path() {
-        let c = remove_dir(&cfg(), "/srv/vms/phren");
-        assert_eq!(c.args[1], "rm -rf '/srv/vms/phren'");
+        let c = remove_dir(&cfg(), "/srv/vms/myproject");
+        assert_eq!(c.args[1], "rm -rf '/srv/vms/myproject'");
     }
 
     #[test]
@@ -609,10 +609,10 @@ mod tests {
         // An interrupted first push leaves the directory made
         // but empty. A bare `vagrant destroy -f` fails there,
         // and would stop the removal that follows.
-        let c = destroy_vm_if_present(&cfg(), "~/vms/phren");
+        let c = destroy_vm_if_present(&cfg(), "~/vms/myproject");
         assert_eq!(
             c.args[1],
-            "cd ~/'vms/phren' && if [ -f Vagrantfile ]; then \
+            "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
              vagrant destroy -f; fi"
         );
     }
@@ -627,20 +627,20 @@ mod tests {
     fn shell_into_vm_forces_a_tty() {
         let c = shell_into_vm(&cfg());
         assert_eq!(c.args[0], "-t");
-        assert_eq!(c.args[1], "frosti");
-        assert_eq!(c.args[2], "cd ~/'vms/phren' && vagrant 'ssh'");
+        assert_eq!(c.args[1], "vmhost");
+        assert_eq!(c.args[2], "cd ~/'vms/myproject' && vagrant 'ssh'");
     }
 
     #[test]
     fn displays_a_plain_command_unquoted() {
-        let c = RemoteCommand::new("scp", &["a.tgz", "frosti:a.tgz"]);
-        assert_eq!(c.to_string(), "scp a.tgz frosti:a.tgz");
+        let c = RemoteCommand::new("scp", &["a.tgz", "vmhost:a.tgz"]);
+        assert_eq!(c.to_string(), "scp a.tgz vmhost:a.tgz");
     }
 
     #[test]
     fn displays_a_spaced_argument_quoted() {
-        let c = RemoteCommand::new("ssh", &["frosti", "cd x && vagrant up"]);
-        assert_eq!(c.to_string(), "ssh frosti \"cd x && vagrant up\"");
+        let c = RemoteCommand::new("ssh", &["vmhost", "cd x && vagrant up"]);
+        assert_eq!(c.to_string(), "ssh vmhost \"cd x && vagrant up\"");
     }
 
     #[test]

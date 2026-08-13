@@ -3,14 +3,15 @@
 # Copy this to `bombyx.toml` in the ROOT OF THE PROJECT you
 # want a VM for -- not here. Each project carries its own
 # config next to the `vagrant/` directory it describes.
-
-# SSH host alias of the VM host, resolved through your
-# ~/.ssh/config. bombyx never handles addresses or keys.
-host = "frosti"
+#
+# THERE IS NO `host` KEY HERE, AND ONE IS REFUSED.
+# Which machine runs the VMs is a property of whoever is
+# driving bombyx, not of the project: everyone has their own
+# hardware on their own network. See the bottom of this file.
 
 # Project name. Doubles as the VM's directory name on the
-# host, e.g. ~/vms/phren.
-project = "phren"
+# host, e.g. ~/vms/myproject.
+project = "myproject"
 
 # Directory in THIS repo holding the Vagrantfile and
 # provisioning scripts. Pushed to the host on every `up`,
@@ -32,15 +33,33 @@ vagrant_dir = "vagrant"
 # it is rejected, as are shell metacharacters.
 remote_root = "~/vms"
 
-# PER-DEVELOPER OVERRIDES
+# WHERE THE VM HOST GOES INSTEAD
 #
-# This file is meant to be committed, but `host` is personal:
-# everyone on a project has their own VM host. Put yours in a
-# `bombyx.local.toml` beside this one and gitignore it:
+# bombyx looks in four places, and takes the first that names
+# one:
+#
+#   1. `--host vmhost-b`         a one-off run
+#   2. `BOMBYX_HOST=vmhost-b`    a shell, CI, or an agent
+#   3. `bombyx.local.toml`       this project only; gitignore it
+#   4. your own config.toml      every project -- the usual one
+#
+# The per-developer file is the one to set up once:
+#
+#   Linux/macOS  ~/.config/bombyx/config.toml
+#   Windows      %APPDATA%\bombyx\config.toml
+#
+#   # config.toml
+#   host = "my-vmhost"
+#
+# `host` is an SSH alias, resolved through your ~/.ssh/config,
+# so bombyx never handles addresses, usernames or keys.
+#
+# A project that needs a different machine from your usual one
+# gets a `bombyx.local.toml` beside this file:
 #
 #   # bombyx.local.toml
-#   host = "fusion"
+#   host = "other-vmhost"
 #
-# Every field above can be overridden there and every one is
-# optional, so name only what differs. The file itself is
+# Every field above can also be overridden there, and every one
+# is optional, so name only what differs. The file itself is
 # optional; most projects never need one.
