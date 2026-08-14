@@ -112,6 +112,14 @@ and this project adheres to
 - `docs/tutorial.md`: an end-to-end walkthrough covering the workstation, the VM
   host and a sample project with a Vagrantfile and provisioning script.
   `docs/usage.md`: the full command reference, split out of the README.
+- `docs/vm-host-wsl2.md`: using a WSL2 distribution on your own Windows machine
+  as the VM host. Covers the four failures particular to WSL -- a guest bridge
+  that outlives the distribution and blocks libvirt, Vagrant demanding Windows
+  interop because its Hyper-V provider reads WSL as Windows, WSL stopping idle
+  distributions out from under running guests (and `vmIdleTimeout` measurably
+  not preventing it), and reaching the host through a one-shot `sshd -i` over a
+  ProxyCommand so no port is exposed to the guests. Verified end to end, and
+  explicit about the isolation such a host gives up.
 
 ### Changed
 
