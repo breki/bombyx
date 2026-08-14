@@ -138,6 +138,37 @@ for tools that are not present:
   same line. Backslash does not escape `$` in PowerShell;
   backtick does. Use a single-quoted string, or a Bash
   heredoc, whenever the text contains `$`.
+- **The same mistake has three other shapes. Check all
+  four when a value crosses a shell boundary.** The rule
+  above protects a *primitive* -- who expands the text --
+  not the `$` character, and each sibling produced a false
+  statement before it was noticed:
+  - **`$(...)` inside a nested remote command runs on the
+    near side.** `ssh host "vagrant ssh -c \"uname -srm\""`
+    is fine, but `$(uname -srm)` written inside it is
+    expanded by the *host* shell, so a guest check happily
+    reports the host's kernel and hostname. Escape it
+    (`\$(...)`), and assert one value that must differ
+    between the two, so a wrong-side expansion is visible
+    rather than plausible.
+  - **An empty argument to a native `.exe` is not empty.**
+    `ssh-keygen -N '""'` in PowerShell passes two literal
+    quote characters as the passphrase, producing an
+    encrypted key that then prompts and hangs anything
+    unattended. Generate keys from Bash, and verify with
+    `ssh-keygen -y -P '' -f <key>` before relying on one.
+  - **`pgrep -f <pattern>` matches its own invocation.**
+    The wrapper command contains the pattern, so a count
+    is inflated and a dead process looks alive. Count with
+    `ps -eo comm | grep -c '^name'` instead.
+- **A Windows command needing elevation blocks on a dialog
+  you cannot see.** `wsl --update` produced no output for
+  ten minutes and read as a hang; a UAC prompt was waiting
+  off-screen the whole time. Run anything that may elevate
+  (`msiexec`, `wsl --update`, `Start-Process -Verb RunAs`)
+  with `run_in_background`, and when a command stalls with
+  an empty log, check `Get-Process consent` before
+  diagnosing anything else.
 
 ## Collaboration
 

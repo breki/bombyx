@@ -255,13 +255,24 @@ remedies are here:
 
 ```console
 $ bombyx doctor
-  local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
+  local   tar               ok    bsdtar 3.8.4 in C:\Windows\system32
+  local   ssh               ok    OpenSSH_for_Windows_9.5p2 in C:\Windows...
+  local   scp               ok    C:\Windows\System32\OpenSSH
+  local   Vagrantfile       ok
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
+  vmhost  tar               ok    /usr/bin/tar
+  vmhost  scp               ok    /usr/bin/scp
   vmhost  vagrant           ok    /usr/bin/vagrant
+  vmhost  project dir       ok    /home/you (will create /home/you/vms/...
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
 all checks passed
 ```
+
+Either `tar` works. The bundled `bsdtar` in `C:\Windows\system32`
+is what a stock Windows workstation has, and the GNU `tar` that
+comes with Git for Windows is equally fine; `doctor` reports
+whichever it found first on the `PATH`.
 
 The manual equivalents are below, and remain useful when you
 want to see the raw output or are setting up before bombyx is
