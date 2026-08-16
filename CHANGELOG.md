@@ -165,4 +165,7 @@ and this project adheres to
   `is_reparse_or_symlink_meta` unconditionally while only its `#[cfg(windows)]`
   branch uses it, and the workspace denies warnings. Nothing on a Windows
   workstation could see it, and there was no CI until now.
+- Clippy failed on Linux and macOS: off Windows `is_reparse_or_symlink_path` can
+  never return `Err`, so `clippy::unnecessary_wraps` fired on a signature that
+  has to serve both platforms.
 

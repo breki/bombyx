@@ -196,6 +196,16 @@ fn delete_entry(
 /// used by deletion. Avoids the extra
 /// `symlink_metadata` call on Unix by short-circuiting
 /// on `file_type.is_symlink()` directly.
+///
+/// The `Result` is load-bearing on Windows only, where
+/// `symlink_metadata` can fail. Off Windows every path
+/// returns `Ok`, so `clippy::unnecessary_wraps` is right
+/// about that build and wrong about the function: one
+/// signature has to serve both, and the caller propagates
+/// the Windows error. Hence an allow scoped to the
+/// platform that triggers it, rather than a per-`cfg`
+/// signature the caller would then have to match.
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn is_reparse_or_symlink_path(
     path: &Path,
     file_type: std::fs::FileType,
