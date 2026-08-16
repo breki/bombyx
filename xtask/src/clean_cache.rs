@@ -30,9 +30,14 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use crate::helpers::{
-    dir_size, fmt_bytes, is_reparse_or_symlink_meta, workspace_root,
-};
+use crate::helpers::{dir_size, fmt_bytes, workspace_root};
+
+// Only the Windows branch of `is_reparse_or_symlink_path` calls
+// this, so an unconditional import is unused everywhere else and
+// the workspace denies warnings -- which made `xtask` fail to
+// compile on Linux and macOS while building fine on Windows.
+#[cfg(windows)]
+use crate::helpers::is_reparse_or_symlink_meta;
 
 /// Incremental cache subdirectories under `target/`.
 const INCREMENTAL_DIRS: &[&str] =

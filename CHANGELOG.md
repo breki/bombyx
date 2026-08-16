@@ -161,4 +161,8 @@ and this project adheres to
   paths, drive letters, `~` and `..` are all refused; a Windows drive is checked
   explicitly because it is not absolute on Unix and the file travels between
   platforms.
+- `xtask` failed to compile on Linux and macOS: `clean_cache` imported
+  `is_reparse_or_symlink_meta` unconditionally while only its `#[cfg(windows)]`
+  branch uses it, and the workspace denies warnings. Nothing on a Windows
+  workstation could see it, and there was no CI until now.
 
