@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Tests run on all three platforms because bombyx builds
+  # command lines for `ssh`, `scp` and `tar`, and the quoting and
+  # path handling differ per host. A test suite that only ran on
+  # Linux would not exercise the workstation this tool is mostly
+  # driven from.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the channel and asks for clippy
+      # and rustfmt, so rustup fetches the right toolchain and
+      # components on first use. Nothing here needs to name them.
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # `cargo xtask test`, not `cargo test`: CLAUDE.md requires
+      # every invocation to go through xtask, so CI runs the same
+      # command a developer does and cannot drift from it.
+      - name: Test
+        run: cargo xtask test
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      # The read-only form. `cargo xtask fmt` rewrites files in
+      # place, which in CI would report success on a tree it had
+      # just fixed.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-clippy-
+      - name: Clippy
+        run: cargo xtask clippy
+
+  # The doc gate runs rustdoc twice, once with private items, and
+  # neither pass catches what the other does -- see "Doc gate" in
+  # CLAUDE.md. It is cheap, and a broken doc link otherwise builds
+  # cleanly while the docs quietly stop navigating.
+  doc:
+    name: Doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-doc-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-doc-
+      - name: Doc
+        run: cargo xtask doc

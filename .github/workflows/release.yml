@@ -1,0 +1,216 @@
+name: Release
+
+# Fires on the annotated tag that `/release` creates. That is the
+# whole trigger: bombyx is installed with `cargo install`, so a
+# release is the tag, and there is nothing to deploy afterwards.
+on:
+  push:
+    tags: [ "v*.*.*" ]
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # The two `validate` gates that every-push CI leaves out.
+  #
+  # They run here and not in ci.yml because each needs a tool the
+  # runner does not ship, and paying for that on every push and
+  # pull request buys little: a coverage or duplication
+  # regression is not urgent the minute it lands, but shipping a
+  # release whose only check of them happened on one developer's
+  # laptop is a different matter. `/release` does run the full
+  # `cargo xtask validate` before tagging -- this is the copy
+  # that runs somewhere nobody can skip.
+  #
+  # `audit` and `dep-age-check` are deliberately still absent.
+  # Both reach the network for state that changes on its own, so
+  # in CI they fail for reasons unrelated to the commit being
+  # released, and the project already treats an unreachable
+  # advisory DB as a warning rather than an error.
+  #
+  # Installed from crates.io rather than through a prebuilt-binary
+  # action: crates.io is already a trust root for this build, so
+  # `cargo install` adds no new party, where a third-party action
+  # would. `--locked` builds each tool from the lockfile it was
+  # published with.
+  gates:
+    name: Coverage and duplication
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup component add llvm-tools-preview
+
+      # Keyed without the lockfile: these tools are independent of
+      # this project's dependencies, so a Cargo.lock change should
+      # not throw away a cache that costs minutes to refill. Bump
+      # the -v1 suffix to force a rebuild.
+      - name: Cache gate tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-gate-tools-v1
+
+      - name: Install gate tools
+        run: |
+          command -v cargo-llvm-cov >/dev/null ||
+            cargo install --locked cargo-llvm-cov
+          command -v code-dupes >/dev/null ||
+            cargo install --locked code-dupes
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gates-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-gates-
+
+      - name: Coverage
+        run: cargo xtask coverage
+
+      - name: Duplication
+        run: cargo xtask dupes
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: gates
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add ${{ matrix.target }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      # --locked so the published binary is built from the
+      # committed lockfile. Without it cargo may resolve newer
+      # versions at build time, and the artifact would not match
+      # the dependency set that passed the release gate -- which
+      # is also what the 14-day cooldown is protecting.
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Determine archive name
+        id: archive
+        shell: bash
+        run: |
+          echo "name=bombyx-${GITHUB_REF_NAME}-${{ matrix.target }}" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGING="${{ steps.archive.outputs.name }}"
+          mkdir "$STAGING"
+          cp "target/${{ matrix.target }}/release/bombyx" "$STAGING/"
+          cp LICENSE README.md "$STAGING/"
+          tar czf "${STAGING}.tar.gz" "$STAGING"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGING="${{ steps.archive.outputs.name }}"
+          mkdir "$STAGING"
+          cp "target/${{ matrix.target }}/release/bombyx.exe" "$STAGING/"
+          cp LICENSE README.md "$STAGING/"
+          7z a "${STAGING}.zip" "$STAGING"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: ${{ steps.archive.outputs.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Notes come from the dated CHANGELOG section for this exact
+      # version, and from nothing else.
+      #
+      # The obvious version of this accepts `[Unreleased]` as a
+      # fallback, and that is a trap rather than a convenience:
+      # `[Unreleased]` is the first heading in the file, so it
+      # matches before the version section is ever reached, and
+      # `/release` has just emptied it. The release then ships
+      # with empty notes and nothing fails. Matching the version
+      # heading exactly, and failing when it is absent, is what
+      # keeps a silent mistake loud.
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v prefix="## [${VERSION}]" '
+            /^## \[/ {
+              if (found) exit
+              found = (substr($0, 1, length(prefix)) == prefix)
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [ ! -s release_notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for [${VERSION}]." \
+                 "Did /release promote [Unreleased] to a dated section?"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          --title "$GITHUB_REF_NAME"
+          --notes-file release_notes.md
+          --verify-tag
+          artifacts/*

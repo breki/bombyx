@@ -2,6 +2,45 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-16
+
+**CI and a release workflow, and one bug not copied across**
+
+bombyx had no `.github` directory at all: no CI, no releases, and
+the only way to install it was `cargo install` with a Rust
+toolchain to hand. Both workflows are modelled on kozmotic's,
+which is the sibling project that already does this.
+
+Three things were changed rather than copied.
+
+The release-notes step in kozmotic's workflow accepts
+`[Unreleased]` as a fallback when it cannot find the version's
+section. `[Unreleased]` is the first heading in the file, so it
+always matches before the version section is reached, and
+`/release` has just emptied it -- kozmotic's `v1.2.0` shipped
+with empty notes for exactly this reason. Here the version
+heading is matched by exact prefix and a missing section
+**fails** the release rather than publishing silence.
+
+CI runs `cargo xtask test` and `cargo xtask clippy` rather than
+the raw cargo commands, because `CLAUDE.md` requires it and CI
+that used a different entry point would drift from what a
+developer runs. `fmt` is the exception: `cargo xtask fmt`
+rewrites in place, so in CI it would pass on a tree it had just
+fixed, and the read-only `cargo fmt --all -- --check` is used
+instead.
+
+Coverage and duplication run on the release path only, in a
+`gates` job that `build` depends on, so no binary is produced
+until they pass. They are kept out of every-push CI because each
+needs a tool the runner does not ship. `audit` and
+`dep-age-check` stay local: both reach the network for state
+that changes on its own, so in CI they fail for reasons
+unrelated to the commit being released. Six of `validate`'s
+eight gates therefore run somewhere nobody can skip; the two
+network-dependent ones still rely on `/release` running
+`validate` before it tags.
+
 ### 2026-08-13
 
 **The VM host left `bombyx.toml` entirely**

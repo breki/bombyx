@@ -120,6 +120,12 @@ and this project adheres to
   not preventing it), and reaching the host through a one-shot `sshd -i` over a
   ProxyCommand so no port is exposed to the guests. Verified end to end, and
   explicit about the isolation such a host gives up.
+- Prebuilt binaries for Linux, Windows and both macOS architectures, published
+  as a GitHub Release when a `vX.Y.Z` tag is pushed. Installing bombyx
+  previously required a Rust toolchain and `cargo install`. A release is gated
+  twice: `/release` runs `cargo xtask validate` before it tags, and the workflow
+  re-runs tests, formatting, clippy, docs, coverage and duplication before any
+  binary is built.
 
 ### Changed
 
