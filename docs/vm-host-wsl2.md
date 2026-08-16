@@ -303,12 +303,40 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/sshd.conf
 ## What this arrangement does not solve
 
 The guest network exposure described under "Keeping agent VMs off
-your home network" in [vm-host-setup.md](vm-host-setup.md)
-applies here unchanged, and is sharper: the gateway one hop from
-the guest is your own workstation. The nftables rules in
-`scripts/agent-vm-firewall.sh` close the guest-to-LAN and
-guest-to-host paths and have not been applied to a WSL host
-*(unverified)*.
+your home network" in [vm-host-setup.md](vm-host-setup.md) turns
+out to be **smaller** on a WSL host than on a dedicated one, and
+the reason is worth knowing rather than assuming either way.
+
+Measured on this setup: a guest could reach the internet and
+resolve names, and could not open TCP to the router, to the
+workstation's own LAN address, or to a Tailscale peer. Neither
+could the WSL distribution itself, while its internet access
+worked normally. So the block is WSL's own NAT and Hyper-V
+firewall, one layer above libvirt, and it applies before any rule
+you write.
+
+Do not read that as "no exposure". It was four TCP probes, not a
+proof; it says nothing about UDP or ICMP; and it depends on WSL's
+default NAT mode. **Mirrored networking mode removes it**, since
+the distribution then shares the Windows network namespace and
+sits directly on your LAN.
+
+`scripts/agent-vm-firewall.sh` has now been applied and persisted
+on a WSL host, and it works: the rules load against `virbr1`, the
+guest keeps internet and DNS, and the LAN and host-gateway paths
+stay closed. Treat it as defence in depth here rather than the
+primary barrier — which is a better position to be in than
+relying on a NAT behaviour that a settings change would remove.
+
+One caveat carried over unchanged: `conntrack` is not installed
+by default, so the script warns that connections opened before
+the rules loaded are still allowed. Restarting the guests
+achieves the same thing.
+
+The systemd unit was verified by restarting it, which proves it
+loads the rules file. Surviving a full restart of the
+distribution is *(unverified)* -- confirming it means terminating
+the distribution, which kills any running guest with it.
 
 Guest disk images land in the distribution's virtual disk, which
 grows and does not shrink when a VM is destroyed. Reclaiming that
