@@ -205,6 +205,27 @@ jobs:
             exit 1
           fi
 
+      # A tag carrying a suffix -- v0.2.0-rc1, v1.0.0-beta.2 --
+      # still matches this workflow's `v*.*.*` trigger, because the
+      # glob only requires two dots. Published as an ordinary
+      # release it would become "Latest" and be what everyone
+      # downloads, which is the opposite of what an rc is for.
+      #
+      # Detected from the tag rather than configured, so a
+      # pre-release needs no second place to remember.
+      - name: Classify the tag
+        id: kind
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF_NAME#v}" in
+            *-*) echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
+                 echo "tag ${GITHUB_REF_NAME} carries a suffix:" \
+                      "publishing as a pre-release" ;;
+            *)   echo "prerelease=" >> "$GITHUB_OUTPUT"
+                 echo "tag ${GITHUB_REF_NAME} is a normal release" ;;
+          esac
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -213,4 +234,5 @@ jobs:
           --title "$GITHUB_REF_NAME"
           --notes-file release_notes.md
           --verify-tag
+          ${{ steps.kind.outputs.prerelease }}
           artifacts/*

@@ -208,6 +208,20 @@ Confirm it the way bombyx will see it, not from a login shell:
 ssh <host> 'echo "$VAGRANT_DEFAULT_PROVIDER"'
 ```
 
+**The same vagrant command then works over SSH and fails from
+`wsl.exe`, which is worth knowing before it confuses you.** PAM is
+what applies `/etc/environment`, and only sshd goes through it.
+A command run as `wsl.exe -d <distro> -- vagrant status` does not,
+so the variable is unset, the Hyper-V probe runs, and it fails
+with the `cmd.exe` error above -- on a host where bombyx is
+working perfectly.
+
+That matters when you drop into the distribution to debug
+something by hand, because the failure looks like the fix never
+took. Reproduce bombyx's environment rather than the convenient
+one: go in over `ssh <host>`, or set the variable explicitly for
+the command.
+
 ## WSL stops idle distributions, and running guests die with them
 
 An agent VM is a QEMU process inside the distribution. When WSL
