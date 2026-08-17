@@ -17,6 +17,7 @@ agent works inside it.
   - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
   - [Per-project overrides](#per-project-overrides)
 - [Use](#use)
+- [Telling the VM which host it runs on](#telling-the-vm-which-host-it-runs-on)
 - [Development](#development)
 - [Status](#status)
 - [Origin](#origin)
@@ -235,6 +236,124 @@ the project name, what teardown removes, how to read the
 `doctor` report, and how the push is built -- including the
 quoting details that keep a config file from running code on
 your workstation.
+
+## Telling the VM which host it runs on
+
+An agent working inside the VM has no way to find out which
+machine is underneath it. There is no synced folder to read,
+`hostname` inside the guest answers with the guest's own name,
+and libvirt does not pass the host's name in at all -- the
+guest's SMBIOS/DMI describes the *emulated* machine, so
+`/sys/class/dmi/id/sys_vendor` reads `QEMU` and `product_name`
+names a QEMU machine type. Those files are readable; they simply
+hold nothing about the host, and the root-only ones
+(`product_serial`) carry no host name either. There is nothing to
+read at any privilege level. Once you have more than one VM
+host -- a workstation's WSL2 distribution and a real machine in
+the next room, say -- "where is this actually running" stops
+being a rhetorical question, and a status line that cannot
+answer it is a status line that will mislead you.
+
+So bombyx puts two environment variables on every `vagrant`
+invocation it makes on the host:
+
+| Variable | Holds |
+|----------|-------|
+| `BOMBYX_VM_HOST` | The SSH alias you configured, e.g. `frosti` |
+| `BOMBYX_VM_HOSTNAME` | What the host machine calls itself (`hostname -s`) |
+
+Both are passed because they need not agree: an alias in your
+`~/.ssh/config` can be any name you like, and often is. Show the
+alias -- it is the name you chose, so it is the one you
+recognise -- and keep the other for the day the two disagree and
+you need to know which machine actually answered.
+
+They can also legitimately agree. A WSL2 distribution that has
+not been given a name of its own reports the Windows machine's
+name, so on that kind of host `BOMBYX_VM_HOSTNAME` may equal your
+workstation's. That is expected rather than a sign that something
+expanded on the wrong side, and it means `BOMBYX_VM_HOST` is the
+value that actually distinguishes one host from another.
+
+They are set on every command that runs `vagrant` in a project
+directory, not only the ones that provision. `halt` and `status`
+have no use for them; setting them in one place is what keeps the
+next command that *does* need them from being the one that was
+forgotten -- `destroy` was exactly that, and it was caught in
+review rather than by the tests.
+
+`doctor` is the one exemption. Its probes run in your login
+directory on the host, not a project directory, so they evaluate
+no `Vagrantfile` and there is nothing there to read the values.
+
+Getting them the rest of the way is the project's job, because
+the project owns its `Vagrantfile` and its provisioning script.
+It takes two steps, and the first one is easy to miss.
+
+**The variables reach the `vagrant` process on the host, not the
+guest.** Vagrant does not export its own environment into the
+VM: a provisioner script runs inside the guest, under the
+guest's environment, so anything from the host has to be handed
+over deliberately. The `Vagrantfile` is Ruby running on the
+host, so it can read them and pass them on:
+
+```ruby
+config.vm.provision "shell",
+  path: "provision.sh",
+  privileged: false,
+  env: {
+    "BOMBYX_VM_HOST"     => ENV.fetch("BOMBYX_VM_HOST", "unknown"),
+    "BOMBYX_VM_HOSTNAME" => ENV.fetch("BOMBYX_VM_HOSTNAME", "unknown"),
+  }
+```
+
+If the provisioner already has an `env:` hash, merge into it
+rather than adding a second one -- a repeated key silently wins
+over the earlier value, and the variable that disappears is the
+one nobody was looking at.
+
+Then the script writes the values somewhere a status line can
+read them without asking for a password:
+
+```sh
+# Which machine this VM is running on. bombyx sets these two
+# variables on the vagrant invocation; nothing inside the guest
+# can work the answer out for itself.
+sudo mkdir -p /etc/bombyx
+printf 'host=%s\nhostname=%s\n' \
+  "${BOMBYX_VM_HOST:-unknown}" "${BOMBYX_VM_HOSTNAME:-unknown}" \
+  | sudo tee /etc/bombyx/vm-host > /dev/null
+```
+
+The defaults on both sides matter: a VM booted by a bare
+`vagrant up` on the host, rather than through bombyx, sees
+neither variable. Writing `unknown` is more use than an empty
+value that reads as a broken script.
+
+Provisioners run when the machine is first created and on
+`bombyx provision`, so an existing VM picks the file up on the
+next `bombyx provision` rather than on the next boot.
+
+A host with no `hostname` command leaves `BOMBYX_VM_HOSTNAME`
+empty rather than failing the boot. Refusing to start a VM over
+a status line would be the wrong trade.
+
+What has been checked, and what has not.
+
+Both variables were confirmed to arrive at a real `Vagrantfile`'s
+Ruby on a live host, and to be absent without the prefix. On that
+host `hostname -s` answered with a name different from the
+workstation's, which is what proves `$(hostname -s)` runs on the
+far side rather than here. That check works because those two
+names differ; on a WSL2 host that reports the Windows machine's
+name it would prove nothing, per the note above.
+
+That the guest's DMI holds nothing about the host was measured
+inside a running guest as the unprivileged user.
+
+The `env:` hand-off into the guest and the `provision.sh` line
+above are Vagrant's ordinary shell-provisioner behaviour and have
+**not** been exercised end to end in a booted VM *(unverified)*.
 
 ## Development
 

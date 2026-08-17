@@ -6,11 +6,28 @@
 
 use assert_cmd::Command;
 use bombyx::config::{CONFIG_DIR_ENV, HOST_ENV, USER_CONFIG_FILE};
+use bombyx::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 /// Name of the per-developer config directory inside a fixture.
 const CONFIG_HOME: &str = "config-home";
+
+/// The VM-host identity prefix, as `--dry-run` prints it.
+///
+/// Every vagrant invocation carries it so the guest can find out
+/// which machine it is running on. The command substitution
+/// appears escaped here because that is what makes the printed
+/// line honest: pasted into a shell it asks the *host* for its
+/// name, which is the whole point of the variable.
+///
+/// Built from the library's own constants, for the same reason
+/// [`write_user_config`] uses them: renamed, a hardcoded copy
+/// would leave this suite green while bombyx exported something
+/// else entirely.
+fn vm_env() -> String {
+    format!(r"{VM_HOST_ENV}='vmhost' {VM_HOSTNAME_ENV}=\$(hostname -s)")
+}
 
 /// Writes a `bombyx.toml` and a per-developer config naming
 /// `vmhost` into a fresh temp dir.
@@ -96,7 +113,14 @@ fn up_makes_the_dir_then_pushes_then_boots() {
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(lines[1].contains("--exclude=./.vagrant"));
     assert!(lines[3].contains("tar -xzf"));
-    assert!(lines[4].ends_with("cd ~/'vms/myproject' && vagrant 'up'\""));
+    assert!(
+        lines[4].ends_with(&format!(
+            "cd ~/'vms/myproject' && {} vagrant 'up'\"",
+            vm_env()
+        )),
+        "{}",
+        lines[4]
+    );
 }
 
 #[test]
@@ -188,7 +212,10 @@ fn provision_pushes_then_runs_vagrant_provision() {
     assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
-        lines[4].ends_with("cd ~/'vms/myproject' && vagrant 'provision'\""),
+        lines[4].ends_with(&format!(
+            "cd ~/'vms/myproject' && {} vagrant 'provision'\"",
+            vm_env()
+        )),
         "{}",
         lines[4]
     );
@@ -201,9 +228,12 @@ fn scratch_pushes_into_a_project_scoped_dir() {
     assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
-        lines[4].ends_with(
-            "cd ~/'vms/scratch/myproject/pr-1234' && vagrant 'up'\""
-        )
+        lines[4].ends_with(&format!(
+            "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up'\"",
+            vm_env()
+        )),
+        "{}",
+        lines[4]
     );
 }
 

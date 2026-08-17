@@ -222,6 +222,13 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 /// stripped `PATH`: composing the two into one line with a
 /// `tail` subshell instead reported an empty reason, because a
 /// `PATH` broken enough to hide `vagrant` can hide `tail` too.
+///
+/// **Deliberately without the VM-host identity prefix** that
+/// `remote::vagrant_script` puts on every other `vagrant` call.
+/// Probes run in the SSH login directory rather than a project
+/// directory, so this evaluates no `Vagrantfile` and there is
+/// nothing here that could read the variables. Adding them would
+/// suggest doctor is part of that arrangement when it is not.
 #[must_use]
 pub fn provider(cfg: &Config) -> RemoteCommand {
     probe(

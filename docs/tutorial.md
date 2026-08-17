@@ -345,9 +345,27 @@ Vagrant.configure("2") do |config|
   # where it needs root.
   config.vm.provision "shell",
     path: "provision.sh",
-    privileged: false
+    privileged: false,
+    # Hand the VM host's identity to the guest. bombyx sets
+    # these two on the `vagrant` process running here on the
+    # host; Vagrant does *not* export its own environment into
+    # the VM, so a provisioner sees them only if the Vagrantfile
+    # passes them over like this. This file is Ruby running on
+    # the host, which is why it can read them at all.
+    env: {
+      "BOMBYX_VM_HOST"     => ENV.fetch("BOMBYX_VM_HOST", "unknown"),
+      "BOMBYX_VM_HOSTNAME" => ENV.fetch("BOMBYX_VM_HOSTNAME", "unknown"),
+    }
 end
 ```
+
+The `env:` block, and the `provision.sh` lines that go with it,
+are *(unverified)*: the two variables were confirmed to arrive at
+a `Vagrantfile` on a live host, but the hand-off into a booted
+guest has not been run end to end. See
+[the README section](../README.md#telling-the-vm-which-host-it-runs-on)
+for what is and is not checked. Everything else in this file has
+been driven against a real host.
 
 The guest's disk is whatever the box ships, usually around
 20 GB. Growing it needs `libvirt.machine_virtual_size` *and* a
@@ -389,6 +407,20 @@ if [ ! -f /swapfile ]; then
   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 fi
 sudo swapon --all
+
+# Record which machine this VM is running on. (Unverified -- see
+# the note under the Vagrantfile above.) Nothing inside the
+# guest can work that out: `hostname` here answers `myproject`,
+# and the guest's DMI describes the emulated machine (`QEMU`),
+# not the host -- there is nothing to read at any privilege
+# level. The two variables reach this script because the
+# Vagrantfile above passes them in; bombyx put them on the
+# `vagrant` process out on the host. A VM booted by a bare
+# `vagrant up` sees neither, which is what the defaults are for.
+sudo mkdir -p /etc/bombyx
+printf 'host=%s\nhostname=%s\n' \
+  "${BOMBYX_VM_HOST:-unknown}" "${BOMBYX_VM_HOSTNAME:-unknown}" \
+  | sudo tee /etc/bombyx/vm-host > /dev/null
 
 echo "provisioning done"
 ```
@@ -439,7 +471,7 @@ ssh vmhost "mkdir -p ~/'vms/myproject'"
 cd "$TMP" && tar -czf .bombyx-push-51100-586438300.tar.gz -C "$PROJ\\vagrant" --exclude=./.vagrant --exclude=./.git .
 cd "$TMP" && scp .bombyx-push-51100-586438300.tar.gz vmhost:.bombyx-push-51100-586438300.tar.gz
 ssh vmhost "{ cd ~/'vms/myproject' && tar -xzf ~/'.bombyx-push-51100-586438300.tar.gz'; }; rc=\$?; rm -f ~/'.bombyx-push-51100-586438300.tar.gz'; exit \$rc"
-ssh vmhost "cd ~/'vms/myproject' && vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
 Two long absolute paths are shortened above to fit the page:
@@ -447,7 +479,11 @@ Two long absolute paths are shortened above to fit the page:
 `$PROJ` is the project directory. bombyx prints them in full.
 
 Five commands: make the directory, archive `vagrant/`, copy the
-archive, extract and delete it, boot. Every bombyx command
+archive, extract and delete it, boot. The two variables on the
+last line are how the guest learns which machine it is running
+on -- the `Vagrantfile` and `provision.sh` above pick them up.
+The `\$` is deliberate: that name has to be filled in by the
+host's shell, not by yours. Every bombyx command
 accepts `--dry-run`, and the output is real shell -- worth using
 whenever you are unsure what a command is about to touch,
 especially `destroy`.

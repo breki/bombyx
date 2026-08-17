@@ -174,12 +174,22 @@ ssh vmhost "mkdir -p ~/'vms/myproject'"
 cd /tmp/.tmpAL8i && tar -czf .bombyx-push-4821-729551000.tar.gz -C /repo/vagrant --exclude=./.vagrant --exclude=./.git .
 cd /tmp/.tmpAL8i && scp .bombyx-push-4821-729551000.tar.gz vmhost:.bombyx-push-4821-729551000.tar.gz
 ssh vmhost "{ cd ~/'vms/myproject' && tar -xzf ~/'.bombyx-push-4821-729551000.tar.gz'; }; rc=\$?; rm -f ~/'.bombyx-push-4821-729551000.tar.gz'; exit \$rc"
-ssh vmhost "cd ~/'vms/myproject' && vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
 The output is real shell: each argument is printed bare only
 when it is unambiguous, and quoted otherwise, so what you
 read is what runs.
+
+The `\$` in the last line is the escaping doing its job rather
+than a stray backslash. `BOMBYX_VM_HOSTNAME` has to be filled in
+by the *host's* shell -- it is the host's name the guest wants --
+so the substitution is printed escaped, and the line you paste
+asks the same machine bombyx would have asked. Unescaped it would
+answer with your workstation's name, which is exactly the kind of
+wrong answer nobody questions. See
+[the README section](../README.md#telling-the-vm-which-host-it-runs-on)
+for what the two variables are for.
 
 ## How the push works
 

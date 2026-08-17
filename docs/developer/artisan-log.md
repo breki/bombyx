@@ -2,6 +2,32 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-17-remote-rs-holds-three-concerns
+
+**Category:** Module structure
+
+`crates/bombyx/src/remote.rs` is now past 800 lines and holds
+three unrelated things: `RemoteCommand` plus its `Display`,
+`PushArchive`, the shell-quoting primitives (`is_plain`,
+`display_arg`, `shell_quote`, `quote_remote_path`) and every
+command builder. The quoting primitives are pure functions with
+their own dense test block and no dependency on `Config`, so they
+read as a separate unit a reader has to scroll past.
+
+Suggested split: `remote/quote.rs` for the quoting primitives and
+their tests, `remote/command.rs` for `RemoteCommand` and
+`PushArchive`, leaving `remote.rs` as the builders plus the
+VM-host identity constants. `shell_quote` and `quote_remote_path`
+are already `pub`, so re-exporting them from `remote` keeps the
+public paths unchanged.
+
+Deferred rather than done: it is a pure move touching every test
+module in the file, and it would have buried the behaviour change
+it was raised against (the VM-host identity prefix) in rename
+noise. The file grew by roughly 60 production lines in that
+commit, so this is not urgent -- but it is the second review to
+mention the file's size.
+
 ## aq-2026-08-13-config-parse-is-test-only
 
 **Category:** API design / test-only public surface

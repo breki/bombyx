@@ -2,6 +2,66 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-17
+
+**The guest learns which machine it is running on**
+
+An agent working inside a bombyx VM could not answer "where is
+this actually running". Nothing in the guest knows: there is no
+synced folder, `hostname` in the VM reports the guest's own name,
+and libvirt does not pass the host's name in at all: the guest's
+DMI describes the *emulated* machine, so `sys_vendor` reads
+`QEMU`. Measured inside a live guest as the unprivileged user --
+those files are readable and hold nothing about the host, and the
+root-only ones carry no host name either, so there is nothing to
+read at any privilege level. The first draft of this reasoning
+said the fields were root-only, which was wrong on both halves
+and was caught in review before it shipped.
+
+With one VM host that is a curiosity. With two -- a
+WSL2 distribution on the workstation and a real machine in the
+next room -- a status line that cannot say which one is answering
+is a status line that will eventually mislead.
+
+So `remote::vagrant_script` now prefixes every `vagrant`
+invocation with `BOMBYX_VM_HOST` (the SSH alias, which is the
+name the operator chose and therefore recognises) and
+`BOMBYX_VM_HOSTNAME` (`$(hostname -s)`, what the machine calls
+itself). Both, because an alias in `~/.ssh/config` need not match
+the machine's own name and often does not.
+
+The prefix goes on *every* invocation rather than only the ones
+that provision. `halt` and `status` have no use for it. The
+alternative was a per-action list, and a per-action list is a
+list that goes stale: the action that next needs the values is
+whichever one grows a provisioner, and it would be the one nobody
+remembered to add.
+
+**The `$(hostname -s)` is the interesting part.** It has to be
+evaluated by the *host's* shell, so it is deliberately left
+unexpanded in the script bombyx builds. This is the wrong-side
+expansion trap `CLAUDE.md` already records, and it fails
+politely: expanded on the workstation it reports a real hostname,
+just the wrong machine's, which is exactly the kind of answer
+nobody questions. The live check was therefore built to make a
+wrong side visible -- the host reported `bombyx-host` while the
+workstation is `PERUN`, two values that cannot be confused.
+
+**And one assumption that was simply wrong.** The first draft of
+the README said Vagrant forwards its own environment to a shell
+provisioner, so a line in `provision.sh` would be enough. It does
+not. A provisioner runs *inside* the guest, under the guest's
+environment; anything from the host has to be handed over
+deliberately through the provisioner's `env:` option. A
+throwaway `Vagrantfile` on the host settled it in one command --
+it printed both values with the prefix and `MISSING` for both
+without it. The guest-side recipe is consequently two steps, not
+one, and the docs now say which half does what. Worth noting how
+the error would have surfaced otherwise: the documented recipe
+would have produced an empty file in every VM, and the natural
+suspicion would have fallen on bombyx's quoting rather than on a
+sentence about Vagrant nobody had checked.
+
 ### 2026-08-16
 
 **CI and a release workflow, and one bug not copied across**

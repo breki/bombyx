@@ -10,6 +10,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Pass the VM host identity into the guest: every `vagrant` invocation that runs
+  in a project directory now carries `BOMBYX_VM_HOST` (the SSH alias) and
+  `BOMBYX_VM_HOSTNAME` (the host machine's `hostname -s`). A guest cannot work
+  this out for itself -- there is no synced folder, `hostname` answers with the
+  guest name, and the guest's DMI describes the emulated machine rather than the
+  host. `doctor` is exempt: its probes run in the login directory and evaluate
+  no `Vagrantfile`. See "Telling the VM which host it runs on" in README.md for
+  the `Vagrantfile` and `provision.sh` lines that carry the values the rest of
+  the way.
+
 ## [0.1.0] - 2026-08-16
 
 ### Added

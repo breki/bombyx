@@ -168,6 +168,57 @@ mod tests {
         Config::for_tests()
     }
 
+    /// The identity prefix `remote` puts on every vagrant script,
+    /// pinned in full by `remote`'s own tests.
+    ///
+    /// Built from the exported constants so a rename cannot leave
+    /// this module green while bombyx sets a different variable.
+    fn vm_env() -> String {
+        format!(
+            "{}='vmhost' {}=$(hostname -s)",
+            remote::VM_HOST_ENV,
+            remote::VM_HOSTNAME_ENV
+        )
+    }
+
+    /// Every action, for the tests that must cover all of them.
+    ///
+    /// Listed here once. A new variant is a compile error in the
+    /// `match` below rather than a case silently missed by every
+    /// test in the module -- which is what a hand-written list in
+    /// each test would have allowed.
+    fn all_actions() -> Vec<Action> {
+        let variants = [
+            Action::Up,
+            Action::Provision,
+            Action::Down,
+            Action::Shell,
+            Action::Status,
+            Action::Reset,
+            Action::Doctor,
+            Action::Destroy,
+            Action::Scratch(scratch("pr-1")),
+            Action::Discard(scratch("pr-1")),
+        ];
+        // Exhaustiveness check: adding a variant fails to compile
+        // here, which is the point of writing it out.
+        for action in &variants {
+            match action {
+                Action::Up
+                | Action::Provision
+                | Action::Down
+                | Action::Shell
+                | Action::Status
+                | Action::Reset
+                | Action::Doctor
+                | Action::Destroy
+                | Action::Scratch(_)
+                | Action::Discard(_) => {}
+            }
+        }
+        variants.to_vec()
+    }
+
     fn run(action: &Action) -> Vec<RemoteCommand> {
         plan(
             action,
@@ -201,7 +252,9 @@ mod tests {
                 "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
                  ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
                  ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
-                "ssh vmhost \"cd ~/'vms/myproject' && vagrant 'up'\"",
+                "ssh vmhost \"cd ~/'vms/myproject' && \
+                 BOMBYX_VM_HOST='vmhost' \
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'up'\"",
             ]
         );
     }
@@ -233,7 +286,9 @@ mod tests {
                 "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
                  ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
                  ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
-                "ssh vmhost \"cd ~/'vms/myproject' && vagrant 'provision'\"",
+                "ssh vmhost \"cd ~/'vms/myproject' && \
+                 BOMBYX_VM_HOST='vmhost' \
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'provision'\"",
             ]
         );
     }
@@ -249,13 +304,14 @@ mod tests {
         let pr = run(&Action::Provision);
         assert_eq!(up.len(), pr.len());
         assert_eq!(up[..up.len() - 1], pr[..pr.len() - 1]);
+        let env = vm_env();
         assert_eq!(
             up.last().unwrap().args[1],
-            "cd ~/'vms/myproject' && vagrant 'up'"
+            format!("cd ~/'vms/myproject' && {env} vagrant 'up'")
         );
         assert_eq!(
             pr.last().unwrap().args[1],
-            "cd ~/'vms/myproject' && vagrant 'provision'"
+            format!("cd ~/'vms/myproject' && {env} vagrant 'provision'")
         );
     }
 
@@ -282,23 +338,34 @@ mod tests {
     #[test]
     fn down_halts_without_pushing() {
         let cmds = run(&Action::Down);
+        let env = vm_env();
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0].args[1], "cd ~/'vms/myproject' && vagrant 'halt'");
+        assert_eq!(
+            cmds[0].args[1],
+            format!("cd ~/'vms/myproject' && {env} vagrant 'halt'")
+        );
     }
 
     #[test]
     fn status_queries_the_project_dir() {
         let cmds = run(&Action::Status);
-        assert_eq!(cmds[0].args[1], "cd ~/'vms/myproject' && vagrant 'status'");
+        let env = vm_env();
+        assert_eq!(
+            cmds[0].args[1],
+            format!("cd ~/'vms/myproject' && {env} vagrant 'status'")
+        );
     }
 
     #[test]
     fn reset_restores_the_fresh_install_snapshot() {
         let cmds = run(&Action::Reset);
+        let env = vm_env();
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/myproject' && vagrant 'snapshot' 'restore' \
-             'fresh-install'"
+            format!(
+                "cd ~/'vms/myproject' && {env} vagrant 'snapshot' \
+                 'restore' 'fresh-install'"
+            )
         );
     }
 
@@ -317,8 +384,11 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f Vagrantfile ]; \
-             then vagrant destroy -f; fi"
+            format!(
+                "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f \
+                 Vagrantfile ]; then {} vagrant 'destroy' '-f'; fi",
+                vm_env()
+            )
         );
         assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/myproject/pr-1234'");
     }
@@ -329,8 +399,11 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert_eq!(
             cmds[0].args[1],
-            "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
-             vagrant destroy -f; fi"
+            format!(
+                "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
+                 {} vagrant 'destroy' '-f'; fi",
+                vm_env()
+            )
         );
         assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/myproject'");
     }
@@ -343,7 +416,7 @@ mod tests {
         let kinds = |cmds: &[RemoteCommand]| -> Vec<&'static str> {
             cmds.iter()
                 .map(|c| {
-                    if c.args[1].contains("vagrant destroy") {
+                    if c.args[1].contains("vagrant 'destroy'") {
                         "destroy"
                     } else if c.args[1].starts_with("rm -rf") {
                         "remove"
@@ -373,6 +446,56 @@ mod tests {
             doctor::probe_commands(&doctor::host_probes(&cfg()))
         );
         assert!(!run(&Action::Doctor).is_empty());
+    }
+
+    #[test]
+    fn every_project_vagrant_call_carries_the_vm_host_identity() {
+        // Derived from `all_actions` rather than a hand-written
+        // list of builders. The list version was green while
+        // `destroy` ran `vagrant` with neither variable set: it
+        // enumerated four call sites and there were six, which is
+        // exactly the "per-action list goes stale" failure it
+        // claimed to prevent.
+        //
+        // `doctor` is the one exemption, and it is a real one
+        // rather than a hedge: its probes run in the SSH login
+        // directory, evaluate no Vagrantfile, and inspect the
+        // host's vagrant installation rather than a project's VM.
+        let env = vm_env();
+        for action in all_actions() {
+            if action == Action::Doctor {
+                continue;
+            }
+            for cmd in run(&action) {
+                let script = &cmd.args[cmd.args.len() - 1];
+                if !script.contains("vagrant") {
+                    continue;
+                }
+                assert!(
+                    script.contains(&env),
+                    "{action:?} runs vagrant without the identity: \
+                     {script}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn doctor_probes_stay_outside_the_identity_arrangement() {
+        // Asserted rather than left implicit, so the exemption
+        // above is a decision on record instead of an oversight
+        // someone later "fixes" without knowing why.
+        let has_vagrant = run(&Action::Doctor)
+            .iter()
+            .any(|c| c.args[c.args.len() - 1].contains("vagrant"));
+        assert!(has_vagrant, "doctor should probe vagrant at all");
+        for cmd in run(&Action::Doctor) {
+            let script = &cmd.args[cmd.args.len() - 1];
+            assert!(
+                !script.contains(remote::VM_HOST_ENV),
+                "doctor probe should not carry the identity: {script}"
+            );
+        }
     }
 
     #[test]
