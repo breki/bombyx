@@ -64,6 +64,14 @@ plan, decisions, and outcome.
   stopgap for agent-vlan, not a replacement: enforcement sits on the machine
   being protected.
 
+- **suspend-resume-commands** -- save and restore VM RAM state mid-task
+  Add `bombyx suspend` / `bombyx resume` subcommands wrapping `vagrant suspend`
+  / `vagrant resume`, so a VM's RAM state can be saved and restored mid-task.
+  Context: `down` maps to `vagrant halt` (plan.rs:90), which is a graceful
+  power-off -- the disk survives but running processes, tmux sessions and
+  listening ports do not. There is currently no way to pick up mid-task after
+  stopping a VM.
+
 ## Done
 
 - [**phantom-deploy-command**](issues/phantom-deploy-command.md)
