@@ -29,7 +29,10 @@ In practice:
   not bury it under paragraphs of agreement.
 - **Drop the flourish.** No idioms, no rhetorical questions,
   no three-part lists built for rhythm, no em-dash asides
-  that restate the clause before them.
+  that restate the clause before them. "Load-bearing",
+  "belt-and-braces", "footgun" and "crown jewel" all read as
+  clever and cost the reader a translation step -- say "a
+  precaution rather than a requirement" instead.
 - **No abstract nouns doing a verb's work.** "the plan layer
   owns exhaustiveness" is jargon; "`plan.rs` can list every
   action, so the check goes there" says the same thing. Name
@@ -226,8 +229,7 @@ here as well.
   concrete example, then the rule; prefer plain words
   ("reminder" over "forcing function", "try again" over
   "iterate"); name the subject rather than leaning on "the
-  first"/"the latter". Showy phrasing looks crisp but slows
-  the reader.
+  first"/"the latter". **Voice** covers the rest.
 - **Narrate the work as it happens.** Before each meaningful
   tool call or step, say in one short sentence what is about
   to happen and why. Do not batch silently and only speak at
@@ -285,10 +287,6 @@ re-deriving a style.
   which kind of shell `ssh host "cmd"` starts, and which
   startup files it therefore skips, is what lets a reader
   diagnose the next variant themselves.
-- **No idioms or showy phrasing.** "Load-bearing",
-  "belt-and-braces", "footgun", "crown jewel" all read as
-  clever and cost the reader a translation step. Say
-  "a precaution rather than a requirement".
 - **Headings state their content.** "Why the non-interactive
   PATH causes trouble" beats "The PATH trap".
 - **Record why, not only what.** A decision explained in the
@@ -592,7 +590,7 @@ a fresh empty `[Unreleased]` above it.
 
 The template-maintenance workflows (`/template-sync`,
 `/template-backfeed`, `/template-improve`) split their work
-into two kinds, and the split is load-bearing:
+into two kinds, and the split matters:
 
 - **Determinism -- belongs in `cargo xtask`.** Delta
   determination (what changed since a watermark / SHA), log
