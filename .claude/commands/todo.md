@@ -36,8 +36,22 @@ the user's words into a slug and a summary.
 
    ```
    cargo xtask todo add --slug <slug> \
-     --summary "<one-line summary, <= 80 chars>"
+     --summary "<one-line summary, see budget below>"
    ```
+
+   The summary shares one 80-column line with the slug,
+   rendered as `- **<slug>** -- <summary>`. That prefix
+   costs 10 characters plus the slug, so the budget is
+   **70 minus the slug length** -- not a flat 80. The
+   23-character `suspend-resume-commands` left 47. A
+   50-character slug (the cap) leaves only 20, so a long
+   slug and a long summary cannot both fit.
+
+   Write a phrase, not a sentence, and put anything longer
+   in `--body`. The command rejects an over-long summary
+   and reports the exact remaining budget; recover by
+   shortening the summary, not by shortening the slug to
+   buy room.
 
    Add `--body "<longer text>"` when the user gave
    more than a one-liner (kept verbatim, wrapped by the
