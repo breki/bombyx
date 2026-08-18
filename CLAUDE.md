@@ -114,6 +114,14 @@ cargo xtask todo <list|add|done> ...       # mechanical docs/todo.md edits
 Never use raw `cargo test` or `cargo clippy` -- always
 go through `xtask`.
 
+**When a `validate` step fails, re-run that step, not the
+pipeline.** It prints the command for you
+(`-> iterate with: cargo xtask clippy`), and that hint exists
+because the failing gate is usually seconds while the whole
+pipeline pays for coverage and the network audit every round.
+Ignoring it four times in one sitting is what prompted writing
+this down. Run `validate` once at the end to confirm.
+
 ### PowerShell Build Script
 
 ```powershell
@@ -166,6 +174,28 @@ for tools that are not present:
   real push.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
+- **Edit YAML and doc-comment neighbourhoods with `Edit`, not a
+  slurp-mode regex.** `perl -0pi -e 's/.../.../'` over a whole
+  file has no idea which block it landed in. One substitution
+  aimed at the `deny` job's cache block matched the `test` job's
+  instead and spliced steps into it; another put a statement at
+  line 1 of `audit.rs`, glued onto the module doc. Both needed
+  `git checkout` and a redo. Two shapes are reliably dangerous:
+  indentation-carrying formats, where a wrong-block match still
+  parses, and anything next to a `///` block, where inserting
+  before an item silently reassigns the comment above it to the
+  new one. `sed`/`perl` are fine for flat text and one-line
+  substitutions.
+- **Print the variable before claiming what it holds.** Three
+  false statements this week came from writing an environment
+  claim from expectation: that the guest's DMI exposes the host
+  (it exposes the emulated machine), that the repository was
+  public (it was private), and that Windows sets `USERPROFILE`
+  "and not HOME" (Git Bash sets both, with `HOME` in POSIX
+  form). Each was one command away -- `cat /sys/class/dmi/id/...`,
+  `gh repo view --json visibility`, `echo $HOME`. A claim about
+  what a variable, a file or a platform actually contains needs
+  the command that read it, in the same breath.
 - **Test an SSH identity with `-F /dev/null`.**
   `IdentitiesOnly=yes` does not exclude identities named
   in `ssh_config`, so `ssh -i key -o IdentitiesOnly=yes`

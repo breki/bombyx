@@ -1,6 +1,6 @@
 ---
 description: Cut a SemVer release from accumulated [Unreleased] CHANGELOG entries
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git tag:*), Bash(git describe:*), Bash(cargo xtask validate*), Bash(cargo xtask audit*), Bash(cargo update:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git tag:*), Bash(git describe:*), Bash(cargo xtask validate*), Bash(cargo xtask audit*), Bash(cargo clippy:*), Bash(cargo update:*), Read, Edit, AskUserQuestion
 ---
 
 Cut a SemVer release: bump the version, promote the
@@ -96,31 +96,58 @@ step for a release to gate.
    the release gate. If it fails, abort and tell the
    user what failed; do not commit a broken release.
 
-9. **Audit, as its own step** -- run
-   `cargo xtask audit` after `validate` passes. Abort the
-   release if it fails.
+9. **Cross-target check** -- run
 
-   This looks redundant and is not. `validate` runs audit
-   too, but *inside* `validate` a missing `cargo-audit` or
-   an unreachable advisory DB degrades to a printed
-   **warning**, so that an offline laptop is not blocked.
-   That trade is right for everyday work and wrong for a
-   release: it means `Validate OK` can be reported on a
-   machine that never consulted the RUSTSEC database.
-   The standalone command **errors** on both, which is
-   what makes this a gate.
+   ```
+   cargo clippy --workspace --all-targets \
+     --target x86_64-unknown-linux-gnu -- -D warnings
+   ```
 
-   Say plainly in the summary that the audit ran and what
-   it found. A release whose advisory check was skipped
-   must not be described as validated.
+   Abort the release if it fails.
 
-   The same check runs in the `gates` job of
-   `.github/workflows/release.yml`, so it is enforced
-   somewhere nobody can skip as well as here. Both, because
-   this one blocks the tag from being created and that one
-   blocks the binaries from being published.
+   `validate` checks one platform: the one you are sitting at.
+   This project claims Windows, Linux and macOS, and the gap
+   has cost two failed releases. `v0.3.0` was tagged, pushed,
+   and failed CI on ubuntu and macos while Windows passed --
+   twice before that, `xtask` neither compiled nor linted off
+   Windows for the same reason. Each failure cost an
+   eight-minute release run and, in the `v0.3.0` case, moving
+   a pushed tag.
 
-10. **Stage and commit:**
+   Use **clippy**, not `cargo check`. `check --target`
+   compiles and runs no lints, so it proves the build and says
+   nothing about the lints -- which is exactly how the second
+   of those two `xtask` failures slipped through a
+   cross-target check that had just been run.
+
+   No linker for the other platform is needed; the cfg
+   analysis and the lints are all that run.
+
+10. **Audit, as its own step** -- run
+    `cargo xtask audit` after `validate` passes. Abort the
+    release if it fails.
+
+    This looks redundant and is not. `validate` runs audit
+    too, but *inside* `validate` a missing `cargo-audit` or
+    an unreachable advisory DB degrades to a printed
+    **warning**, so that an offline laptop is not blocked.
+    That trade is right for everyday work and wrong for a
+    release: it means `Validate OK` can be reported on a
+    machine that never consulted the RUSTSEC database.
+    The standalone command **errors** on both, which is
+    what makes this a gate.
+
+    Say plainly in the summary that the audit ran and what
+    it found. A release whose advisory check was skipped
+    must not be described as validated.
+
+    The same check runs in the `gates` job of
+    `.github/workflows/release.yml`, so it is enforced
+    somewhere nobody can skip as well as here. Both, because
+    this one blocks the tag from being created and that one
+    blocks the binaries from being published.
+
+11. **Stage and commit:**
     - Stage `crates/bombyx/Cargo.toml`, `Cargo.lock`,
       `CHANGELOG.md` (and nothing else).
     - Commit directly with `git commit` (do **not** route
@@ -142,14 +169,14 @@ step for a release to gate.
       )"
       ```
 
-11. **Tag** -- create an **annotated** tag:
+12. **Tag** -- create an **annotated** tag:
     `git tag -a vX.Y.Z -m "Release vX.Y.Z"`. Do **not**
     use a lightweight tag (`git tag vX.Y.Z`) -- the
     deploy guard runs `git describe --exact-match
     --match 'v*' HEAD`, which only sees annotated tags
     by default. Do not push; the user pushes when ready.
 
-12. **Tell the user what to do next** -- print:
+13. **Tell the user what to do next** -- print:
     - The new version and tag name
     - The CHANGELOG bullets that were released
     - "Push with `git push && git push --tags`" -- the
@@ -164,10 +191,11 @@ step for a release to gate.
 - Never edit closed (already-dated) release sections of
   `CHANGELOG.md`; only the `[Unreleased]` block is
   mutable.
-- If `cargo xtask validate` **or** `cargo xtask audit`
-  fails after the version bump, leave `Cargo.toml`,
-  `Cargo.lock`, and `CHANGELOG.md` modified on disk so the
-  user can see the broken state, and do not commit or tag.
+- If `cargo xtask validate`, the cross-target clippy **or**
+  `cargo xtask audit` fails after the version bump, leave
+  `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md` modified on
+  disk so the user can see the broken state, and do not
+  commit or tag.
 - Never describe a release as validated when the audit was
   skipped or degraded to a warning. Say which of the two
   happened.
