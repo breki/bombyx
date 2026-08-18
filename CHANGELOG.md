@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.4.0] - 2026-08-18
+
+### Added
+
 - Licence checking, in two halves. `cargo xtask deny` gates licences, banned
   crates and registry sources with cargo-deny -- offline, so it runs on every
   push in CI as well as in validate, unlike the advisory audit. And `cargo xtask
