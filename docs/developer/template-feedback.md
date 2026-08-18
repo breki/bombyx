@@ -30,6 +30,37 @@ section they belong to.
 
 ## Open divergences
 
+### tf-2026-08-18-skills-json-registers-a-missing-skill -- skills.json registers a missing skill
+
+`.claude/skills.json` still registers a `web-dev` skill that does not
+exist. Its `path` is `web-dev/SKILL.md`, and `.claude/skills/` contains
+only `architect/`. Its description names "Axum backend, Svelte 5
+frontend, Vite configuration, and Playwright E2E testing" -- every one
+of which was removed when this project was pruned to a CLI.
+
+Two separate problems sit in that one entry. The path is dangling, so
+anything that resolves registered skills against the filesystem finds
+nothing. And the description is a false claim about what the project
+does, which is the failure `CLAUDE.md` warns about under "After
+removing a capability, re-grep for it": the compiler finds the code
+that referenced a deleted subsystem, and nothing finds the prose.
+
+It survived because the prune removed the crates, the xtask
+subcommands and the E2E suite, and `skills.json` is data rather than
+code, so no build step objected. It has been sitting here since the
+prune and was only noticed while adding an unrelated command.
+
+Still open in bombyx: the entry has not been removed, because it was
+found during work on a different subject and deleting canon in that
+commit would have mixed concerns.
+
+Suggested for the template: either do not ship `skills.json` entries
+for optional subsystems, or make something validate that every
+registered `path` resolves -- a few lines in `xtask` would turn a
+silent dangling reference into a failed gate. The prune instructions
+should also name `skills.json` explicitly, since it is the one place a
+removed subsystem leaves a description behind.
+
 _None yet._
 
 ## Resolved
@@ -37,6 +68,271 @@ _None yet._
 _None yet._
 
 ## Suggestions to flow back to the template
+
+### tf-2026-08-18-template-improve-only-logs-what-it-is-told -- template-improve only logs what it is told
+
+`/template-improve` only records what the operator happens to remember.
+It asks "what did you notice?", logs that one thing, and stops. Nothing
+looks at the commits, so an observation made during work and not
+mentioned at the moment the command runs is simply lost.
+
+The gap showed itself the first time the command was used seriously
+here. Run at the end of a long session it produced four entries, all
+drawn from the last hour of context. A sweep of the twenty-one commits
+since the file was last touched then found four more, every one of them
+a template-provided file and every one already written up in a commit
+body: `xtask` not compiling off Windows, a `/todo` prompt stating a
+budget its tool does not use, the absent CI that let the first two ship,
+and this entry. The observations were not missing. They were unasked
+for.
+
+The fix here was a sweep mode. With no argument the command now
+establishes a boundary from `git log -1 -- docs/developer/template-
+feedback.md`, walks the commits since, and reads four places rather than
+one: commit bodies, the diary, the two review backlogs, and the diffs
+where a message is thin. That last set matters -- a deferred finding
+against template-provided code *is* template feedback and is already
+written up, so the sweep is mostly harvesting rather than analysing.
+
+Two details that took a correction to get right. Judgement has to be
+explicit or a sweep fills the file with project-specific noise, so the
+command now asks three questions of each candidate: does it live in a
+file the template provides, would another derived project hit it, and
+was it a surprise. And `feedback-add` dedups by ID, which catches only
+an identical title, so the sweep greps the file *and* both backlogs for
+the subject before offering anything.
+
+One more, found by the operator rather than by the sweep: a boundary
+taken from `git log` cannot see uncommitted work, so a change made in
+the same session -- including the one adding the sweep -- is invisible to
+it. The command now reads the working tree as well.
+
+Suggested for the template: give `/template-improve` a sweep mode with
+the boundary, the four sources, the three judgement questions and the
+working-tree check. A command that depends on the operator volunteering
+what they noticed captures the loudest observation, not the most useful
+one.
+
+### tf-2026-08-18-template-ships-no-ci-or-release-workflow -- template ships no CI or release workflow
+
+The template ships no CI and no release workflow. This project had no
+`.github` directory at all until one was written here, so a derived
+project's quality gates run only where a developer happens to run them.
+
+The cost is not hypothetical, and it landed immediately. The very first
+CI run failed on ubuntu and macos while passing on windows, on two
+separate defects in template-provided `xtask` code -- see
+`tf-2026-08-18-xtask-clean-cache-breaks-off-windows`. Both had been
+present through every green local `validate`, because `validate` checks
+one platform: the one the developer is sitting at. A template that
+claims Windows, Linux and macOS as first-class targets and provides no
+multi-platform check is asserting something nothing verifies.
+
+Two design points from building it here are worth carrying upstream
+rather than re-deriving.
+
+Which gates go where. `coverage` and `dupes` each need a tool the runner
+does not ship, so paying for them on every push buys little; they belong
+on the release path, where shipping a regression matters. The advisory
+`audit` is the opposite case in a subtler way: it reaches the network for
+state that changes on its own, so on every push it fails pull requests
+that changed nothing, while at release time it is exactly what must not
+be skipped. A licence check, being offline, can sit on every push.
+
+Release-notes extraction. The obvious implementation accepts
+`[Unreleased]` as a fallback when it cannot find the version's CHANGELOG
+section, and that is a trap rather than a convenience: `[Unreleased]` is
+the first heading in the file, so it always matches before the version
+section is reached, and `/release` has just emptied it. Matching the
+version heading by exact prefix and *failing* when it is absent is what
+keeps a silent mistake loud.
+
+Suggested for the template: ship both workflows, with the gate placement
+above and the exact-match notes extraction, so a derived project starts
+with a check that covers the platforms it claims.
+
+### tf-2026-08-18-todo-command-states-wrong-summary-budget -- todo command states wrong summary budget
+
+`.claude/commands/todo.md` told the agent a summary must be "<= 80
+chars". `cargo xtask todo add` measures something else: the whole
+rendered line, `- **<slug>** -- <summary>`, against 80 columns. The
+prefix costs 10 characters plus the slug length, so the real budget is
+70 minus the slug.
+
+The two are template-provided and disagree, which makes the failure
+confusing rather than merely inconvenient. A 60-character summary behind
+a 23-character slug is well inside the documented limit and was rejected
+for being 96 columns wide, costing a repeated call and a guess at what
+the tool actually meant.
+
+The general shape is worth naming: a prompt file stating a numeric limit
+that the tool it drives computes differently. The number in the prose
+has no way to notice when the tool's formatting changes, so it is a
+claim that rots silently.
+
+Fixed here in `2d1f6fe` by replacing the flat number with the formula,
+noting that a 50-character slug leaves only 20 characters, and saying to
+recover by shortening the summary rather than the slug -- the slug is the
+entry's identity and appears in the Done link.
+
+Suggested for the template: state the budget as the formula rather than a
+number, or have `todo add` report the arithmetic when it rejects a line
+so the message is self-explanatory.
+
+### tf-2026-08-18-xtask-clean-cache-breaks-off-windows -- xtask clean_cache breaks off Windows
+
+`xtask/src/clean_cache.rs` neither compiled nor linted on Linux or
+macOS. Two separate failures, both from the same shape, both found by
+the first CI run this project ever had and neither by any local gate.
+
+First, the build. `is_reparse_or_symlink_meta` is imported at the top of
+the file but called only inside the `#[cfg(windows)]` branch of
+`is_reparse_or_symlink_path`. Everywhere else the import is unused, and
+`[workspace.lints.rust] warnings = "deny"` turns an unused import into a
+compile error. So `cargo build` fails outright on two of the three
+platforms the template claims.
+
+Second, clippy. With the build fixed, `unnecessary_wraps` objected that
+off Windows the function never returns `Err`, so its `Result` is
+gratuitous. The lint is right about the non-Windows build and wrong
+about the function: the `Result` is load-bearing on Windows, where
+`symlink_metadata` can fail, and one signature has to serve both
+platforms because the caller propagates the error. A `cfg_attr`-scoped
+allow says exactly that and leaves the lint active on Windows.
+
+The reason both shipped is worth more than either fix. Every gate in
+`validate` passes on a Windows workstation, and nothing in the template
+cross-checks another platform. The two commands that reproduce CI
+locally, without a runner, are:
+
+    cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu
+    cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu -- -D warnings
+
+And the distinction between them is the trap: `cargo check --target`
+compiles and runs *no lints*, so it proved the build and said nothing
+about clippy -- which is precisely how the second failure slipped
+through a cross-target check that had just been run.
+
+Fixed here in `e309e9c` and `c0596fd`. The template presumably still
+carries both, since the file arrived with the cross-cfg import in place.
+
+Suggested for the template: gate the import to match its use site, add
+the `cfg_attr` allow, and note the two cross-target commands wherever
+the platform claim is made -- a project developed on Windows has no
+other way to find this before CI does.
+
+### tf-2026-08-18-validate-step-numbers-are-literals -- validate step numbers are literals
+
+`xtask/src/validate.rs` numbers its steps with literals. A
+`TOTAL_STEPS` constant holds the count, each `run_step` call passes its
+own index, and nothing checks that the two agree:
+
+    const TOTAL_STEPS: usize = 8;
+    ...
+    run_step(3, "Duplication", "dupes", run_duplication)?;
+    run_step(4, "Clippy", "clippy", run_clippy)?;
+
+Adding one gate therefore means editing the constant and renumbering
+every call after the insertion point. bombyx inserted a licence gate as
+step 4 and had to touch six call sites for one new check. Miss one and
+`validate` prints `[5/9]` twice, or `[9/10]` last, and no test fails --
+the numbering is derived data being maintained by hand, and the only
+thing that notices a mismatch is a human reading the output.
+
+Suggested for the template: build a table of steps and enumerate it, so
+the index and the total both come from the same list.
+
+    let steps = vec![
+        ("Dep-age", "dep-age-check", boxed(run_dep_age)),
+        ("Fmt", "fmt", boxed(move || run_fmt(check))),
+        // ...
+    ];
+    let total = steps.len();
+    for (i, (name, cmd, f)) in steps.into_iter().enumerate() {
+        run_step(i + 1, total, name, cmd, f)?;
+    }
+
+`run_step` takes `total` as a parameter, `TOTAL_STEPS` disappears, and
+inserting a gate becomes one line in one place. The per-step comments
+that currently sit above each call read just as well inside the table.
+
+Not fixed in bombyx: it touches every step in the file, and the gate
+being changed at the time was being changed for other reasons. Recorded
+in `docs/developer/artisan-log.md` as
+`aq-2026-08-18-validate-step-numbers-are-literals`.
+
+### tf-2026-08-18-no-licence-gate-or-attribution-tooling -- no licence gate or attribution tooling
+
+The template guards the dependency tree against vulnerabilities and
+against freshness -- `audit`, `dep-age`, `dep-age-check`,
+`dep-preflight` -- and against licences not at all. There is no
+`deny.toml`, nothing checks licence compatibility, and nothing
+generates third-party attribution.
+
+Both halves turn out to be needed by any project that publishes
+binaries, and the second is an obligation rather than a nicety. MIT and
+Apache-2.0 both require the licence and copyright notice to travel with
+a distributed binary, and a crate carrying an SPDX `AND` (for example
+`unicode-ident`, which is `(MIT OR Apache-2.0) AND Unicode-3.0`) makes
+those extra terms required rather than optional. A release archive
+holding only the project's own `LICENSE` does not meet that, and the
+gap opens with the first published binary rather than at some later
+point of scale.
+
+bombyx added two `cargo xtask` commands. `deny` runs cargo-deny over
+licences, bans and sources against a `deny.toml` whose allow-list is
+exactly the licences in the tree; it is offline, so it runs on every
+push in CI as well as in `validate`, where the advisory audit cannot go.
+`licenses` generates a `THIRD-PARTY-LICENSES` file from `cargo
+metadata` plus the licence texts already unpacked in the cargo
+registry, and the release workflow writes it into every archive.
+
+Three details worth carrying upstream rather than rediscovering.
+`private = { ignore = true }` in `deny.toml` reads as "skip our own
+unpublished crates" and does not: cargo-deny skips *any* package with
+`publish = false`, wherever it lives, so a GPL-only path dependency
+passes the gate -- verified. `cargo deny` needs an explicit `--offline`
+or it resolves and fetches the whole tree, which defeats the reason for
+running it on every push. And `COPYRIGHT` and `AUTHORS` have to count as
+notice files: `rustix` and `linux-raw-sys` explain their triple licence
+and the LLVM exception there rather than in `LICENSE-MIT`, and omitting
+them is invisible because those crates ship a `LICENSE-*` as well.
+
+Suggested for the template: ship `deny.toml` plus the two commands, wire
+`deny` into `validate` and every-push CI, and write the attribution file
+into whatever the project distributes.
+
+### tf-2026-08-18-validate-audit-can-pass-without-auditing -- validate audit can pass without auditing
+
+`cargo xtask validate` runs the security audit as one of its steps, and
+inside that step a missing `cargo-audit` or an unreachable RUSTSEC
+database degrades to a printed warning rather than failing. The
+leniency is deliberate and defensible on its own -- an offline machine
+should still be able to finish `validate` -- but the consequence is not
+stated anywhere the template documents the gate.
+
+The consequence is that **`Validate OK` does not mean the dependencies
+were audited.** On a machine where `cargo-audit` was never installed,
+`validate` prints a warning nobody reads and then reports success, and
+every derived project inherits a gate that is silently not one. The
+standalone `cargo xtask audit` errors on both conditions, so the two
+spellings of the same check disagree about whether it is a gate.
+
+It matters most at release time, which is exactly when the answer needs
+to be trustworthy: an advisory is almost always filed against code that
+has already shipped, so no check tied to *changed* dependencies can
+catch it, and `dep-age-check` cannot by design.
+
+bombyx closed it two ways. `/release` now runs the standalone
+`cargo xtask audit` as its own step after `validate`, so the tag cannot
+be created without the advisory database having been consulted, and the
+release CI job runs the same command where nobody can skip it. The
+caveat is also written into `CLAUDE.md` in as many words, because the
+surprising part is not the leniency but that "Validate OK" overstates.
+
+Suggested for the template: state the degrade-to-warning behaviour
+wherever `validate`'s audit step is documented, and give `/release` a
+standalone audit step rather than relying on `validate`'s copy.
 
 ### tf-2026-08-13-commit-marks-breaking-before-checking-for-a-rele -- commit marks breaking before checking for a release
 
