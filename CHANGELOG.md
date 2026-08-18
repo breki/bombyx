@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.3.0] - 2026-08-18
+
+### Added
+
 - bombyx self-update: replace the installed binary with the newest release.
   Finds the tag with `git ls-remote`, downloads that platform archive with
   `curl`, and verifies it against the release SHA256SUMS before extracting.
@@ -34,10 +44,6 @@ and this project adheres to
   installed pinned and uncached in CI, since a cached copy would be the tool the
   gate consists of. The release job is also the only one granted a write-scoped
   token now.
-
-### Fixed
-
-### Removed
 
 ## [0.2.0] - 2026-08-18
 
