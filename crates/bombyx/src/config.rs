@@ -78,12 +78,35 @@ pub enum ConfigError {
 
     /// The configuration file is not valid TOML, or does not
     /// match the expected shape.
-    #[error("invalid config in {}: {source}", .path.display())]
+    ///
+    /// **Carries a summary, not the `toml` crate's `Display`.**
+    /// That rendering quotes the offending *source line* into the
+    /// message, and bombyx printed it straight to stderr:
+    ///
+    /// ```text
+    /// bombyx: loading bombyx.toml: invalid config in bombyx.toml:
+    /// TOML parse error at line 1, column 12
+    ///   |
+    /// 1 | -----BEGIN OPENSSH PRIVATE KEY-----
+    /// ```
+    ///
+    /// Reproduced against the built binary. `bombyx.toml` can be a
+    /// symlink -- the overlay path refuses one, the base path does
+    /// not, and nobody inspects a config after a clone -- so a
+    /// hostile repo could aim it at `~/.ssh/id_ed25519` and have a
+    /// line of it echoed.
+    ///
+    /// What is kept is the part that helps: the position and the
+    /// reason. What is dropped is the quoted line. Naming
+    /// `line 1, column 12` and "expected an equals" is enough to
+    /// correct a malformed config; the file's own contents are not
+    /// bombyx's to print.
+    #[error("invalid config in {}: {summary}", .path.display())]
     Parse {
         /// Path that failed to parse.
         path: PathBuf,
-        /// Underlying TOML error.
-        source: toml::de::Error,
+        /// Position and reason, without the source snippet.
+        summary: String,
     },
 
     /// A required field was present but empty.
@@ -374,10 +397,50 @@ fn from_toml<T>(source: &str, path: &Path) -> Result<T, ConfigError>
 where
     T: serde::de::DeserializeOwned,
 {
-    toml::from_str(source).map_err(|source| ConfigError::Parse {
+    toml::from_str(source).map_err(|e| ConfigError::Parse {
         path: path.to_path_buf(),
-        source,
+        summary: toml_summary(source, &e),
     })
+}
+
+/// Position and reason from a TOML error, without the source line.
+///
+/// `toml::de::Error`'s own `Display` quotes the offending line into
+/// the message, and bombyx printed that to stderr -- so a
+/// `bombyx.toml` symlinked at a private key echoed a line of it. See
+/// [`ConfigError::Parse`] for the reproduction.
+///
+/// `message()` is the reason alone: "expected an equals, found a
+/// newline", with no snippet and no position. `span()` gives a byte
+/// range, so `source` is needed to turn it into a line and column --
+/// which is the whole reason the source is a parameter here and is
+/// never put into the result.
+fn toml_summary(source: &str, e: &toml::de::Error) -> String {
+    let reason = e.message().trim();
+    match e.span() {
+        Some(span) => {
+            let (line, column) = line_column(source, span.start);
+            format!("line {line}, column {column}: {reason}")
+        }
+        // No span on a shape mismatch -- a missing field, an
+        // unknown key -- and the reason names the field there,
+        // which is the whole answer.
+        None => reason.to_owned(),
+    }
+}
+
+/// One-based line and column for a byte offset into `source`.
+///
+/// The column counts *characters*, not bytes, so a non-ASCII line
+/// does not report a position past where the operator sees the
+/// problem. An offset past the end clamps to the last line, which is
+/// what a truncated file produces.
+fn line_column(source: &str, offset: usize) -> (usize, usize) {
+    let upto = &source[..offset.min(source.len())];
+    let line = upto.bytes().filter(|b| *b == b'\n').count() + 1;
+    let column =
+        upto.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
+    (line, column)
 }
 
 /// Whether a config file may be a symlink.
@@ -877,6 +940,53 @@ fn charset(
 mod tests {
     use super::host::config_dir_from;
     use super::*;
+
+    #[test]
+    fn a_parse_error_names_the_position_and_not_the_line() {
+        // The disclosure this replaced: `toml`'s own `Display`
+        // quotes the offending source line, and bombyx printed it
+        // to stderr. `bombyx.toml` can be a symlink, so a hostile
+        // repo aimed it at a private key and had a line echoed.
+        // Measured against the built binary before and after.
+        let key = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+                   b3BlbnNzaC1rZXktdjEAAAAA\n";
+        let err = parse(key).unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, ConfigError::Parse { .. }), "{text}");
+        // The position and the reason are what correct a malformed
+        // config, and they stay.
+        assert!(text.contains("line 1"), "{text}");
+        assert!(text.contains("column"), "{text}");
+        // None of the file's own bytes do.
+        assert!(!text.contains("BEGIN"), "{text}");
+        assert!(!text.contains("OPENSSH"), "{text}");
+        assert!(!text.contains("b3Blb"), "{text}");
+    }
+
+    #[test]
+    fn a_shape_error_still_names_the_field() {
+        // An unknown key carries no span, so the summary is the
+        // reason alone -- which names the key, and that is the
+        // whole answer.
+        let err = parse("project = \"p\"\nhsot = \"x\"\n").unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("hsot"), "{text}");
+    }
+
+    #[test]
+    fn a_position_counts_lines_and_characters() {
+        assert_eq!(line_column("abc", 0), (1, 1));
+        assert_eq!(line_column("abc", 2), (1, 3));
+        assert_eq!(line_column("a\nbc", 2), (2, 1));
+        assert_eq!(line_column("a\nbc", 3), (2, 2));
+        assert_eq!(line_column("a\nb\nc", 4), (3, 1));
+        // Characters, not bytes: a multi-byte line must not report
+        // a column past where the operator sees the problem.
+        assert_eq!(line_column("äöü=", 6), (1, 4));
+        // Past the end clamps rather than panicking, which is what
+        // a truncated file produces.
+        assert_eq!(line_column("ab", 99), (1, 3));
+    }
 
     fn minimal() -> &'static str {
         "project = \"myproject\"\n"

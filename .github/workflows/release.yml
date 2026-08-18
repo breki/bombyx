@@ -347,6 +347,35 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # Idempotency has a limit, and this is it. Re-running a
+            # release whose upload never finished is a repair.
+            # Replacing the assets of a *complete* release silently
+            # redefines what a published version is, and nothing
+            # downstream can tell: `update::decide` compares only
+            # MAJOR.MINOR.PATCH, so whoever installed the old bytes
+            # is reported up to date forever, and whoever is
+            # mid-download gets a checksum mismatch whose message
+            # blames tampering.
+            #
+            # SHA256SUMS is the completion marker: it is uploaded
+            # with the assets, so its presence means a previous run
+            # got all the way here.
+            if gh release view "$GITHUB_REF_NAME" \
+                 --json assets \
+                 --jq '.assets[].name' | grep -qx 'SHA256SUMS'; then
+              if [ "${{ vars.ALLOW_RELEASE_REPLACE }}" != "true" ]; then
+                echo "::error::$GITHUB_REF_NAME is already published" \
+                     "with checksummed assets. Replacing them would" \
+                     "redefine a released version, and self-update" \
+                     "would never offer the replacement. Cut a new" \
+                     "patch tag instead. To override deliberately," \
+                     "set the repository variable" \
+                     "ALLOW_RELEASE_REPLACE=true."
+                exit 1
+              fi
+              echo "ALLOW_RELEASE_REPLACE is set; replacing the" \
+                   "assets of an already-published $GITHUB_REF_NAME"
+            fi
             echo "release $GITHUB_REF_NAME exists; updating in place"
             # `--prerelease=` explicitly, in both directions. The
             # create branch passes the flag and the edit branch

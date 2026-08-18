@@ -32,6 +32,13 @@ and this project adheres to
 
 ### Changed
 
+- The release workflow refuses to overwrite the assets of a release that already
+  carries a SHA256SUMS, and asks for a new patch tag. Replacing them redefines a
+  published version, and self-update compares only MAJOR.MINOR.PATCH -- so
+  anyone already on that version is told they are up to date forever. Re-running
+  a release whose upload never finished still works, and
+  ALLOW_RELEASE_REPLACE=true overrides deliberately.
+
 ### Fixed
 
 - self-update no longer promises a cleanup it may not perform. The
@@ -49,6 +56,10 @@ and this project adheres to
   the code says so -- a writer inside the private temp directory is already the
   same user or root, and can overwrite the installed binary directly without
   racing anything.
+- A malformed bombyx.toml no longer echoes the offending source line. The toml
+  crate renders it into its error text, which bombyx printed to stderr, so a
+  bombyx.toml symlinked at a private key had a line of it disclosed. The
+  position and the reason are kept; the file's own contents are not.
 
 ### Removed
 

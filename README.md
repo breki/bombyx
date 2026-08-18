@@ -277,6 +277,26 @@ workflow publishing those as GitHub pre-releases. And it never
 downgrades: a binary you built from a bumped `Cargo.toml` is
 newer than any release, and it says so rather than replacing it.
 
+### A version number is the only thing compared
+
+`self-update` decides by comparing `MAJOR.MINOR.PATCH`, so it has
+no notion of "this version's bytes changed". If a published
+release's assets were ever replaced, anyone already on that
+version is told they are up to date and never receives the
+replacement, and anyone mid-download sees a checksum mismatch
+whose message says the bytes are not the ones that were released --
+which reads as tampering when the cause was a re-publish.
+
+So the release workflow refuses to overwrite the assets of a
+release that already carries a `SHA256SUMS`, and asks for a new
+patch tag instead. It stays idempotent for the case that made it
+idempotent in the first place: re-running a release whose upload
+never finished, which is a repair rather than a redefinition. The
+refusal can be overridden with a repository variable
+(`ALLOW_RELEASE_REPLACE=true`), and if you use it, understand that
+existing installations will not pick the change up. Cut a patch
+release for that.
+
 ### Why the binary is renamed
 
 On Windows the update renames `bombyx.exe` aside before writing

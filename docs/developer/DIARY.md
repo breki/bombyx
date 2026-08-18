@@ -4,6 +4,66 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-18
 
+**A config file that read out a private key, and a tag that could
+redefine a version**
+
+The last two red-team items, both of which had been deferred as
+design decisions rather than as work.
+
+`toml::de::Error`'s `Display` quotes the offending source line into
+its message, and bombyx printed that to stderr:
+
+```
+bombyx: loading bombyx.toml: invalid config in bombyx.toml:
+TOML parse error at line 1, column 12
+  |
+1 | -----BEGIN OPENSSH PRIVATE KEY-----
+```
+
+Reproduced against the built binary, then again after the fix,
+which now prints "line 1, column 12: key with no value, expected
+an equals". The position and the reason are what let someone
+correct a malformed config; the file's own bytes are not
+bombyx's to print. The overlay path already refused a symlink,
+but the base `bombyx.toml` did not, and nobody inspects a
+config after a clone.
+
+The deferral said this "trades away the diagnostic that makes a
+malformed config easy to correct". It does not, because
+`toml::de::Error` exposes `message()` and `span()` separately -- the
+reason without the snippet, and a byte range. Turning the range
+into a line and column needs the source, which is why
+`toml_summary` takes it and why nothing it returns comes from it.
+The column counts characters rather than bytes, so a non-ASCII
+line does not report a position past where the operator sees the
+problem.
+
+The other one was about release idempotency. `gh release upload
+--clobber` on a re-pushed tag means a published version's bytes can
+change, and nothing downstream can tell: `update::decide` compares
+only `MAJOR.MINOR.PATCH`, so whoever installed the old bytes is
+reported up to date forever, and whoever is mid-download gets a
+checksum mismatch whose message blames tampering.
+
+Idempotency was added for a real reason -- a history rewrite moved
+both tags and the release job failed on an otherwise green build --
+so removing it outright would reintroduce that. The distinction it
+was missing is between repairing an incomplete release and
+redefining a complete one, and `SHA256SUMS` marks the difference:
+it is uploaded with the assets, so its presence means a previous
+run reached the end. A release without it can still be re-run; one
+with it fails and asks for a new patch tag, with
+`ALLOW_RELEASE_REPLACE=true` as a deliberate override. The
+version-comparison limit is in `README.md` as well, since the
+override exists.
+
+That empties both backlogs. Two of the twelve items closed today
+were not defects but standing decisions -- keep `plan.rs`'s
+duplicated push expectations, keep `doctor/readonly.rs` whole --
+and those moved into comments beside the code they govern, which is
+where a decision belongs. A "deferred backlog" is the wrong place
+to file something nobody intends to do.
+
 **Two reads of one archive, and a type that made an unreachable
 branch necessary**
 
