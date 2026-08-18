@@ -17,6 +17,8 @@ agent works inside it.
   - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
   - [Per-project overrides](#per-project-overrides)
 - [Use](#use)
+- [Updating bombyx](#updating-bombyx)
+  - [Why the binary is renamed](#why-the-binary-is-renamed)
 - [Telling the VM which host it runs on](#telling-the-vm-which-host-it-runs-on)
 - [Development](#development)
 - [Status](#status)
@@ -213,6 +215,8 @@ bombyx destroy myproject  # destroy the VM and remove its dir
 
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
+
+bombyx self-update        # update this binary to the newest release
 ```
 
 Two lifecycles, on purpose:
@@ -236,6 +240,72 @@ the project name, what teardown removes, how to read the
 `doctor` report, and how the push is built -- including the
 quoting details that keep a config file from running code on
 your workstation.
+
+## Updating bombyx
+
+```bash
+bombyx self-update
+```
+
+**This path has not been run end to end yet *(unverified)*.** No
+published release carries a `SHA256SUMS`, because the workflow
+that attaches one landed after `v0.2.0`, so the first version this
+can actually update *to* is the next one. Run against a release
+published before that, it correctly refuses and prints the manual
+`cargo install` line. The pieces below are each verified -- the
+digest against the SHA-256 specification's own test vectors, the
+`tar` and `curl` invocations against real archives and a real
+404 -- but their composition has never completed a single update.
+
+It finds the newest release tag with `git ls-remote --tags`,
+downloads that release's archive for your platform with `curl`,
+checks it against the release's `SHA256SUMS`, and only then
+extracts the binary over the installed one. `curl` and `tar` are
+the only extra requirements, and no Rust toolchain is involved.
+
+**Verification fails closed.** A missing `SHA256SUMS`, no entry
+for your platform's archive, or a digest that does not match all
+refuse the update. There is no flag to skip the check: the one
+outcome worse than not updating is replacing the binary with
+something unverified. When a release cannot be verified, the
+error prints the `cargo install --git --tag --locked` line to run
+by hand instead, so you are never simply stuck.
+
+Two things it will not do. It never installs a pre-release, so a
+`v1.0.0-rc1` tag is ignored -- consistent with the release
+workflow publishing those as GitHub pre-releases. And it never
+downgrades: a binary you built from a bumped `Cargo.toml` is
+newer than any release, and it says so rather than replacing it.
+
+### Why the binary is renamed
+
+On Windows the update renames `bombyx.exe` aside before writing
+the new one, and deletes the old copy on the *next* run.
+
+Windows refuses to overwrite the image of a running process, and
+`bombyx self-update` is itself a running bombyx -- the very file
+being replaced. Writing over it fails with
+`Access is denied (os error 5)`. Renaming a running binary is
+permitted, and the running process keeps working from the
+renamed file, which is what makes updating in place possible at
+all. That copy usually cannot be deleted until nothing is using
+it, hence the sweep on the following run.
+
+Those two facts -- the refused overwrite and the permitted
+rename -- were measured on Windows 11 while a second bombyx held
+the same file. The *update as a whole* has not been, per the note
+at the top of this section.
+
+The directory updated is the one holding the **running**
+executable, not one derived from `CARGO_HOME`. Those differ more
+often than they look -- `cargo install --root`, a copy into
+`~/bin`, a Scoop shim -- and writing to the wrong one would
+report success while leaving the binary you actually invoke
+untouched.
+
+Unix needs none of this: replacing a path there unlinks the old
+inode and leaves running processes on it, so the extraction
+simply succeeds.
 
 ## Telling the VM which host it runs on
 

@@ -2,6 +2,91 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-18
+
+**`self-update`, and three assumptions that did not survive
+contact**
+
+bombyx now updates itself: `git ls-remote --tags` finds the
+newest release, `curl` fetches that platform's `.tar.gz` and the
+release's `SHA256SUMS`, the digest is checked, and `tar` extracts
+the binary over the installed one. Verification fails closed --
+no checksum, no entry, or a mismatch all refuse, and there is no
+flag to skip it.
+
+The design changed three times, each time because something got
+measured rather than reasoned about.
+
+**It started as `cargo install --git --tag`.** No new
+dependencies, and every bombyx user has a toolchain because
+installing it is `cargo install`. That was the plan until it was
+pointed out that the release already publishes binaries for four
+platforms, so requiring a compiler to consume them is absurd.
+
+**The download version then died on repository visibility.**
+`breki/bombyx` is private, so the plain
+`releases/download/...` URL returns 404 -- asset downloads need a
+token and the API endpoint. The `cargo install` path had been
+working the whole time precisely because git uses the credential
+helper. The lesson is the cheap one: `gh repo view --json
+visibility` would have settled it before any code was written.
+The repo is being made public, which is what makes the download
+path viable at all.
+
+**And Windows will not overwrite a running executable.** The
+first install attempt failed with `Access is denied (os error 5)`
+on the *move*, not the build -- a four-day-old `bombyx shell` was
+holding `~/.cargo/bin/bombyx.exe`. This is not an edge case:
+`bombyx self-update` is itself a running bombyx, the same file
+being replaced. Windows does permit *renaming* a running binary,
+and the running process keeps working from the renamed file, so
+the update moves the old one aside, extracts, and sweeps the
+leftover on the next run. Both halves were measured before the
+code was written.
+
+Three things are verified by measurement rather than assertion:
+SHA-256 against the specification's own `abc` and empty-string
+vectors; the `tar --strip-components=1 <stem>/<binary>` argv
+against a release-shaped archive, which extracts the binary alone
+and leaves `LICENSE` behind; and `curl -f`, which exits 22 and
+writes **nothing**, where the same command without `-f` exits
+zero having saved a nine-byte `Not Found` as the asset. That last
+one was a real bug earlier the same day, so the flag is a fix
+rather than a habit.
+
+What is not verified: the update end to end. It needs the repo
+public *and* a release cut after this commit, because `v0.2.0`
+has neither a `SHA256SUMS` nor a Windows `.tar.gz`. Run against
+`v0.2.0` today it correctly refuses and prints the manual
+`cargo install` line.
+
+**Releases now audit twice**
+
+`cargo xtask audit` runs in the release workflow's `gates` job
+and as its own step in `/release`. Two copies, because they stop
+different things: the local one blocks the tag from being
+created, and the CI one blocks the binaries from being published.
+
+The reason it is a *separate* step rather than left to `validate`
+is a detail worth writing down. Inside `validate`, a missing
+`cargo-audit` or an unreachable advisory DB degrades to a printed
+warning so an offline laptop is not blocked -- which means
+`Validate OK` does not imply the dependencies were audited. The
+standalone command errors on both. For everyday work the lenient
+reading is right; for a release it is not.
+
+`dep-age-check` was deliberately left out of the release job. It
+compares the working tree against `HEAD`, and at a tag the
+lockfile is unchanged, so it would be a guaranteed no-op -- a
+step that looks like a gate and checks nothing. The cooldown
+belongs where a dependency is adopted.
+
+The workflow also learned to be idempotent. Force-pushing the
+rewritten tags earlier the same day re-triggered it for both, and
+`gh release create` failed with "a release with the same tag name
+already exists" on an otherwise green build. A re-pushed tag is a
+legitimate event, so it now updates an existing release in place.
+
 ### 2026-08-17
 
 **The guest learns which machine it is running on**

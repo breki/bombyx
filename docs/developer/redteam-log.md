@@ -2,6 +2,55 @@
 
 Security (Red Team) review findings. Newest first.
 
+## rt-2026-08-18-verified-archive-reread-before-extract
+
+**Category:** Time-of-check to time-of-use
+
+`self-update` hashes the downloaded archive with
+`std::fs::read(&archive_path)` and then hands the same *path* to
+`tar`, so the bytes that were verified and the bytes that are
+extracted are two separate reads. Nothing pins the file between
+them: no handle is held, and it is not renamed to a private name
+after verification. A process able to write that path in the window
+gets an unverified binary installed, with
+`bombyx: <archive> matches its published checksum` printed
+immediately before.
+
+The window is narrow and the mitigation is real but *incidental*:
+`tempfile::TempDir` creates the directory mode `0o700` on Unix and
+inside the per-user `%LOCALAPPDATA%\Temp` on Windows, so an
+attacker must already be the same user or root. Recorded rather
+than fixed blind, because the mitigation comes from `tempfile`'s
+defaults rather than from a decision made here, and nothing in the
+code says so.
+
+Closing it properly means extracting from a handle opened before
+hashing, or re-hashing the extracted binary. Worth doing when the
+release publishes a digest of the binary itself and not only of the
+archive.
+
+## rt-2026-08-18-replayed-tag-redefines-a-version
+
+**Category:** Release integrity
+
+The release workflow now updates an existing release in place and
+uploads assets with `--clobber`, so a re-pushed tag silently
+redefines what a published version *is*. `update::decide` compares
+only `MAJOR.MINOR.PATCH`, so it has no notion of "this version's
+bytes changed": someone who installed the old `v0.2.0` is reported
+`UpToDate` and never receives the replacement, and someone
+mid-download gets `VerifyError::Mismatch`, whose message asserts
+the bytes "are not the ones that were released" -- pointing at
+tampering when the cause was a re-push.
+
+Idempotency was added for a real reason (a history rewrite moved
+both tags, and the release job failed on an otherwise green build),
+but that is a property of this repository's habits rather than of
+releases. The honest options are to refuse clobbering assets on a
+release that already has them and require a new patch tag, or to
+say in `README.md` that a replaced version is not picked up by
+`self-update`. Neither is done yet.
+
 ## rt-2026-08-11-toml-error-echoes-source
 
 **Category:** Information disclosure

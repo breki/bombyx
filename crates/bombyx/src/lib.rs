@@ -14,3 +14,4 @@ pub mod name;
 pub mod plan;
 pub mod remote;
 pub mod tool;
+pub mod update;

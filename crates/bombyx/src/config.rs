@@ -332,7 +332,7 @@ fn host_problem(value: &str) -> Option<HostProblem> {
 /// `C:cfg` is refused along with `cfg`: a drive-relative path
 /// resolves against that drive's current directory, which is not
 /// a location the operator chose either.
-fn is_anchored_dir(value: &str) -> bool {
+pub(crate) fn is_anchored_dir(value: &str) -> bool {
     let value = value.trim();
     if value.starts_with('/') || value.starts_with('\\') {
         return true;

@@ -1,6 +1,6 @@
 ---
 description: Cut a SemVer release from accumulated [Unreleased] CHANGELOG entries
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git tag:*), Bash(git describe:*), Bash(cargo xtask validate*), Bash(cargo update:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git tag:*), Bash(git describe:*), Bash(cargo xtask validate*), Bash(cargo xtask audit*), Bash(cargo update:*), Read, Edit, AskUserQuestion
 ---
 
 Cut a SemVer release: bump the version, promote the
@@ -96,36 +96,60 @@ step for a release to gate.
    the release gate. If it fails, abort and tell the
    user what failed; do not commit a broken release.
 
-9. **Stage and commit:**
-   - Stage `crates/bombyx/Cargo.toml`, `Cargo.lock`,
-     `CHANGELOG.md` (and nothing else).
-   - Commit directly with `git commit` (do **not** route
-     through `/commit` -- the underlying changes were
-     reviewed at their own commit time, and a release
-     commit is a single-purpose bookkeeping commit; this
-     is the documented exception to the "all commits go
-     through `/commit`" rule).
-   - Use this message format (HEREDOC):
-     ```bash
-     git commit -m "$(cat <<'EOF'
-     release: vX.Y.Z
+9. **Audit, as its own step** -- run
+   `cargo xtask audit` after `validate` passes. Abort the
+   release if it fails.
 
-     <one-line summary derived from the [Unreleased]
-     bullets being released>
+   This looks redundant and is not. `validate` runs audit
+   too, but *inside* `validate` a missing `cargo-audit` or
+   an unreachable advisory DB degrades to a printed
+   **warning**, so that an offline laptop is not blocked.
+   That trade is right for everyday work and wrong for a
+   release: it means `Validate OK` can be reported on a
+   machine that never consulted the RUSTSEC database.
+   The standalone command **errors** on both, which is
+   what makes this a gate.
 
-     AI-Generated: Claude Code (<ModelName> <YYYY-MM-DD>)
-     EOF
-     )"
-     ```
+   Say plainly in the summary that the audit ran and what
+   it found. A release whose advisory check was skipped
+   must not be described as validated.
 
-10. **Tag** -- create an **annotated** tag:
+   The same check runs in the `gates` job of
+   `.github/workflows/release.yml`, so it is enforced
+   somewhere nobody can skip as well as here. Both, because
+   this one blocks the tag from being created and that one
+   blocks the binaries from being published.
+
+10. **Stage and commit:**
+    - Stage `crates/bombyx/Cargo.toml`, `Cargo.lock`,
+      `CHANGELOG.md` (and nothing else).
+    - Commit directly with `git commit` (do **not** route
+      through `/commit` -- the underlying changes were
+      reviewed at their own commit time, and a release
+      commit is a single-purpose bookkeeping commit; this
+      is the documented exception to the "all commits go
+      through `/commit`" rule).
+    - Use this message format (HEREDOC):
+      ```bash
+      git commit -m "$(cat <<'EOF'
+      release: vX.Y.Z
+
+      <one-line summary derived from the [Unreleased]
+      bullets being released>
+
+      AI-Generated: Claude Code (<ModelName> <YYYY-MM-DD>)
+      EOF
+      )"
+      ```
+
+11. **Tag** -- create an **annotated** tag:
     `git tag -a vX.Y.Z -m "Release vX.Y.Z"`. Do **not**
     use a lightweight tag (`git tag vX.Y.Z`) -- the
     deploy guard runs `git describe --exact-match
     --match 'v*' HEAD`, which only sees annotated tags
     by default. Do not push; the user pushes when ready.
 
-11. **Tell the user what to do next** -- print:
+12. **Tell the user what to do next** -- print:
     - The new version and tag name
     - The CHANGELOG bullets that were released
     - "Push with `git push && git push --tags`" -- the
@@ -140,7 +164,10 @@ step for a release to gate.
 - Never edit closed (already-dated) release sections of
   `CHANGELOG.md`; only the `[Unreleased]` block is
   mutable.
-- If `cargo xtask validate` fails after the version
-  bump, leave `Cargo.toml`, `Cargo.lock`, and
-  `CHANGELOG.md` modified on disk so the user can see
-  the broken state, and do not commit or tag.
+- If `cargo xtask validate` **or** `cargo xtask audit`
+  fails after the version bump, leave `Cargo.toml`,
+  `Cargo.lock`, and `CHANGELOG.md` modified on disk so the
+  user can see the broken state, and do not commit or tag.
+- Never describe a release as validated when the audit was
+  skipped or degraded to a warning. Say which of the two
+  happened.

@@ -7,14 +7,22 @@ on:
   push:
     tags: [ "v*.*.*" ]
 
+# Read by default, and write **only** on the job that publishes.
+#
+# Declared workflow-level, `contents: write` handed a write-scoped
+# token to `ci`, `gates` and `build` as well -- three jobs that
+# only compile and test. `gates` is the worst of them: it restores
+# all of `~/.cargo/bin` from a cache under a fixed key, so anything
+# that can write that cache puts executables on `PATH` in a job
+# holding a token that can rewrite releases.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
 
-  # The two `validate` gates that every-push CI leaves out.
+  # The `validate` gates that every-push CI leaves out.
   #
   # They run here and not in ci.yml because each needs a tool the
   # runner does not ship, and paying for that on every push and
@@ -25,11 +33,28 @@ jobs:
   # `cargo xtask validate` before tagging -- this is the copy
   # that runs somewhere nobody can skip.
   #
-  # `audit` and `dep-age-check` are deliberately still absent.
-  # Both reach the network for state that changes on its own, so
-  # in CI they fail for reasons unrelated to the commit being
-  # released, and the project already treats an unreachable
-  # advisory DB as a warning rather than an error.
+  # **`audit` is one of them.** It reaches the network for state
+  # that changes on its own, which is why it is absent from
+  # every-push CI: an advisory published overnight would fail a
+  # pull request that changed nothing. A release is the opposite
+  # case. An advisory is almost always filed against code already
+  # shipped, so no lockfile check tied to *changed* dependencies
+  # can catch it -- `dep-age-check` cannot, by design -- and a
+  # release is the moment the current lockfile is about to become
+  # what people install.
+  #
+  # It runs as the standalone `cargo xtask audit`, which **errors**
+  # on a missing tool or an unreachable advisory DB. Inside
+  # `validate` those degrade to a warning so an offline laptop is
+  # not blocked, and that is the wrong trade for a release:
+  # "Validate OK" there would not mean the dependencies were
+  # audited.
+  #
+  # `dep-age-check` is still absent, and adding it here would be
+  # theatre: it compares the working tree against `HEAD`, and at a
+  # tag the lockfile is unchanged, so it is a guaranteed no-op.
+  # The cooldown is enforced where a dependency is actually
+  # adopted -- `validate` on the commit that adds it.
   #
   # Installed from crates.io rather than through a prebuilt-binary
   # action: crates.io is already a trust root for this build, so
@@ -37,7 +62,7 @@ jobs:
   # would. `--locked` builds each tool from the lockfile it was
   # published with.
   gates:
-    name: Coverage and duplication
+    name: Coverage, duplication and audit
     needs: ci
     runs-on: ubuntu-latest
     steps:
@@ -65,6 +90,24 @@ jobs:
           command -v code-dupes >/dev/null ||
             cargo install --locked code-dupes
 
+      # `cargo-audit` is installed separately and **never from the
+      # cache**, because it is the tool the security gate consists
+      # of. The `command -v X || cargo install X` idiom used above
+      # is satisfied by *any* file named `cargo-audit` on `PATH`,
+      # and `~/.cargo/bin` is restored wholesale from a cache under
+      # a fixed key -- so a poisoned or merely broken entry would
+      # make the audit step trivially passable while the comment
+      # above claims a release cannot pass without the advisory DB
+      # being consulted.
+      #
+      # Pinned, so the binary is a version chosen here rather than
+      # whatever was current when a cache was minted, and the
+      # version is echoed so the log records what actually ran.
+      - name: Install cargo-audit (uncached)
+        run: |
+          cargo install --locked --force cargo-audit@0.22.2
+          cargo audit --version
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -80,6 +123,14 @@ jobs:
       - name: Duplication
         run: cargo xtask dupes
 
+      # Last, and standalone rather than through `validate`: this
+      # spelling errors on a missing tool or an unreachable
+      # advisory DB instead of warning, so a release cannot pass
+      # this job without the RUSTSEC database actually having been
+      # consulted.
+      - name: Security audit
+        run: cargo xtask audit
+
   build:
     name: Build (${{ matrix.target }})
     needs: gates
@@ -87,19 +138,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # No `archive:` key: which archives a target produces is
+        # derived from the triple in the Package step below.
+        # Carrying it here meant a field whose value (`zip`)
+        # really meant "this is Windows" once every target
+        # started producing a tar.gz as well.
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
-            archive: tar.gz
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
-            archive: zip
           - target: aarch64-apple-darwin
             runner: macos-latest
-            archive: tar.gz
           - target: x86_64-apple-darwin
             runner: macos-latest
-            archive: tar.gz
     steps:
       - uses: actions/checkout@v4
 
@@ -132,39 +184,60 @@ jobs:
           echo "name=bombyx-${GITHUB_REF_NAME}-${{ matrix.target }}" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Package (tar.gz)
-        if: matrix.archive == 'tar.gz'
+      # Every target gets a `.tar.gz`, and Windows additionally
+      # gets a `.zip`.
+      #
+      # The zip is for people: it is what a Windows user expects
+      # to download and Explorer opens it without a tool. The
+      # tar.gz is for `bombyx self-update`, which needs *one*
+      # extraction path across platforms. It cannot be the zip,
+      # because bombyx extracts by running `tar`, and the `tar`
+      # that PATH resolves to on Windows is usually GNU tar from
+      # Git for Windows, which cannot read a zip at all. Windows
+      # does ship a bsdtar that can, at
+      # `C:\Windows\System32\tar.exe`, but reaching it means
+      # hardcoding an absolute path -- and `src/tool.rs` refuses
+      # non-plain program names on purpose.
+      #
+      # Publishing one extra small archive is the cheaper answer.
+      - name: Package
         shell: bash
         run: |
           set -euo pipefail
           STAGING="${{ steps.archive.outputs.name }}"
-          mkdir "$STAGING"
-          cp "target/${{ matrix.target }}/release/bombyx" "$STAGING/"
-          cp LICENSE README.md "$STAGING/"
-          tar czf "${STAGING}.tar.gz" "$STAGING"
+          case "${{ matrix.target }}" in
+            *windows*) WINDOWS=yes; BIN=bombyx.exe ;;
+            *)         WINDOWS=no;  BIN=bombyx ;;
+          esac
 
-      - name: Package (zip)
-        if: matrix.archive == 'zip'
-        shell: bash
-        run: |
-          set -euo pipefail
-          STAGING="${{ steps.archive.outputs.name }}"
           mkdir "$STAGING"
-          cp "target/${{ matrix.target }}/release/bombyx.exe" "$STAGING/"
+          cp "target/${{ matrix.target }}/release/$BIN" "$STAGING/"
           cp LICENSE README.md "$STAGING/"
-          7z a "${STAGING}.zip" "$STAGING"
+
+          tar czf "${STAGING}.tar.gz" "$STAGING"
+          if [ "$WINDOWS" = yes ]; then
+            7z a "${STAGING}.zip" "$STAGING"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.archive.outputs.name }}
-          path: ${{ steps.archive.outputs.name }}.${{ matrix.archive }}
+          # A glob rather than one line per archive: naming a
+          # `.zip` that only Windows produces would depend on how
+          # `if-no-files-found` treats a path that matches nothing
+          # while a sibling path matches. The staging directory
+          # has no extension, so this cannot pick it up.
+          path: ${{ steps.archive.outputs.name }}.*
           if-no-files-found: error
 
   release:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
+    # The one job that needs to write, so the only one that can.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -218,21 +291,73 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Two spellings of one answer: the create path takes a
+          # bare flag, and `gh release edit` needs an explicit
+          # `--prerelease=true|false` so it can also clear the bit.
           case "${GITHUB_REF_NAME#v}" in
             *-*) echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
+                 echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
                  echo "tag ${GITHUB_REF_NAME} carries a suffix:" \
                       "publishing as a pre-release" ;;
             *)   echo "prerelease=" >> "$GITHUB_OUTPUT"
+                 echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
                  echo "tag ${GITHUB_REF_NAME} is a normal release" ;;
           esac
 
-      - name: Create GitHub Release
+      # Checksums, so `bombyx self-update` can verify what it
+      # downloaded rather than trusting the transport alone. One
+      # `SHA256SUMS` file covering every asset, in the format
+      # `sha256sum -c` reads, so a human can check by hand with
+      # the same file the tool uses.
+      #
+      # Generated here rather than per-build-job: the assets are
+      # all in one place only at this point, and a single file is
+      # one fetch for a client instead of one per asset.
+      - name: Checksum the assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          # Named explicitly rather than `*`, so re-running this
+          # step cannot fold a previous SHA256SUMS into the new one.
+          sha256sum bombyx-* > SHA256SUMS
+          cat SHA256SUMS
+
+      # Idempotent on purpose: `gh release create` fails with
+      # "a release with the same tag name already exists", and a
+      # re-pushed tag is a legitimate event -- rewriting history
+      # moves every tag, and both of this project's tags were
+      # force-updated once for exactly that reason. The whole
+      # release job then failed on a build that was otherwise
+      # green, which reads as a broken release rather than as a
+      # replayed one.
+      - name: Create or update the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          --title "$GITHUB_REF_NAME"
-          --notes-file release_notes.md
-          --verify-tag
-          ${{ steps.kind.outputs.prerelease }}
-          artifacts/*
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists; updating in place"
+            # `--prerelease=` explicitly, in both directions. The
+            # create branch passes the flag and the edit branch
+            # originally did not, so the same tag could be
+            # published as a normal release by one path and a
+            # pre-release by the other -- and mis-classifying an rc
+            # as Latest is exactly what the classification step
+            # exists to prevent.
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release_notes.md \
+              --prerelease=${{ steps.kind.outputs.is_prerelease }}
+            # --clobber, so a replayed tag replaces the assets
+            # rather than failing on the names already being there.
+            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release_notes.md \
+              --verify-tag \
+              ${{ steps.kind.outputs.prerelease }} \
+              artifacts/*
+          fi

@@ -891,6 +891,32 @@ Four `cargo xtask` commands guard the dependency tree:
   **`validate` needs `cargo-audit` installed
   (`cargo install cargo-audit`) and network access** to the
   advisory DB.
+
+  **Inside `validate` a missing tool or an unreachable
+  advisory DB is a printed warning, not a failure**, so an
+  offline machine is not blocked. The consequence is worth
+  stating plainly: `Validate OK` does **not** mean the
+  dependencies were audited. The standalone
+  `cargo xtask audit` errors on both instead, and that is
+  the spelling a release uses.
+
+  **Releases audit twice, and neither copy is optional.**
+  `/release` runs the standalone command as its own step
+  after `validate`, which blocks the tag from being created;
+  the `gates` job in `.github/workflows/release.yml` runs it
+  as well, which blocks the binaries from being published.
+  The second one is the copy nobody can skip. Every-push CI
+  still leaves audit out on purpose -- an advisory filed
+  overnight would fail a pull request that changed nothing.
+
+  **What this does not cover.** An advisory against a
+  dependency you have not touched is caught only at the next
+  release, because `dep-age-check` looks at *changed* deps by
+  design and nothing else watches. There is also no licence
+  or ban policy (no `deny.toml`), no provenance vetting (no
+  `cargo-vet`), and no automated update cadence, so a
+  dependency whose vulnerability is already fixed upstream
+  sits at the old version until someone runs `/update-deps`.
 - **`cargo xtask dep-age cargo <package> [version]`**
   reports how many days ago a version was published (on-demand,
   a single package). Add **`--latest-aged`** to instead print

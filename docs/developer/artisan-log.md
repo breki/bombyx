@@ -2,6 +2,96 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-18-self-update-composition-untested
+
+**Category:** Testability / abstraction boundaries
+
+`self_update` in `crates/bombyx/src/bin/bombyx/main.rs` is ~120
+lines of composition in the binary: it renders every `Decision`
+variant's operator-facing text, chooses the temp-directory layout,
+derives both URLs, builds three commands, and encodes the ordering
+rule that `SHA256SUMS` is fetched *before* the archive. `update.rs`
+and `update/asset.rs` are thoroughly tested; this composition is
+not, and `src/bin/` is outside the coverage gate. The one function
+holding the ordering invariant that verification depends on has no
+test.
+
+Suggested shape: a library `plan_update(latest, triple,
+install_dir, work) -> UpdatePlan` returning the archive name, both
+paths, and the three commands, unit-tested for the URLs, the
+extract target, and that the sums fetch comes first. `self_update`
+then shrinks to parse-capture-match-run. Rendering `Decision` to
+text could move too.
+
+Deferred because the correctness findings from the same review
+(the `?`-in-loop parser bug, the Windows `tar` drive-letter
+failure, the wrong install directory) were fixed instead, and
+landing a refactor in the same commit would have buried them.
+Note the module doc still claims the binary is "thin by design:
+parse arguments, hand off to the library", which this function
+contradicts.
+
+## aq-2026-08-18-update-rs-mixes-pure-and-io
+
+**Category:** Module structure
+
+`crates/bombyx/src/update.rs` is past 900 lines and holds four
+concerns: version/tag parsing and the update decision (pure), argv
+builders, environment probing for the install directory, and
+filesystem manipulation of the installed binary (`move_aside`,
+`restore`, `place`, `sweep_aside`). The last group renames and
+deletes files, which is the only I/O in the crate's
+command-building layer.
+
+Suggested split by *effect* rather than by topic:
+`update/version.rs` for the pure decision half, `update/swap.rs`
+for the filesystem half, leaving `update.rs` as the facade.
+`update/asset.rs` is a good boundary already and should stay.
+
+The module doc header was corrected in this commit to say which
+half touches the filesystem, so the misleading claim is gone; the
+split itself is still worth doing. Second review to raise this
+file's size (see `aq-2026-08-17-remote-rs-holds-three-concerns`
+for the sibling).
+
+## aq-2026-08-18-execute-returns-an-exit-code
+
+**Category:** API design
+
+`execute` in `main.rs` returns `Result<ExitCode>` -- a
+process-exit type -- as its domain answer, so every caller that
+wants "did it work" re-derives it. `ran_ok` does
+`execute(...)? == ExitCode::SUCCESS`, leaning on `ExitCode:
+PartialEq`, which is not what that opaque type is for.
+`std::slice::from_ref(cmd)` also appears three times to feed a
+single command into a slice API.
+
+Suggested: give `execute` a return type that says what happened
+(`struct Ran { ok: bool, code: ExitCode }`, or
+`Result<Result<(), ExitCode>>`) and convert at the `main`
+boundary; add an `execute_one` wrapper so `from_ref` appears once.
+
+Partially defused in this commit: the second, differently-spelled
+copy of the predicate inside `replace_binary` is gone, because the
+move-aside dance moved into the library as `update::place`, which
+returns a `Result` rather than an `ExitCode`. One spelling is left.
+
+## aq-2026-08-18-selfupdate-arm-is-unreachable
+
+**Category:** Type safety
+
+`action_of` carries a `Cmd::SelfUpdate => bail!("internal error:
+...")` arm that cannot be reached, guarded only by a `matches!` in
+`run` some four hundred lines away. The invariant is maintained by
+a comment rather than by the types, and the next subcommand that
+also bypasses the config (`completions`, a `version --check`) adds
+a second such arm.
+
+Suggested: `enum Cmd { SelfUpdate, Vm(VmCmd) }` with
+`#[command(flatten)]`, so the CLI surface is unchanged and
+`action_of(&VmCmd, ...)` becomes total, deleting both the arm and
+the `matches!` sentinel.
+
 ## aq-2026-08-17-remote-rs-holds-three-concerns
 
 **Category:** Module structure

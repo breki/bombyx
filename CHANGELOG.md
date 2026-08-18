@@ -12,7 +12,28 @@ and this project adheres to
 
 ### Added
 
+- bombyx self-update: replace the installed binary with the newest release.
+  Finds the tag with `git ls-remote`, downloads that platform archive with
+  `curl`, and verifies it against the release SHA256SUMS before extracting.
+  Fails closed -- a missing or mismatched checksum refuses the update and prints
+  a `cargo install` line to run by hand. Never installs a pre-release, and never
+  downgrades a local build newer than any release. On Windows the running binary
+  is renamed aside, since Windows refuses to overwrite a running image.
+
 ### Changed
+
+- Release workflow: attach a SHA256SUMS covering every asset, publish a .tar.gz
+  for every target (Windows keeps its .zip as well) so self-update has one
+  extraction path, and update an existing release in place instead of failing
+  when a tag is re-pushed.
+- Releases now audit dependencies as a blocking gate, in two places: `cargo
+  xtask audit` runs in the release workflow gates job and as its own step in
+  /release. Standalone rather than via validate, because inside validate a
+  missing cargo-audit or unreachable RUSTSEC database degrades to a warning --
+  so "Validate OK" did not imply the dependencies were audited. cargo-audit is
+  installed pinned and uncached in CI, since a cached copy would be the tool the
+  gate consists of. The release job is also the only one granted a write-scoped
+  token now.
 
 ### Fixed
 

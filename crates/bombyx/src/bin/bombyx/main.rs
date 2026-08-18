@@ -18,6 +18,7 @@ use bombyx::doctor::{
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
 use bombyx::remote::{PushArchive, RemoteCommand};
+use bombyx::update::{self, asset};
 use clap::{Parser, Subcommand};
 use tempfile::TempDir;
 
@@ -74,6 +75,15 @@ enum Cmd {
         /// Must match `project` in `bombyx.toml`
         project: Option<String>,
     },
+    /// Update this bombyx binary to the newest release
+    ///
+    /// Downloads the release archive for this platform and
+    /// verifies it against the release's `SHA256SUMS` before
+    /// replacing the binary. Refuses rather than installing
+    /// anything it cannot verify, never installs a pre-release,
+    /// and never downgrades a local build that is newer than any
+    /// release. Needs `curl` and `tar`.
+    SelfUpdate,
     /// Boot a throwaway VM for untrusted work
     Scratch {
         /// Name for the scratch VM, e.g. `pr-1234`
@@ -98,6 +108,17 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
+
+    // Handled before anything reads a config, because it is the
+    // one subcommand that is not about a VM. Every other command
+    // needs a project and a host; `self-update` needs neither,
+    // and loading the config first would make updating bombyx
+    // fail in any directory without a `bombyx.toml` -- including
+    // the home directory, which is where someone would naturally
+    // run it.
+    if matches!(cli.command, Cmd::SelfUpdate) {
+        return self_update(cli.dry_run);
+    }
 
     // The VM host is not in the project file: it belongs to
     // whoever is driving bombyx, not to the repo. Highest
@@ -197,6 +218,226 @@ fn run() -> Result<ExitCode> {
     execute(&plan(&action, &cfg, &local_dir, &archive), false)
 }
 
+/// Checks for a newer release and installs it.
+///
+/// Does not go through `plan`, because there is a decision in the
+/// middle: the tag list has to be *read* before the rest can be
+/// built at all. The steps that follow the decision come from
+/// [`asset::plan`], so their order and their URLs are asserted in
+/// the library rather than assembled here.
+///
+/// The tag list is fetched even for a dry run: it changes nothing
+/// locally, and a dry run that skipped it could only print a
+/// guess at the version.
+fn self_update(dry_run: bool) -> Result<ExitCode> {
+    let current = update::Version::parse(update::CURRENT).ok_or_else(|| {
+        anyhow!("this build's version {:?} is not X.Y.Z", update::CURRENT)
+    })?;
+
+    let list = update::list_releases_command();
+    if dry_run {
+        println!("{list}");
+    }
+    let Some(latest) = newer_release(current, &list)? else {
+        return Ok(ExitCode::SUCCESS);
+    };
+
+    let triple = asset::target_triple().ok_or_else(|| {
+        anyhow!(
+            "no release is published for {}/{}; build from source \
+             instead:\n  {}",
+            std::env::consts::ARCH,
+            std::env::consts::OS,
+            update::install_command(latest)
+        )
+    })?;
+    let dir = target_dir(latest)?;
+    let work = TempDir::new().context("creating a temp directory")?;
+    let plan = asset::plan(latest, triple, work.path());
+
+    if dry_run {
+        for cmd in plan.steps() {
+            println!("{cmd}");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("bombyx: updating {current} -> {latest}");
+    fetch_verified(&plan, latest)?;
+
+    if !ran_ok(&plan.extract)? {
+        bail!("extracting {} failed", plan.archive);
+    }
+
+    let placed = update::place(&plan.extracted, &dir, &run_id())?;
+    if placed.swept > 0 {
+        eprintln!("bombyx: removed {} superseded binaries", placed.swept);
+    }
+    if let Some(leftover) = placed.leftover {
+        eprintln!(
+            "bombyx: {} is still in use; the next self-update \
+             removes it",
+            leftover.display()
+        );
+    }
+    println!("bombyx: updated to {latest} in {}", dir.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The newest release when it is worth installing, else `None`.
+///
+/// Prints its own reason for the three no-op answers, so the
+/// caller has nothing to decide. `None` is not a failure: being up
+/// to date, and being ahead of every release, are both ordinary.
+fn newer_release(
+    current: update::Version,
+    list: &RemoteCommand,
+) -> Result<Option<update::Version>> {
+    let tags = capture(list)?;
+    match update::decide(current, update::newest_release(&tags)) {
+        update::Decision::UpToDate(version) => {
+            println!("bombyx {version} is the newest release");
+            Ok(None)
+        }
+        // Not an error: a locally built binary ahead of the last
+        // tag is the normal state while developing. Reported
+        // rather than silently downgraded.
+        update::Decision::Ahead { latest, .. } => {
+            println!(
+                "bombyx {current} is newer than the newest release \
+                 {latest}; nothing to do"
+            );
+            Ok(None)
+        }
+        update::Decision::NoReleases { .. } => bail!(
+            "{} publishes no release tags, so there is nothing to \
+             update {current} to",
+            update::REPO_URL
+        ),
+        update::Decision::Available { latest, .. } => Ok(Some(latest)),
+    }
+}
+
+/// Downloads the archive and refuses unless it verifies.
+///
+/// The checksum file is fetched **first**, so a release that
+/// cannot be verified is discovered before an archive is
+/// downloaded rather than after.
+///
+/// None of the failures here claim to know *why* the fetch
+/// failed. An earlier version answered a non-zero `curl` with
+/// "this release predates checksummed releases", which is one
+/// cause among DNS failure, a proxy, a 403 and a dropped
+/// connection -- so on a network that merely blocked the file,
+/// bombyx confidently advised abandoning verification.
+fn fetch_verified(
+    plan: &asset::UpdatePlan,
+    latest: update::Version,
+) -> Result<()> {
+    let by_hand = || {
+        format!("or install by hand:\n  {}", update::install_command(latest))
+    };
+
+    if !ran_ok(&plan.get_sums)? {
+        bail!(
+            "could not fetch {} for {} (curl's error is above).\n  \
+             If that release has none, it predates checksummed \
+             releases and cannot be verified here -- {}",
+            asset::SUMS_FILE,
+            latest.tag(),
+            by_hand()
+        );
+    }
+    if !ran_ok(&plan.get_archive)? {
+        bail!("could not download {} -- {}", plan.archive, by_hand());
+    }
+
+    let sums = std::fs::read_to_string(&plan.sums_path)
+        .with_context(|| format!("reading {}", plan.sums_path.display()))?;
+    // A zero-length body passes `curl -f` -- a 200 with nothing in
+    // it, or a truncated transfer -- and would otherwise be
+    // reported as "no entry for this asset", which is a claim about
+    // the release rather than about the download.
+    if sums.trim().is_empty() {
+        bail!(
+            "{} for {} is empty; the download was truncated",
+            asset::SUMS_FILE,
+            latest.tag()
+        );
+    }
+
+    let bytes = std::fs::read(&plan.archive_path)
+        .with_context(|| format!("reading {}", plan.archive_path.display()))?;
+    asset::verify(&sums, &plan.archive, &bytes).with_context(by_hand)?;
+    println!("bombyx: {} matches its published checksum", plan.archive);
+    Ok(())
+}
+
+/// Where the binary being replaced lives.
+///
+/// **The directory holding the *running* executable**, not a
+/// directory guessed from the environment. Those differ more often
+/// than they look: `cargo install --root`, a copy into `~/bin`, a
+/// Scoop or winget shim, or simply running
+/// `target\release\bombyx.exe`. Deriving it from `CARGO_HOME`
+/// alone wrote a fresh binary into `~/.cargo/bin`, printed
+/// `updated`, and left the binary the operator actually invokes
+/// untouched -- a success message for a no-op.
+///
+/// [`update::install_dir`] is the fallback for the platforms where
+/// `current_exe` can fail, and it is only a fallback.
+fn target_dir(latest: update::Version) -> Result<PathBuf> {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        return Ok(parent.to_path_buf());
+    }
+    update::install_dir().ok_or_else(|| {
+        anyhow!(
+            "cannot tell which directory holds this binary, and \
+             the environment names no cargo home either: install \
+             by hand:\n  {}",
+            update::install_command(latest)
+        )
+    })
+}
+
+/// Runs one command, reporting only whether it succeeded.
+///
+/// `execute` passes a failing exit code through as an `ExitCode`
+/// rather than an error, which is right for the VM commands whose
+/// status is the tool's own answer. Here the two failures need
+/// different messages, so the caller decides -- and a bare
+/// `execute` result would make "no such asset" and "network down"
+/// look identical.
+fn ran_ok(cmd: &RemoteCommand) -> Result<bool> {
+    Ok(execute(std::slice::from_ref(cmd), false)? == ExitCode::SUCCESS)
+}
+
+/// Runs a command and returns its stdout.
+///
+/// Separate from `execute`, which streams and keeps only the exit
+/// status. Resolution goes through `tool` for the same reason
+/// every other program does -- see that module; the working
+/// directory is never searched.
+fn capture(cmd: &RemoteCommand) -> Result<String> {
+    let program = bombyx::tool::resolve(&cmd.program)
+        .ok_or_else(|| anyhow!("{}", doctor::not_on_path(&cmd.program)))?;
+    let out = std::process::Command::new(program)
+        .args(&cmd.args)
+        .output()
+        .with_context(|| format!("running {}", cmd.program))?;
+    if !out.status.success() {
+        // The program's own stderr is the useful part -- for
+        // `git ls-remote` it distinguishes "no network" from
+        // "repository not found".
+        let reason = String::from_utf8_lossy(&out.stderr);
+        bail!("{} failed: {}\n{}", cmd.program, out.status, reason.trim());
+    }
+    String::from_utf8(out.stdout)
+        .with_context(|| format!("{} printed invalid UTF-8", cmd.program))
+}
+
 /// Returns a string distinguishing this run from any other
 /// pushing to the same host.
 fn run_id() -> String {
@@ -223,6 +464,19 @@ fn action_of(cmd: &Cmd, cfg: &Config) -> Result<Action> {
         }
         Cmd::Scratch { name } => Action::Scratch(vm_name(name)?),
         Cmd::Discard { name } => Action::Discard(vm_name(name)?),
+        // Unreachable by construction: `run` intercepts this
+        // before the config is loaded, because it is the one
+        // subcommand that needs neither a project nor a host.
+        //
+        // An error rather than `unreachable!()`. The two differ
+        // only when the invariant breaks, and that is exactly when
+        // the difference matters: a panic prints a backtrace and a
+        // bug-report request at someone trying to update a CLI,
+        // where this prints a line and exits non-zero.
+        Cmd::SelfUpdate => bail!(
+            "internal error: self-update reached the VM action \
+             mapping; it is handled before the config is loaded"
+        ),
     })
 }
 
