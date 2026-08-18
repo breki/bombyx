@@ -4,6 +4,70 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-18
 
+**The attribution file was attributing the wrong crates**
+
+`cargo xtask licenses` landed listing 87 crates and calling them
+the binary's dependencies. Three of those words were wrong at
+once. `cargo metadata` with no pruning walks dev-dependencies, so
+`assert_cmd`, `predicates` and `difflib` were in there; it walks
+every workspace member, so `xtask`'s own `clap` and `serde_json`
+were too; and without `--filter-platform` it walks every target,
+which is how `r-efi` -- a UEFI crate -- came to be attributed on
+Windows. The fix walks `resolve.nodes` from members whose
+`publish` field is not an empty array, following only `dep_kinds`
+entries with `kind: null`, and passes `--filter-platform` plus
+`--locked`. The count went 87 to 50 for
+`x86_64-pc-windows-msvc`, and the release workflow now generates
+the file per target so each archive carries its own platform's
+set.
+
+The `--locked` is the non-obvious one. Without it this call can
+re-resolve and rewrite `Cargo.lock` *after* the
+`cargo build --locked` that produced the binary, so the file
+would describe a set the binary never used.
+
+**Then the review found the sentence still was not true, and the
+example it leaned on was the worst case of it.** Two things are
+in the list without being linked into anything. Proc-macro crates
+run at compile time -- and `unicode-ident`, whose `Unicode-3.0`
+obligation was being quoted in three places as the reason this
+file exists, reaches bombyx only through `clap_derive`,
+`serde_derive` and `thiserror-impl`. `cargo tree -i unicode-ident
+-e normal` shows every path going through a `(proc-macro)` crate.
+The flagship justification was for a crate that is not in the
+binary. Separately, `resolve.nodes[].deps` reports an optional
+dependency the build never enables with the same `kind: null` as
+a real edge, which is how `indexmap`, `hashbrown` and
+`equivalent` arrive behind `toml`'s disabled `preserve_order`
+feature: `cargo tree -e normal` gives 47 crates where the walk
+gives 50.
+
+Pruning those two needs feature resolution and proc-macro role
+detection, both of which fail quietly and in the direction that
+matters -- an omitted notice. So the set stays over-inclusive and
+the *wording* was fixed instead, everywhere: "goes into building
+this binary", never "is linked into" it. An unnecessary
+attribution costs nothing. A false sentence in a legal document
+is the thing being avoided, and it had been written three times.
+
+The other half was the failure mode. A crate with no licence text
+used to be named in the file and the command exited 0. That reads
+as thorough and is the opposite: if the registry sources are
+absent -- a vendored build, or a container where `CARGO_HOME`
+differs between build and packaging -- every crate comes back
+text-less, and the tool writes a short file announcing that none
+of them ship a licence, exits 0, and that ships. It now fails,
+with `--max-missing N` to raise the bar on purpose.
+
+Two follow-ons there. The gate's predicate had to be narrower
+than the collector's: `NOTICE`, `AUTHORS` and `COPYRIGHT` are
+gathered because they carry obligations, but a crate shipping only
+an `AUTHORS` contributor list, or an empty `LICENSE`, has given us
+no terms to reproduce -- and either used to pass. And the gate now
+runs in every-push CI, not only in the release matrix. A gate
+whose first firing is minutes into a tagged build costs a moved
+tag, which this project has already paid for once.
+
 **`self-update`, and three assumptions that did not survive
 contact**
 

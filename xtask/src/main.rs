@@ -72,6 +72,12 @@ enum XCommand {
         /// Where to write it (default: THIRD-PARTY-LICENSES)
         #[arg(long)]
         out: Option<std::path::PathBuf>,
+        /// Target triple to attribute for (default: this host)
+        #[arg(long)]
+        target: Option<String>,
+        /// Crates allowed to ship no licence text
+        #[arg(long, default_value_t = 0)]
+        max_missing: usize,
     },
     /// Report a dependency version's age and flag it if
     /// within the publish cooldown (on-demand; requires curl)
@@ -186,7 +192,11 @@ fn main() {
         XCommand::Dupes => dupes::dupes(),
         XCommand::Audit => audit::audit(),
         XCommand::Deny => deny::deny(),
-        XCommand::Licenses { out } => licenses::licenses(out),
+        XCommand::Licenses {
+            out,
+            target,
+            max_missing,
+        } => licenses::licenses(out.as_deref(), target.as_deref(), max_missing),
         XCommand::DepAge {
             ecosystem,
             package,

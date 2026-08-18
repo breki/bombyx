@@ -69,6 +69,92 @@ _None yet._
 
 ## Suggestions to flow back to the template
 
+### tf-2026-08-18-agent-editing-and-measurement-rules-worth-shippi -- agent editing and measurement rules worth shipping
+
+Two rules were added to this project's `CLAUDE.md` after each cost real
+time. Both are about how an agent edits and how it states facts, so
+neither is specific to this project and both would serve any project
+generated from the template.
+
+**Use `Edit` rather than a slurp-mode regex for YAML, and for anything
+next to a doc comment.** `perl -0pi -e 's/.../.../'` over a whole file
+has no idea which block it landed in. One substitution aimed at a
+workflow's `deny` job cache block matched the `test` job's instead and
+spliced steps into the wrong place; another put a statement at line 1 of
+`xtask/src/audit.rs`, glued onto the module doc comment. Both needed a
+`git checkout` and a redo, and the YAML one only surfaced when a parse
+check failed several steps later.
+
+Two shapes are reliably dangerous. Indentation-carrying formats, where a
+wrong-block match still parses and so fails silently. And anything
+adjacent to a `///` block, where inserting before an item reassigns the
+comment above it to the new item -- which is how a function ended up
+documented as doing the opposite of what it does, with both rustdoc
+passes clean because the comment was syntactically valid on the item it
+landed on. `sed` and `perl` remain fine for flat text and one-line
+substitutions.
+
+**Print the variable before claiming what it holds.** Three false
+statements in one week came from writing an environment claim from
+expectation rather than measurement: that a libvirt guest's DMI exposes
+the host (it exposes the emulated machine -- `sys_vendor` reads `QEMU`),
+that a repository was public (it was private, so every asset URL 404'd
+and a whole design was built on the wrong premise), and that Windows sets
+`USERPROFILE` "and not HOME" (Git Bash sets both, with `HOME` in POSIX
+form). Each was one command away: `cat /sys/class/dmi/id/sys_vendor`,
+`gh repo view --json visibility`, `echo $HOME`. The rule is that a claim
+about what a variable, a file or a platform actually contains has to
+arrive with the command that read it.
+
+The second rule matters more than it looks, because the failure mode is
+a *plausible* wrong answer rather than an error. A claim that a platform
+does not expose something is the easiest kind to invent, and nothing
+fails when it is wrong -- it just gets written into three files and
+believed.
+
+Suggested for the template: carry both in the `CLAUDE.md` scaffolding.
+They are cheap to state and each one here was learned by losing an hour.
+
+### tf-2026-08-18-nothing-checks-a-second-platform-before-release -- nothing checks a second platform before release
+
+Nothing in the template checks a second platform before a release. Both
+`validate` and `/release` run on the machine the developer is sitting at,
+and the template claims Windows, Linux and macOS as first-class targets.
+So a release can be tagged, pushed and immediately fail CI on the two
+platforms nobody checked.
+
+That is not a worry, it is the record. `v0.3.0` was cut here after a
+green nine-gate `validate`, tagged, pushed -- and the release run failed
+on ubuntu and macos while windows passed. Recovering it meant fixing the
+defect, moving an already-pushed tag and paying a second eight-minute
+release run. Twice before that, template-provided `xtask` code neither
+compiled nor linted off Windows for the same reason, which is recorded
+separately as `tf-2026-08-18-xtask-clean-cache-breaks-off-windows`.
+
+That entry suggests noting the cross-target commands wherever the
+platform claim is made. This one is the stronger form of the same
+lesson: make one of them a gate, because a note is something a release
+can skip and a step is not.
+
+The fix here was a step in `/release`, before the tag:
+
+    cargo clippy --workspace --all-targets \
+      --target x86_64-unknown-linux-gnu -- -D warnings
+
+Two details that took a failure each to learn. It has to be **clippy**,
+not `cargo check`: `check --target` compiles and runs no lints, so it
+proves the build and says nothing about the lints -- which is exactly how
+the second `xtask` failure slipped through a cross-target check that had
+just been run. And no linker for the other platform is needed, because
+only the cfg analysis and the lints run, so this costs seconds on a
+warm target directory and needs no toolchain beyond a `rustup target
+add`.
+
+Suggested for the template: add the cross-target clippy to `/release`
+before the tag, and consider it in `validate` for projects where the
+extra seconds are acceptable. A template that claims three platforms and
+gates one is asserting something nothing verifies.
+
 ### tf-2026-08-18-template-improve-only-logs-what-it-is-told -- template-improve only logs what it is told
 
 `/template-improve` only records what the operator happens to remember.

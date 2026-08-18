@@ -98,7 +98,7 @@ cargo xtask fmt               # format code
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
 cargo xtask deny              # licence/bans/sources gate (cargo-deny, offline)
-cargo xtask licenses [--out P] # generate THIRD-PARTY-LICENSES
+cargo xtask licenses [--out P] [--target T] [--max-missing N]
 cargo xtask dep-age cargo <pkg> [ver]  # one package's publish age
 cargo xtask dep-age cargo <pkg> --latest-aged  # newest ver past cooldown
 cargo xtask dep-age-check     # cooldown-gate changed deps (vs HEAD)
@@ -940,18 +940,55 @@ matters because the two hazards behave differently:
   satisfied by any allowed member -- so that crate resolves to MIT
   and a crate that is *only* copyleft fails the gate.
 
-- **`cargo xtask licenses`** generates `THIRD-PARTY-LICENSES` from
-  the dependency tree, and the release workflow writes it into
-  every archive. This is compliance, not tidiness: MIT and
-  Apache-2.0 both require the licence and notice to travel with a
-  distributed binary, and `unicode-ident` carries `Unicode-3.0`
-  through an SPDX `AND`, which is required rather than optional.
-  Until this existed the archives held only bombyx's own
-  `LICENSE`, so the obligation was unmet from the first published
-  binary. Texts come from the registry sources already on disk;
-  nothing is downloaded. A crate shipping no licence file is
-  **named in the file** rather than skipped -- two currently are,
-  and omitting them would make the file look complete.
+- **`cargo xtask licenses`** generates `THIRD-PARTY-LICENSES` for
+  one target, and the release workflow writes it into every
+  archive. This is compliance, not tidiness: MIT and Apache-2.0
+  both require the licence and notice to travel with a distributed
+  binary, and `serde`, `clap`, `anyhow` and the `windows-sys` tree
+  are all in the shipped binary under one or the other. Until this
+  existed the archives held only bombyx's own `LICENSE`, so the
+  obligation was unmet from the first published binary. Texts come
+  from the registry sources already on disk; nothing is
+  downloaded.
+
+  **The set is what goes into building the binary for one
+  target**, which took three restrictions: crates reachable from a
+  *distributed* workspace member (so not `xtask`'s tree), through
+  *normal* dependencies (so not `assert_cmd`, `predicates`,
+  `difflib`), resolved for the *one* platform named by `--target`
+  (so not `r-efi`). That is 50 crates on
+  `x86_64-pc-windows-msvc` against 87 before. Pass `--target` from
+  the release matrix, or the host triple is used -- and it fails
+  rather than guessing one, because a guessed triple resolves
+  another platform's set and still exits 0.
+
+  **It says "goes into building", not "links", and that wording is
+  load-bearing.** Within those three restrictions the set is
+  deliberately over-inclusive: proc-macro crates run at compile
+  time and are not in the binary (8 of the 50, including the
+  `unicode-ident` whose `Unicode-3.0` used to be quoted as the
+  reason this file exists -- it reaches bombyx only through
+  `clap_derive`, `serde_derive` and `thiserror-impl`), and
+  `resolve.nodes[].deps` reports an optional dependency the build
+  never enables with the same `kind: null` as a real edge
+  (`cargo tree -e normal` says 47 where the walk says 50). Pruning
+  either means reimplementing feature resolution, which fails
+  quietly and in the direction that matters. An unnecessary
+  attribution costs nothing; a false sentence in a legal document
+  does, so the sentence is what gets kept true.
+
+  **A crate shipping no licence terms fails the command**, with
+  `--max-missing N` to raise the bar deliberately. Naming them in
+  the file was not enough: if the registry sources are absent every
+  crate comes back text-less, and the tool would write a short file
+  announcing that none of them ship a licence and exit 0. "Terms"
+  is narrower than what the tool *collects*: `NOTICE`, `AUTHORS`
+  and `COPYRIGHT` are gathered because they carry obligations of
+  their own, but a crate shipping only an `AUTHORS` list has given
+  us nothing to reproduce, so it does not satisfy the gate. Nor
+  does an empty `LICENSE`. The generator runs in every-push CI as
+  well as the release, because a gate that first fires after the
+  tag exists costs a moved tag.
 
   It is not committed (`.gitignore`), because it is derived from
   `Cargo.lock` and would drift the moment a dependency moved.
@@ -991,10 +1028,7 @@ The other four are about vulnerabilities and freshness:
   crate from one that merely has no advisory yet, and no
   automated update cadence, so a dependency whose vulnerability
   is already fixed upstream sits at the old version until
-  someone runs `/update-deps`. The attribution file also covers
-  the whole dependency tree rather than only what the binary
-  links, which over-claims -- see the deferred item in
-  `docs/developer/artisan-log.md`.
+  someone runs `/update-deps`.
 - **`cargo xtask dep-age cargo <package> [version]`**
   reports how many days ago a version was published (on-demand,
   a single package). Add **`--latest-aged`** to instead print

@@ -15,14 +15,20 @@ and this project adheres to
 - Licence checking, in two halves. `cargo xtask deny` gates licences, banned
   crates and registry sources with cargo-deny -- offline, so it runs on every
   push in CI as well as in validate, unlike the advisory audit. And `cargo xtask
-  licenses` generates a THIRD-PARTY-LICENSES file from the dependency tree, now
-  included in every release archive: MIT and Apache-2.0 both require attribution
-  to travel with a distributed binary, and the archives previously carried only
-  bombyx own LICENSE. `COPYRIGHT` and `AUTHORS` count as notice files, which
-  matters because that is where rustix and linux-raw-sys explain their triple
-  licence and the LLVM exception. The one crate that ships no licence text at all
-  is named in the file rather than omitted, and the header says the list covers
-  the whole dependency tree rather than only what the binary links.
+  licenses` generates a THIRD-PARTY-LICENSES file, now included in every release
+  archive: MIT and Apache-2.0 both require attribution to travel with a
+  distributed binary, and the archives previously carried only bombyx own
+  LICENSE. The list is what goes into building that binary -- normal
+  dependencies of a distributed workspace member, resolved for the one target
+  passed with `--target` -- so each archive carries its own platform's set. It
+  is over-inclusive within that, since compile-time-only crates are listed too,
+  and the file says so rather than claiming they are linked in. `COPYRIGHT` and
+  `AUTHORS` are collected as notice files, which matters because that is where
+  rustix and linux-raw-sys explain their triple licence and the LLVM exception,
+  but a notice alone does not satisfy the gate: a crate shipping no licence
+  terms fails the command, and `--max-missing` raises that bar deliberately.
+  The generator runs in every-push CI as well as the release, so a dependency
+  with no licence text fails while it is still a diff rather than after the tag.
 
 ### Changed
 

@@ -2,48 +2,6 @@
 
 Security (Red Team) review findings. Newest first.
 
-## rt-2026-08-18-attribution-covers-more-than-the-binary
-
-**Category:** Compliance accuracy
-
-`cargo xtask licenses` runs `cargo metadata --all-features` with no
-dep-kind pruning, no `--filter-platform` and no `--locked`, so
-`THIRD-PARTY-LICENSES` lists dev-dependencies (`assert_cmd`,
-`predicates`, `difflib`), the build tooling own tree, and crates for
-other targets (`r-efi`). Verified: `cargo tree -i difflib -e normal`
-returns nothing, so it is not in the shipped binary.
-
-The header now states that the list is the whole dependency tree
-rather than what the binary links, so the file no longer makes a
-false claim, and over-attribution breaks no licence. It is still
-imprecise: the count differs per platform, and the one honest caveat
-in the document points at a crate that is not distributed at all.
-
-Fix: walk `resolve.nodes` from the workspace roots keeping only
-`dep_kinds` with `kind: null`, and pass `--filter-platform <triple>`
-from the release matrix plus `--locked`, so the attribution
-describes the set the binary was built from. Deferred because it
-needs a `resolve` fixture and per-target generation.
-
-## rt-2026-08-18-licences-generator-can-ship-empty
-
-**Category:** Compliance / silent failure
-
-Nothing fails when the generator finds no licence text. If the
-registry sources are absent or laid out differently from what
-`manifest_path` implies -- a vendored build, or a container where
-`CARGO_HOME` differs between the build and packaging steps --
-`texts_beside` returns empty for every crate and the tool writes a
-short file saying "87 of them ship no licence file" and exits 0.
-
-That ships, and it is worse than the previous state: it documents
-that the obligation was considered and then not met.
-
-Fix: fail when the missing count exceeds a small committed
-expectation, or keep a checked-in allow-list of crates known to ship
-nothing (currently just `difflib`), and run the generator in
-every-push CI so a regression surfaces before a tag.
-
 ## rt-2026-08-18-verified-archive-reread-before-extract
 
 **Category:** Time-of-check to time-of-use

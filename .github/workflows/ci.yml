@@ -152,3 +152,17 @@ jobs:
 
       - name: Licences, bans and sources
         run: cargo xtask deny
+
+      # Here rather than only in the release, because the generator is
+      # now a **gate**: a dependency shipping no licence terms fails
+      # it. In the release workflow that failure lands after the tag
+      # exists, per platform, minutes into the build matrix, and
+      # recovery means moving a pushed tag -- which this project has
+      # already paid for once, on `v0.3.0`. On every push it costs a
+      # few seconds and fails while the dependency is still a diff.
+      #
+      # `cargo fetch` above put the registry sources on disk, which is
+      # where the licence texts are read from. The output is thrown
+      # away; only the exit status matters here.
+      - name: Third-party attribution generates cleanly
+        run: cargo xtask licenses --out "$RUNNER_TEMP/THIRD-PARTY-LICENSES"
