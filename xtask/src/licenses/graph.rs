@@ -26,7 +26,7 @@ use serde_json::Value;
 /// it means the crate *is* distributed. Requiring `null` dropped it
 /// as a root, and with one publishable member that yields an empty
 /// attribution set from a perfectly ordinary manifest.
-pub fn distributed_roots(json: &Value) -> Vec<&str> {
+pub(super) fn distributed_roots(json: &Value) -> Vec<&str> {
     let members = workspace_members(json);
     json["packages"]
         .as_array()
@@ -51,7 +51,7 @@ fn publish_disabled(publish: &Value) -> bool {
 /// callers need it and the shape has already changed once: cargo
 /// moved these ids from `name version (source)` to a
 /// `PackageIdSpec` URL. A format change should mean one edit.
-pub fn workspace_members(json: &Value) -> Vec<&str> {
+pub(super) fn workspace_members(json: &Value) -> Vec<&str> {
     json["workspace_members"]
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).collect())
@@ -70,7 +70,7 @@ pub fn workspace_members(json: &Value) -> Vec<&str> {
 /// Platform filtering is not done here -- `--filter-platform` on the
 /// `cargo metadata` call already prunes `resolve` to one target, so
 /// doing it twice would mean reimplementing cfg evaluation.
-pub fn reachable_normal<'a>(
+pub(super) fn reachable_normal<'a>(
     json: &'a Value,
     roots: &[&'a str],
 ) -> BTreeSet<&'a str> {

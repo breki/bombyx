@@ -2,43 +2,6 @@
 
 Quality (Artisan) review findings. Newest first.
 
-## aq-2026-08-18-validate-step-numbers-are-literals
-
-**Category:** API design
-
-`xtask/src/validate.rs` carries nine hardcoded step indices plus a
-`TOTAL_STEPS` const that has to agree with them by hand, and nothing
-checks the two. Inserting the Deny step meant editing six call
-sites; missing one would print `[5/9]` twice or `[9/10]` last, and
-no test would fail.
-
-Fix: build a table of `(name, cmd, closure)`, take `total` from
-`len()`, and enumerate it -- the numbering becomes derived data and
-`TOTAL_STEPS` disappears. Deferred because it touches every step in
-a file whose gate was being changed for other reasons.
-
-## aq-2026-08-18-xtask-modules-over-public
-
-**Category:** API design
-
-`xtask/src/licenses.rs` exposes `DEFAULT_OUT`, `Attribution`,
-`is_license_file`, `collect`, `attributions_from` and `render` as
-`pub`, and `deny.rs` exposes `DenyResult` and `classify`, although
-`main.rs` calls only the two entry points. `audit.rs` -- the module
-both were modelled on -- keeps its internals private and exposes
-only what `validate` needs.
-
-`pub` on an xtask internal is not a compile error, so it becomes the
-pattern for the next module, and it drags every item into the
-rustdoc pass and the "all public items documented" obligation.
-`#[cfg(test)] mod tests` reaches private items through `use
-super::*` regardless.
-
-Fix: make everything private except `deny()` and `licenses()`. While
-there, `DenyResult { ok: bool, detail: String }` would read better
-as an enum naming its three outcomes (passed, failed, tool missing),
-which is the distinction its own tests care about.
-
 ## aq-2026-08-18-self-update-composition-untested
 
 **Category:** Testability / abstraction boundaries
@@ -220,32 +183,6 @@ Revisit when the next change touches this module for a reason
 other than a fix -- the split is a good one, it just should not
 ride along with a security patch.
 
-## aq-2026-08-10-push-expectation-duplication
-
-**Category:** Craftsmanship (test duplication)
-
-`plan.rs`'s `up_makes_the_dir_then_pushes_then_boots` and
-`provision_pushes_then_reprovisions` each spell out the same
-five-command expected script as a hand-escaped literal block,
-differing only in the trailing `vagrant 'up'` versus
-`vagrant 'provision'`. The review suggested an
-`expected_push(dir, subcommand)` helper, so the one-token
-difference is visible at the call site and a change to the push
-sequence lands once instead of twice.
-
-Deferred deliberately. The literal blocks are meant to be dumb
-pins: they read as the exact shell bombyx emits, which is what
-makes them useful as documentation, and two independently
-written expectations cannot both drift the same wrong way, which
-one shared builder can. The duplication is bounded -- a third
-exact-script test would change this judgement -- and
-`provision_and_up_take_the_same_shape` now carries the "these
-two differ only in their last step" claim that the helper would
-have made visible.
-
-Revisit if a third caller of `push_then` gains its own
-exact-script test.
-
 ## aq-2026-08-10-doctor-module-size
 
 **Status:** Resolved 2026-08-10, in the commit after the one that
@@ -291,32 +228,29 @@ fixes in a diff nobody can review, and a mechanical slip during
 the move would put verified behaviour at risk. It should be its
 own commit, with no other change in it.
 
-## aq-2026-08-09-collect-changes-generality
+## aq-2026-08-10-push-expectation-duplication
 
-**Category:** API design / leftover generality
+**Category:** Craftsmanship (test duplication)
 
-`collect_changes` in `xtask/src/dep_age/gate.rs` still takes a
-`parser: fn(&str) -> Vec<(String, String)>` function pointer
-and two `&mut Vec` out-params. That shape earned its keep
-while the function was called twice, once for `Cargo.lock`
-and once for `frontend/package-lock.json`. After the npm
-purge it has a single call site, `parser` has exactly one
-possible value (`parse_cargo_lock`), and the out-params exist
-only so the caller could accumulate across two invocations.
+`plan.rs`'s `up_makes_the_dir_then_pushes_then_boots` and
+`provision_pushes_then_reprovisions` each spell out the same
+five-command expected script as a hand-escaped literal block,
+differing only in the trailing `vagrant 'up'` versus
+`vagrant 'provision'`. The review suggested an
+`expected_push(dir, subcommand)` helper, so the one-token
+difference is visible at the call site and a change to the push
+sequence lands once instead of twice.
 
-A function-pointer parameter reads as "there are several
-parsers here" and sends the reader looking for the other one.
+Deferred deliberately. The literal blocks are meant to be dumb
+pins: they read as the exact shell bombyx emits, which is what
+makes them useful as documentation, and two independently
+written expectations cannot both drift the same wrong way, which
+one shared builder can. The duplication is bounded -- a third
+exact-script test would change this judgement -- and
+`provision_and_up_take_the_same_shape` now carries the "these
+two differ only in their last step" claim that the helper would
+have made visible.
 
-Suggested shape:
-`fn collect_changes(rel: &str, allow: &HashSet<String>) ->
-(Vec<(String, DepOutcome)>, Vec<String>)`, with the caller
-destructuring the pair.
+Revisit if a third caller of `push_then` gains its own
+exact-script test.
 
-Deferred deliberately: this is the supply-chain gate, and the
-same commit had just changed its failure handling (the silent
-read-failure pass) and verified that end-to-end against a
-missing `Cargo.lock`. Reshaping it again in the same change
-would have traded verified behaviour for style. The dead
-generality is inert -- it costs a reader's attention, not
-correctness -- so it is safe to carry until someone is next
-working in this file.

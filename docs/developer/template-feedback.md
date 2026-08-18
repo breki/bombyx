@@ -342,10 +342,16 @@ the index and the total both come from the same list.
 inserting a gate becomes one line in one place. The per-step comments
 that currently sit above each call read just as well inside the table.
 
-Not fixed in bombyx: it touches every step in the file, and the gate
-being changed at the time was being changed for other reasons. Recorded
-in `docs/developer/artisan-log.md` as
-`aq-2026-08-18-validate-step-numbers-are-literals`.
+Fixed in bombyx on 2026-08-18, close to the shape above: a
+`struct Step { name, cmd, run: Box<dyn FnOnce() -> ... > }` and a
+`steps(check) -> Vec<Step>` builder, with `validate` enumerating it.
+Splitting the table out of `validate` also made it testable, which
+turned out to matter for a second reason: the `cmd` strings are the
+`iterate with: cargo xtask <cmd>` hints, and nothing tied them to the
+clap subcommands, so a rename would have left the gate advising a
+command that does not exist. A test now resolves each one through
+`Cli::command().find_subcommand`. The template presumably still carries
+the literals.
 
 ### tf-2026-08-18-no-licence-gate-or-attribution-tooling -- no licence gate or attribution tooling
 

@@ -52,19 +52,19 @@ use graph::{distributed_roots, reachable_normal, workspace_members};
 mod graph;
 
 /// Default output path, relative to the workspace root.
-pub const DEFAULT_OUT: &str = "THIRD-PARTY-LICENSES";
+const DEFAULT_OUT: &str = "THIRD-PARTY-LICENSES";
 
 /// One dependency's attribution.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Attribution {
+struct Attribution {
     /// Crate name.
-    pub name: String,
+    name: String,
     /// Crate version.
-    pub version: String,
+    version: String,
     /// SPDX expression from the manifest, if it had one.
-    pub license: Option<String>,
+    license: Option<String>,
     /// Licence texts found beside the crate's manifest.
-    pub texts: Vec<(String, String)>,
+    texts: Vec<(String, String)>,
 }
 
 impl Attribution {
@@ -79,7 +79,7 @@ impl Attribution {
     /// empty file the gate exists to prevent. The predicate is
     /// therefore narrower than [`is_license_file`], on purpose.
     #[must_use]
-    pub fn text_missing(&self) -> bool {
+    fn text_missing(&self) -> bool {
         !self.texts.iter().any(|(name, body)| {
             is_license_terms(name) && !body.trim().is_empty()
         })
@@ -89,7 +89,7 @@ impl Attribution {
 /// Whether `name` is a file stating licence *terms*, as opposed to a
 /// notice accompanying them. See [`Attribution::text_missing`].
 #[must_use]
-pub fn is_license_terms(name: &str) -> bool {
+fn is_license_terms(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     if !has_text_extension(&lower) {
         return false;
@@ -117,7 +117,7 @@ fn has_text_extension(lower: &str) -> bool {
 /// carried, and a crate shipping one is asserting there is something
 /// to carry.
 #[must_use]
-pub fn is_license_file(name: &str) -> bool {
+fn is_license_file(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     if !has_text_extension(&lower) {
         return false;
@@ -175,7 +175,7 @@ fn texts_beside(manifest: &Path) -> Vec<(String, String)> {
 /// # Errors
 ///
 /// Returns a message when `cargo metadata` cannot be run or parsed.
-pub fn collect(target: &str) -> Result<Vec<Attribution>, String> {
+fn collect(target: &str) -> Result<Vec<Attribution>, String> {
     let out = run_cargo_capture(&[
         "metadata",
         "--format-version",
@@ -218,7 +218,7 @@ pub fn collect(target: &str) -> Result<Vec<Attribution>, String> {
 /// archive already covers. Split out so the walk, the exclusions and
 /// the ordering are tested without running cargo.
 #[must_use]
-pub fn attributions_from(json: &Value) -> Vec<Attribution> {
+fn attributions_from(json: &Value) -> Vec<Attribution> {
     let members = workspace_members(json);
     let roots = distributed_roots(json);
     let keep = reachable_normal(json, &roots);
@@ -260,7 +260,7 @@ const NO_SPDX: &str = "no SPDX expression";
 
 /// Renders the attribution file.
 #[must_use]
-pub fn render(crates: &[Attribution]) -> String {
+fn render(crates: &[Attribution]) -> String {
     // Collected as parts and joined once, rather than pushing
     // `format!` results into a growing `String` -- one allocation
     // per part either way, and this keeps every piece visible as a

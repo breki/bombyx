@@ -235,51 +235,54 @@ fn check_one(name: &str, version: &str) -> DepOutcome {
     }
 }
 
-/// Diff one lockfile against `HEAD` and append an outcome per
-/// newly-adopted dependency.
+/// Diff the lockfile at `rel` against `HEAD` and return one outcome
+/// per newly-adopted dependency.
 ///
-/// Both "cannot read the lockfile" and "no `HEAD` baseline to
-/// diff against" are surfaced as **warnings**, never as a
-/// silent return. This gate exists to fail loudly on an
-/// un-vetted dependency, so a condition that stops it
-/// checking must never leave the caller printing a green
-/// `Dep-age OK` -- that reads to an operator as evidence the
-/// dependency was vetted.
+/// `Err` is a **skip reason, not a failure**: the lockfile could not
+/// be read, or there is no `HEAD` to diff against. The caller turns
+/// it into a warning. `Result` rather than a pair of vectors because
+/// the two are mutually exclusive -- a tuple of two collections says
+/// nothing about whether both halves can be non-empty, and a reader
+/// had to trace every return to find out.
+///
+/// Whichever way it goes, a condition that stops the check must
+/// never leave the caller printing a green `Dep-age OK` -- that
+/// reads to an operator as evidence the dependency was vetted.
+///
+/// `rel` is a parameter with one production value, kept so the two
+/// skip paths are reachable from a test; there is one lockfile, so
+/// the parser is fixed rather than a second parameter.
 fn collect_changes(
     rel: &str,
-    parser: fn(&str) -> Vec<(String, String)>,
     allow: &HashSet<String>,
-    outcomes: &mut Vec<(String, DepOutcome)>,
-    warnings: &mut Vec<String>,
-) {
-    let current_text = match fs::read_to_string(workspace_root().join(rel)) {
-        Ok(t) => t,
-        Err(e) => {
-            warnings.push(format!(
-                "{rel}: cannot read ({e}) -- skipping the cooldown check"
-            ));
-            return;
-        }
-    };
-    let Some(baseline_text) = git_show(rel) else {
-        warnings.push(format!(
+) -> Result<Vec<(String, DepOutcome)>, String> {
+    let current_text =
+        fs::read_to_string(workspace_root().join(rel)).map_err(|e| {
+            format!("{rel}: cannot read ({e}) -- skipping the cooldown check")
+        })?;
+    let baseline_text = git_show(rel).ok_or_else(|| {
+        format!(
             "{rel}: no HEAD baseline to diff against -- skipping the \
              cooldown check"
-        ));
-        return;
-    };
-    let mut changed =
-        new_locked_versions(&parser(&baseline_text), &parser(&current_text));
+        )
+    })?;
+    let mut changed = new_locked_versions(
+        &parse_cargo_lock(&baseline_text),
+        &parse_cargo_lock(&current_text),
+    );
     changed.sort();
-    for (name, version) in changed {
-        let label = format!("{name}@{version}");
-        let outcome = if allow.contains(&label) {
-            DepOutcome::Allowed
-        } else {
-            check_one(&name, &version)
-        };
-        outcomes.push((label, outcome));
-    }
+    Ok(changed
+        .into_iter()
+        .map(|(name, version)| {
+            let label = format!("{name}@{version}");
+            let outcome = if allow.contains(&label) {
+                DepOutcome::Allowed
+            } else {
+                check_one(&name, &version)
+            };
+            (label, outcome)
+        })
+        .collect())
 }
 
 /// Run the changed-dependency cooldown gate: check only the
@@ -288,16 +291,12 @@ fn collect_changes(
 /// lockfile is unchanged.
 pub fn check_changed_deps() -> DepAgeResult {
     let allow = parse_allow(std::env::var(ALLOW_ENV).ok().as_deref());
-    let mut outcomes: Vec<(String, DepOutcome)> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
-
-    collect_changes(
-        "Cargo.lock",
-        parse_cargo_lock,
-        &allow,
-        &mut outcomes,
-        &mut warnings,
-    );
+    let (outcomes, mut warnings) = match collect_changes("Cargo.lock", &allow) {
+        Ok(outcomes) => (outcomes, Vec::new()),
+        // A skip reason, not a failure -- but it must reach the
+        // caller, or `Dep-age OK` prints for a check that never ran.
+        Err(why) => (Vec::new(), vec![why]),
+    };
 
     let mut result = classify_dep_age(&outcomes);
     // Baseline/parse warnings precede the per-dep warnings the
@@ -331,6 +330,35 @@ pub fn dep_age_check() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_lockfile_is_a_skip_reason_not_a_pass() {
+        // The invariant the whole function exists for: a condition
+        // that stops the check must never let `Dep-age OK` print.
+        // Both skip paths were reshaped by a refactor with no test
+        // watching, and returning an empty warning list instead of
+        // this message turns "could not check" into a silent green.
+        let why = collect_changes("no-such-file.lock", &HashSet::new())
+            .expect_err("a missing lockfile cannot be a clean pass");
+        assert!(why.contains("cannot read"), "{why}");
+        assert!(why.contains("skipping the cooldown check"), "{why}");
+    }
+
+    #[test]
+    fn the_skip_reason_reaches_the_result_as_a_warning() {
+        // One level up, because the message is only useful if it
+        // survives the hand-off. `classify_dep_age` reports "no
+        // dependency changes" for an empty outcome list, which is
+        // exactly what an unreadable lockfile also produces -- so
+        // the warning is the only thing distinguishing them.
+        let allow = HashSet::new();
+        let outcomes = match collect_changes("no-such-file.lock", &allow) {
+            Ok(o) => (o, Vec::new()),
+            Err(why) => (Vec::new(), vec![why]),
+        };
+        assert!(outcomes.0.is_empty());
+        assert_eq!(outcomes.1.len(), 1, "{:?}", outcomes.1);
+    }
 
     #[test]
     fn parse_cargo_lock_registry_only_ignoring_locals_and_deps() {

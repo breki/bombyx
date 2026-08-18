@@ -21,34 +21,62 @@
 use crate::helpers::run_cargo_capture;
 
 /// What `cargo deny` reported.
+///
+/// Three named outcomes rather than a bool and a string, because a
+/// missing tool must never be spelled as a failure that happens to
+/// carry install text in its detail field -- that shape let the
+/// distinction live in a string comparison.
 #[derive(Debug, PartialEq, Eq)]
-pub struct DenyResult {
-    /// True when every check passed.
-    pub ok: bool,
-    /// The tool's own output, for the failure message.
-    pub detail: String,
+enum DenyResult {
+    /// Every check passed.
+    Passed,
+    /// A check failed; the string is the tool's own output, which
+    /// can be empty when cargo-deny fails and prints nothing.
+    Failed(String),
+    /// `cargo-deny` is not installed.
+    ToolMissing,
 }
+
+/// What to tell the operator when cargo-deny is not installed.
+const MISSING_TOOL: &str =
+    "cargo-deny is not installed: cargo install --locked cargo-deny";
 
 /// Classifies a `cargo deny` run.
 ///
 /// Split from the subprocess so the "missing tool" wording is
 /// unit-tested rather than only reachable by uninstalling cargo-deny.
-#[must_use]
-pub fn classify(status_ok: bool, stderr: &str) -> DenyResult {
+fn classify(status_ok: bool, stderr: &str) -> DenyResult {
     // cargo itself reports an absent subcommand this way, and the
     // message is unhelpful on its own -- it names `deny` without
-    // saying how to get it.
+    // saying how to get it. Checked before `status_ok`, because a
+    // missing tool must never come back as a pass: there is no
+    // network to be down here, unlike in `audit`.
     if crate::helpers::is_missing_subcommand(stderr) {
-        return DenyResult {
-            ok: false,
-            detail: "cargo-deny is not installed: \
-                     cargo install --locked cargo-deny"
-                .to_owned(),
-        };
+        return DenyResult::ToolMissing;
     }
-    DenyResult {
-        ok: status_ok,
-        detail: stderr.trim().to_owned(),
+    if status_ok {
+        DenyResult::Passed
+    } else {
+        DenyResult::Failed(stderr.trim().to_owned())
+    }
+}
+
+/// Turns an outcome into the error the caller returns, or `None`
+/// when the gate passed.
+///
+/// Split out for the same reason [`classify`] is: the branch it
+/// exists for -- cargo-deny failing while printing nothing -- sits
+/// behind the subprocess and is otherwise unreachable from a test,
+/// and a blocked gate reporting an empty reason costs a whole
+/// re-run to diagnose.
+fn failure(r: DenyResult, status: &str) -> Option<String> {
+    match r {
+        DenyResult::Passed => None,
+        DenyResult::Failed(d) if d.is_empty() => {
+            Some(format!("cargo deny failed ({status}) and printed nothing"))
+        }
+        DenyResult::Failed(d) => Some(d),
+        DenyResult::ToolMissing => Some(MISSING_TOOL.to_owned()),
     }
 }
 
@@ -83,17 +111,13 @@ pub fn deny() -> Result<(), String> {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let both = format!("{}\n{}", stderr.trim(), stdout.trim());
     let r = classify(out.status.success(), &both);
-    if r.ok {
-        println!("Deny OK (licenses, bans, sources)");
-        return Ok(());
+    match failure(r, &out.status.to_string()) {
+        None => {
+            println!("Deny OK (licenses, bans, sources)");
+            Ok(())
+        }
+        Some(e) => Err(e),
     }
-    if r.detail.is_empty() {
-        return Err(format!(
-            "cargo deny failed ({}) and printed nothing",
-            out.status
-        ));
-    }
-    Err(r.detail)
 }
 
 #[cfg(test)]
@@ -102,14 +126,17 @@ mod tests {
 
     #[test]
     fn a_passing_run_is_ok() {
-        assert!(classify(true, "").ok);
+        assert_eq!(classify(true, ""), DenyResult::Passed);
+        assert_eq!(failure(DenyResult::Passed, "exit code: 0"), None);
     }
 
     #[test]
     fn a_failing_check_carries_the_tools_output() {
         let r = classify(false, "error[L001]: failed to satisfy license");
-        assert!(!r.ok);
-        assert!(r.detail.contains("L001"), "{}", r.detail);
+        assert!(
+            matches!(&r, DenyResult::Failed(d) if d.contains("L001")),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -117,16 +144,32 @@ mod tests {
         // cargo's own wording, which names the subcommand and
         // nothing else. The replacement has to be actionable.
         let r = classify(false, "error: no such command: `deny`");
-        assert!(!r.ok);
-        assert!(r.detail.contains("cargo install"), "{}", r.detail);
-        assert!(r.detail.contains("cargo-deny"), "{}", r.detail);
+        assert_eq!(r, DenyResult::ToolMissing);
+        let e = failure(r, "exit code: 101").unwrap();
+        assert!(e.contains("cargo install"), "{e}");
+        assert!(e.contains("cargo-deny"), "{e}");
     }
 
     #[test]
     fn a_missing_tool_is_never_reported_as_a_pass() {
         // The distinction from `audit`, asserted: there is no
         // network to be down here, so a missing tool cannot be
-        // waved through.
-        assert!(!classify(true, "error: no such command: `deny`").ok);
+        // waved through -- even when the exit status says success.
+        assert_eq!(
+            classify(true, "error: no such command: `deny`"),
+            DenyResult::ToolMissing
+        );
+    }
+
+    #[test]
+    fn a_silent_failure_still_names_the_exit_status() {
+        // The branch this test exists for: cargo-deny fails and
+        // prints nothing on either stream. Reporting an empty
+        // reason there costs a whole re-run to diagnose, so the
+        // status is the one fact available and it has to appear.
+        let e = failure(DenyResult::Failed(String::new()), "exit code: 2")
+            .expect("a failure must produce a message");
+        assert!(e.contains("exit code: 2"), "{e}");
+        assert!(e.contains("printed nothing"), "{e}");
     }
 }

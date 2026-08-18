@@ -10,8 +10,22 @@ use crate::fmt_cmd;
 use crate::helpers::{elapsed_str, step_output};
 use crate::test_cmd;
 
-/// Total number of validation steps.
-const TOTAL_STEPS: usize = 9;
+/// One gate: its label, the standalone subcommand that re-runs
+/// just it, and the work.
+///
+/// The step numbers and the total are **derived** from the table's
+/// order and length; do not reintroduce literals. Hand-written
+/// indices plus a matching `TOTAL_STEPS` const had nothing checking
+/// the two, so inserting a gate and missing one call site printed
+/// `[5/9]` twice with every test still green.
+struct Step {
+    /// Label printed in the `[N/T]` line.
+    name: &'static str,
+    /// The `cargo xtask <cmd>` that runs this gate alone.
+    cmd: &'static str,
+    /// The gate itself, returning its detail string.
+    run: Box<dyn FnOnce() -> Result<String, String>>,
+}
 
 /// Run all validation steps with concise stepwise
 /// output.
@@ -47,24 +61,55 @@ const TOTAL_STEPS: usize = 9;
 /// working tree.
 pub fn validate(check: bool) -> Result<(), String> {
     let overall_start = Instant::now();
-
-    // Fail fast on a within-cooldown dependency before compiling it.
-    run_step(1, "Dep-age", "dep-age-check", run_dep_age)?;
-
-    // Cheap static gates first ...
-    run_step(2, "Fmt", "fmt", || run_fmt(check))?;
-    run_step(3, "Duplication", "dupes", run_duplication)?;
-    run_step(4, "Deny", "deny", run_deny)?;
-    run_step(5, "Clippy", "clippy", run_clippy)?;
-    run_step(6, "Doc", "doc", run_doc)?;
-
-    // ... expensive dynamic gates last.
-    run_step(7, "Test (xtask only)", "test", run_test)?;
-    run_step(8, "Coverage", "coverage", run_coverage)?;
-    run_step(9, "Audit", "audit", run_audit)?;
+    let steps = steps(check);
+    let total = steps.len();
+    for (i, s) in steps.into_iter().enumerate() {
+        run_step(i + 1, total, s)?;
+    }
 
     println!("Validate OK ({})", elapsed_str(overall_start));
     Ok(())
+}
+
+/// The gate table, in the order they run.
+///
+/// A function rather than an expression inside [`validate`], so the
+/// table is data a test can look at. What that buys: the `cmd`
+/// strings are the `iterate with: cargo xtask <cmd>` hints, and
+/// nothing else ties them to the clap subcommands in
+/// [`crate::XCommand`] -- a renamed subcommand would leave a hint
+/// telling the operator to run a command that does not exist, with
+/// every test green. That is the same drift the derived step
+/// numbers were introduced to remove.
+fn steps(check: bool) -> Vec<Step> {
+    vec![
+        // Fail fast on a within-cooldown dependency before
+        // compiling it.
+        step("Dep-age", "dep-age-check", run_dep_age),
+        // Cheap static gates first ...
+        step("Fmt", "fmt", move || run_fmt(check)),
+        step("Duplication", "dupes", run_duplication),
+        step("Deny", "deny", run_deny),
+        step("Clippy", "clippy", run_clippy),
+        step("Doc", "doc", run_doc),
+        // ... expensive dynamic gates last.
+        step("Test (xtask only)", "test", run_test),
+        step("Coverage", "coverage", run_coverage),
+        step("Audit", "audit", run_audit),
+    ]
+}
+
+/// Builds one [`Step`], so the table reads as a list rather than as
+/// a column of `Box::new` calls.
+fn step<F>(name: &'static str, cmd: &'static str, run: F) -> Step
+where
+    F: FnOnce() -> Result<String, String> + 'static,
+{
+    Step {
+        name,
+        cmd,
+        run: Box::new(run),
+    }
 }
 
 /// Run a single step, printing the `[N/T]` result line.
@@ -73,12 +118,9 @@ pub fn validate(check: bool) -> Result<(), String> {
 /// on failure it is printed as an iterate-with hint so the
 /// user re-runs the single failing gate (seconds) instead
 /// of the whole pipeline (minutes).
-fn run_step<F>(step: usize, name: &str, cmd: &str, f: F) -> Result<(), String>
-where
-    F: FnOnce() -> Result<String, String>,
-{
+fn run_step(index: usize, total: usize, s: Step) -> Result<(), String> {
     let start = Instant::now();
-    match f() {
+    match (s.run)() {
         Ok(detail) => {
             let time = elapsed_str(start);
             let full = if detail.is_empty() {
@@ -86,12 +128,12 @@ where
             } else {
                 format!("{detail}, {time}")
             };
-            step_output(step, TOTAL_STEPS, name, "OK", &full);
+            step_output(index, total, s.name, "OK", &full);
             Ok(())
         }
         Err(e) => {
-            step_output(step, TOTAL_STEPS, name, "FAILED", "");
-            eprintln!("  -> iterate with: cargo xtask {cmd}");
+            step_output(index, total, s.name, "FAILED", "");
+            eprintln!("  -> iterate with: cargo xtask {}", s.cmd);
             Err(e)
         }
     }
@@ -211,5 +253,63 @@ fn run_duplication() -> Result<String, String> {
         Err(err)
     } else {
         Ok(r.detail)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use clap::CommandFactory;
+
+    use super::*;
+
+    #[test]
+    fn every_iterate_hint_names_a_real_subcommand() {
+        // The hint printed on failure is `cargo xtask <cmd>`, and
+        // nothing else connects those strings to the clap surface.
+        // Renaming a subcommand would otherwise leave the gate
+        // advising a command that does not exist, with the whole
+        // suite green.
+        let cli = crate::Cli::command();
+        for s in steps(false) {
+            assert!(
+                cli.find_subcommand(s.cmd).is_some(),
+                "no `cargo xtask {}` subcommand for the {} gate",
+                s.cmd,
+                s.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_gates_are_distinct_and_named() {
+        let steps = steps(false);
+        let names: BTreeSet<&str> = steps.iter().map(|s| s.name).collect();
+        assert_eq!(names.len(), steps.len(), "a gate label is repeated");
+        assert!(steps.iter().all(|s| !s.name.is_empty()));
+    }
+
+    #[test]
+    fn the_order_is_the_documented_one() {
+        // Cheapest first, network last. Asserted rather than left to
+        // the prose above: the ordering is the reason a failing
+        // clippy run does not cost a coverage run first, and a
+        // reordering that undoes that is invisible otherwise.
+        let order: Vec<&str> = steps(false).iter().map(|s| s.name).collect();
+        assert_eq!(
+            order,
+            vec![
+                "Dep-age",
+                "Fmt",
+                "Duplication",
+                "Deny",
+                "Clippy",
+                "Doc",
+                "Test (xtask only)",
+                "Coverage",
+                "Audit",
+            ]
+        );
     }
 }
