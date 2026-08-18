@@ -29,15 +29,17 @@
 //! on the operator's behalf.
 
 pub mod asset;
+mod locate;
 mod swap;
 mod version;
 
 // Re-exported, so `bombyx::update::Version` and
 // `bombyx::update::place` keep working: the split is about where the
 // code lives, not about the paths callers use.
+pub use locate::{install_dir, running_dir};
 pub use swap::{
-    BINARY, MovedAside, Placed, UpdateError, install_dir, move_aside,
-    needs_moving_aside, place, restore, running_dir, sweep_aside,
+    BINARY, MovedAside, Placed, UpdateError, move_aside, needs_moving_aside,
+    place, restore, sweep_aside,
 };
 pub use version::{
     Decision, Outcome, Version, decide, newest_release, version_in_tag_line,

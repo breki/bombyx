@@ -6,6 +6,17 @@
 //! It reads the text of bombyx's own scripts. What an invoked
 //! tool then does is outside its reach; see
 //! [`MUTATING_COMMANDS`] for the precise claim.
+//!
+//! **This is the largest of `doctor`'s submodules and stays whole
+//! on purpose.** When `doctor.rs` was split into a directory
+//! module, the production line counts came out as `readonly.rs`
+//! 193, `probes.rs` 97, `report.rs` 79, `doctor.rs` 68,
+//! `local.rs` 62, `text.rs` 36. This file is the outlier that
+//! prompted the split, and it was left as one piece because it
+//! holds one concern, declares no types, and most of its bulk is
+//! the explanation of why each entry in the blocklist is there.
+//! Splitting it would separate the list from that explanation --
+//! which is the part that keeps the list correct.
 
 /// Commands whose purpose is to write, matched on **word
 /// boundaries**.

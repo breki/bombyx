@@ -45,6 +45,26 @@ fn project_dir() -> TempDir {
     dir
 }
 
+/// A `Config` for `myproject` on `vmhost`, built the way the
+/// binary builds one.
+///
+/// Through `Config::load` against a real file, not a shortcut past
+/// it: `Config::parse` used to be public with no production caller,
+/// so these tests were exercising a path nothing shipped.
+fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
+    let path = dir.join("bombyx.toml");
+    std::fs::write(&path, "project = \"myproject\"\n").unwrap();
+    let (cfg, _) = bombyx::config::Config::load(
+        &path,
+        &bombyx::config::HostSources {
+            flag: Some("vmhost"),
+            ..bombyx::config::HostSources::default()
+        },
+    )
+    .unwrap();
+    cfg
+}
+
 /// A fixture whose `bombyx.toml` is exactly `source`.
 fn project_dir_with(source: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
@@ -333,12 +353,8 @@ fn the_push_archive_really_excludes_dot_vagrant_and_dot_git() {
 
     let work = TempDir::new().unwrap();
     let archive = bombyx::remote::PushArchive::new(work.path(), "test");
-    let cfg = bombyx::config::Config::parse(
-        "project = \"myproject\"\n",
-        std::path::Path::new("bombyx.toml"),
-        "vmhost",
-    )
-    .unwrap();
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg = load_cfg(cfg_dir.path());
     let cmds = bombyx::plan::plan(
         &bombyx::plan::Action::Up,
         &cfg,
@@ -443,12 +459,8 @@ fn doctor_dry_run_prints_exactly_the_commands_a_live_run_sends() {
     // rendering of `host_probes`, through the real CLI.
     let dir = project_dir();
     let printed = dry_run(&dir, &["--dry-run", "doctor"]);
-    let cfg = bombyx::config::Config::parse(
-        "project = \"myproject\"\n",
-        std::path::Path::new("bombyx.toml"),
-        "vmhost",
-    )
-    .unwrap();
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg = load_cfg(cfg_dir.path());
     let expected: Vec<String> =
         bombyx::doctor::probe_commands(&bombyx::doctor::host_probes(&cfg))
             .iter()

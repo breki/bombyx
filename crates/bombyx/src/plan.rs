@@ -236,6 +236,19 @@ mod tests {
         ScratchName::parse(name).unwrap()
     }
 
+    // This test and `provision_pushes_then_reprovisions` spell out
+    // the same five-command script, differing only in the trailing
+    // `vagrant 'up'` versus `vagrant 'provision'`. A review proposed
+    // an `expected_push(dir, subcommand)` helper and the duplication
+    // is kept deliberately: these blocks are meant to be dumb pins
+    // that read as the exact shell bombyx emits, and two
+    // independently written expectations cannot both drift the same
+    // wrong way, which one shared builder can.
+    // `provision_and_up_take_the_same_shape` below carries the
+    // "these two differ only in their last step" claim the helper
+    // would have made visible. Revisit if a third caller of
+    // `push_then` gains its own exact-script test -- three copies
+    // change the judgement.
     #[test]
     fn up_makes_the_dir_then_pushes_then_boots() {
         // Order is the point: booting before the push would

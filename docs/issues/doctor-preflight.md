@@ -478,11 +478,12 @@ was in the module written to close a security hole.
   places each now have one home and pointers.
 
 Deferred at the time, and done in the very next commit: splitting
-`doctor.rs` into a directory module
-(`aq-2026-08-10-doctor-module-size`). It was the right change and a
+`doctor.rs` into a directory module. It was the right change and a
 1300-line reorganisation, which would have buried the fixes above
 in a diff nobody could review. Separating them cost one commit and
-made both readable.
+made both readable. The resulting line counts, and why
+`doctor/readonly.rs` was left whole at 193 lines, are recorded in
+that file's own module doc rather than in a backlog.
 
 ### Fourth review round, scoped to the rewritten guards
 
