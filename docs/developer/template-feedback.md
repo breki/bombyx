@@ -69,6 +69,174 @@ _None yet._
 
 ## Suggestions to flow back to the template
 
+### tf-2026-08-18-idempotent-release-can-redefine-a-version -- idempotent release can redefine a version
+
+A follow-on to `tf-2026-08-18-template-ships-no-ci-or-release-workflow`,
+which argues the template should ship a release workflow. If it does,
+this is the trap to ship it without.
+
+`gh release create` fails with "a release with the same tag name already
+exists", and a re-pushed tag is a legitimate event -- rewriting history
+moves every tag, and both of this project's tags were force-updated once
+for exactly that reason, after which the release job failed on a build
+that was otherwise green. The obvious repair is to branch on
+`gh release view` and, when the release exists, `gh release edit` plus
+`gh release upload --clobber`.
+
+That makes the workflow idempotent and also makes a published version's
+bytes mutable, which nothing downstream can detect. A self-updater
+compares version *numbers*: this project's compares `MAJOR.MINOR.PATCH`
+and has no notion of "this version's bytes changed". So whoever
+installed the old assets is reported up to date forever and never
+receives the replacement, and whoever is mid-download gets a checksum
+mismatch whose message says the bytes are not the ones that were
+released -- pointing at tampering when the cause was a re-publish.
+
+The distinction the branch is missing is between *repairing* an
+incomplete release and *redefining* a complete one, and a completion
+marker separates them cheaply. Here the checksum file is uploaded with
+the assets, so its presence means a previous run reached the end: a
+release without `SHA256SUMS` can still be re-run, one with it fails and
+asks for a new patch tag, and a repository variable
+(`ALLOW_RELEASE_REPLACE=true`) overrides deliberately. Any asset the
+workflow uploads last would serve as the marker.
+
+Suggested for the template: if the release workflow is idempotent, gate
+the asset replacement on a completion marker rather than clobbering
+unconditionally, and say in the README that a replaced version is not
+picked up by an installed copy. The guard has not itself been exercised
+-- it runs only on a tag push, and no tag has been pushed since it
+landed *(unverified)*. See commit `337e60a` and
+`.github/workflows/release.yml`.
+
+### tf-2026-08-18-backlog-convention-has-no-closing-half -- backlog convention has no closing half
+
+`.claude/commands/commit.md` defines the deferred-findings backlogs
+carefully on the way in: two files, newest-first, entries go after the
+`---`, a `<rt|aq>-<YYYY-MM-DD>-<kebab-slug>` ID so there is no central
+counter, and "a later commit that acts on or reverses a deferred item
+cites its ID inline". It says nothing about what happens to the entry
+itself when the item is closed. So the convention is silent at exactly
+the moment someone acts on it.
+
+Two habits both look correct under that silence and they contradict
+each other. One is to annotate: this project's `doctor.rs` split was
+closed by adding a `**Status:** Resolved 2026-08-10` block to the entry,
+together with the measured line counts and the reason one submodule was
+deliberately left whole. The other is to delete, on the reasoning that a
+"deferred backlog" should hold only what is still deferred.
+
+Working through twelve accumulated items on 2026-08-18 I deleted, and
+two things broke. `docs/issues/doctor-preflight.md` still cited
+`aq-2026-08-10-doctor-module-size` by ID, so the pointer resolved to
+nothing -- caught by a reviewer, not by me. And the only written record
+of *why* the largest submodule stays at 193 lines went with it, which is
+the record that stops the next size review reopening the question. Two
+of the twelve turned out not to be defects at all but standing decisions
+("keep this duplication, and here is the condition that would change
+that"), and a deferred-findings backlog is the wrong home for a decision
+nobody intends to revisit.
+
+The resolution used here: a fixed item leaves no entry (its resolution
+is in the commit message, as the file already says); a standing decision
+moves into a comment beside the code it governs, with its revisit
+condition; and before any entry is deleted, `grep -rn "<id>" .` runs,
+because an ID is greppable *by design* and that cuts both ways.
+
+Suggested for the template: state the closing half of the convention in
+`commit.md` next to the opening half -- what happens on fix, on
+reversal, on a decision-not-to-act -- and require the ID grep before
+removal. The IDs exist so other documents can point at them; a
+convention that explains how to mint them and not how to retire them
+guarantees a dangling pointer eventually. See commits `e1b00bd` (the
+mistake) and `08413bc` (the resolution).
+
+### tf-2026-08-18-toml-error-interpolation-echoes-the-config -- toml error interpolation echoes the config
+
+A `toml` parse error renders the offending **source line** into its
+`Display`, and the ordinary `thiserror` spelling passes that straight
+through. In this project the field was `#[error("invalid config in {}:
+{source}", .path.display())]` over a `source: toml::de::Error`, and the
+binary printed:
+
+```
+bombyx: loading bombyx.toml: invalid config in bombyx.toml:
+TOML parse error at line 1, column 12
+  |
+1 | -----BEGIN OPENSSH PRIVATE KEY-----
+```
+
+Reproduced against the built binary before and after the fix. The
+config file here ships *inside a repo*, so its path is influenced by
+whoever wrote the repo; it can be a symlink, and nobody inspects a
+config after a clone. Aimed at `~/.ssh/id_ed25519`, a malformed parse
+echoed a line of the key to stderr.
+
+**Whether the template itself carries this is unverified** -- this
+project's `config` module is its own, and the claim that generalises is
+about the *convention* rather than about a specific file: any generated
+project that reads a TOML file it does not fully control, and reports
+the error by interpolating `{source}`, gets the file's contents in its
+own stderr. That is the default spelling, and it is wrong by default.
+
+The fix does not cost the diagnostic, which is what made this look like
+a trade worth deferring. `toml::de::Error` exposes the two halves
+separately: `message()` is the reason alone ("key with no value,
+expected `=`") with no snippet and no position, and `span()` is a byte
+range. Keeping both and dropping only the quoted line gives
+`line 1, column 12: key with no value, expected `=``, which is
+everything needed to correct a malformed config. The source string is
+needed to turn the byte range into a line and column, so it is a
+parameter to the summariser and nothing it returns comes from it. Count
+the column in characters rather than bytes, or a non-ASCII line reports
+a position past where the operator sees the problem.
+
+Suggested for the template: if it ships a TOML config reader, summarise
+the error rather than interpolating `toml::de::Error`, and say in the
+comment why -- the next person will otherwise "improve" the message by
+putting the snippet back. See commit `337e60a` and
+`crates/bombyx/src/config.rs` (`toml_summary`, `line_column`).
+
+### tf-2026-08-18-coverage-gate-cannot-see-src-bin -- coverage gate cannot see src/bin
+
+`cargo xtask coverage` prints `Coverage 98.0% >= 90%` and passes, and
+that number is not about all of the code. `IGNORE_REGEX` in
+`xtask/src/coverage.rs` is `src[/\](main\.rs$|bin[/\])`, so the whole
+of `src/bin/` is invisible to the gate. The reasoning in that constant's
+doc comment is sound -- a spawned binary's coverage cannot be fully
+credited to the source, and the advice "keep the testable logic in the
+library crate" is right. What is missing is that nothing says so at the
+point the number is reported, and nothing measures how much was skipped.
+
+The cost, measured in this project on 2026-08-18 in one session, twice.
+`bombyx`'s `src/bin/bombyx/main.rs` had accumulated the operator-facing
+text for all three no-op outcomes of the self-update decision -- among
+them a sentence naming two version numbers, where swapping them tells a
+developer their freshly built binary is out of date. No test asserted
+which version each sentence named, because no test could reach them
+under the gate. They were moved into the library as
+`Decision::outcome`, with tests, in commit `1e05b8d`.
+
+In the *same commit* a new security check was written into that same
+file: a digest comparison re-verifying a downloaded archive after
+extraction. A reviewer pointed out that inverting its `==` would fail
+nothing, and that the commit's own reasoning for moving the decision
+sentences out applied to the code it had just added. It moved to the
+library as well. So the blind spot is not merely theoretical: it
+attracted new untested logic in the act of being described.
+
+Suggested for the template: have `coverage` report what the ignore
+regex excluded -- a file count, or a line count, beside the percentage
+-- so `Coverage 98.0%` reads as "98.0% of 2,102 lines; 640 lines in 1
+file excluded" rather than as a statement about the project. A number
+that names its own denominator cannot be misread. Stating the caveat in
+`CLAUDE.md`'s Definition of Done would help too, but the report is
+where the misreading happens.
+
+The per-file `MODULE_THRESHOLD` of 85% has the same shape and the same
+answer: an excluded file has no module figure either, so a project can
+carry one wholly untested file and see every gate green.
+
 ### tf-2026-08-18-agent-editing-and-measurement-rules-worth-shippi -- agent editing and measurement rules worth shipping
 
 Two rules were added to this project's `CLAUDE.md` after each cost real
