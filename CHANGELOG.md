@@ -16,6 +16,16 @@ and this project adheres to
 
 ### Fixed
 
+### Removed
+
+## [0.4.1] - 2026-08-18
+
+### Added
+
+### Changed
+
+### Fixed
+
 - self-update's sweep notice agrees with its own count. The first real update
   printed "removed 1 superseded binaries"; the wording moved into the library
   beside the count it describes, where a test covers zero, one and many. Its
