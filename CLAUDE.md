@@ -577,6 +577,7 @@ a fresh empty `[Unreleased]` above it.
 | `/commit` | Save-point commit with diary, CHANGELOG, and code review (no version bump) |
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |
+| `/rundown` | Grouped one-line rundown of the session's work, ending with the decisions and actions left for the operator. Reports only -- changes nothing |
 | `/todo` | Capture a work item into `docs/todo.md` (no implementation) |
 | `/implement` | Plan + implement a captured item; writes `docs/issues/<slug>.md` |
 | `/update-deps` | Upgrade third-party deps to the newest versions outside the 14-day cooldown |
