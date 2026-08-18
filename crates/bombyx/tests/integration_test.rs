@@ -360,6 +360,7 @@ fn the_push_archive_really_excludes_dot_vagrant_and_dot_git() {
         &cfg,
         &vagrant_dir,
         &archive,
+        bombyx::remote::Tty::NoPty,
     );
     let pack = cmds
         .iter()

@@ -22,6 +22,19 @@ and this project adheres to
   sibling, the leftover-binary notice, moved with it for the same reason, so
   both of the sentences reporting an update's cleanup are now tested rather
   than written where the coverage gate cannot see them.
+- Output no longer staircases on a Windows console. Every line was starting at
+  the column where the previous one ended, because nothing emitted a carriage
+  return. Two causes: the remote's stdout was a pipe, so its tty never
+  translated LF to CRLF; and bombyx's own doctor table staircased as well, which
+  happens after a command that runs ssh and never in self-update -- the console
+  is being left in a state where a line feed does not return the carriage,
+  though exactly what leaves it that way is unverified. Windows runs with both
+  streams on a terminal now ask ssh for a pseudo-terminal, and bombyx's own
+  multi-line output gets CRLF per stream. Piped or redirected output is
+  unchanged, byte for byte, so captured logs gain no carriage returns and no
+  colour codes; Linux and macOS are untouched, since a Unix terminal needs no
+  translation and a pseudo-terminal would only fold the remote's stderr into
+  stdout.
 
 ### Removed
 

@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
@@ -27,7 +28,8 @@ use bombyx::doctor::{
 };
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
-use bombyx::remote::{PushArchive, RemoteCommand};
+use bombyx::remote::{PushArchive, RemoteCommand, Tty};
+use bombyx::term;
 use bombyx::update::{self, asset};
 use clap::{Parser, Subcommand};
 use tempfile::TempDir;
@@ -130,10 +132,97 @@ fn main() -> ExitCode {
     match run() {
         Ok(ran) => ran.code(),
         Err(err) => {
-            eprintln!("bombyx: {err:#}");
+            // Through `eprint_lines` because `{err:#}` is routinely
+            // *multi-line* -- the "no release is published for
+            // this platform" message embeds a newline and so does
+            // any anyhow chain -- and it runs after arbitrary
+            // children, `ssh` probes included. A multi-line message
+            // is exactly the shape worth protecting, and it was the
+            // one left out of the first cut of this fix.
+            eprint_lines(&format!("bombyx: {err:#}\n"));
             ExitCode::FAILURE
         }
     }
+}
+
+/// Whether to ask `ssh` for a remote pseudo-terminal.
+///
+/// **Windows only, deliberately.** The reason to want a PTY here is
+/// that the remote tty then translates `\n` to `\r\n`, and a Unix
+/// terminal needs no such translation -- so on Linux and macOS this
+/// would buy nothing by its own rationale while still paying every
+/// cost [`Tty`] lists. The one that matters: `-t` merges the
+/// remote's stderr into stdout, so `bombyx up 2> err.log` would
+/// capture nothing from the remote. Leaving those platforms on
+/// [`Tty::NoPty`] keeps their behaviour exactly as it was.
+///
+/// `shell_into_vm` is unaffected and still allocates on every
+/// platform: an interactive shell needs a tty for its own sake.
+///
+/// The two-boolean rule itself lives in [`Tty::for_streams`], where
+/// a test can reach it. `IsTerminal` is `std`, so reading the
+/// streams costs no dependency and no `unsafe` -- which matters,
+/// because production crates here are `#[forbid(unsafe_code)]` and
+/// the Win32 console API is therefore not an option.
+fn tty_choice() -> Tty {
+    if !cfg!(windows) {
+        return Tty::NoPty;
+    }
+    Tty::for_streams(
+        std::io::stdin().is_terminal(),
+        std::io::stdout().is_terminal(),
+    )
+}
+
+/// Writes `text` to stdout, ending lines the way it needs them.
+///
+/// **On a Windows console a bare `\n` is sometimes not enough**, and
+/// the cause is the honest gap in this fix. What is *measured*: the
+/// output staircases -- each line starting at the column where the
+/// previous ended -- after a command that runs `ssh`, and
+/// `self-update`, which spawns children but never `ssh`, prints
+/// cleanly. The leading explanation is that `ssh.exe` leaves a
+/// console-mode bit set that suppresses the console's implicit
+/// carriage return (`DISABLE_NEWLINE_AUTO_RETURN` is the bit with
+/// that effect). **That cause is unverified**: a redirected stdout
+/// cannot reproduce a console-mode change, so confirming it needs a
+/// real console.
+///
+/// The translation lives here rather than in the library.
+/// [`Report::render`] keeps emitting `\n`, which is what keeps its
+/// expected-output tests identical on every platform -- a renderer
+/// that emitted `\r\n` on Windows would need two expectations, and
+/// this project has already shipped one test that passed on Windows
+/// alone. The substitution itself is [`bombyx::term::line_endings`],
+/// which is pure and tested.
+fn print_lines(text: &str) {
+    print!(
+        "{}",
+        term::line_endings(text, crlf_wanted(&std::io::stdout()))
+    );
+}
+
+/// [`print_lines`] for stderr.
+///
+/// Reads **stderr's** own terminal state, not stdout's. The streams
+/// are redirected independently and sampling the wrong one is wrong
+/// in both directions: `bombyx up > out.log` would leave the failure
+/// line bare on the terminal, which is the case this exists for, and
+/// `bombyx up 2> err.log` would write carriage returns into a
+/// captured log, which the change promises not to do.
+fn eprint_lines(text: &str) {
+    eprint!(
+        "{}",
+        term::line_endings(text, crlf_wanted(&std::io::stderr()))
+    );
+}
+
+/// Whether `stream` wants `\r\n`: a Windows terminal, and nothing
+/// else.
+///
+/// Redirected or piped, the bytes stay as the library produced them.
+fn crlf_wanted(stream: &impl IsTerminal) -> bool {
+    cfg!(windows) && stream.is_terminal()
 }
 
 fn run() -> Result<Ran> {
@@ -214,6 +303,7 @@ fn run() -> Result<Ran> {
     }
 
     let action = action_of(&vm, &cfg)?;
+    let tty = tty_choice();
 
     // `tar` runs from the archive directory, so the source
     // directory has to be absolute.
@@ -246,12 +336,12 @@ fn run() -> Result<Ran> {
     // structs, and a live run never builds their command lines
     // twice.
     if cli.dry_run {
-        return execute(&plan(&action, &cfg, &local_dir, &archive), true);
+        return execute(&plan(&action, &cfg, &local_dir, &archive, tty), true);
     }
     if matches!(action, Action::Doctor) {
         return Ok(doctor_run(&cfg, &local_dir));
     }
-    execute(&plan(&action, &cfg, &local_dir, &archive), false)
+    execute(&plan(&action, &cfg, &local_dir, &archive, tty), false)
 }
 
 /// Checks for a newer release and installs it.
@@ -609,7 +699,7 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
             .status()
             .with_context(|| format!("running {}", cmd.program))?;
         if !status.success() {
-            eprintln!("bombyx: {cmd} failed: {status}");
+            eprint_lines(&format!("bombyx: {cmd} failed: {status}\n"));
             return Ok(Ran::Failed(exit_status_byte(status)));
         }
     }
@@ -630,7 +720,7 @@ fn doctor_run(cfg: &Config, local_dir: &Path) -> Ran {
     report.add(doctor::vagrantfile_finding(local_dir));
     report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
 
-    print!("{}", report.render(&cfg.host));
+    print_lines(&report.render(&cfg.host));
     if report.ok() { Ran::Ok } else { Ran::Failed(1) }
 }
 

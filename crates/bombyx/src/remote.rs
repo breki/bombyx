@@ -143,19 +143,109 @@ fn vagrant_script(cfg: &Config, dir: &str, args: &[&str]) -> String {
     )
 }
 
+/// Whether `ssh` should allocate a remote pseudo-terminal (`-t`).
+///
+/// It decides more than interactivity, which is why it is a
+/// parameter rather than a detail of the one command that obviously
+/// needs it. Without a PTY the remote program's stdout is a pipe, so
+/// the remote tty layer never translates `\n` to `\r\n`, and every
+/// line arrives with a bare line feed. Measured against a real host:
+/// `vagrant status` returned 206 bytes containing six line feeds and
+/// **no** carriage returns, which a Windows console renders as a
+/// staircase -- each line starting at the column where the last one
+/// ended.
+///
+/// So the choice is not cosmetic, and it is not free either.
+///
+/// [`Tty::Allocate`] buys readable line endings, and lets the remote
+/// colourize. It costs three things: the remote's stderr is merged
+/// into stdout, the local terminal goes into raw mode, and it needs a
+/// local terminal to allocate against at all -- without one, ssh
+/// prints `Pseudo-terminal will not be allocated because stdin is
+/// not a terminal.` and carries on with no PTY, which is measured
+/// and is why the caller checks stdin.
+///
+/// It also carries `-o LogLevel=ERROR`, and that is not tidying.
+/// A tty session makes ssh print `Connection to <host> closed.` to
+/// stderr when it ends, so without this every `status`, `up` and
+/// teardown would gain a spurious trailing line. Measured: the
+/// message appears at the default level and not at `ERROR`, while a
+/// genuine failure still reports identically -- an unresolvable host
+/// gives the same message and the same 255 either way. `QUIET`
+/// suppresses the line too and was rejected: it would also swallow
+/// real diagnostics from a tool whose failures matter.
+///
+/// [`Tty::NoPty`] keeps the bytes exactly as the remote wrote them,
+/// which is what a pipe, a redirect or a parsed probe needs.
+///
+/// `doctor`'s probes are the case that must stay [`Tty::NoPty`]:
+/// their output is compared and sanitized, and a PTY would fold
+/// control characters and CRs into the text being checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tty {
+    /// Pass `-t`, so the remote gets a pseudo-terminal.
+    Allocate,
+    /// No `-t`; the remote writes to a pipe.
+    ///
+    /// Spelled `NoPty` rather than `None` so a `match` arm cannot be
+    /// misread as an absent [`Option`].
+    NoPty,
+}
+
+impl Tty {
+    /// The choice for a run whose streams are (or are not)
+    /// terminals.
+    ///
+    /// **Both have to be terminals**, and each for its own reason.
+    /// `ssh -t` needs a local terminal to allocate against, and
+    /// merely warns and carries on without one. And the reason to
+    /// want a PTY is that the remote tty then translates `\n` to
+    /// `\r\n`, which only helps when the output is going to a
+    /// terminal -- piped or redirected, the bytes must stay exactly
+    /// as the remote wrote them, or a captured log gains carriage
+    /// returns and, since the remote colourizes under a PTY, escape
+    /// sequences too.
+    ///
+    /// A pure function of two booleans so the rule is testable; the
+    /// binary supplies them from `IsTerminal`.
+    #[must_use]
+    pub fn for_streams(stdin_tty: bool, stdout_tty: bool) -> Self {
+        if stdin_tty && stdout_tty {
+            Self::Allocate
+        } else {
+            Self::NoPty
+        }
+    }
+}
+
 /// Builds an `ssh` command running `vagrant` in `dir` on the
 /// VM host.
+///
+/// See [`Tty`] for what the last argument costs and buys.
 #[must_use]
-pub fn vagrant_in(cfg: &Config, dir: &str, args: &[&str]) -> RemoteCommand {
+pub fn vagrant_in(
+    cfg: &Config,
+    dir: &str,
+    args: &[&str],
+    tty: Tty,
+) -> RemoteCommand {
     let script = vagrant_script(cfg, dir, args);
-    RemoteCommand::new("ssh", &[&cfg.host, &script])
+    // `-t` ahead of the destination: ssh takes options before the
+    // host, and everything after the host is the remote command.
+    match tty {
+        Tty::Allocate => RemoteCommand::new(
+            "ssh",
+            &["-t", "-o", "LogLevel=ERROR", &cfg.host, &script],
+        ),
+        Tty::NoPty => RemoteCommand::new("ssh", &[&cfg.host, &script]),
+    }
 }
 
 /// Builds an `ssh` command running `vagrant` in the project
 /// directory on the VM host.
 #[must_use]
-pub fn vagrant(cfg: &Config, args: &[&str]) -> RemoteCommand {
-    vagrant_in(cfg, &cfg.remote_project_dir(), args)
+pub fn vagrant(cfg: &Config, args: &[&str], tty: Tty) -> RemoteCommand {
+    vagrant_in(cfg, &cfg.remote_project_dir(), args, tty)
 }
 
 /// Builds the commands that push a local directory's
@@ -251,14 +341,31 @@ pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// `destroy` after working on `up` -- and since execution stops at
 /// the first failing step, the directory removal that follows
 /// would never run.
+/// Takes a [`Tty`] like the other vagrant builders, and for the
+/// same reason: `vagrant destroy -f` prints several lines of
+/// progress, so without one `destroy` and `discard` staircase on
+/// the console this parameter exists to fix. It was the sibling
+/// left out when `Tty` was introduced -- the reachable-primitive
+/// case `CLAUDE.md` warns about, found by review rather than by a
+/// test.
 #[must_use]
-pub fn destroy_vm_if_present(cfg: &Config, dir: &str) -> RemoteCommand {
+pub fn destroy_vm_if_present(
+    cfg: &Config,
+    dir: &str,
+    tty: Tty,
+) -> RemoteCommand {
     let script = format!(
         "cd {dir} && if [ -f Vagrantfile ]; then {cmd}; fi",
         dir = quote_remote_path(dir),
         cmd = vagrant_command(cfg, &["destroy", "-f"]),
     );
-    RemoteCommand::new("ssh", &[&cfg.host, &script])
+    match tty {
+        Tty::Allocate => RemoteCommand::new(
+            "ssh",
+            &["-t", "-o", "LogLevel=ERROR", &cfg.host, &script],
+        ),
+        Tty::NoPty => RemoteCommand::new("ssh", &[&cfg.host, &script]),
+    }
 }
 
 /// Builds the `ssh` command that recursively removes `dir` on
@@ -290,12 +397,13 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// Builds the `ssh` command that opens an interactive shell
 /// inside the project's VM.
 ///
-/// `-t` forces a TTY, which `vagrant ssh` needs when invoked
-/// through a non-interactive SSH command.
+/// Always [`Tty::Allocate`], and unconditionally so: `vagrant ssh`
+/// needs a TTY when invoked through a non-interactive SSH command,
+/// and an interactive shell without one is unusable whatever the
+/// local stdio looks like. Every other vagrant call decides per run.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
-    let script = vagrant_script(cfg, &cfg.remote_project_dir(), &["ssh"]);
-    RemoteCommand::new("ssh", &["-t", &cfg.host, &script])
+    vagrant_in(cfg, &cfg.remote_project_dir(), &["ssh"], Tty::Allocate)
 }
 
 #[cfg(test)]
@@ -304,6 +412,99 @@ mod tests {
     use crate::name::ScratchName;
     use std::path::PathBuf;
 
+    /// The ssh options that precede the destination, in order.
+    ///
+    /// Asserted as a whole rather than by index: an earlier version
+    /// of these tests pinned `args[1]` as the host, so inserting
+    /// `-o LogLevel=ERROR` moved the host without failing anything
+    /// until the argv was compared entirely.
+    fn opts_before_host(c: &RemoteCommand) -> Vec<String> {
+        c.args
+            .iter()
+            .take_while(|a| *a != "vmhost")
+            .cloned()
+            .collect()
+    }
+
+    /// The remote script, whatever precedes it.
+    fn remote_script(c: &RemoteCommand) -> String {
+        c.args.last().expect("a remote command").clone()
+    }
+
+    #[test]
+    fn a_tty_run_asks_for_a_pty_and_silences_the_closing_notice() {
+        // Order matters to ssh: options come before the destination,
+        // and everything after it is the remote command, so `-t`
+        // landing after the host would be handed to the remote
+        // shell instead.
+        //
+        // `LogLevel=ERROR` is measured, not decoration: a tty
+        // session makes ssh print `Connection to <host> closed.` to
+        // stderr, which would end every status and up with a
+        // spurious line. A genuine failure still reports at this
+        // level.
+        let c = vagrant(&cfg(), &["status"], Tty::Allocate);
+        assert_eq!(c.program, "ssh");
+        assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
+        assert!(remote_script(&c).contains("vagrant 'status'"));
+    }
+
+    #[test]
+    fn no_tty_passes_no_options_at_all() {
+        // The default for a pipe or a redirect: the remote's bytes
+        // arrive unchanged, which is what a captured log needs, and
+        // ssh emits no pseudo-terminal warning.
+        let c = vagrant(&cfg(), &["status"], Tty::NoPty);
+        assert!(opts_before_host(&c).is_empty(), "{:?}", c.args);
+        assert_eq!(c.args.len(), 2);
+    }
+
+    #[test]
+    fn the_tty_choice_does_not_disturb_the_remote_script() {
+        // Only the argv ahead of the host differs. If the script
+        // itself changed with the tty, the printed plan and the
+        // executed one would describe different work.
+        let with = vagrant(&cfg(), &["status"], Tty::Allocate);
+        let without = vagrant(&cfg(), &["status"], Tty::NoPty);
+        assert_eq!(remote_script(&with), remote_script(&without));
+    }
+
+    #[test]
+    fn an_interactive_shell_always_gets_a_tty() {
+        // Unconditional here, unlike every other vagrant call:
+        // `vagrant ssh` needs a TTY through a non-interactive SSH
+        // command, and a shell without one is unusable whatever the
+        // local stdio looks like.
+        let c = shell_into_vm(&cfg());
+        assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
+        assert_eq!(
+            remote_script(&c),
+            remote_script(&vagrant(&cfg(), &["ssh"], Tty::NoPty))
+        );
+    }
+
+    #[test]
+    fn teardown_takes_a_tty_like_every_other_vagrant_call() {
+        // The sibling that was left out when `Tty` was introduced.
+        // `vagrant destroy -f` streams progress, so it staircased on
+        // the very console this parameter exists to fix.
+        let with = destroy_vm_if_present(&cfg(), "~/vms/p", Tty::Allocate);
+        assert_eq!(opts_before_host(&with), vec!["-t", "-o", "LogLevel=ERROR"]);
+        let without = destroy_vm_if_present(&cfg(), "~/vms/p", Tty::NoPty);
+        assert!(opts_before_host(&without).is_empty());
+        assert_eq!(remote_script(&with), remote_script(&without));
+    }
+
+    #[test]
+    fn the_stream_rule_needs_both_streams() {
+        // stdin, because ssh needs a local terminal to allocate
+        // against and merely warns without one; stdout, because the
+        // translation only helps output that reaches a terminal.
+        assert_eq!(Tty::for_streams(true, true), Tty::Allocate);
+        assert_eq!(Tty::for_streams(true, false), Tty::NoPty);
+        assert_eq!(Tty::for_streams(false, true), Tty::NoPty);
+        assert_eq!(Tty::for_streams(false, false), Tty::NoPty);
+    }
     fn cfg() -> Config {
         Config::for_tests()
     }
@@ -347,7 +548,7 @@ mod tests {
         // read. So the two names ride in on the one command that
         // crosses the boundary, and the guest's provisioning
         // writes them down.
-        let c = vagrant(&cfg(), &["up"]);
+        let c = vagrant(&cfg(), &["up"], Tty::NoPty);
         assert_eq!(
             c.args[1],
             "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' \
@@ -365,7 +566,7 @@ mod tests {
         // reaches the host verbatim -- and the dry run has to
         // show it escaped, or a pasted line would answer with
         // the wrong machine.
-        let c = vagrant(&cfg(), &["up"]);
+        let c = vagrant(&cfg(), &["up"], Tty::NoPty);
         assert!(c.args[1].contains("$(hostname -s)"), "{}", c.args[1]);
         assert!(c.to_string().contains(r"\$(hostname -s)"), "{c}");
     }
@@ -389,7 +590,9 @@ mod tests {
         // which can enumerate them; this pins the one builder that
         // does not go through `vagrant_script`.
         let script =
-            destroy_vm_if_present(&cfg(), "~/vms/myproject").args[1].clone();
+            destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty).args
+                [1]
+            .clone();
         assert!(script.contains(&vm_env()), "{script}");
     }
 
@@ -402,7 +605,7 @@ mod tests {
         // module checked it.
         let mut cfg = cfg();
         cfg.host = "a b; rm -rf /".to_owned();
-        let script = vagrant(&cfg, &["up"]).args[1].clone();
+        let script = vagrant(&cfg, &["up"], Tty::NoPty).args[1].clone();
         assert!(
             script.contains("BOMBYX_VM_HOST='a b; rm -rf /'"),
             "{script}"
@@ -411,7 +614,7 @@ mod tests {
 
     #[test]
     fn builds_a_vagrant_command() {
-        let c = vagrant(&cfg(), &["up"]);
+        let c = vagrant(&cfg(), &["up"], Tty::NoPty);
         let env = vm_env();
         assert_eq!(c.program, "ssh");
         assert_eq!(c.args[0], "vmhost");
@@ -423,7 +626,11 @@ mod tests {
 
     #[test]
     fn builds_a_vagrant_command_with_several_args() {
-        let c = vagrant(&cfg(), &["snapshot", "restore", "fresh-install"]);
+        let c = vagrant(
+            &cfg(),
+            &["snapshot", "restore", "fresh-install"],
+            Tty::NoPty,
+        );
         let env = vm_env();
         assert_eq!(
             c.args[1],
@@ -442,6 +649,7 @@ mod tests {
             &cfg,
             &cfg.remote_scratch_dir(&name),
             &["destroy", "-f"],
+            Tty::NoPty,
         );
         let env = vm_env();
         assert_eq!(
@@ -563,7 +771,7 @@ mod tests {
         let quoted = quote_remote_path(&dir);
         assert!(cmds[2].args[1].contains(&format!("cd {quoted} &&")));
         assert!(
-            vagrant(&cfg, &["up"]).args[1]
+            vagrant(&cfg, &["up"], Tty::NoPty).args[1]
                 .starts_with(&format!("cd {quoted} &&"))
         );
     }
@@ -607,7 +815,7 @@ mod tests {
         // An interrupted first push leaves the directory made
         // but empty. A bare `vagrant destroy -f` fails there,
         // and would stop the removal that follows.
-        let c = destroy_vm_if_present(&cfg(), "~/vms/myproject");
+        let c = destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty);
         assert_eq!(
             c.args[1],
             format!(
@@ -620,20 +828,8 @@ mod tests {
 
     #[test]
     fn vagrant_in_runs_in_the_given_dir() {
-        let c = vagrant_in(&cfg(), "/srv/x", &["halt"]);
+        let c = vagrant_in(&cfg(), "/srv/x", &["halt"], Tty::NoPty);
         let env = vm_env();
         assert_eq!(c.args[1], format!("cd '/srv/x' && {env} vagrant 'halt'"));
-    }
-
-    #[test]
-    fn shell_into_vm_forces_a_tty() {
-        let c = shell_into_vm(&cfg());
-        let env = vm_env();
-        assert_eq!(c.args[0], "-t");
-        assert_eq!(c.args[1], "vmhost");
-        assert_eq!(
-            c.args[2],
-            format!("cd ~/'vms/myproject' && {env} vagrant 'ssh'")
-        );
     }
 }

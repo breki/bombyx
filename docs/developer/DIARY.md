@@ -4,6 +4,138 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-18
 
+**Output that walked off the right edge of the screen**
+
+`bombyx status` and `bombyx doctor` rendered as a staircase on a
+Windows console: each line beginning at the column where the
+previous one ended, and splitting mid-token once it hit the right
+margin. The geometry proved the cause by itself -- from the
+operator's own paste, line lengths 23, 66, 130 and leading indents
+0, 23, 66. Every line started exactly where the last one stopped,
+which is a missing carriage return and nothing else.
+
+Two candidate explanations went in before the evidence did, and
+both were wrong. Colour codes: ruled out, zero `0x1b` bytes in
+either capture. A hardcoded `LINE_WIDTH: usize = 80` in
+`doctor/report.rs` with the longest row measuring exactly 80: a
+good story, and innocent -- the mid-token splits were the
+terminal's own margin wrap of text that had already been pushed
+rightward.
+
+The real cause has two halves, and they need different fixes.
+
+`status` streams the *remote's* bytes. Without a PTY the remote's
+stdout is a pipe, so its tty layer never applies the `\n` to
+`\r\n` translation: measured, 206 bytes with six line feeds and no
+carriage returns at all. Forcing a PTY with `ssh -tt` against the
+same host returned 220 bytes with six CRs and six LFs, perfectly
+paired. That is the fix, and it is now `remote::Tty`, threaded
+through `plan` so a dry run prints the argv the live run uses.
+Only when both stdin and stdout are terminals -- `ssh -t` needs a
+local terminal to allocate against, and a pipe must keep the bytes
+the remote wrote. Worth knowing: under a PTY vagrant also
+colourizes, which is the other 8 bytes of that difference (two
+`ESC[0m` resets). Gating on both streams is what keeps those codes
+out of a captured log.
+
+`doctor`'s table is rendered by bombyx itself, so a PTY cannot
+explain it -- and yet it staircased. The correlation says why:
+every command that staircases runs `ssh` first, and `self-update`,
+which never does, prints cleanly. The leading explanation is that
+`ssh.exe` leaves a console-mode bit set that suppresses the
+implicit carriage return -- `DISABLE_NEWLINE_AUTO_RETURN` is the
+bit with that effect -- after which a bare LF is a pure line feed
+and
+*bombyx's own later writes* staircase. That cause remains
+unverified -- a redirected stdout cannot reproduce a console mode
+change, so it needs the operator's terminal to confirm.
+
+The fix for that half deliberately does not live in the library.
+`Report::render` keeps emitting `\n`, and the binary's
+`print_lines` adds the CR when stdout is a Windows terminal. A
+renderer that emitted `\r\n` on Windows would need two expected
+strings per test, and this project has already shipped one test
+that passed on Windows alone. `SetConsoleMode` would be the
+precise instrument and is unavailable: production crates are
+`#[forbid(unsafe_code)]`, with the scoped exception only for
+`xtask`.
+
+**The review found seven things wrong with that, and two were
+defects rather than opinions.**
+
+`eprint_lines` chose stderr's line endings by reading **stdout**.
+Wrong in both directions, and each is a real invocation:
+`bombyx up > out.log` left the failure line -- the one my own doc
+comment called the line an operator most needs to read -- bare on
+the terminal, and `bombyx up 2> err.log` wrote carriage returns
+into a captured log the change promises not to touch. The
+predicate is per-stream now.
+
+`destroy` and `discard` never got a `Tty` at all.
+`destroy_vm_if_present` builds its own argv, so teardown -- the
+destructive pair, whose output you most want to read -- still
+staircased. That is `CLAUDE.md`'s "guarding one field? check its
+siblings", and it was invisible because the test I wrote to pin
+the threading asserted only that `tar` and `scp` lack `-t`, which
+their literal argv always did. It could never fail. It now
+classifies every action, so a new one is a decision rather than an
+omission.
+
+Three claims were wrong rather than broken. I named
+`ENABLE_VIRTUAL_TERMINAL_PROCESSING` as the mechanism; the bit
+that actually suppresses the console's implicit carriage return is
+`DISABLE_NEWLINE_AUTO_RETURN`, so I had published a specific,
+checkable, probably-false claim while the real hypothesis was
+right. The diary hedged the cause and the doc comment and CHANGELOG
+did not, which is backwards -- the doc comment is the copy a
+reader trusts. And `plan`'s doc promised a dry run prints the argv
+the live run uses, which is false exactly where dry runs get used:
+`--dry-run | grep` has a piped stdout, so it prints the plan
+without `-t` while the live run in that terminal uses it.
+
+Two consequences of `-t` needed measuring rather than assuming,
+and both changed the code. Without a local terminal ssh prints
+`Pseudo-terminal will not be allocated because stdin is not a
+terminal.` and allocates nothing -- which is why the gate checks
+stdin, now with evidence. And a tty session makes ssh print
+`Connection to <host> closed.` on stderr, so every `status` and
+`up` would have gained a spurious trailing line. `-o
+LogLevel=ERROR` suppresses it; measured that a genuine failure
+still reports identically, an unresolvable host giving the same
+message and the same 255 either way. `QUIET` also works and was
+rejected for swallowing real diagnostics.
+
+`Tty::Allocate` is now Windows-only. On Unix a terminal needs no
+translation, so it bought nothing by its own stated rationale
+while still folding the remote's stderr into stdout -- meaning
+`bombyx up 2> err.log` would have captured nothing from the
+remote on Linux. Those platforms keep the behaviour they had.
+
+The pure halves moved into `bombyx::term` and
+`Tty::for_streams`, which is where they should have gone first:
+`src/bin/` is outside the coverage gate, and I had put the entire
+second half of the fix -- a string substitution and a
+two-boolean rule -- somewhere no test could reach, in the same
+session whose last two commits were about exactly that. Writing
+`line_endings`'s tests immediately found a third defect nobody had
+reported: `replace('\n', "\r\n")` turns existing CRLF into
+`\r\r\n`, a blank row between every line. Nothing feeds it CRLF
+today, but the failure line embeds a remote script built from
+`bombyx.toml` values, and none of those is checked for control
+characters. It is idempotent now.
+
+Scope, stated rather than uniform: the messages that go through
+the new writers are the ones printed *after* a child -- doctor's
+table, `execute`'s failure line, and the top-level error printer,
+which the first cut missed and which is the worst omission of the
+three because `{err:#}` is routinely multi-line.
+
+One thing this cost an hour to notice: `cargo xtask test` reported
+`Test OK` against a **stale build** while I was iterating, so a
+test that should have failed passed twice. The tell was 0.05s with
+no compile line. A `touch` fixed it; not trusting a green run that
+did not recompile is the lesson.
+
 **The first real self-update, and the one bug it printed**
 
 `bombyx self-update` ran end to end for the first time: an installed

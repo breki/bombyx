@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::config::Config;
 use crate::doctor;
 use crate::name::ScratchName;
-use crate::remote::{self, PushArchive, RemoteCommand};
+use crate::remote::{self, PushArchive, RemoteCommand, Tty};
 
 /// What the user asked bombyx to do.
 ///
@@ -65,12 +65,28 @@ impl Action {
 ///
 /// `local_dir` is the absolute path of the project's Vagrant
 /// directory; `archive` names the transient push archive.
+///
+/// `tty` is threaded through to every vagrant invocation this
+/// builds, rather than being added while spawning, so the printed
+/// plan and the executed plan come from one place -- see [`Tty`].
+/// `doctor` ignores it: its probes are parsed, and
+/// [`doctor::probe_commands`] builds them without a PTY.
+///
+/// **A dry run prints the argv for *its own* stdio, not for a later
+/// live run.** `bombyx status --dry-run | grep ssh` has a piped
+/// stdout, so it prints the plan without `-t`, while
+/// `bombyx status` in that same terminal will use it. Deliberate --
+/// the flag depends on how the process is invoked, and a dry run
+/// that claimed otherwise would be guessing about a future
+/// invocation -- but it does mean a captured plan is not a script
+/// you can paste and expect byte-identical behaviour from.
 #[must_use]
 pub fn plan(
     action: &Action,
     cfg: &Config,
     local_dir: &Path,
     archive: &PushArchive,
+    tty: Tty,
 ) -> Vec<RemoteCommand> {
     match action {
         Action::Up => push_then(
@@ -79,6 +95,7 @@ pub fn plan(
             local_dir,
             archive,
             &["up"],
+            tty,
         ),
         Action::Provision => push_then(
             cfg,
@@ -86,28 +103,33 @@ pub fn plan(
             local_dir,
             archive,
             &["provision"],
+            tty,
         ),
-        Action::Down => vec![remote::vagrant(cfg, &["halt"])],
+        Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
-        Action::Status => vec![remote::vagrant(cfg, &["status"])],
+        Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
         Action::Reset => vec![remote::vagrant(
             cfg,
             &["snapshot", "restore", "fresh-install"],
+            tty,
         )],
         // Host probes only. The local checks read this
         // filesystem and spawn a `--version` call, so there is no
         // command line a dry run could print that would describe
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
-        Action::Destroy => tear_down(cfg, &cfg.remote_project_dir()),
+        Action::Destroy => tear_down(cfg, &cfg.remote_project_dir(), tty),
         Action::Scratch(name) => push_then(
             cfg,
             &cfg.remote_scratch_dir(name),
             local_dir,
             archive,
             &["up"],
+            tty,
         ),
-        Action::Discard(name) => tear_down(cfg, &cfg.remote_scratch_dir(name)),
+        Action::Discard(name) => {
+            tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
+        }
     }
 }
 
@@ -125,9 +147,9 @@ pub fn plan(
 /// `execute` stops at the first failure the removal would never
 /// run, leaving a directory no bombyx command could clear.
 /// Skipping the destroy instead makes teardown re-runnable.
-fn tear_down(cfg: &Config, dir: &str) -> Vec<RemoteCommand> {
+fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
     vec![
-        remote::destroy_vm_if_present(cfg, dir),
+        remote::destroy_vm_if_present(cfg, dir, tty),
         remote::remove_dir(cfg, dir),
     ]
 }
@@ -153,10 +175,11 @@ fn push_then(
     local_dir: &Path,
     archive: &PushArchive,
     args: &[&str],
+    tty: Tty,
 ) -> Vec<RemoteCommand> {
     let mut cmds = vec![remote::ensure_dir(cfg, dir)];
     cmds.extend(remote::push_dir(cfg, local_dir, dir, archive));
-    cmds.push(remote::vagrant_in(cfg, dir, args));
+    cmds.push(remote::vagrant_in(cfg, dir, args, tty));
     cmds
 }
 
@@ -166,6 +189,73 @@ mod tests {
 
     fn cfg() -> Config {
         Config::for_tests()
+    }
+
+    /// How many commands in a plan carry `-t`.
+    fn dash_t_count(cmds: &[RemoteCommand]) -> usize {
+        cmds.iter()
+            .filter(|c| c.args.iter().any(|a| a == "-t"))
+            .count()
+    }
+
+    fn plan_for(action: &Action, tty: Tty) -> Vec<RemoteCommand> {
+        plan(
+            action,
+            &cfg(),
+            Path::new("/repo/vagrant"),
+            &PushArchive::new(Path::new("/work"), "42"),
+            tty,
+        )
+    }
+
+    #[test]
+    fn every_action_carries_the_tty_choice_it_should() {
+        // The first version of this test asserted only that `tar`
+        // and `scp` lack `-t` -- which their literal argv always
+        // did, so it could never fail, and it left `destroy` and
+        // `discard` silently un-threaded. Classifying every action
+        // is what makes a new one a decision rather than an
+        // omission.
+        for action in all_actions() {
+            // Doctor is the only action with no tty-bearing
+            // command: its probes are parsed, and a PTY would fold
+            // control characters into text that gets compared.
+            // Every other action ends in exactly one vagrant
+            // invocation over ssh -- including teardown, where the
+            // `rm -rf` beside it has no output worth a terminal.
+            let expected = usize::from(action != Action::Doctor);
+            assert_eq!(
+                dash_t_count(&plan_for(&action, Tty::Allocate)),
+                expected,
+                "{action:?} under Allocate"
+            );
+
+            // Under NoPty only `shell` keeps its `-t`, because it
+            // asks for one regardless of the local stdio.
+            let without = usize::from(matches!(action, Action::Shell));
+            assert_eq!(
+                dash_t_count(&plan_for(&action, Tty::NoPty)),
+                without,
+                "{action:?} under NoPty"
+            );
+        }
+    }
+
+    #[test]
+    fn only_ssh_is_ever_given_a_tty_flag() {
+        // `-t` means something else entirely to `tar`, and nothing
+        // to `scp`.
+        for action in all_actions() {
+            for c in &plan_for(&action, Tty::Allocate) {
+                if c.program != "ssh" {
+                    assert!(
+                        !c.args.iter().any(|a| a == "-t"),
+                        "{action:?}: {} got -t",
+                        c.program
+                    );
+                }
+            }
+        }
     }
 
     /// The identity prefix `remote` puts on every vagrant script,
@@ -225,6 +315,7 @@ mod tests {
             &cfg(),
             Path::new("/repo/vagrant"),
             &PushArchive::new(Path::new("/work"), "42"),
+            Tty::NoPty,
         )
     }
 

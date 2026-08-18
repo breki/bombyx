@@ -74,6 +74,10 @@ plan, decisions, and outcome.
 
 ## Done
 
+- [**crlf-staircase-on-windows**](issues/crlf-staircase-on-windows.md)
+  -- output staircases on a Windows console
+  (2026-08-18)
+
 - [**phantom-deploy-command**](issues/phantom-deploy-command.md)
   -- stripped the references; bombyx has no deploy step
   (2026-08-12)
