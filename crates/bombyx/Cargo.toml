@@ -1,6 +1,6 @@
 [package]
 name = "bombyx"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Drive isolated AI-agent VMs on a remote libvirt host over SSH"
 license = "MIT"

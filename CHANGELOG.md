@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.2.0] - 2026-08-18
+
+### Added
+
 - Pass the VM host identity into the guest: every `vagrant` invocation that runs
   in a project directory now carries `BOMBYX_VM_HOST` (the SSH alias) and
   `BOMBYX_VM_HOSTNAME` (the host machine's `hostname -s`). A guest cannot work
