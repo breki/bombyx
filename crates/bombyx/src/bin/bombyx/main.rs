@@ -1,9 +1,19 @@
 //! bombyx CLI entry point.
 //!
-//! Thin by design: parse arguments, hand off to the library
-//! to build the command list, then run it. The mapping from a
-//! subcommand to its commands lives in `bombyx::plan`, where
-//! it is covered by tests.
+//! Parse arguments, hand off to the library to build the command
+//! list, then run it. The mapping from a subcommand to its commands
+//! lives in `bombyx::plan`, where it is covered by tests.
+//!
+//! It used to say "thin by design", and that is worth not claiming.
+//! Four things genuinely live here and nowhere else: argument
+//! parsing, the config-precedence reporting on stderr, spawning
+//! processes, and the ordering of the `self-update` sequence -- and
+//! this file is outside the coverage gate (`src/bin/`), so anything
+//! that stays is untested. That is the reason to keep moving
+//! decisions out of it, most recently the wording of the update
+//! decision (`update::Decision::outcome`) and the post-extraction
+//! re-check (`update::asset::confirm_unchanged`). `self_update` is
+//! still the largest thing here.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -47,6 +57,35 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Update this bombyx binary to the newest release
+    ///
+    /// Downloads the release archive for this platform and
+    /// verifies it against the release's `SHA256SUMS` before
+    /// replacing the binary. Refuses rather than installing
+    /// anything it cannot verify, never installs a pre-release,
+    /// and never downgrades a local build that is newer than any
+    /// release. Needs `curl` and `tar`.
+    SelfUpdate,
+
+    // Everything else. Flattened, so the *invocation* surface is
+    // identical -- `bombyx up`, not `bombyx vm up`. The `--help`
+    // listing does change: `self-update` now heads it instead of
+    // sitting between `destroy` and `scratch`, because a flattened
+    // variant contributes its subcommands at its own position.
+    // The type says what the code relies on: `self-update` is the
+    // one subcommand that is not about a VM and does not read a
+    // config. `action_of` used to carry a `Cmd::SelfUpdate =>
+    // bail!("internal error")` arm kept unreachable by a
+    // `matches!` four hundred lines away, and the next
+    // config-less subcommand would have added a second one.
+    #[command(flatten)]
+    Vm(VmCmd),
+}
+
+/// The subcommands that drive a VM, so all of them need a
+/// project config and a host.
+#[derive(Subcommand)]
+enum VmCmd {
     /// Push the Vagrant dir and boot the project VM
     Up,
     /// Push the Vagrant dir and re-run provisioning
@@ -75,15 +114,6 @@ enum Cmd {
         /// Must match `project` in `bombyx.toml`
         project: Option<String>,
     },
-    /// Update this bombyx binary to the newest release
-    ///
-    /// Downloads the release archive for this platform and
-    /// verifies it against the release's `SHA256SUMS` before
-    /// replacing the binary. Refuses rather than installing
-    /// anything it cannot verify, never installs a pre-release,
-    /// and never downgrades a local build that is newer than any
-    /// release. Needs `curl` and `tar`.
-    SelfUpdate,
     /// Boot a throwaway VM for untrusted work
     Scratch {
         /// Name for the scratch VM, e.g. `pr-1234`
@@ -98,7 +128,7 @@ enum Cmd {
 
 fn main() -> ExitCode {
     match run() {
-        Ok(code) => code,
+        Ok(ran) => ran.code(),
         Err(err) => {
             eprintln!("bombyx: {err:#}");
             ExitCode::FAILURE
@@ -106,7 +136,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<ExitCode> {
+fn run() -> Result<Ran> {
     let cli = Cli::parse();
 
     // Handled before anything reads a config, because it is the
@@ -116,9 +146,15 @@ fn run() -> Result<ExitCode> {
     // fail in any directory without a `bombyx.toml` -- including
     // the home directory, which is where someone would naturally
     // run it.
-    if matches!(cli.command, Cmd::SelfUpdate) {
-        return self_update(cli.dry_run);
-    }
+    //
+    // An exhaustive `match`, not a `let ... else`: the point of the
+    // `Cmd`/`VmCmd` split is that a third config-less subcommand
+    // fails to compile here rather than being routed silently into
+    // `self_update`.
+    let vm = match cli.command {
+        Cmd::SelfUpdate => return self_update(cli.dry_run),
+        Cmd::Vm(vm) => vm,
+    };
 
     // The VM host is not in the project file: it belongs to
     // whoever is driving bombyx, not to the repo. Highest
@@ -177,7 +213,7 @@ fn run() -> Result<ExitCode> {
         eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }
 
-    let action = action_of(&cli.command, &cfg)?;
+    let action = action_of(&vm, &cfg)?;
 
     // `tar` runs from the archive directory, so the source
     // directory has to be absolute.
@@ -229,7 +265,7 @@ fn run() -> Result<ExitCode> {
 /// The tag list is fetched even for a dry run: it changes nothing
 /// locally, and a dry run that skipped it could only print a
 /// guess at the version.
-fn self_update(dry_run: bool) -> Result<ExitCode> {
+fn self_update(dry_run: bool) -> Result<Ran> {
     let current = update::Version::parse(update::CURRENT).ok_or_else(|| {
         anyhow!("this build's version {:?} is not X.Y.Z", update::CURRENT)
     })?;
@@ -239,7 +275,7 @@ fn self_update(dry_run: bool) -> Result<ExitCode> {
         println!("{list}");
     }
     let Some(latest) = newer_release(current, &list)? else {
-        return Ok(ExitCode::SUCCESS);
+        return Ok(Ran::Ok);
     };
 
     let triple = asset::target_triple().ok_or_else(|| {
@@ -259,15 +295,16 @@ fn self_update(dry_run: bool) -> Result<ExitCode> {
         for cmd in plan.steps() {
             println!("{cmd}");
         }
-        return Ok(ExitCode::SUCCESS);
+        return Ok(Ran::Ok);
     }
 
     println!("bombyx: updating {current} -> {latest}");
-    fetch_verified(&plan, latest)?;
+    let sums = fetch_verified(&plan, latest)?;
 
     if !ran_ok(&plan.extract)? {
         bail!("extracting {} failed", plan.archive);
     }
+    asset::confirm_unchanged(&plan.archive_path, &sums, &plan.archive)?;
 
     let placed = update::place(&plan.extracted, &dir, &run_id())?;
     if placed.swept > 0 {
@@ -287,7 +324,7 @@ fn self_update(dry_run: bool) -> Result<ExitCode> {
         );
     }
     println!("bombyx: updated to {latest} in {}", dir.display());
-    Ok(ExitCode::SUCCESS)
+    Ok(Ran::Ok)
 }
 
 /// The newest release when it is worth installing, else `None`.
@@ -300,27 +337,17 @@ fn newer_release(
     list: &RemoteCommand,
 ) -> Result<Option<update::Version>> {
     let tags = capture(list)?;
-    match update::decide(current, update::newest_release(&tags)) {
-        update::Decision::UpToDate(version) => {
-            println!("bombyx {version} is the newest release");
+    let decision = update::decide(current, update::newest_release(&tags));
+    // The three sentences live in the library, with the decision they
+    // describe. They used to be written here, where the coverage gate
+    // does not reach and no test asserted which version each names.
+    match decision.outcome() {
+        update::Outcome::Install(latest) => Ok(Some(latest)),
+        update::Outcome::Nothing(why) => {
+            println!("{why}");
             Ok(None)
         }
-        // Not an error: a locally built binary ahead of the last
-        // tag is the normal state while developing. Reported
-        // rather than silently downgraded.
-        update::Decision::Ahead { latest, .. } => {
-            println!(
-                "bombyx {current} is newer than the newest release \
-                 {latest}; nothing to do"
-            );
-            Ok(None)
-        }
-        update::Decision::NoReleases { .. } => bail!(
-            "{} publishes no release tags, so there is nothing to \
-             update {current} to",
-            update::REPO_URL
-        ),
-        update::Decision::Available { latest, .. } => Ok(Some(latest)),
+        update::Outcome::Refuse(why) => bail!("{why}"),
     }
 }
 
@@ -339,7 +366,7 @@ fn newer_release(
 fn fetch_verified(
     plan: &asset::UpdatePlan,
     latest: update::Version,
-) -> Result<()> {
+) -> Result<String> {
     let by_hand = || {
         format!("or install by hand:\n  {}", update::install_command(latest))
     };
@@ -376,7 +403,7 @@ fn fetch_verified(
         .with_context(|| format!("reading {}", plan.archive_path.display()))?;
     asset::verify(&sums, &plan.archive, &bytes).with_context(by_hand)?;
     println!("bombyx: {} matches its published checksum", plan.archive);
-    Ok(())
+    Ok(sums)
 }
 
 /// Where the binary being replaced lives.
@@ -408,14 +435,13 @@ fn target_dir(latest: update::Version) -> Result<PathBuf> {
 
 /// Runs one command, reporting only whether it succeeded.
 ///
-/// `execute` passes a failing exit code through as an `ExitCode`
-/// rather than an error, which is right for the VM commands whose
-/// status is the tool's own answer. Here the two failures need
-/// different messages, so the caller decides -- and a bare
-/// `execute` result would make "no such asset" and "network down"
-/// look identical.
+/// `execute` passes a failing status through rather than turning it
+/// into an error, which is right for the VM commands whose status is
+/// the tool's own answer. Here the two failures need different
+/// messages, so the caller decides -- and a bare `execute` result
+/// would make "no such asset" and "network down" look identical.
 fn ran_ok(cmd: &RemoteCommand) -> Result<bool> {
-    Ok(execute(std::slice::from_ref(cmd), false)? == ExitCode::SUCCESS)
+    Ok(execute(std::slice::from_ref(cmd), false)?.ok())
 }
 
 /// Runs a command and returns its stdout.
@@ -453,34 +479,27 @@ fn run_id() -> String {
 
 /// Converts the parsed subcommand into a library action,
 /// validating any user-supplied VM name.
-fn action_of(cmd: &Cmd, cfg: &Config) -> Result<Action> {
+///
+/// Total over [`VmCmd`], which is the point of that type existing.
+/// It used to take `Cmd` and carry a `Cmd::SelfUpdate =>
+/// bail!("internal error: ...")` arm, unreachable only because of a
+/// `matches!` four hundred lines away -- an invariant maintained by
+/// a comment instead of by the types.
+fn action_of(cmd: &VmCmd, cfg: &Config) -> Result<Action> {
     Ok(match cmd {
-        Cmd::Up => Action::Up,
-        Cmd::Provision => Action::Provision,
-        Cmd::Down => Action::Down,
-        Cmd::Shell => Action::Shell,
-        Cmd::Status => Action::Status,
-        Cmd::Reset => Action::Reset,
-        Cmd::Doctor => Action::Doctor,
-        Cmd::Destroy { project } => {
+        VmCmd::Up => Action::Up,
+        VmCmd::Provision => Action::Provision,
+        VmCmd::Down => Action::Down,
+        VmCmd::Shell => Action::Shell,
+        VmCmd::Status => Action::Status,
+        VmCmd::Reset => Action::Reset,
+        VmCmd::Doctor => Action::Doctor,
+        VmCmd::Destroy { project } => {
             confirm_destroy(project.as_deref(), cfg)?;
             Action::Destroy
         }
-        Cmd::Scratch { name } => Action::Scratch(vm_name(name)?),
-        Cmd::Discard { name } => Action::Discard(vm_name(name)?),
-        // Unreachable by construction: `run` intercepts this
-        // before the config is loaded, because it is the one
-        // subcommand that needs neither a project nor a host.
-        //
-        // An error rather than `unreachable!()`. The two differ
-        // only when the invariant breaks, and that is exactly when
-        // the difference matters: a panic prints a backtrace and a
-        // bug-report request at someone trying to update a CLI,
-        // where this prints a line and exits non-zero.
-        Cmd::SelfUpdate => bail!(
-            "internal error: self-update reached the VM action \
-             mapping; it is handled before the config is loaded"
-        ),
+        VmCmd::Scratch { name } => Action::Scratch(vm_name(name)?),
+        VmCmd::Discard { name } => Action::Discard(vm_name(name)?),
     })
 }
 
@@ -523,6 +542,37 @@ fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
     }
 }
 
+/// What running a command list came to.
+///
+/// Not an [`ExitCode`]: that is a *process-exit* type, and using it
+/// as the domain answer made every caller re-derive "did it work"
+/// by comparing against `ExitCode::SUCCESS`, leaning on a
+/// `PartialEq` that opaque type does not exist to provide. It
+/// carries a raw status byte instead, so this type *can* be
+/// compared, and the single conversion happens in [`main`].
+#[derive(Debug, PartialEq, Eq)]
+enum Ran {
+    /// Every command succeeded.
+    Ok,
+    /// One failed; this is the status to exit with.
+    Failed(u8),
+}
+
+impl Ran {
+    /// Whether every command succeeded.
+    fn ok(&self) -> bool {
+        matches!(self, Self::Ok)
+    }
+
+    /// The code this process should exit with.
+    fn code(self) -> ExitCode {
+        match self {
+            Self::Ok => ExitCode::SUCCESS,
+            Self::Failed(status) => ExitCode::from(status),
+        }
+    }
+}
+
 /// Runs (or, for a dry run, prints) each command in order,
 /// stopping at the first failure.
 ///
@@ -530,12 +580,12 @@ fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
 /// flattened, so `bombyx status` stays scriptable and an
 /// `ssh` transport failure (255) remains distinguishable from
 /// whatever the remote `vagrant` returned.
-fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<ExitCode> {
+fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     if dry_run {
         for cmd in commands {
             println!("{cmd}");
         }
-        return Ok(ExitCode::SUCCESS);
+        return Ok(Ran::Ok);
     }
 
     // Resolve every program before running any of them, through
@@ -568,10 +618,10 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<ExitCode> {
             .with_context(|| format!("running {}", cmd.program))?;
         if !status.success() {
             eprintln!("bombyx: {cmd} failed: {status}");
-            return Ok(exit_code(status));
+            return Ok(Ran::Failed(exit_status_byte(status)));
         }
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(Ran::Ok)
 }
 
 /// Runs every precondition probe and prints the report.
@@ -580,7 +630,7 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<ExitCode> {
 /// result, the skip cascade, rendering, the exit code -- lives in
 /// `bombyx::doctor`, for the reason its module doc gives. What is
 /// left here is process spawning.
-fn doctor_run(cfg: &Config, local_dir: &Path) -> ExitCode {
+fn doctor_run(cfg: &Config, local_dir: &Path) -> Ran {
     let mut report = Report::default();
     report.add(local_tool("tar", Some("--version")));
     report.add(local_tool("ssh", Some("-V")));
@@ -589,11 +639,7 @@ fn doctor_run(cfg: &Config, local_dir: &Path) -> ExitCode {
     report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
 
     print!("{}", report.render(&cfg.host));
-    if report.ok() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
-    }
+    if report.ok() { Ran::Ok } else { Ran::Failed(1) }
 }
 
 /// Runs one host probe, turning a spawn failure into a finding.
@@ -648,9 +694,9 @@ fn local_tool(name: &str, version_arg: Option<&str>) -> Finding {
     doctor::local_tool_finding(name, resolved.as_deref(), &version)
 }
 
-/// Maps a child's exit status onto this process's exit code,
-/// falling back to 1 for a signal or an out-of-range code.
-fn exit_code(status: ExitStatus) -> ExitCode {
+/// Maps a child's exit status onto a status byte, falling back to
+/// 1 for a signal or an out-of-range code.
+fn exit_status_byte(status: ExitStatus) -> u8 {
     let code = status.code().unwrap_or(1);
-    ExitCode::from(u8::try_from(code).unwrap_or(1))
+    u8::try_from(code).unwrap_or(1)
 }

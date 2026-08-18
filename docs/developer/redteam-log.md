@@ -2,33 +2,6 @@
 
 Security (Red Team) review findings. Newest first.
 
-## rt-2026-08-18-verified-archive-reread-before-extract
-
-**Category:** Time-of-check to time-of-use
-
-`self-update` hashes the downloaded archive with
-`std::fs::read(&archive_path)` and then hands the same *path* to
-`tar`, so the bytes that were verified and the bytes that are
-extracted are two separate reads. Nothing pins the file between
-them: no handle is held, and it is not renamed to a private name
-after verification. A process able to write that path in the window
-gets an unverified binary installed, with
-`bombyx: <archive> matches its published checksum` printed
-immediately before.
-
-The window is narrow and the mitigation is real but *incidental*:
-`tempfile::TempDir` creates the directory mode `0o700` on Unix and
-inside the per-user `%LOCALAPPDATA%\Temp` on Windows, so an
-attacker must already be the same user or root. Recorded rather
-than fixed blind, because the mitigation comes from `tempfile`'s
-defaults rather than from a decision made here, and nothing in the
-code says so.
-
-Closing it properly means extracting from a handle opened before
-hashing, or re-hashing the extracted binary. Worth doing when the
-release publishes a digest of the binary itself and not only of the
-archive.
-
 ## rt-2026-08-18-replayed-tag-redefines-a-version
 
 **Category:** Release integrity

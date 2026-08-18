@@ -41,6 +41,14 @@ and this project adheres to
   widened the window in which a concurrent update can delete another one rescue
   copy, and it deleted hand-made backups matching the same name prefix. The
   message now says what happens.
+- self-update now re-checks the downloaded archive after extraction, before the
+  binary is installed, and refuses if it no longer matches. The digest was
+  computed from one read and tar opened the same path again, so `matches its
+  published checksum` was printed about bytes that need not be the bytes
+  extracted. This detects an unreverted swap; it does not close the window, and
+  the code says so -- a writer inside the private temp directory is already the
+  same user or root, and can overwrite the installed binary directly without
+  racing anything.
 
 ### Removed
 

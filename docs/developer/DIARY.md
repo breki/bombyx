@@ -4,6 +4,83 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-18
 
+**Two reads of one archive, and a type that made an unreachable
+branch necessary**
+
+`self-update` verified the downloaded archive by hashing
+`std::fs::read(&archive_path)`, then handed the same *path* to
+`tar`. Two reads, nothing pinning the file between them -- so
+`bombyx: <archive> matches its published checksum` was printed
+about bytes that need not be the bytes extracted.
+
+What landed re-checks the archive after extraction and refuses
+*before* `place` installs anything. The first version of that
+change, and the CHANGELOG bullet with it, said it "detects" a
+swap. The review pointed out two shapes it does not: a writer who
+restores the original bytes before the second read, and -- easier,
+needing no timing at all -- a writer who leaves the archive alone
+and overwrites the *extracted binary* after `tar` exits.
+
+The useful part of the review was not the two holes but the
+question of whether they matter. `tempfile::TempDir` is mode
+`0o700` on Unix and per-user on Windows, so any such writer is
+already the same user or root, and that writer can overwrite
+`~/.cargo/bin/bombyx` directly. Racing self-update wins them
+nothing they did not have. So the check stays -- one read, and it
+covers the ordinary accident and the unreverted swap -- and the
+wording was corrected everywhere to claim exactly that. Closing
+it properly needs the release to publish a digest of the *binary*,
+not only of the archive.
+
+It also moved into the library as `asset::confirm_unchanged`,
+calling the already-tested `asset::verify` a second time rather
+than comparing a digest by hand, with three tests. It had been
+written in `src/bin/`, where the coverage gate does not reach --
+so a security comparison sat in the one place an inverted `==`
+would fail nothing. The same diff's own diary entry gave that
+argument for moving the decision sentences out; the review noticed
+it had not been applied to the new code.
+
+Three structural findings from the same review round, all closed
+here:
+
+`action_of` carried a `Cmd::SelfUpdate => bail!("internal error:
+...")` arm that could not be reached, kept unreachable by a
+`matches!` four hundred lines away. An invariant maintained by a
+comment. `enum Cmd { SelfUpdate, #[command(flatten)] Vm(VmCmd) }`
+makes it total, and the arm and the sentinel both delete. The
+invocation surface is unchanged -- `bombyx up`, not `bombyx vm
+up` -- though `--help` now lists `self-update` first, since a
+flattened variant contributes its subcommands at its own
+position. The dispatch is an exhaustive `match` rather than the
+`let ... else` it was first written as: the whole point is that a
+third config-less subcommand fails to compile instead of being
+routed silently into `self_update`.
+
+`execute` returned `Result<ExitCode>` as its domain answer, so
+`ran_ok` asked "did it work" with `== ExitCode::SUCCESS`, leaning
+on a `PartialEq` that opaque type does not exist to provide. It
+returns a `Ran` now, carrying a raw status byte rather than an
+`ExitCode` -- the first attempt kept the `ExitCode` inside, which
+left `Ran` uncomparable and the conversion still happening in two
+places inside `run` while its doc claimed otherwise. `run` and
+`self_update` return `Ran` too, so the single `ExitCode::from` is
+in `main`.
+
+And `update.rs` was past 900 lines holding four concerns. Split by
+*effect*, which is the distinction worth having: `update/version.rs`
+is pure, `update/swap.rs` renames and deletes the installed binary,
+and `update.rs` keeps the argv builders and re-exports both, so no
+caller path changed. The doc gate caught the one mistake in the
+move immediately -- a public module doc linking to the now-private
+submodules.
+
+The wording of the three no-op decisions moved into the library
+with them, as `Decision::outcome`. `src/bin/` is outside the
+coverage gate, so those sentences had no test at all; getting
+`Ahead`'s two versions the wrong way round tells a developer their
+fresh build is out of date, and nothing would have said so.
+
 **The attribution file was attributing the wrong crates**
 
 `cargo xtask licenses` landed listing 87 crates and calling them

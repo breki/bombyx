@@ -335,6 +335,76 @@ pub fn verify(sums: &str, file: &str, bytes: &[u8]) -> Result<(), VerifyError> {
     })
 }
 
+/// Re-reads `path` and checks it still matches what `sums` records
+/// for `file`.
+///
+/// **This is a second check-then-use, and it is worth being exact
+/// about what it buys.** The digest in [`verify`] is computed from
+/// one `read`; `tar` then opens the same *path* again. Two reads,
+/// nothing pinning the file in between, so
+/// `matches its published checksum` was printed about bytes that
+/// need not be the bytes extracted. Calling this after extraction
+/// and before the binary is installed detects that.
+///
+/// It does **not** close the window, and two shapes get through:
+/// a writer who restores the original bytes before this runs, and
+/// a writer who leaves the archive alone and overwrites the
+/// *extracted* binary instead -- which is easier, since it needs no
+/// timing at all.
+///
+/// The reason that is acceptable rather than a hole to chase:
+/// `tempfile::TempDir` creates the directory mode `0o700` on Unix
+/// and under the per-user `%LOCALAPPDATA%\Temp` on Windows, so any
+/// such writer is already the same user or root. That writer can
+/// overwrite `~/.cargo/bin/bombyx` directly and skip the race
+/// entirely, so racing self-update wins them nothing they did not
+/// already have. What this check does cover is the ordinary
+/// accident and the unreverted swap, for the cost of one read.
+///
+/// Closing it properly means verifying the *extracted binary*
+/// against a published digest of the binary, which needs the
+/// release to publish one.
+///
+/// # Errors
+///
+/// The io error when `path` cannot be re-read, and otherwise the
+/// same [`VerifyError`] cases as [`verify`].
+pub fn confirm_unchanged(
+    path: &Path,
+    sums: &str,
+    file: &str,
+) -> Result<(), ConfirmError> {
+    let bytes = std::fs::read(path).map_err(|source| ConfirmError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    verify(sums, file, &bytes).map_err(ConfirmError::Changed)
+}
+
+/// Why a post-extraction re-check failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfirmError {
+    /// The archive could not be read a second time.
+    #[error("re-reading {path}")]
+    Read {
+        /// Archive that could not be re-read.
+        path: PathBuf,
+        /// The io error.
+        source: std::io::Error,
+    },
+
+    /// The archive is not the one that was verified.
+    #[error(
+        "the archive changed between verification and extraction, so \
+         what was extracted from it is not what was checked"
+    )]
+    Changed(
+        /// Why it no longer verifies.
+        #[source]
+        VerifyError,
+    ),
+}
+
 /// Why a downloaded asset was refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VerifyError {
@@ -669,6 +739,40 @@ mod tests {
         let err = verify(&sums(), "unlisted.tar.gz", b"abc").unwrap_err();
         assert!(matches!(err, VerifyError::NoEntry { .. }), "{err}");
         assert!(err.to_string().contains(SUMS_FILE), "{err}");
+    }
+
+    #[test]
+    fn an_unchanged_archive_passes_the_second_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = format!("bombyx-v0.2.0-{TRIPLE}.tar.gz");
+        let path = dir.path().join(&file);
+        std::fs::write(&path, b"abc").unwrap();
+        assert!(confirm_unchanged(&path, &sums(), &file).is_ok());
+    }
+
+    #[test]
+    fn an_archive_swapped_after_verification_is_refused() {
+        // The whole reason this function exists: the digest was
+        // computed from one read and `tar` opened the same path
+        // again. Here the bytes change in between, which is what
+        // must not reach `place`.
+        let dir = tempfile::tempdir().unwrap();
+        let file = format!("bombyx-v0.2.0-{TRIPLE}.tar.gz");
+        let path = dir.path().join(&file);
+        std::fs::write(&path, b"tampered").unwrap();
+        let err = confirm_unchanged(&path, &sums(), &file).unwrap_err();
+        assert!(matches!(err, ConfirmError::Changed(_)), "{err}");
+        assert!(err.to_string().contains("changed between"), "{err}");
+    }
+
+    #[test]
+    fn an_archive_that_vanished_is_refused_naming_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = format!("bombyx-v0.2.0-{TRIPLE}.tar.gz");
+        let path = dir.path().join(&file);
+        let err = confirm_unchanged(&path, &sums(), &file).unwrap_err();
+        assert!(matches!(err, ConfirmError::Read { .. }), "{err}");
+        assert!(err.to_string().contains("re-reading"), "{err}");
     }
 
     #[test]
