@@ -12,9 +12,29 @@ and this project adheres to
 
 ### Added
 
+- Licence checking, in two halves. `cargo xtask deny` gates licences, banned
+  crates and registry sources with cargo-deny -- offline, so it runs on every
+  push in CI as well as in validate, unlike the advisory audit. And `cargo xtask
+  licenses` generates a THIRD-PARTY-LICENSES file from the dependency tree, now
+  included in every release archive: MIT and Apache-2.0 both require attribution
+  to travel with a distributed binary, and the archives previously carried only
+  bombyx own LICENSE. `COPYRIGHT` and `AUTHORS` count as notice files, which
+  matters because that is where rustix and linux-raw-sys explain their triple
+  licence and the LLVM exception. The one crate that ships no licence text at all
+  is named in the file rather than omitted, and the header says the list covers
+  the whole dependency tree rather than only what the binary links.
+
 ### Changed
 
 ### Fixed
+
+- self-update no longer promises a cleanup it may not perform. The
+  leftover-binary notice said "the next self-update removes it", but the sweep
+  runs only when an update actually replaces the binary, so an up-to-date run
+  cleaned nothing. Sweeping on every invocation was tried and reverted: it
+  widened the window in which a concurrent update can delete another one rescue
+  copy, and it deleted hand-made backups matching the same name prefix. The
+  message now says what happens.
 
 ### Removed
 

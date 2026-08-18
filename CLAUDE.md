@@ -97,6 +97,8 @@ cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
+cargo xtask deny              # licence/bans/sources gate (cargo-deny, offline)
+cargo xtask licenses [--out P] # generate THIRD-PARTY-LICENSES
 cargo xtask dep-age cargo <pkg> [ver]  # one package's publish age
 cargo xtask dep-age cargo <pkg> --latest-aged  # newest ver past cooldown
 cargo xtask dep-age-check     # cooldown-gate changed deps (vs HEAD)
@@ -506,11 +508,16 @@ just when the code compiles:
    fails when a dependency added or bumped since `HEAD` was
    published within the 14-day window; an unchanged
    lockfile makes it a no-op
+9. **Licences, bans and sources** (`cargo xtask deny`) --
+   runs offline against `deny.toml`; a licence outside the
+   allow-list, a banned crate or a non-crates.io source fails,
+   and a missing `cargo-deny` is an error rather than a warning
+   because there is no network here to be down
 
 The dependency-cooldown gate runs **first** (it is a no-op
 on an unchanged lockfile, and fails fast on a within-cooldown
 dependency before anything compiles it); after it the gates
-run cheapest-first (Fmt, Duplication, Clippy, Doc) before the
+run cheapest-first (Fmt, Duplication, Deny, Clippy, Doc) before the
 expensive dynamic gates (Tests, Coverage, then the network
 Audit), and a failed step prints the single command to
 re-run just that gate.
@@ -883,7 +890,43 @@ from `Cargo.toml` via the build -- a CLI binary can use
 
 ## Supply-chain hygiene
 
-Four `cargo xtask` commands guard the dependency tree:
+Six `cargo xtask` commands guard the dependency tree. Two of them
+are about **licences** rather than vulnerabilities, and the split
+matters because the two hazards behave differently:
+
+- **`cargo xtask deny`** runs `cargo deny check licenses bans
+  sources` against `deny.toml`. It is **offline** -- it reads
+  `Cargo.lock` and the metadata already on disk -- which is why it
+  runs as `validate` step 4 *and* on every push in CI, where
+  `audit` deliberately does not. An advisory can appear overnight
+  and fail a pull request that changed nothing; a licence cannot
+  change under you that way. A missing `cargo-deny` is an error
+  here, not a warning, because there is no network to be down.
+
+  The allow-list is every licence in the current tree and no
+  more: MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception,
+  Unicode-3.0, Unlicense. `LGPL-2.1-or-later` is deliberately
+  absent even though `r-efi` offers it, because an SPDX `OR` is
+  satisfied by any allowed member -- so that crate resolves to MIT
+  and a crate that is *only* copyleft fails the gate.
+
+- **`cargo xtask licenses`** generates `THIRD-PARTY-LICENSES` from
+  the dependency tree, and the release workflow writes it into
+  every archive. This is compliance, not tidiness: MIT and
+  Apache-2.0 both require the licence and notice to travel with a
+  distributed binary, and `unicode-ident` carries `Unicode-3.0`
+  through an SPDX `AND`, which is required rather than optional.
+  Until this existed the archives held only bombyx's own
+  `LICENSE`, so the obligation was unmet from the first published
+  binary. Texts come from the registry sources already on disk;
+  nothing is downloaded. A crate shipping no licence file is
+  **named in the file** rather than skipped -- two currently are,
+  and omitting them would make the file look complete.
+
+  It is not committed (`.gitignore`), because it is derived from
+  `Cargo.lock` and would drift the moment a dependency moved.
+
+The other four are about vulnerabilities and freshness:
 
 - **`cargo xtask audit`** runs `cargo audit` (RUSTSEC) over
   `Cargo.lock`, failing on any vulnerability (advisory
@@ -913,11 +956,15 @@ Four `cargo xtask` commands guard the dependency tree:
   **What this does not cover.** An advisory against a
   dependency you have not touched is caught only at the next
   release, because `dep-age-check` looks at *changed* deps by
-  design and nothing else watches. There is also no licence
-  or ban policy (no `deny.toml`), no provenance vetting (no
-  `cargo-vet`), and no automated update cadence, so a
-  dependency whose vulnerability is already fixed upstream
-  sits at the old version until someone runs `/update-deps`.
+  design and nothing else watches. There is no provenance
+  vetting (no `cargo-vet`), so nothing distinguishes an audited
+  crate from one that merely has no advisory yet, and no
+  automated update cadence, so a dependency whose vulnerability
+  is already fixed upstream sits at the old version until
+  someone runs `/update-deps`. The attribution file also covers
+  the whole dependency tree rather than only what the binary
+  links, which over-claims -- see the deferred item in
+  `docs/developer/artisan-log.md`.
 - **`cargo xtask dep-age cargo <package> [version]`**
   reports how many days ago a version was published (on-demand,
   a single package). Add **`--latest-aged`** to instead print

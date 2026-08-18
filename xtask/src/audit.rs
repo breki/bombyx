@@ -74,7 +74,9 @@ fn run_cargo_audit() -> Result<CargoAudit, String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     if stdout.trim().is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("no such") || stderr.contains("not installed") {
+        // Shared with `deny`, because the two copies of this rule
+        // had already drifted -- see `helpers::is_missing_subcommand`.
+        if crate::helpers::is_missing_subcommand(&stderr) {
             return Err("cargo-audit is not installed -- \
                  install with: cargo install cargo-audit"
                 .into());

@@ -608,3 +608,44 @@ keep me too";
         assert!(require_nonempty("x", "").is_err());
     }
 }
+
+/// Whether cargo reported an absent subcommand.
+///
+/// One place, because two modules need it and their two copies had
+/// already drifted: `audit` matched `no such` or `not installed`
+/// while `deny` matched only the full `no such command`, so the
+/// newer one missed cargo's older `no such subcommand` wording and
+/// reported raw cargo text instead of an install hint. The two
+/// *policies* differ deliberately -- deny errors, audit warns -- but
+/// the string matching should not.
+#[must_use]
+pub fn is_missing_subcommand(stderr: &str) -> bool {
+    stderr.contains("no such command")
+        || stderr.contains("no such subcommand")
+        || stderr.contains("not installed")
+}
+
+#[cfg(test)]
+mod missing_subcommand_tests {
+    use super::is_missing_subcommand;
+
+    #[test]
+    fn matches_every_cargo_wording() {
+        for text in [
+            "error: no such command: `deny`",
+            "error: no such subcommand: `audit`",
+            "cargo-audit is not installed",
+        ] {
+            assert!(is_missing_subcommand(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn does_not_match_a_real_finding() {
+        // A licence rejection must not be reported as a missing tool.
+        assert!(!is_missing_subcommand(
+            "error[rejected]: failed to satisfy license requirements"
+        ));
+        assert!(!is_missing_subcommand(""));
+    }
+}

@@ -11,7 +11,7 @@ use crate::helpers::{elapsed_str, step_output};
 use crate::test_cmd;
 
 /// Total number of validation steps.
-const TOTAL_STEPS: usize = 8;
+const TOTAL_STEPS: usize = 9;
 
 /// Run all validation steps with concise stepwise
 /// output.
@@ -54,13 +54,14 @@ pub fn validate(check: bool) -> Result<(), String> {
     // Cheap static gates first ...
     run_step(2, "Fmt", "fmt", || run_fmt(check))?;
     run_step(3, "Duplication", "dupes", run_duplication)?;
-    run_step(4, "Clippy", "clippy", run_clippy)?;
-    run_step(5, "Doc", "doc", run_doc)?;
+    run_step(4, "Deny", "deny", run_deny)?;
+    run_step(5, "Clippy", "clippy", run_clippy)?;
+    run_step(6, "Doc", "doc", run_doc)?;
 
     // ... expensive dynamic gates last.
-    run_step(6, "Test (xtask only)", "test", run_test)?;
-    run_step(7, "Coverage", "coverage", run_coverage)?;
-    run_step(8, "Audit", "audit", run_audit)?;
+    run_step(7, "Test (xtask only)", "test", run_test)?;
+    run_step(8, "Coverage", "coverage", run_coverage)?;
+    run_step(9, "Audit", "audit", run_audit)?;
 
     println!("Validate OK ({})", elapsed_str(overall_start));
     Ok(())
@@ -149,6 +150,12 @@ fn run_doc() -> Result<String, String> {
 fn run_test() -> Result<String, String> {
     test_cmd::test_check_xtask()?;
     Ok(String::new())
+}
+
+/// The licence, bans and sources gate -- see [`crate::deny`] for
+/// why it is offline and why a missing tool is an error here.
+fn run_deny() -> Result<String, String> {
+    crate::deny::deny().map(|()| String::from("licenses, bans, sources"))
 }
 
 /// Security-advisory step -- fails on any vulnerability

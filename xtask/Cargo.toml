@@ -3,6 +3,9 @@ name = "xtask"
 version = "0.1.0"
 edition = "2024"
 publish = false
+# Build tooling, never published, but stating it keeps the licence
+# gate from having to make an exception for our own code.
+license = "MIT"
 
 [lints]
 workspace = true

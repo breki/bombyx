@@ -7,7 +7,7 @@ Run the full validation pipeline with concise output.
 
 ## Usage
 
-`/validate` -- run all 8 gates
+`/validate` -- run all 9 gates
 
 `/validate --check` -- same, but check formatting read-only
 instead of auto-fixing it in place. Use in CI, or before
@@ -17,14 +17,15 @@ would sweep unrelated drift into the commit.
 ## Output
 
 ```
-[1/8] Dep-age....... OK (1 changed: 1 aged, 0 allow-listed, 0.5s)
-[2/8] Fmt........... OK (0.3s)
-[3/8] Duplication... OK (<= 6%, 0.1s)
-[4/8] Clippy........ OK (0.7s)
-[5/8] Doc........... OK (1.5s)
-[6/8] Test (xtask only) OK (0.3s)
-[7/8] Coverage...... OK (99.4% >= 90%, 6.6s)
-[8/8] Audit......... OK (cargo: 0 vuln, 0 warn, 2.1s)
+[1/9] Dep-age....... OK (1 changed: 1 aged, 0 allow-listed, 0.5s)
+[2/9] Fmt........... OK (0.3s)
+[3/9] Duplication... OK (<= 6%, 0.1s)
+[4/9] Deny.......... OK (licenses, bans, sources, 0.4s)
+[5/9] Clippy........ OK (0.7s)
+[6/9] Doc........... OK (1.5s)
+[7/9] Test (xtask only) OK (0.3s)
+[8/9] Coverage...... OK (99.4% >= 90%, 6.6s)
+[9/9] Audit......... OK (cargo: 0 vuln, 0 warn, 2.1s)
 Validate OK (12.1s)
 ```
 

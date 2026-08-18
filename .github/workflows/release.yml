@@ -213,6 +213,11 @@ jobs:
           mkdir "$STAGING"
           cp "target/${{ matrix.target }}/release/$BIN" "$STAGING/"
           cp LICENSE README.md "$STAGING/"
+          # Attribution for the statically linked crates. MIT and
+          # Apache-2.0 both require it to travel with a distributed
+          # binary, and an archive holding only bombyx own LICENSE
+          # did not carry it.
+          cargo xtask licenses --out "$STAGING/THIRD-PARTY-LICENSES"
 
           tar czf "${STAGING}.tar.gz" "$STAGING"
           if [ "$WINDOWS" = yes ]; then

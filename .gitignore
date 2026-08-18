@@ -41,3 +41,8 @@ bombyx.local.toml
 # to whichever host booted the VM, never to the repo, and
 # bombyx excludes it from the push for the same reason.
 .vagrant/
+
+# Generated attribution, written into the release archives by
+# `cargo xtask licenses`. Not committed: it is derived from
+# Cargo.lock and would drift the moment a dependency moved.
+THIRD-PARTY-LICENSES

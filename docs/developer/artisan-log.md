@@ -2,6 +2,43 @@
 
 Quality (Artisan) review findings. Newest first.
 
+## aq-2026-08-18-validate-step-numbers-are-literals
+
+**Category:** API design
+
+`xtask/src/validate.rs` carries nine hardcoded step indices plus a
+`TOTAL_STEPS` const that has to agree with them by hand, and nothing
+checks the two. Inserting the Deny step meant editing six call
+sites; missing one would print `[5/9]` twice or `[9/10]` last, and
+no test would fail.
+
+Fix: build a table of `(name, cmd, closure)`, take `total` from
+`len()`, and enumerate it -- the numbering becomes derived data and
+`TOTAL_STEPS` disappears. Deferred because it touches every step in
+a file whose gate was being changed for other reasons.
+
+## aq-2026-08-18-xtask-modules-over-public
+
+**Category:** API design
+
+`xtask/src/licenses.rs` exposes `DEFAULT_OUT`, `Attribution`,
+`is_license_file`, `collect`, `attributions_from` and `render` as
+`pub`, and `deny.rs` exposes `DenyResult` and `classify`, although
+`main.rs` calls only the two entry points. `audit.rs` -- the module
+both were modelled on -- keeps its internals private and exposes
+only what `validate` needs.
+
+`pub` on an xtask internal is not a compile error, so it becomes the
+pattern for the next module, and it drags every item into the
+rustdoc pass and the "all public items documented" obligation.
+`#[cfg(test)] mod tests` reaches private items through `use
+super::*` regardless.
+
+Fix: make everything private except `deny()` and `licenses()`. While
+there, `DenyResult { ok: bool, detail: String }` would read better
+as an enum naming its three outcomes (passed, failed, tool missing),
+which is the distinction its own tests care about.
+
 ## aq-2026-08-18-self-update-composition-untested
 
 **Category:** Testability / abstraction boundaries

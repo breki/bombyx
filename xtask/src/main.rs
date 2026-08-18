@@ -5,12 +5,14 @@ mod check;
 mod clean_cache;
 mod clippy_cmd;
 mod coverage;
+mod deny;
 mod dep_age;
 mod doc_cmd;
 mod dupes;
 mod feedback;
 mod fmt_cmd;
 mod helpers;
+mod licenses;
 mod sync;
 mod test_cmd;
 mod todo;
@@ -63,6 +65,14 @@ enum XCommand {
     /// Security-advisory audit (RUSTSEC); requires
     /// cargo-audit
     Audit,
+    /// Licence, bans and sources gate (cargo-deny); offline
+    Deny,
+    /// Generate THIRD-PARTY-LICENSES from the dependency tree
+    Licenses {
+        /// Where to write it (default: THIRD-PARTY-LICENSES)
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Report a dependency version's age and flag it if
     /// within the publish cooldown (on-demand; requires curl)
     DepAge {
@@ -175,6 +185,8 @@ fn main() {
         XCommand::Coverage => coverage::coverage(),
         XCommand::Dupes => dupes::dupes(),
         XCommand::Audit => audit::audit(),
+        XCommand::Deny => deny::deny(),
+        XCommand::Licenses { out } => licenses::licenses(out),
         XCommand::DepAge {
             ecosystem,
             package,
