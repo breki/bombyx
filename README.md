@@ -247,15 +247,35 @@ your workstation.
 bombyx self-update
 ```
 
-**This path has not been run end to end yet *(unverified)*.** No
-published release carries a `SHA256SUMS`, because the workflow
-that attaches one landed after `v0.2.0`, so the first version this
-can actually update *to* is the next one. Run against a release
-published before that, it correctly refuses and prints the manual
-`cargo install` line. The pieces below are each verified -- the
-digest against the SHA-256 specification's own test vectors, the
-`tar` and `curl` invocations against real archives and a real
-404 -- but their composition has never completed a single update.
+**Verified end to end on 2026-08-18**, updating an installed
+`0.3.0` to the published `0.4.0` on Windows 11. Tag discovery, the
+per-platform archive URL, the checksum against the release's
+`SHA256SUMS`, extraction, the rename-aside dance below, and the
+sweep of an earlier leftover all ran in one invocation. The whole
+output, unedited:
+
+```
+bombyx: updating 0.3.0 -> 0.4.0
+bombyx: bombyx-v0.4.0-x86_64-pc-windows-msvc.tar.gz matches its published checksum
+bombyx: removed 1 superseded binaries
+bombyx: C:\Users\igor\.cargo\bin\bombyx.exe.old-41780-606660100 is still in use; the next self-update removes it
+bombyx: updated to 0.4.0 in C:\Users\igor\.cargo\bin
+```
+
+Two of those sentences are quoted with their defects intact,
+because **an update always runs the old binary's code** -- the file
+being replaced is the one doing the replacing. So `0.3.0` wrote
+them, and both have since been corrected: the plural now agrees
+with its count, and the leftover notice says "the next update that
+replaces the binary" rather than "the next self-update", since the
+sweep runs only when an update installs something. Which means the
+run above verifies `0.3.0`'s copy of this path; the two corrected
+sentences have not themselves run against a real release
+*(unverified)*.
+
+Also unexercised *(unverified)*: updating on Linux or macOS, and
+the release workflow's refusal to replace an already-published
+version's assets, which needs a re-pushed tag to reach.
 
 It finds the newest release tag with `git ls-remote --tags`,
 downloads that release's archive for your platform with `curl`,
@@ -289,7 +309,9 @@ which reads as tampering when the cause was a re-publish.
 
 So the release workflow refuses to overwrite the assets of a
 release that already carries a `SHA256SUMS`, and asks for a new
-patch tag instead. It stays idempotent for the case that made it
+patch tag instead *(unverified: reaching that refusal needs a
+re-pushed tag, and none has been pushed since it landed)*. It
+stays idempotent for the case that made it
 idempotent in the first place: re-running a release whose upload
 never finished, which is a repair rather than a redefinition. The
 refusal can be overridden with a repository variable
@@ -313,8 +335,10 @@ it, hence the sweep on the following run.
 
 Those two facts -- the refused overwrite and the permitted
 rename -- were measured on Windows 11 while a second bombyx held
-the same file. The *update as a whole* has not been, per the note
-at the top of this section.
+the same file, and the dance has since run for real: the
+`0.3.0` -> `0.4.0` update at the top of this section left
+`bombyx.exe.old-41780-606660100` behind, held by the process doing
+the updating, exactly as described here.
 
 The directory updated is the one holding the **running**
 executable, not one derived from `CARGO_HOME`. Those differ more

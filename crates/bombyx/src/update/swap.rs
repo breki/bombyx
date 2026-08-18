@@ -219,6 +219,58 @@ pub struct Placed {
     pub leftover: Option<PathBuf>,
 }
 
+impl Placed {
+    /// What to tell the operator about the sweep, if anything.
+    ///
+    /// `None` when nothing was swept: there is nothing to report.
+    ///
+    /// Both notices return the sentence **without** the `bombyx: `
+    /// prefix; the caller adds it. That differs from
+    /// [`crate::update::Outcome`]'s strings, which spell the program
+    /// name themselves because there it is part of the sentence
+    /// ("bombyx 0.4.0 is the newest release") rather than a log
+    /// prefix. Stated because the two conventions are otherwise
+    /// distinguishable only by running the binary, where the failure
+    /// looks like `bombyx: bombyx 0.4.0 is ...`.
+    ///
+    /// The wording lives here rather than in the binary for the same
+    /// reason [`crate::update::Decision::outcome`]'s does:
+    /// `src/bin/` is outside the coverage gate.
+    #[must_use]
+    pub fn sweep_notice(&self) -> Option<String> {
+        match self.swept {
+            0 => None,
+            1 => Some("removed 1 superseded binary".to_owned()),
+            n => Some(format!("removed {n} superseded binaries")),
+        }
+    }
+
+    /// What to tell the operator about a binary that could not be
+    /// deleted, if there is one.
+    ///
+    /// Says "the next update that replaces the binary", not "the
+    /// next self-update". The sweep runs inside [`place`], so a run
+    /// that finds nothing to install never reaches it -- the earlier
+    /// wording promised a cleanup that an up-to-date run did not
+    /// perform. Sweeping on every invocation was tried and reverted:
+    /// it widened the window where a concurrent update can delete
+    /// another's rescue copy, and it deleted hand-made backups
+    /// matching the same prefix.
+    ///
+    /// See [`Self::sweep_notice`] for the prefix convention and why
+    /// this wording is in the library at all.
+    #[must_use]
+    pub fn leftover_notice(&self) -> Option<String> {
+        self.leftover.as_ref().map(|path| {
+            format!(
+                "{} is still in use; the next update that replaces \
+                 the binary removes it",
+                path.display()
+            )
+        })
+    }
+}
+
 /// Renames `from` to `to`, copying when they are on different
 /// volumes.
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -263,13 +315,51 @@ pub fn sweep_aside(dir: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// A directory holding an installed binary.
     fn installed() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join(BINARY);
         std::fs::write(&bin, b"old binary").unwrap();
         (dir, bin)
+    }
+
+    #[test]
+    fn the_sweep_notice_agrees_with_its_own_count() {
+        // "removed 1 superseded binaries" is what the first real
+        // self-update printed, on 2026-08-18, updating 0.3.0 to
+        // 0.4.0. The count and the noun have to agree.
+        let notice = |swept| {
+            Placed {
+                swept,
+                leftover: None,
+            }
+            .sweep_notice()
+        };
+        assert_eq!(notice(0), None);
+        assert_eq!(notice(1).unwrap(), "removed 1 superseded binary");
+        assert_eq!(notice(2).unwrap(), "removed 2 superseded binaries");
+    }
+
+    #[test]
+    fn the_leftover_notice_names_the_path_and_the_right_next_run() {
+        // "the next self-update" was the earlier wording, and it
+        // promised a cleanup an up-to-date run never performs: the
+        // sweep happens inside `place`, which only a run that
+        // installs something reaches.
+        let nothing = Placed {
+            swept: 0,
+            leftover: None,
+        };
+        assert_eq!(nothing.leftover_notice(), None);
+
+        let held = Placed {
+            swept: 0,
+            leftover: Some(PathBuf::from("/bin/bombyx.old-1-2")),
+        };
+        let text = held.leftover_notice().unwrap();
+        assert!(text.contains("bombyx.old-1-2"), "{text}");
+        assert!(text.contains("update that replaces the binary"), "{text}");
+        assert!(!text.contains("self-update"), "{text}");
     }
 
     #[test]

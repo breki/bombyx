@@ -307,21 +307,13 @@ fn self_update(dry_run: bool) -> Result<Ran> {
     asset::confirm_unchanged(&plan.archive_path, &sums, &plan.archive)?;
 
     let placed = update::place(&plan.extracted, &dir, &run_id())?;
-    if placed.swept > 0 {
-        eprintln!("bombyx: removed {} superseded binaries", placed.swept);
-    }
-    if let Some(leftover) = placed.leftover {
-        eprintln!(
-            // "the next self-update" was wrong: the sweep runs
-            // inside `place`, so an up-to-date run never reaches
-            // it. Sweeping on every invocation was tried and
-            // reverted -- it widened the window where a concurrent
-            // update can delete another's rescue copy, and it
-            // deleted hand-made backups matching the same prefix.
-            "bombyx: {} is still in use; the next update that \
-             replaces the binary removes it",
-            leftover.display()
-        );
+    // Both sentences come from the library, where a test can read
+    // them. The wording of each is explained beside it.
+    for notice in [placed.sweep_notice(), placed.leftover_notice()]
+        .into_iter()
+        .flatten()
+    {
+        eprintln!("bombyx: {notice}");
     }
     println!("bombyx: updated to {latest} in {}", dir.display());
     Ok(Ran::Ok)

@@ -4,6 +4,81 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-08-18
 
+**The first real self-update, and the one bug it printed**
+
+`bombyx self-update` ran end to end for the first time: an installed
+`0.3.0` replaced by the published `0.4.0` on Windows 11. Tag discovery,
+the per-platform URL, the checksum against the release's `SHA256SUMS`,
+extraction, the rename-aside dance and the sweep of an earlier leftover
+all worked in one invocation. The README's `(unverified)` note on that
+section, and a later sentence saying the update as a whole had not been
+measured, are both replaced with the run's own output.
+
+That note mattered more than it looks. An unverified marker left in
+place *after* verification is worse than never having written one,
+because it teaches the reader to skip them -- and this project puts a
+lot of weight on those markers. Two remain in the section and are
+honest: no update has been run on Linux or macOS, and the release
+workflow's refusal to replace a published version's assets needs a
+re-pushed tag to reach.
+
+The run printed one defect: `removed 1 superseded binaries`. Trivial
+in isolation, and the interesting part is where it was written -- in
+`src/bin/bombyx/main.rs`, which the coverage gate cannot see, so no
+test could have caught it. That is the third thing this session to go
+wrong in that file for the same reason, after the update decision's
+three operator sentences and a digest comparison. So the notice moved
+into the library as `Placed::sweep_notice`, beside the count it
+describes, with a test over zero, one and many. The pattern is now
+established well enough to state plainly: prose that names a number
+belongs next to the number.
+
+**The review then pointed out I had fixed half of it.** `Placed` has
+two fields and reports both; the leftover sentence was still composed
+by hand three lines below the call that had just been moved out, with
+the same properties that justified moving it -- operator prose, a
+`Some`/`None` branch, no test. A reader would have seen one field
+reported through a tested library method and its neighbour done
+inline, with no rule between them. `Placed::leftover_notice` now sits
+beside `sweep_notice`, both tested, and the call site is one loop over
+the two. That is the "after fixing a bug, grep the file for the same
+shape" rule in `CLAUDE.md`, and this is the second time today I have
+needed a reviewer to apply it for me.
+
+Prompted by the repeat, I enumerated all thirteen `println!` and
+`eprintln!` calls left in that file rather than waiting for a fifth
+commit against it. Only the one fixed carried a count; the rest are
+error passthrough, two-path notices, dry-run argv echoes, or already
+library-sourced. So the plural class is closed rather than merely
+patched at the site that happened to be seen.
+
+One convention worth writing down, since a third message will
+eventually be added. `sweep_notice` and `leftover_notice` return the
+sentence *without* the `bombyx: ` prefix and the caller adds it, while
+`Outcome`'s strings spell the program name themselves -- because
+there it is part of the sentence ("bombyx 0.4.0 is the newest
+release") rather than a log prefix. Both are now documented, because
+picking the wrong one produces `bombyx: bombyx 0.4.0 is ...`, which
+no test would show and only a real run would.
+
+Also worth recording: the leftover `bombyx.exe.old-41780-606660100`
+behaved exactly as the README describes -- held by the process doing
+the updating, so undeletable until the next update replaces the
+binary. And the wording *for that* leftover was already correct in the
+shipped 0.4.0 code; the message the operator saw came from the 0.3.0
+binary, which is the one running while an update happens.
+
+That last fact bit the README twice. A self-update always reports the
+old version's sentences, so "verified end to end" over a commit that
+*changes* one of those sentences overstates by a hair -- the run
+verified `0.3.0`'s copy of the path, and the two corrected sentences
+have still never run against a real release. And my first draft of
+that section quoted the run as three lines when it printed five,
+having quietly dropped the two defective ones. Trimming the evidence
+to the parts that look good, in the very section whose value is
+calibrated confidence. The block is now verbatim, defects included,
+with the reason they are there.
+
 **A config file that read out a private key, and a tag that could
 redefine a version**
 

@@ -16,6 +16,13 @@ and this project adheres to
 
 ### Fixed
 
+- self-update's sweep notice agrees with its own count. The first real update
+  printed "removed 1 superseded binaries"; the wording moved into the library
+  beside the count it describes, where a test covers zero, one and many. Its
+  sibling, the leftover-binary notice, moved with it for the same reason, so
+  both of the sentences reporting an update's cleanup are now tested rather
+  than written where the coverage gate cannot see them.
+
 ### Removed
 
 ## [0.4.0] - 2026-08-18
