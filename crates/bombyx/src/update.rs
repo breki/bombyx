@@ -358,6 +358,21 @@ where
     Some(Path::new(&home).join(".cargo").join("bin"))
 }
 
+/// The directory holding the running executable.
+///
+/// This, not a directory derived from the environment, is where
+/// the binary being replaced lives -- see `target_dir` in the
+/// binary for why the two differ more often than they look.
+/// `None` only where `current_exe` fails, which is rare enough
+/// that [`install_dir`] exists as the fallback.
+#[must_use]
+pub fn running_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(Path::to_path_buf)
+}
+
 /// A binary renamed so a running copy can be replaced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MovedAside {

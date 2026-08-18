@@ -275,8 +275,14 @@ fn self_update(dry_run: bool) -> Result<ExitCode> {
     }
     if let Some(leftover) = placed.leftover {
         eprintln!(
-            "bombyx: {} is still in use; the next self-update \
-             removes it",
+            // "the next self-update" was wrong: the sweep runs
+            // inside `place`, so an up-to-date run never reaches
+            // it. Sweeping on every invocation was tried and
+            // reverted -- it widened the window where a concurrent
+            // update can delete another's rescue copy, and it
+            // deleted hand-made backups matching the same prefix.
+            "bombyx: {} is still in use; the next update that \
+             replaces the binary removes it",
             leftover.display()
         );
     }
@@ -387,10 +393,8 @@ fn fetch_verified(
 /// [`update::install_dir`] is the fallback for the platforms where
 /// `current_exe` can fail, and it is only a fallback.
 fn target_dir(latest: update::Version) -> Result<PathBuf> {
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(parent) = exe.parent()
-    {
-        return Ok(parent.to_path_buf());
+    if let Some(dir) = update::running_dir() {
+        return Ok(dir);
     }
     update::install_dir().ok_or_else(|| {
         anyhow!(
