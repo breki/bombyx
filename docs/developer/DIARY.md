@@ -60,6 +60,44 @@ has neither a `SHA256SUMS` nor a Windows `.tar.gz`. Run against
 `v0.2.0` today it correctly refuses and prints the manual
 `cargo install` line.
 
+**A test that passed on one platform, and the bug behind it**
+
+`v0.3.0` was tagged and its release run failed -- not in the new
+workflow steps, but in `ci / Test` on ubuntu and macos while
+Windows passed. The cause was mine and it is worth naming.
+
+`install_dir_accepts_userprofile_on_a_bare_windows_shell` built its
+expected value as `Path::new(r"C:\Users\igor\.cargo").join("bin")`.
+A backslash is not a path separator on Unix, so that string is a
+*single* component there, while the implementation joins `.cargo`
+onto the home directory and produces two. Windows normalises and
+compares component-wise, so the two matched there and only there.
+Every expectation is now built with the same joins the code uses,
+behind a `cargo_bin` helper so the shape has one place to live.
+
+Review then found the real defect underneath. `install_dir_from`
+resolved `HOME` before `USERPROFILE`, and Git Bash sets *both*,
+with `HOME` in POSIX form (`/c/Users/igor`). That value satisfies
+`is_anchored_dir`, and Windows resolves a `/`-rooted path against
+the *current drive* -- so from `D:\src\bombyx` it would mean
+`D:\c\Users\igor\.cargo\bin`. In practice MSYS converts `HOME` for
+native children, so a binary launched from that shell usually sees
+the Windows spelling; nothing guarantees it. `USERPROFILE` now wins
+on Windows and `HOME` is not consulted at all elsewhere, which is
+exactly what `config_dir_from` already does with `APPDATA` and for
+the same two reasons: the POSIX-form value, and `WSLENV` exporting
+Windows variables into Linux processes.
+
+No test had set both variables, so reversing the order would have
+kept the whole group green. That test exists now.
+
+The other half of the lesson is the one to remember. The doc
+comment asserted "Windows usually sets USERPROFILE and not HOME",
+which is false on the shell this repo is developed in, and a
+five-second `echo $HOME` would have said so. Three separate
+findings this week have had the same shape: a claim about the
+environment written from expectation rather than measurement.
+
 **Releases now audit twice**
 
 `cargo xtask audit` runs in the release workflow's `gates` job

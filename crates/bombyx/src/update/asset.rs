@@ -428,13 +428,40 @@ mod tests {
         assert_eq!(c.program, "tar");
         assert_eq!(c.dir.as_deref(), Some(work));
         assert!(c.args.iter().any(|a| a == "--strip-components=1"));
-        // The named member, so LICENSE and README are not
-        // unpacked alongside it.
-        assert!(
-            c.args.iter().any(|a| a
-                == &format!("bombyx-v0.2.0-{TRIPLE}/{}", super::super::BINARY)),
-            "{:?}",
-            c.args
+        // The member is named, so LICENSE and README are not
+        // unpacked alongside the binary.
+        //
+        // The expected name is a literal rather than
+        // `format!("...{BINARY}")`. Built from `BINARY`, expectation
+        // and implementation read the same constant, so the
+        // assertion is self-consistent on every platform and pins
+        // nothing -- the mirror of the bug that made the
+        // `install_dir` test pass only on Windows.
+        let member = c.args.last().expect("a member is named");
+        if cfg!(windows) {
+            assert_eq!(
+                member,
+                "bombyx-v0.2.0-x86_64-pc-windows-msvc/bombyx.exe"
+            );
+        } else {
+            assert_eq!(member, "bombyx-v0.2.0-x86_64-pc-windows-msvc/bombyx");
+        }
+    }
+
+    #[test]
+    fn the_binary_name_agrees_with_this_platforms_triple() {
+        // What the two-branch assertion above cannot say on its own:
+        // the binary name and the triple have to agree, or the member
+        // names a file the published archive does not contain. A
+        // `windows-msvc` archive holds `bombyx.exe`; every other one
+        // holds `bombyx`. (`update` separately pins BINARY against
+        // the platform; this pins it against the *asset* naming.)
+        let triple = target_triple().expect("a published target");
+        assert_eq!(
+            triple.contains("windows"),
+            super::super::BINARY == "bombyx.exe",
+            "triple {triple} disagrees with BINARY {:?}",
+            super::super::BINARY
         );
     }
 
