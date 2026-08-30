@@ -4,42 +4,37 @@ bombyx runs `vagrant` on a remote VM host over SSH, so an agent
 works inside a VM and the workstation stays clean. It composes
 `ssh`, `scp`, `tar` and `vagrant` and reimplements none of them.
 
-> The diagrams are PlantUML. GitHub does not render it inline,
-> so read them as source or paste them into a renderer.
-> **They have not been rendered**: this workstation has neither
-> `plantuml` nor a JVM, so the syntax is unverified.
+> The diagrams are Mermaid, which GitHub renders in place. They
+> were not previewed while being written: this workstation has
+> no renderer, so the first real check is this page on GitHub.
 
 ## The three machines
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
+```mermaid
+flowchart LR
+  subgraph ws["workstation"]
+    repo["project repo<br/>bombyx.toml, vagrant/"]
+    cli["bombyx"]
+  end
 
-node "workstation" as ws {
-  component "bombyx" as cli
-  folder "project repo\nbombyx.toml, vagrant/" as repo
-}
+  subgraph host["VM host"]
+    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh"]
+    vg["vagrant"]
+  end
 
-node "VM host" as host {
-  component "vagrant" as vg
-  folder "~/vms/<project>\nVagrantfile, bootstrap.sh" as dir
-}
+  subgraph guest["agent VM (guest)"]
+    clone["/opt/project"]
+    agent["agent"]
+  end
 
-node "agent VM (guest)" as guest {
-  folder "/opt/project\n(cloned here)" as clone
-  component "agent" as agent
-}
+  git[("git host")]
 
-cloud "git host" as git
-
-repo --> cli
-cli --> vg : ssh
-cli --> dir : scp + heredoc
-vg --> guest : creates
-clone <-- git : clone
-agent --> clone
-
-@enduml
+  repo --> cli
+  cli -- ssh --> vg
+  cli -- "scp + heredoc" --> dir
+  vg -- creates --> guest
+  git -- clone --> clone
+  agent --> clone
 ```
 
 The workstation never runs project code. The VM host runs
@@ -54,51 +49,33 @@ hold project source, and what is still unfinished.
 Everything with a decision in it lives in the library, because
 `src/bin/` is outside the coverage gate.
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
+```mermaid
+flowchart TD
+  main["main (bin)"]
 
-package "bin" {
-  [main]
-}
+  main --> plan
+  main --> update
+  main --> doctor
+  main --> term
+  main --> tool
 
-package "bombyx (lib)" {
-  [plan]
-  [vagrantfile]
-  [doctor]
-  [update]
-  [remote]
-  [config]
-  [name]
-  [term]
-  [tool]
-}
+  plan --> vagrantfile
+  plan --> doctor
+  plan --> remote
+  plan --> config
+  plan --> name
 
-[main] --> [plan]
-[main] --> [update]
-[main] --> [term]
-[main] --> [tool]
-[main] --> [doctor]
+  vagrantfile --> remote
+  vagrantfile --> config
 
-[plan] --> [vagrantfile]
-[plan] --> [doctor]
-[plan] --> [remote]
-[plan] --> [config]
-[plan] --> [name]
+  update --> remote
+  update --> config
 
-[vagrantfile] --> [remote]
-[vagrantfile] --> [config]
+  doctor <--> remote
 
-[update] --> [remote]
-[update] --> [config]
-
-[doctor] <--> [remote]
-
-[remote] --> [config]
-[remote] --> [name]
-[config] --> [name]
-
-@enduml
+  remote --> config
+  remote --> name
+  config --> name
 ```
 
 `doctor` and `remote` reference each other: `remote` builds the
@@ -123,33 +100,30 @@ else.
 
 ## `bombyx up`, end to end
 
-```plantuml
-@startuml
-autonumber
+```mermaid
+sequenceDiagram
+  autonumber
+  actor op as operator
+  participant cli as bombyx (workstation)
+  participant host as shell (VM host)
+  participant vg as vagrant (VM host)
+  participant guest as guest VM
+  participant git as git host
 
-actor operator
-participant "bombyx\n(workstation)" as cli
-participant "shell\n(VM host)" as host
-participant "vagrant\n(VM host)" as vg
-participant "guest VM" as guest
-participant "git host" as git
-
-operator -> cli : bombyx up
-cli -> cli : read bombyx.toml, validate
-cli -> host : mkdir -p ~/vms/<project>
-cli -> cli : tar -czf <archive> -C vagrant/
-cli -> host : scp <archive>
-cli -> host : tar -xzf, rm <archive>
-cli -> host : cat > Vagrantfile <<'BOMBYX_EOF'
-cli -> host : cat > bootstrap.sh <<'BOMBYX_EOF'
-cli -> vg : vagrant up
-vg -> guest : create from box
-vg -> guest : run bootstrap.sh
-guest -> git : git clone <repo> <ref>
-guest -> guest : run <script> from the clone
-guest --> operator : VM ready
-
-@enduml
+  op->>cli: bombyx up
+  cli->>cli: read bombyx.toml, validate
+  cli->>host: mkdir -p the project dir
+  cli->>cli: tar -czf the archive from vagrant/
+  cli->>host: scp the archive
+  cli->>host: tar -xzf, then remove it
+  cli->>host: cat > Vagrantfile (heredoc)
+  cli->>host: cat > bootstrap.sh (heredoc)
+  cli->>vg: vagrant up
+  vg->>guest: create from box
+  vg->>guest: run bootstrap.sh
+  guest->>git: git clone repo at ref
+  guest->>guest: run the script from the clone
+  guest-->>op: VM ready
 ```
 
 Two things about the order. The generated files land **after**
@@ -162,43 +136,29 @@ first creates a machine.
 
 ## Where the rules live
 
-A rule goes in the module that owns the value, not at each
-call site.
+A rule goes in the module that owns the value, not at each call
+site.
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
+```mermaid
+flowchart TD
+  toml["bombyx.toml"]
+  val["config::validate"]
+  render["vagrantfile::render"]
+  write["remote::write_file"]
+  out["Vagrantfile<br/>on the VM host"]
 
-file "bombyx.toml" as toml
-component "config::validate" as val
-component "vagrantfile::render" as render
-component "remote::write_file" as write
-file "Vagrantfile\n(on VM host)" as out
-
-toml --> val
-val --> render : validated Config
-render --> write : Ruby text
-write --> out : quoted heredoc
-
-note bottom of val
-  refuses what breaks Ruby,
-  what git reads as an option,
-  and paths leaving the clone
-end note
-
-note bottom of write
-  lengthens the delimiter until
-  no payload line equals it
-end note
-
-@enduml
+  toml --> val
+  val -- "validated Config" --> render
+  render -- "Ruby text" --> write
+  write -- "quoted heredoc" --> out
 ```
 
-Each stage is safe on its own. `render` escapes Ruby even
-though `validate` already refused the characters, and
-`write_file` picks a delimiter no payload can contain rather
-than trusting either. A guard in another module is the one a
-new field gets added without.
+Each stage is safe on its own. `validate` refuses what breaks
+Ruby, what `git` reads as an option, and paths leaving the
+clone. `render` escapes Ruby anyway. `write_file` lengthens its
+heredoc delimiter until no payload line equals it, rather than
+trusting either. A guard in another module is the one a new
+field gets added without.
 
 ## Quality gates
 
