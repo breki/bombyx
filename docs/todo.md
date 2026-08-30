@@ -72,6 +72,71 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
+- **remote-clone-project-source** -- clone repo on VM host, no local checkout
+  Today `bombyx up` needs the project checked out on the workstation, which is
+  what the isolation is meant to avoid. Introduce a project-source abstraction:
+  a local checkout is one implementation, a git URL plus commit is another. In
+  the second case the workstation says "use repo X at commit Y" and the VM host
+  clones it and uses its vagrant directory. The repo stays the source of truth.
+  Note the limit found in discussion: cloning inside the guest cannot work,
+  because Vagrant needs the Vagrantfile before the VM exists.
+
+- **trust-boundary-doc** -- write down that the VM host is trusted
+  Cloning the project anywhere outside the guest still puts untrusted code on a
+  machine. Moving the checkout from the workstation to the VM host narrows the
+  exposure but does not remove it. Record the stance in the README or a doc: the
+  VM host is part of the trusted computing base, and say why that is an
+  acceptable trade rather than leaving the reader to infer it.
+
+- **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
+  Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
+  memory, and a single generic bootstrap provisioner that calls into bombyx.
+  Everything project-specific moves out. A short Vagrantfile is also easier to
+  keep identical across Windows and Linux hosts, since provider-specific
+  features are what turn it into a nest of conditionals.
+
+- **generate-vagrantfile** -- generate per provider from bombyx templates
+  Once the Vagrantfile is minimal it is nearly identical everywhere, so projects
+  need not own it at all. Keep per-provider templates inside bombyx (libvirt,
+  hyperv) and generate the file from bombyx's own model of the VM. Provider
+  knowledge then lives in one place instead of being copied into every project
+  repo, and a second virtualization backend becomes a template rather than a
+  rewrite.
+
+- **provision-lifecycle-hooks** -- named hooks replace one bash provision script
+  Provisioning is currently one bash script run by Vagrant at VM creation.
+  Replace it with named lifecycle hooks a project declares in a small manifest:
+  prepare, dependencies, agent, cleanup. Vagrant then only creates the VM and
+  runs the bootstrap; bombyx runs the hooks inside the guest. Simple projects
+  implement one hook, complex ones several, and bombyx stays generic. It also
+  decouples the hooks from Vagrant, so the backend can change later without
+  touching them.
+
+- **per-host-resource-profiles** -- detect host capacity, merge project minimums
+  The same project run on a workstation and on a laptop should not get the same
+  VM. Let the project declare its needs (minimum memory, minimum CPUs) and let
+  each host contribute what it can provide. Detect RAM, CPU cores and hypervisor
+  when a host is first used, apply a default policy such as half of RAM, and
+  allow a per-host override file. Named profiles are the other half: a profile
+  maps to a large allocation on the workstation and a smaller one on the laptop.
+
+- **status-endpoint** -- read-only per-host VM status over the network
+  There is no overview of what is running across machines. Each bombyx
+  installation could expose a small read-only endpoint reporting its VMs, their
+  projects, state and resource usage. Read-only keeps the autonomy of the
+  current design: no central registry, no service to keep alive, no single point
+  of failure. Report two distinct roles per VM, since they differ in this setup:
+  the controller, meaning the instance that launched it, and the executor,
+  meaning the host it actually runs on. Bind it to the private network only.
+
+- **status-all-aggregator** -- bombyx status --all queries the known hosts
+  The consumer of the per-host status endpoints. The client initiates: no
+  background chatter, no instances polling each other. Discovery starts as a
+  static config file listing the other hosts, which is dull and reliable; keep
+  the lookup behind an interface so a tailnet or Consul provider can be added
+  later without changing callers. The CLI is the first consumer, a dashboard is
+  possible afterwards.
+
 ## Done
 
 - [**crlf-staircase-on-windows**](issues/crlf-staircase-on-windows.md)
