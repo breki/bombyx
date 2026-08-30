@@ -98,6 +98,117 @@ probe commands, `doctor` decides what their output means.
 `main` parses arguments, spawns processes and prints. Nothing
 else.
 
+## Domain entities
+
+What a project declares:
+
+```mermaid
+classDiagram
+  class Config {
+    +String host
+    +String project
+    +String vagrant_dir
+    +String remote_root
+  }
+  class Vm {
+    +Provider provider
+    +String box_name
+    +u32 cpus
+    +u32 memory
+  }
+  class Source {
+    +String repo
+    +String git_ref
+    +String script
+  }
+  class Provider {
+    <<enumeration>>
+    Libvirt
+    Hyperv
+  }
+  class Overlay {
+    +all fields optional
+  }
+  class HostSources {
+    +Option~str~ flag
+    +Option~str~ env
+    +Option~Path~ user_config_dir
+  }
+  class HostOrigin {
+    <<enumeration>>
+    Flag
+    Env
+    Overlay
+    UserFile
+  }
+
+  Config *-- Vm : vm
+  Config *-- Source : source
+  Vm --> Provider
+  Overlay ..> Config : replaces fields of
+  HostSources ..> Config : supplies host
+  HostSources ..> HostOrigin : reports which won
+```
+
+`Config` is what bombyx runs with. `host` is the one field never
+read from `bombyx.toml`, because a VM host belongs to a person
+rather than a project.
+
+Two Rust names differ from their TOML keys, because `box` and
+`ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
+`ref`.
+
+What bombyx does with it:
+
+```mermaid
+classDiagram
+  class Action {
+    <<enumeration>>
+    Up
+    Provision
+    Down
+    Shell
+    Status
+    Reset
+    Doctor
+    Destroy
+    Scratch
+    Discard
+  }
+  class ScratchName {
+    +String value
+  }
+  class RemoteCommand {
+    +String program
+    +Vec~String~ args
+    +Option~PathBuf~ dir
+  }
+  class PushArchive {
+    +PathBuf dir
+    +String name
+  }
+  class Tty {
+    <<enumeration>>
+    Allocate
+    NoPty
+  }
+
+  Action --> ScratchName : Scratch and Discard carry one
+  Action ..> RemoteCommand : plan() produces a list
+  PushArchive ..> RemoteCommand : names the tar and scp
+  Tty ..> RemoteCommand : decides ssh -t
+```
+
+`plan()` turns one `Action` and a `Config` into an ordered
+`Vec<RemoteCommand>`, and nothing else in the library spawns a
+process. That is what makes `--dry-run` honest and the ordering
+testable.
+
+`Scratch` and `Discard` carry a `ScratchName`, which is a
+validated newtype rather than a `String`: it must be one path
+segment, so a name that would escape the scratch directory
+cannot reach `plan()` at all.
+
 ## `bombyx up`, end to end
 
 ```mermaid
