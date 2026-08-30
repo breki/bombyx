@@ -134,10 +134,29 @@ the archive is unpacked, or the push would overwrite them. And
 which exists because vagrant runs provisioners only when it
 first creates a machine.
 
-## Where the rules live
+## What config values are checked
 
-A rule goes in the module that owns the value, not at each call
-site.
+`bombyx.toml` travels inside a repo, so its values are treated
+as hostile input. Six reach the generated files.
+
+| Field | Refused | Because |
+|-------|---------|---------|
+| `box` `repo` `ref` `script` | empty or blank | no meaning when blank |
+| `box` `repo` `ref` `script` | control characters | end the line in a Ruby file |
+| `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
+| `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
+| `repo` `ref` `script` | leading `-` | `git` reads it as an option |
+| `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
+| `script` | leading `/` or `\`, a `..` segment, surrounding space | it is made executable and run as root inside the clone |
+| `cpus` `memory` | zero | vagrant would refuse it on the VM host, after the push changed state |
+
+The older fields have their own rules, in the same place:
+`project` must be one path segment, `vagrant_dir` must stay
+inside the project, and `remote_root` must be anchored and
+several directories deep, because bombyx runs `rm -rf` on a path
+derived from it.
+
+## Why three stages and not one
 
 ```mermaid
 flowchart TD
@@ -153,12 +172,16 @@ flowchart TD
   write -- "quoted heredoc" --> out
 ```
 
-Each stage is safe on its own. `validate` refuses what breaks
-Ruby, what `git` reads as an option, and paths leaving the
-clone. `render` escapes Ruby anyway. `write_file` lengthens its
+Each stage is safe on its own rather than trusting the one
+before it. `render` escapes every `"`, `\` and `#` even though
+`validate` already refused them. `write_file` lengthens its
 heredoc delimiter until no payload line equals it, rather than
-trusting either. A guard in another module is the one a new
-field gets added without.
+assuming the payload came from `render`.
+
+The repetition is not redundant. `Config`'s fields are public
+and both functions are public, so a library caller reaches them
+without passing through `validate` at all. A guard that lives in
+another module is the one a new field gets added without.
 
 ## Quality gates
 
