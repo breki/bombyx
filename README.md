@@ -95,6 +95,10 @@ host, add [docs/vm-host-wsl2.md](docs/vm-host-wsl2.md). It works,
 and it costs you the isolation that motivates the tool -- that
 page says what is lost and what is not.
 
+[docs/architecture.md](docs/architecture.md) is the short
+version of how the pieces fit: the three machines, the module
+graph, and what `bombyx up` actually does.
+
 If this is your first setup, follow
 [docs/tutorial.md](docs/tutorial.md) instead of the sections
 below. It goes through all three pieces in order -- the
