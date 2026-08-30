@@ -292,11 +292,29 @@ myproject/                  your project repo
 ```toml
 project = "myproject"    # VM and directory name on the host
 
-vagrant_dir = "vagrant"  # dir in this repo with the Vagrantfile
+[vm]                     # required: the machine to build
+provider = "libvirt"
+box = "debian/bookworm64"
+cpus = 4
+memory = 8192            # MiB; agents want room to build
+
+[source]                 # required: what the guest clones
+repo = "https://github.com/you/myproject"
+ref = "main"
+script = "vagrant/provision.sh"
+
+vagrant_dir = "vagrant"  # dir in this repo pushed to the host
 remote_root = "~/vms"    # root on the host for project dirs
 ```
 
-The last two are optional and shown with their defaults. There
+`[vm]` and `[source]` are required and have no defaults. bombyx
+builds the VM from the first and the guest clones the second,
+so there is nothing sensible for bombyx to guess: a base image
+is a choice, and a repository bombyx invented would be cloned
+into the guest and run as root.
+
+`vagrant_dir` and `remote_root` are optional, shown with
+their defaults. There
 is no `host` here: it went into your own `config.toml` back in
 Part 1, and bombyx refuses one in this file. This is the file
 you commit, so it should hold only what is true for anyone who
@@ -317,60 +335,37 @@ vagrant/.vagrant/
 bombyx already excludes it from the push. Ignoring it locally
 stops a stale copy from ever entering the repo.
 
-### `vagrant/Vagrantfile`
+### The Vagrantfile: bombyx writes it
 
-```ruby
-Vagrant.configure("2") do |config|
-  # A box with libvirt support. Debian's own boxes have it, and
-  # they are small.
-  config.vm.box = "debian/bookworm64"
-  config.vm.hostname = "myproject"
+You do not write one. bombyx renders the Vagrantfile from
+`[vm]` and writes it onto the VM host on every `up`, `provision`
+and `scratch`, together with a small bootstrap script.
 
-  # bombyx pushes this directory to the VM host, so the guest
-  # gets nothing from your workstation -- which is the point.
-  # Disabling the default share keeps it that way. It also
-  # avoids an NFS mount that *hangs* rather than failing
-  # clearly when the host firewall drops guest-initiated
-  # traffic.
-  config.vm.synced_folder ".", "/vagrant", disabled: true
+This is not a convenience. Vagrant reads the Vagrantfile before
+the VM exists, so a project-supplied one has to sit on a machine
+outside the guest -- and keeping project code off those machines
+is the whole point. `docs/trust-boundary.md` records the
+reasoning.
 
-  config.vm.provider :libvirt do |libvirt|
-    libvirt.memory = 8192   # MiB; agents want room to build
-    libvirt.cpus = 4
-  end
+Two things the generated file does that are worth knowing:
 
-  # `privileged: false` runs the script as the `vagrant` user,
-  # so anything installed into that user's home lands where the
-  # agent will actually look for it. The script uses `sudo`
-  # where it needs root.
-  config.vm.provision "shell",
-    path: "provision.sh",
-    privileged: false,
-    # Hand the VM host's identity to the guest. bombyx sets
-    # these two on the `vagrant` process running here on the
-    # host; Vagrant does *not* export its own environment into
-    # the VM, so a provisioner sees them only if the Vagrantfile
-    # passes them over like this. This file is Ruby running on
-    # the host, which is why it can read them at all.
-    env: {
-      "BOMBYX_VM_HOST"     => ENV.fetch("BOMBYX_VM_HOST", "unknown"),
-      "BOMBYX_VM_HOSTNAME" => ENV.fetch("BOMBYX_VM_HOSTNAME", "unknown"),
-    }
-end
-```
+- **It disables the default `/vagrant` share.** Vagrant would
+  otherwise mount the pushed directory into the guest, which
+  puts your workstation's copy of the project back inside the
+  VM. On a host whose firewall drops guest-initiated traffic
+  that mount also *hangs* rather than failing clearly.
+- **It forwards the VM-host identity.** `BOMBYX_VM_HOST` and
+  `BOMBYX_VM_HOSTNAME` reach your provisioning script as
+  environment variables, so it can record which machine the VM
+  is running on. See "Telling the VM which host it runs on" in
+  `README.md`.
 
-The `env:` block, and the `provision.sh` lines that go with it,
-are *(unverified)*: the two variables were confirmed to arrive at
-a `Vagrantfile` on a live host, but the hand-off into a booted
-guest has not been run end to end. See
-[the README section](../README.md#telling-the-vm-which-host-it-runs-on)
-for what is and is not checked. Everything else in this file has
-been driven against a real host.
+A `Vagrantfile` left in `vagrant/` is pushed and then
+overwritten, so editing it has no effect. `bombyx doctor` says
+so if it finds one.
 
-The guest's disk is whatever the box ships, usually around
-20 GB. Growing it needs `libvirt.machine_virtual_size` *and* a
-box that resizes its root partition on boot, so leave it alone
-until you actually run out.
+The guest clones `[source]` itself and runs the script named
+there, which is the file the next section covers.
 
 ### `vagrant/provision.sh`
 
@@ -471,6 +466,8 @@ ssh vmhost "mkdir -p ~/'vms/myproject'"
 cd "$TMP" && tar -czf .bombyx-push-51100-586438300.tar.gz -C "$PROJ\\vagrant" --exclude=./.vagrant --exclude=./.git .
 cd "$TMP" && scp .bombyx-push-51100-586438300.tar.gz vmhost:.bombyx-push-51100-586438300.tar.gz
 ssh vmhost "{ cd ~/'vms/myproject' && tar -xzf ~/'.bombyx-push-51100-586438300.tar.gz'; }; rc=\$?; rm -f ~/'.bombyx-push-51100-586438300.tar.gz'; exit \$rc"
+ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (21 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (44 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -478,13 +475,23 @@ Two long absolute paths are shortened above to fit the page:
 `$TMP` is a fresh temporary directory on your workstation, and
 `$PROJ` is the project directory. bombyx prints them in full.
 
-Five commands: make the directory, archive `vagrant/`, copy the
-archive, extract and delete it, boot. The two variables on the
-last line are how the guest learns which machine it is running
-on -- the `Vagrantfile` and `provision.sh` above pick them up.
+Seven commands: make the directory, archive `vagrant/`, copy the
+archive, extract and delete it, write the two files bombyx
+generates, boot.
+
+The two writes print as one line each. Each carries a whole
+file, and printing both in full would bury the plan they belong
+to, so the line names the heredoc and how many lines it dropped.
+The full contents are written to the host either way -- this is
+the one place `--dry-run` summarises rather than showing you
+everything.
+
+The two variables on the last line are how the guest learns
+which machine it is running on. The generated Vagrantfile
+forwards them into the VM, where `provision.sh` can read them.
 The `\$` is deliberate: that name has to be filled in by the
-host's shell, not by yours. Every bombyx command
-accepts `--dry-run`, and the output is real shell -- worth using
+host's shell, not by yours. Every bombyx command accepts
+`--dry-run`, and the output is real shell -- worth using
 whenever you are unsure what a command is about to touch,
 especially `destroy`.
 

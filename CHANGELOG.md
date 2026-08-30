@@ -12,7 +12,39 @@ and this project adheres to
 
 ### Added
 
+- The generated Vagrantfile runs a bootstrap script inside the guest that clones
+  `source.repo` at `source.ref` and runs `source.script` from the clone. A
+  private repository needs a credential inside the guest; see
+  `docs/trust-boundary.md`.
+- `[source]` values are checked before they reach the guest: none may look like
+  a `git` option, `repo` must be a real URL rather than a `<transport>::<rest>`
+  remote helper such as `ext::` (which runs a command), and `script` must stay
+  inside the clone.
+
 ### Changed
+
+- **BREAKING:** bombyx generates the Vagrantfile and writes it on the VM host. A
+  project's own Vagrantfile is still pushed but is overwritten, so it no longer
+  has any effect. Vagrant needs that file before the VM exists, which is why it
+  cannot come from inside the guest.
+- **BREAKING:** `bombyx.toml` now requires a `[vm]` table (`provider`, `box`,
+  `cpus`, `memory`) and a `[source]` table (`repo`, `ref`, `script`). None of
+  the seven has a default, so every existing config must gain both tables before
+  any command runs.
+- `--dry-run` prints the two generated files as one line each, naming the
+  heredoc and how many lines it dropped. The full content is still written to
+  the host.
+- `bombyx doctor` no longer fails when the project has no Vagrantfile, since
+  bombyx generates one. It reports a project Vagrantfile as ignored instead.
+- The generated Vagrantfile disables Vagrant's default `/vagrant` synced folder.
+  Leaving it on mounted the workstation's pushed copy of the project into the
+  guest, and hangs on a VM host whose firewall drops guest-initiated NFS.
+- bombyx forwards `BOMBYX_VM_HOST` and `BOMBYX_VM_HOSTNAME` into the guest
+  itself. This used to be the project's job in its own Vagrantfile; since bombyx
+  now overwrites that file, a hand-written block would be deleted on the next
+  `up`.
+- `bombyx doctor` fails when `vagrant_dir` names no directory. It replaces the
+  typo check lost when the Vagrantfile probe inverted.
 
 ### Fixed
 

@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, PushArchive, RemoteCommand, Tty};
+use crate::vagrantfile;
 
 /// What the user asked bombyx to do.
 ///
@@ -80,6 +81,14 @@ impl Action {
 /// that claimed otherwise would be guessing about a future
 /// invocation -- but it does mean a captured plan is not a script
 /// you can paste and expect byte-identical behaviour from.
+///
+/// **A dry run also elides the two file writes' payloads.** Each
+/// carries a whole file -- the generated Vagrantfile and the
+/// bootstrap script -- and printing both in full buries the plan
+/// they belong to. The printed line names the heredoc and how
+/// many lines it dropped, and what is written to the host is the
+/// full content regardless; see
+/// [`RemoteCommand::abbreviated`].
 #[must_use]
 pub fn plan(
     action: &Action,
@@ -179,6 +188,13 @@ fn push_then(
 ) -> Vec<RemoteCommand> {
     let mut cmds = vec![remote::ensure_dir(cfg, dir)];
     cmds.extend(remote::push_dir(cfg, local_dir, dir, archive));
+    // After the push, not before. The archive is unpacked over
+    // this directory, so a Vagrantfile written first would be
+    // replaced by whatever the project shipped -- which is the
+    // file bombyx generates one to stop vagrant reading.
+    for (name, contents) in vagrantfile::files(cfg) {
+        cmds.push(remote::write_file(cfg, dir, name, &contents));
+    }
     cmds.push(remote::vagrant_in(cfg, dir, args, tty));
     cmds
 }
@@ -323,6 +339,25 @@ mod tests {
         run(action).iter().map(ToString::to_string).collect()
     }
 
+    /// Like [`scripts`], with each entry cut at its first line.
+    ///
+    /// Only the two file writes span more than one line, and
+    /// what they carry is a whole Vagrantfile and a whole shell
+    /// script. Pinning those here would put forty lines of
+    /// another file's prose inside a test about command order,
+    /// and would fail whenever a comment in `bootstrap.sh` was
+    /// reworded. Their contents are pinned where they belong:
+    /// `vagrantfile::tests` for what is rendered, and
+    /// `remote::tests` for the heredoc that carries it. What
+    /// this test owns is the shell shape and the order, and the
+    /// first line carries both.
+    fn scripts_head(action: &Action) -> Vec<String> {
+        scripts(action)
+            .iter()
+            .map(|s| s.lines().next().unwrap_or_default().to_owned())
+            .collect()
+    }
+
     fn scratch(name: &str) -> ScratchName {
         ScratchName::parse(name).unwrap()
     }
@@ -342,10 +377,12 @@ mod tests {
     // change the judgement.
     #[test]
     fn up_makes_the_dir_then_pushes_then_boots() {
-        // Order is the point: booting before the push would
-        // run `vagrant up` with no Vagrantfile in place.
+        // Order is the point twice over. Booting before the
+        // push would run `vagrant up` with no Vagrantfile in
+        // place, and writing the generated files before the
+        // push would let the archive replace them.
         assert_eq!(
-            scripts(&Action::Up),
+            scripts_head(&Action::Up),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
@@ -356,11 +393,72 @@ mod tests {
                 "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
                  ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
                  ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
+                "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
+                 <<'BOMBYX_EOF'",
+                "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh' \
+                 <<'BOMBYX_EOF'",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'up'\"",
             ]
         );
+    }
+
+    /// Index of the one script containing `needle`.
+    fn only_at(scripts: &[String], needle: &str) -> usize {
+        let hits: Vec<usize> = scripts
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.contains(needle))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(hits.len(), 1, "{needle} appears {} times", hits.len());
+        hits[0]
+    }
+
+    #[test]
+    fn a_push_writes_both_generated_files_before_booting() {
+        // Order is the whole point. Both files have to land
+        // *after* the archive is unpacked, or the push would
+        // overwrite the generated Vagrantfile with whatever the
+        // project shipped -- which is the file this change
+        // exists to stop vagrant reading.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            let s = scripts(&action);
+            let untar = only_at(&s, "tar -xzf");
+            let vagrantfile = only_at(&s, "/Vagrantfile'");
+            let bootstrap = only_at(&s, "/bootstrap.sh'");
+            let boot = s.len() - 1;
+            assert!(
+                untar < vagrantfile && vagrantfile < boot,
+                "{action:?}: Vagrantfile written out of order"
+            );
+            assert!(
+                untar < bootstrap && bootstrap < boot,
+                "{action:?}: bootstrap written out of order"
+            );
+        }
+    }
+
+    #[test]
+    fn actions_that_do_not_push_write_nothing() {
+        // A write on `down` or `destroy` would recreate the
+        // directory teardown had just removed.
+        for action in [
+            Action::Down,
+            Action::Status,
+            Action::Reset,
+            Action::Destroy,
+            Action::Discard(scratch("pr-1234")),
+        ] {
+            for s in scripts(&action) {
+                assert!(!s.contains("cat > "), "{action:?} writes: {s}");
+            }
+        }
     }
 
     #[test]
@@ -369,7 +467,13 @@ mod tests {
         let cmds = run(&Action::Scratch(scratch("pr-1234")));
         let programs: Vec<&str> =
             cmds.iter().map(|c| c.program.as_str()).collect();
-        assert_eq!(programs, vec!["ssh", "tar", "scp", "ssh", "ssh"]);
+        // Seven, not five: the two writes of the generated
+        // Vagrantfile and bootstrap script sit between the
+        // unpack and the boot.
+        assert_eq!(
+            programs,
+            vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
+        );
         assert!(cmds[0].args[1].contains("mkdir -p"));
         assert!(cmds.last().unwrap().args[1].ends_with("vagrant 'up'"));
     }
@@ -379,7 +483,7 @@ mod tests {
         // Pins the literal shell, so the command's whole effect
         // on the host is readable in one place.
         assert_eq!(
-            scripts(&Action::Provision),
+            scripts_head(&Action::Provision),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
@@ -390,6 +494,10 @@ mod tests {
                 "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
                  ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
                  ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
+                "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
+                 <<'BOMBYX_EOF'",
+                "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh' \
+                 <<'BOMBYX_EOF'",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'provision'\"",
@@ -572,7 +680,16 @@ mod tests {
             }
             for cmd in run(&action) {
                 let script = &cmd.args[cmd.args.len() - 1];
-                if !script.contains("vagrant") {
+                // Matches the invocation, not the word. A plain
+                // `contains("vagrant")` also caught the commands
+                // that *write* the generated files, because one
+                // carries `vagrant/provision.sh` in its payload
+                // and the other mentions vagrant in a comment.
+                // Neither runs vagrant, so neither can carry the
+                // identity, and the test failed on code that was
+                // correct. The invocation is always built as
+                // `... vagrant '<arg>'`.
+                if !script.contains(" vagrant '") {
                     continue;
                 }
                 assert!(

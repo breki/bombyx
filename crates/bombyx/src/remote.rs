@@ -17,9 +17,11 @@
 mod command;
 pub mod probe;
 mod quote;
+mod write;
 
 pub use command::{PushArchive, RemoteCommand};
 pub use quote::{quote_remote_path, shell_quote};
+pub use write::write_file;
 
 use std::path::Path;
 

@@ -28,6 +28,25 @@ use thiserror::Error;
 use crate::name::{ScratchName, check_segment};
 
 mod host;
+mod vm;
+
+/// The `[vm]` and `[source]` tables every project file needs.
+///
+/// One copy. The same eleven lines had accumulated in four
+/// places, so an eighth required field would have meant four
+/// edits and a missed one would fail in a test about something
+/// else entirely.
+#[cfg(test)]
+const REQUIRED_TABLES: &str = "\n[vm]\n\
+     provider = \"libvirt\"\n\
+     box = \"generic/ubuntu2204\"\n\
+     cpus = 2\n\
+     memory = 2048\n\
+     \n\
+     [source]\n\
+     repo = \"https://example.invalid/myproject.git\"\n\
+     ref = \"main\"\n\
+     script = \"vagrant/provision.sh\"\n";
 
 pub use host::{
     CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, USER_CONFIG_FILE,
@@ -36,6 +55,7 @@ pub use host::{
 pub(crate) use host::{
     HostProblem, host_places, host_problem, is_anchored_dir, resolve_host,
 };
+pub use vm::{Provider, Source, Vm};
 
 /// Default directory (relative to the project root) holding
 /// the Vagrantfile and provisioning scripts.
@@ -228,6 +248,13 @@ pub struct Config {
     /// Root directory on the VM host under which project
     /// directories are created.
     pub remote_root: String,
+
+    /// The machine to build. Rendered into the Vagrantfile
+    /// bombyx writes on the VM host.
+    pub vm: Vm,
+
+    /// Where the guest clones the project from.
+    pub source: Source,
 }
 
 /// The committed project file, exactly as it parses.
@@ -252,6 +279,10 @@ struct ProjectFile {
 
     #[serde(default = "default_remote_root")]
     remote_root: String,
+
+    vm: Vm,
+
+    source: Source,
 }
 
 /// A path as it appears in a message.
@@ -297,10 +328,20 @@ pub struct Overlay {
     pub vagrant_dir: Option<String>,
     /// Replaces [`Config::remote_root`].
     pub remote_root: Option<String>,
+    /// Replaces [`Config::vm`] wholesale.
+    ///
+    /// Whole-section rather than field by field: a half-stated
+    /// machine reads as a merge of two sizes and neither file
+    /// shows the result. Naming `[vm]` here means naming all of
+    /// it, which is what the base file already requires.
+    pub vm: Option<Vm>,
+    /// Replaces [`Config::source`] wholesale, for the same
+    /// reason as [`Overlay::vm`].
+    pub source: Option<Source>,
 }
 
 /// Overwrites `dst` when the overlay supplied a value.
-fn replace(dst: &mut String, src: Option<String>) {
+fn replace<T>(dst: &mut T, src: Option<T>) {
     if let Some(value) = src {
         *dst = value;
     }
@@ -315,6 +356,8 @@ impl ProjectFile {
             project: self.project,
             vagrant_dir: self.vagrant_dir,
             remote_root: self.remote_root,
+            vm: self.vm,
+            source: self.source,
         };
         match overlay {
             Some(overlay) => cfg.with_overlay(overlay),
@@ -579,11 +622,15 @@ impl Config {
             project,
             vagrant_dir,
             remote_root,
+            vm,
+            source,
         } = overlay;
 
         replace(&mut self.project, project);
         replace(&mut self.vagrant_dir, vagrant_dir);
         replace(&mut self.remote_root, remote_root);
+        replace(&mut self.vm, vm);
+        replace(&mut self.source, source);
         self
     }
 
@@ -636,7 +683,7 @@ impl Config {
     #[must_use]
     pub(crate) fn for_tests() -> Self {
         Self::parse(
-            "project = \"myproject\"\n",
+            &format!("project = \"myproject\"\n{REQUIRED_TABLES}"),
             Path::new("bombyx.toml"),
             "vmhost",
         )
@@ -886,7 +933,22 @@ impl Config {
             });
         }
 
-        Ok(())
+        self.validate_generated()
+    }
+
+    /// Checks `box`, `repo`, `ref`, `script`, `cpus` and
+    /// `memory`.
+    ///
+    /// These six are the ones bombyx renders into the
+    /// Vagrantfile, which is why they are checked together.
+    ///
+    /// Split out of [`Config::validate`] only because that
+    /// function outgrew the 100-line limit. The rules still sit
+    /// in the module that owns the fields, and `validate`
+    /// remains the single entry point, so no caller can reach
+    /// one half of the checks without the other.
+    fn validate_generated(&self) -> Result<(), ConfigError> {
+        vm::validate(&self.vm, &self.source)
     }
 
     /// Returns the project directory on the VM host, e.g.
@@ -988,12 +1050,71 @@ mod tests {
         assert_eq!(line_column("ab", 99), (1, 3));
     }
 
-    fn minimal() -> &'static str {
-        "project = \"myproject\"\n"
+    /// The smallest project file that validates.
+    ///
+    /// "Minimal" grew when `[vm]` and `[source]` became
+    /// required: there is no longer a one-line project file.
+    ///
+    /// The tables come last and every caller passes this whole,
+    /// never appending to it. A bare key appended after a table
+    /// header would join that table instead of the top level,
+    /// and would parse -- so a test meaning to set `remote_root`
+    /// would silently set `vm.remote_root` and fail on
+    /// `deny_unknown_fields` somewhere unrelated.
+    /// The smallest project file that validates.
+    ///
+    /// "Minimal" grew when `[vm]` and `[source]` became
+    /// required: there is no longer a one-line project file.
+    ///
+    /// Every caller passes this whole and never appends to it. A
+    /// bare key appended after a table header would join that
+    /// table instead of the top level, and would parse -- so a
+    /// test meaning to set `remote_root` would silently set
+    /// `vm.remote_root`.
+    fn minimal() -> String {
+        format!("project = \"myproject\"\n{REQUIRED_TABLES}")
+    }
+
+    /// The required tables, for a test composing its own
+    /// top-level keys. Append this *after* those keys.
+    fn required_tables() -> &'static str {
+        "\n[vm]\n\
+         provider = \"libvirt\"\n\
+         box = \"generic/ubuntu2204\"\n\
+         cpus = 2\n\
+         memory = 2048\n\
+         \n\
+         [source]\n\
+         repo = \"https://example.invalid/myproject.git\"\n\
+         ref = \"main\"\n\
+         script = \"vagrant/provision.sh\"\n"
+    }
+
+    /// Appends the required tables when `source` lacks them.
+    ///
+    /// Nearly every test here varies one top-level key and
+    /// cares nothing about the machine description. Making each
+    /// spell out `[vm]` and `[source]` would bury the line under
+    /// test in ten lines of scenery.
+    ///
+    /// A test *about* a missing section must not be repaired by
+    /// this, so those call [`Config::parse`] directly rather
+    /// than going through the helpers below.
+    fn completed(source: &str) -> String {
+        // Any table header, not just `[vm]`. Sniffing for `[vm]`
+        // alone meant a fixture declaring only `[source]` -- the
+        // exact case a missing-`[vm]` test needs -- had a second
+        // `[source]` appended and failed on a duplicate key
+        // instead of on the missing table.
+        if source.lines().any(|l| l.trim_start().starts_with('[')) {
+            source.to_owned()
+        } else {
+            format!("{source}{}", required_tables())
+        }
     }
 
     fn parse(source: &str) -> Result<Config, ConfigError> {
-        Config::parse(source, Path::new("bombyx.toml"), "vmhost")
+        Config::parse(&completed(source), Path::new("bombyx.toml"), "vmhost")
     }
 
     /// Parses the minimal project file with an explicit host.
@@ -1002,11 +1123,11 @@ mod tests {
     /// a test about host values varies this argument rather than
     /// the TOML.
     fn parse_with_host(host: &str) -> Result<Config, ConfigError> {
-        Config::parse(minimal(), Path::new("bombyx.toml"), host)
+        Config::parse(&minimal(), Path::new("bombyx.toml"), host)
     }
 
     fn good() -> Config {
-        parse(minimal()).unwrap()
+        parse(&minimal()).unwrap()
     }
 
     fn scratch(name: &str) -> ScratchName {
@@ -1113,6 +1234,33 @@ mod tests {
     }
 
     #[test]
+    fn an_overlay_replaces_a_whole_table_or_none_of_it() {
+        // `[vm]` and `[source]` are replaced wholesale, so one
+        // machine size is in force rather than a merge of two
+        // that neither file states. Nothing pinned this, and the
+        // invariant rests on `Vm`'s fields all being required --
+        // a later `#[serde(default)]` would quietly turn it into
+        // a partial merge.
+        let overlay: Overlay = toml::from_str(
+            "[vm]\n\
+             provider = \"hyperv\"\n\
+             box = \"other/box\"\n\
+             cpus = 8\n\
+             memory = 16384\n",
+        )
+        .unwrap();
+        let cfg = good().with_overlay(overlay);
+        assert_eq!(cfg.vm.provider, Provider::Hyperv);
+        assert_eq!(cfg.vm.cpus, 8);
+        // `[source]` was not named, so the base file's stands.
+        assert_eq!(cfg.source.git_ref, "main");
+
+        // A half-stated table is refused rather than merged.
+        let partial: Result<Overlay, _> = toml::from_str("[vm]\ncpus = 8\n");
+        assert!(partial.is_err(), "a partial [vm] must not parse");
+    }
+
+    #[test]
     fn with_overlay_does_not_apply_host() {
         // `host` is ranked against `--host` and the environment
         // by `resolve_host`, both of which outrank the file.
@@ -1198,7 +1346,7 @@ mod tests {
     fn project_dir(source: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("bombyx.toml");
-        std::fs::write(&base, source).unwrap();
+        std::fs::write(&base, completed(source)).unwrap();
         (dir, base)
     }
 
@@ -1232,7 +1380,7 @@ mod tests {
 
     #[test]
     fn reports_no_host_configured_when_nothing_supplies_one() {
-        let (_dir, base) = project_dir(minimal());
+        let (_dir, base) = project_dir(&minimal());
         let err = load(&base, &HostSources::default()).unwrap_err();
         assert!(matches!(err, ConfigError::HostMissing { .. }));
         // Every way out is named, since the operator has to pick
@@ -1245,7 +1393,7 @@ mod tests {
 
     #[test]
     fn takes_the_host_from_the_user_config_file() {
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "my-vmhost");
         let sources = user_sources(dir.path());
         assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
@@ -1256,7 +1404,7 @@ mod tests {
         // All four sources present at once, then removed one at
         // a time. Testing each in isolation would pass with any
         // ordering at all.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(
             dir.path().join("bombyx.local.toml"),
             "host = \"from-overlay\"\n",
@@ -1290,7 +1438,7 @@ mod tests {
         // force without re-deriving the ranking. Asserted for
         // every source, since a constant would satisfy any one of
         // them.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(
             dir.path().join("bombyx.local.toml"),
             "host = \"from-overlay\"\n",
@@ -1345,7 +1493,7 @@ mod tests {
         // message was the project file's -- the one file that must
         // not carry a host, so it sent the operator to edit the
         // wrong thing.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "-oProxyCommand=x");
         let err = load(&base, &user_sources(dir.path())).unwrap_err();
         let text = err.to_string();
@@ -1367,7 +1515,7 @@ mod tests {
         // `ln -s`) symlinks exactly this file -- which made bombyx
         // fail on every subcommand with a message that never
         // mentioned symlinks.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         let real = dir.path().join("real-config.toml");
         std::fs::write(&real, "host = \"linked-host\"\n").unwrap();
 
@@ -1416,7 +1564,7 @@ mod tests {
         // An exported-but-empty variable is how a shell says "no
         // value". Taking it literally would report an empty-field
         // error naming a file the operator never edited.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "my-vmhost");
         let sources = HostSources {
             env: Some("  "),
@@ -1430,7 +1578,7 @@ mod tests {
         // `--host` has to work on a machine whose per-developer
         // file is missing, unreadable or malformed -- that is
         // half the point of having a flag.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "host = ").unwrap();
         let sources = HostSources {
             flag: Some("mine"),
@@ -1445,7 +1593,7 @@ mod tests {
         // Same rule as the overlay: a typo in a file nobody
         // reads twice must be an error, not a setting that does
         // nothing.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "hsot = \"x\"\n")
             .unwrap();
         let sources = HostSources {
@@ -1461,7 +1609,7 @@ mod tests {
     fn a_user_config_without_a_host_is_not_a_host() {
         // The file exists and parses but names nothing, which
         // must read the same as no file at all.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "\n").unwrap();
         let sources = HostSources {
             user_config_dir: Some(dir.path()),
@@ -1481,7 +1629,7 @@ mod tests {
         // fill any of them in. The file sources are covered by
         // `an_invalid_host_names_the_source_that_supplied_it`;
         // this is the environment, which no file check reaches.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         let sources = HostSources {
             env: Some("-oProxyCommand=x"),
             ..user_sources(dir.path())
@@ -1966,5 +2114,144 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = load(dir.path(), &flag_sources("vmhost")).unwrap_err();
         assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
+    }
+
+    /// A project file carrying every required section.
+    ///
+    /// Tests that exercise one bad field start from this and
+    /// replace a line, so a failure names the field under test
+    /// rather than a section someone forgot.
+    fn full_toml() -> String {
+        // The shared tables with `cpus`/`memory` raised, so a
+        // test varying one can tell its value from the default.
+        format!("project = \"myproject\"\n{REQUIRED_TABLES}")
+            .replace("cpus = 2", "cpus = 4")
+            .replace("memory = 2048", "memory = 8192")
+    }
+
+    fn parse_full(source: &str) -> Result<Config, ConfigError> {
+        Config::parse(source, Path::new("bombyx.toml"), "vmhost")
+    }
+
+    #[test]
+    fn parses_the_vm_and_source_sections() {
+        let cfg = parse_full(&full_toml()).unwrap();
+        assert_eq!(cfg.vm.provider, Provider::Libvirt);
+        assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
+        assert_eq!(cfg.vm.cpus, 4);
+        assert_eq!(cfg.vm.memory, 8192);
+        assert_eq!(cfg.source.repo, "https://example.invalid/myproject.git");
+        assert_eq!(cfg.source.git_ref, "main");
+        assert_eq!(cfg.source.script, "vagrant/provision.sh");
+    }
+
+    #[test]
+    fn requires_both_new_sections() {
+        // Neither has a defensible default. A box is the one
+        // thing bombyx cannot invent, and a repository bombyx
+        // guessed at would be cloned into the guest and run as
+        // root.
+        //
+        // One table removed at a time. The first cut built the
+        // input with `take_while`, which truncated the file at
+        // the named header -- so the `[vm]` case dropped
+        // `[source]` as well and neither case was isolated.
+        // Both reviewers caught it.
+        for missing in ["[vm]", "[source]"] {
+            let mut source = String::new();
+            let mut skipping = false;
+            for line in full_toml().lines() {
+                if line.starts_with('[') {
+                    skipping = line.starts_with(missing);
+                }
+                if !skipping {
+                    source.push_str(line);
+                    source.push('\n');
+                }
+            }
+            assert!(
+                source.contains(if missing == "[vm]" {
+                    "[source]"
+                } else {
+                    "[vm]"
+                }),
+                "only {missing} may be removed"
+            );
+            let err = parse_full(&source).unwrap_err();
+            assert!(
+                matches!(err, ConfigError::Parse { .. }),
+                "a file without {missing} must be refused: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_unknown_provider() {
+        // Failing at parse rather than at boot: an unknown
+        // provider renders a Vagrantfile no vagrant can use,
+        // and the error would arrive on the VM host after a
+        // push has already changed state.
+        let source = full_toml().replace("libvirt", "virtualbox");
+        let err = parse_full(&source).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn rejects_a_machine_with_nothing_to_run_on() {
+        // One field at a time, so a guard covering only `cpus`
+        // cannot pass by way of the `memory` case.
+        for (field, from, to) in [
+            ("cpus", "cpus = 4", "cpus = 0"),
+            ("memory", "memory = 8192", "memory = 0"),
+        ] {
+            let source = full_toml().replace(from, to);
+            let err = parse_full(&source).unwrap_err();
+            assert!(
+                matches!(&err, ConfigError::Invalid { field: f, .. }
+                    if *f == field),
+                "{field}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_characters_that_would_break_the_generated_file() {
+        // These four fields are rendered into a Ruby file. The
+        // whole family: a quote closes the literal early, a
+        // backslash starts an escape, a control character is
+        // never meant, and `#{}` is Ruby interpolation, which
+        // is evaluated rather than printed.
+        for field in ["box", "repo", "ref", "script"] {
+            // `{bad:?}` renders a Rust literal, which is a valid
+            // TOML basic string for these three. A control
+            // character is not: Rust and TOML spell an escape
+            // for one differently, so that case would fail as
+            // a parse error before reaching the guard. It is
+            // covered directly in `config::vm`'s tests instead.
+            for bad in ["a\"b", "a\\b", "a#{1}b"] {
+                let source: String = full_toml()
+                    .lines()
+                    .map(|l| {
+                        if l.starts_with(&format!("{field} = ")) {
+                            format!("{field} = {bad:?}\n")
+                        } else {
+                            format!("{l}\n")
+                        }
+                    })
+                    .collect();
+                // The substitution has to have happened, or this
+                // loop would assert nothing at all.
+                assert!(
+                    source.contains(&format!("{field} = ")),
+                    "{field} is not a key in the fixture"
+                );
+                let err = parse_full(&source).unwrap_err();
+                assert!(
+                    matches!(&err, ConfigError::Invalid { field: f, .. }
+                        if *f == field),
+                    "{field} must refuse {bad:?}, got {err:?}"
+                );
+            }
+        }
     }
 }

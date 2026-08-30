@@ -2,6 +2,73 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-30
+
+**bombyx writes the Vagrantfile now**
+
+The Vagrantfile used to come from the project, and that put the
+trust boundary out of reach. Vagrant reads the file before the VM
+exists, so a project-supplied one has to sit on some machine
+outside the guest. `docs/trust-boundary.md` decided the guest is
+the only machine allowed to hold project source. The file
+therefore cannot come from the project at all: bombyx renders it
+from `[vm]` in `bombyx.toml` and writes it on the host after the
+push, and the guest clones the project itself.
+
+Two files go over, not one, and that came from operator review.
+The first design put the provisioning script inline as a Ruby
+heredoc, so config values crossed three nested contexts: Ruby, a
+shell inside Ruby, and a shell on the VM host. Vagrant's shell
+provisioner takes `path:` and `env:`, so the script became a
+separate file that never varies. It ships verbatim through
+`include_str!`, and `repo`, `ref` and `script` reach the guest as
+environment variables Vagrant sets. One quoting layer went away,
+and it was the dangerous one.
+
+The second correction came from the dry run. `up` builds seven
+commands now, two of which carry a whole file, so `--dry-run`
+printed about seventy lines in which a payload line could not be
+told from the next command. Separating on blank lines would not
+have helped, because both payloads contain blank lines. Each
+write prints as one line now, naming the heredoc and how many
+lines it dropped. `remote::abbreviated` does that, in the library
+rather than in `src/bin/`, which the coverage gate cannot see.
+
+What is verified and what is not. Vagrant 2.4.9 with
+vagrant-libvirt 0.12.2 turned out to be installed on this
+workstation, the same versions frosti runs, so `vagrant validate`
+parses the generated file. That is kept as an `#[ignore]`-tagged
+test. `shellcheck` reports `bootstrap.sh` clean. Nothing has run
+against frosti, so nothing shows that the host accepts the
+heredoc write or that the guest can reach the git host.
+
+The review round caught the thing that mattered. The generated
+Vagrantfile left Vagrant's default share on, so the guest
+mounted the workstation's pushed copy of the project -- the copy
+the whole design exists to keep out of it, and on a firewalled
+host a mount that hangs rather than failing. The tutorial had
+taught disabling it, in the very file bombyx now overwrites. So
+the change did not do what it was for, and no test noticed
+because no test asked.
+
+Two more of the same shape. Overwriting the project's
+Vagrantfile also broke the hand-over of `BOMBYX_VM_HOST` into
+the guest, which that file used to perform and which the README
+still described. And `check_renderable` guarded the Ruby literal
+while the same three fields reached `git` argv and a path run as
+root in the guest -- `ref = "--upload-pack=..."` read as an
+option, `repo = "ext::sh -c ..."` running a command instead of
+cloning. `vagrant_dir` and `remote_root` had carried those rules
+for weeks. That is the "guard one field, check its siblings"
+rule, missed again, on the commit that quoted it in its own
+plan.
+
+The doctor probe kept its failing branch after all. It used to
+fail on a missing Vagrantfile, which caught a typo in
+`vagrant_dir`; an absent Vagrantfile is ordinary now, so it
+fails on a missing *directory* instead -- the same typo, one
+step earlier.
+
 ### 2026-08-18
 
 **Output that walked off the right edge of the screen**

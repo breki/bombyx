@@ -92,14 +92,6 @@ plan, decisions, and outcome.
   keep identical across Windows and Linux hosts, since provider-specific
   features are what turn it into a nest of conditionals.
 
-- **generate-vagrantfile** -- generate per provider from bombyx templates
-  Once the Vagrantfile is minimal it is nearly identical everywhere, so projects
-  need not own it at all. Keep per-provider templates inside bombyx (libvirt,
-  hyperv) and generate the file from bombyx's own model of the VM. Provider
-  knowledge then lives in one place instead of being copied into every project
-  repo, and a second virtualization backend becomes a template rather than a
-  rewrite.
-
 - **provision-lifecycle-hooks** -- named hooks replace one bash provision script
   Provisioning is currently one bash script run by Vagrant at VM creation.
   Replace it with named lifecycle hooks a project declares in a small manifest:
@@ -135,6 +127,10 @@ plan, decisions, and outcome.
   possible afterwards.
 
 ## Done
+
+- [**generate-vagrantfile**](issues/generate-vagrantfile.md)
+  -- generate per provider from bombyx templates
+  (2026-08-30)
 
 - [**trust-boundary-doc**](issues/trust-boundary-doc.md)
   -- write down that the VM host is trusted

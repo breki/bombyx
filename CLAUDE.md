@@ -60,9 +60,14 @@ In practice:
   the new document do not silently disagree" -- "so it"
   reads as singular until "and" forces a rewind, and the
   pronoun's antecedent is unclear as well. Name both
-  subjects, or split the clause off. Prefer short
-  subject-verb-object sentences. Two plain sentences beat
-  one compressed one every time.
+  subjects, or split the clause off. (f) Relative clauses
+  chained one off the next, worst when a later one drops
+  its pronoun: "the fields that reach the files bombyx
+  generates" -- "the files bombyx" reads as a single noun
+  phrase until "generates" arrives. When the things have
+  names, list them: "checks `box`, `repo`, `ref` and
+  `script`". Prefer short subject-verb-object sentences.
+  Two plain sentences beat one compressed one every time.
 - **Read the sentence back before it ships.** The check
   is mechanical: find the main verb on the first pass,
   and take each phrasal verb whole. If you cannot, or if

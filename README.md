@@ -50,25 +50,30 @@ workstation.
 ```
 workstation                  vmhost (VM host)
   bombyx  ──── ssh ────►  vagrant ──► agent VM
-     │                                    │
-     └── pushes vagrant/ ─────────────────┘
+     │                          ▲          │
+     ├── pushes vagrant/ ───────┘          │
+     └── writes Vagrantfile ───────────────┘
+                                  clones the repo itself
 ```
 
 Two rules shape the design:
 
 1. **The repo is the source of truth.** Each project keeps
-   its `vagrant/` directory in its own repo. `bombyx up`
-   pushes it to the host before booting, so the host holds
-   a cache that cannot silently drift.
+   its `vagrant/` directory in its own repo, and `bombyx up`
+   pushes it to the host before booting.
 
-   *The second and third sentences describe the mechanism
-   as it works today, and it is being replaced.* Pushing
-   `vagrant/` requires a checkout on your workstation,
-   which is the machine this design exists to keep project
-   code off. The decision, the argument for it, and what it
-   costs are in
-   [trust-boundary.md](docs/trust-boundary.md). Nothing has
-   changed yet.
+   *The Vagrantfile is the exception, and it is the first
+   step of a larger change.* bombyx generates that file from
+   `[vm]` in `bombyx.toml` and writes it on the host after
+   the push, because vagrant needs it before the VM exists
+   and so it cannot come from inside the guest. The guest
+   then clones the project itself.
+
+   Pushing `vagrant/` at all still requires a checkout on
+   your workstation, which is the machine this design exists
+   to keep project code off. That part has not changed yet.
+   The decision, the argument for it, and what it costs are
+   in [trust-boundary.md](docs/trust-boundary.md).
 2. **Wrap, don't reimplement.** bombyx composes `ssh`,
    `scp` and `vagrant`. If it breaks, `ssh vmhost` and
    `vagrant up` by hand still work.
@@ -109,10 +114,39 @@ Drop a `bombyx.toml` in the project you want a VM for:
 ```toml
 project = "myproject"    # VM + directory name on the host
 
+[vm]                     # required: the machine to build
+provider = "libvirt"     # libvirt or hyperv
+box = "generic/ubuntu2204"
+cpus = 4
+memory = 8192            # MiB
+
+[source]                 # required: what the guest clones
+repo = "https://github.com/you/myproject"
+ref = "main"
+script = "vagrant/provision.sh"   # run from the clone
+
 # optional, shown with defaults
-vagrant_dir = "vagrant"  # dir in this repo with the Vagrantfile
+vagrant_dir = "vagrant"  # dir in this repo pushed to the host
 remote_root = "~/vms"    # root on the host for project dirs
 ```
+
+**bombyx writes the Vagrantfile; the project does not.** It is
+generated from `[vm]` and written on the VM host on every `up`,
+`provision` and `scratch`, so a `Vagrantfile` left in
+`vagrant_dir` is pushed and then overwritten. `bombyx doctor`
+says so if it finds one.
+
+Neither `[vm]` nor `[source]` has defaults, and both are
+required. There is no defensible default for a base image, and
+a repository bombyx guessed at would be cloned into the guest
+and run as root.
+
+**`[source]` is fetched by the guest, not by you.** The
+generated Vagrantfile runs a bootstrap script inside the VM
+that clones `repo` at `ref` and runs `script` from the clone.
+A private repository therefore needs a credential inside the
+guest, which is an accepted and unsolved exposure -- see
+[trust-boundary.md](docs/trust-boundary.md).
 
 Then name your own VM host once, in a file outside the repo:
 
@@ -416,33 +450,23 @@ review rather than by the tests.
 directory on the host, not a project directory, so they evaluate
 no `Vagrantfile` and there is nothing there to read the values.
 
-Getting them the rest of the way is the project's job, because
-the project owns its `Vagrantfile` and its provisioning script.
-It takes two steps, and the first one is easy to miss.
-
 **The variables reach the `vagrant` process on the host, not the
 guest.** Vagrant does not export its own environment into the
 VM: a provisioner script runs inside the guest, under the
 guest's environment, so anything from the host has to be handed
 over deliberately. The `Vagrantfile` is Ruby running on the
-host, so it can read them and pass them on:
+host, so it can read them and pass them on.
 
-```ruby
-config.vm.provision "shell",
-  path: "provision.sh",
-  privileged: false,
-  env: {
-    "BOMBYX_VM_HOST"     => ENV.fetch("BOMBYX_VM_HOST", "unknown"),
-    "BOMBYX_VM_HOSTNAME" => ENV.fetch("BOMBYX_VM_HOSTNAME", "unknown"),
-  }
-```
+**bombyx does that for you now.** This used to be the project's
+job, and the README told you to write the `env:` block into your
+own `Vagrantfile`. bombyx generates that file and overwrites
+what the project ships, so a hand-written block would be deleted
+on the next `up`. The generated file forwards both variables
+into the guest alongside the `[source]` settings.
 
-If the provisioner already has an `env:` hash, merge into it
-rather than adding a second one -- a repeated key silently wins
-over the earlier value, and the variable that disappears is the
-one nobody was looking at.
-
-Then the script writes the values somewhere a status line can
+What is still the project's job is the other half: your
+provisioning script decides what to do with them. It can write
+the values somewhere a status line can
 read them without asking for a password:
 
 ```sh
