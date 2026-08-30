@@ -31,8 +31,15 @@ Running an AI coding agent on your daily driver puts your
 password manager, SSH keys, cloud credentials and browser
 profiles one prompt injection or malicious `postinstall`
 away from exfiltration. The defence is a VM with its own
-kernel, no host filesystem, and no credentials -- on a
-machine that is not your laptop.
+kernel, no host filesystem, and none of your credentials --
+on a machine that is not your laptop.
+
+"None of your credentials" is the honest form of that claim,
+and the distinction will start to matter. A VM that fetches
+a private repository by itself needs a credential of its own
+to do it, and code inside the VM can read it. See
+[trust-boundary.md](docs/trust-boundary.md) for what is
+accepted there and why.
 
 bombyx is the control plane for that setup: it runs
 `vagrant` on the VM host over SSH so you can stay on your
@@ -53,6 +60,15 @@ Two rules shape the design:
    its `vagrant/` directory in its own repo. `bombyx up`
    pushes it to the host before booting, so the host holds
    a cache that cannot silently drift.
+
+   *The second and third sentences describe the mechanism
+   as it works today, and it is being replaced.* Pushing
+   `vagrant/` requires a checkout on your workstation,
+   which is the machine this design exists to keep project
+   code off. The decision, the argument for it, and what it
+   costs are in
+   [trust-boundary.md](docs/trust-boundary.md). Nothing has
+   changed yet.
 2. **Wrap, don't reimplement.** bombyx composes `ssh`,
    `scp` and `vagrant`. If it breaks, `ssh vmhost` and
    `vagrant up` by hand still work.

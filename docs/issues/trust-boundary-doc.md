@@ -1,8 +1,9 @@
 # trust-boundary-doc
 
-**Status:** Planning
+**Status:** Done
 **Captured:** 2026-08-30
 **Started:** 2026-08-30
+**Completed:** 2026-08-30
 
 ## Problem
 
@@ -220,3 +221,56 @@ commands bombyx emits, so there is no real-host run to do.
   with an inline note that it is being replaced and where the
   argument lives. Rewriting them now would describe an
   architecture bombyx does not have.
+
+## Progress log
+
+- **2026-08-30** -- `docs/trust-boundary.md` written, README
+  amended in two places, `remote-clone-project-source`
+  corrected in `docs/todo.md`. Docs-only throughout; no code
+  changed.
+
+## Outcome
+
+`docs/trust-boundary.md` is the deliverable. It states the
+boundary, describes today's behaviour with the argv read from
+`crates/bombyx/src/plan.rs`, explains the Vagrant ordering
+constraint, gives both ways to satisfy it and the argument for
+the one chosen, and ends with three costs and a list of what
+is not built. A blockquote at the top says the document is a
+decision rather than a description, so a reader cannot mistake
+the target for current behaviour.
+
+`README.md` changed twice. "Why" now says "none of your
+credentials" instead of "no credentials", with a short note
+that a VM fetching its own private repository needs a
+credential of its own. Model rule 1 keeps describing the push
+mechanism, with an italic note that its second and third
+sentences are being replaced and a link to the new document.
+The diagram is untouched, since it illustrates the same
+mechanism the rule describes.
+
+`remote-clone-project-source` in `docs/todo.md` had its summary
+and body rewritten. Its previous body put the clone on the VM
+host, which is the rejected option, and claimed that cloning
+inside the guest cannot work. That claim was wrong: only the
+Vagrantfile cannot come from the guest.
+
+Verification. Every file and slug named in the new document was
+checked to exist -- three files and six todo slugs. Prose wrap
+matches `docs/vm-host-setup.md` at 62 columns rather than the
+80-column maximum, since `CLAUDE.md` names that file as the
+style reference. Definition of Done item 3 does not apply: no
+command bombyx emits was changed, so there is no real-host run
+to report.
+
+Follow-ups, all already captured:
+
+- `generate-vagrantfile` is now the item everything else waits
+  on, and it is not yet reflected in the ordering of
+  `docs/todo.md`, which is append-order rather than dependency
+  order.
+- The sizing question stays open and belongs to
+  `per-host-resource-profiles`.
+- The egress question belongs to `host-network-isolation`,
+  which also needs a sudo password on the VM host and so
+  cannot be finished from a bombyx session.
