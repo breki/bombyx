@@ -69,6 +69,79 @@ _None yet._
 
 ## Suggestions to flow back to the template
 
+### tf-2026-08-30-xtask-invocations-in-command-files-are-not-quiet -- xtask invocations in command files are not quiet
+
+Every xtask invocation in the template's `.claude/commands/` files is
+written as bare `cargo xtask ...`, so cargo's build progress goes to
+the terminal ahead of the command's own output.
+
+Measured here on 2026-08-30. The first `cargo xtask todo list` of the
+session printed 30 lines -- an index update and 28 `Compiling` lines
+for the xtask dependency tree, then `Finished` and `Running` -- ahead
+of the 7 lines of actual result. The answer arrives last and looks
+like a footnote to a build log.
+
+Two things make this worse for an agent than for a person reading a
+terminal. The output is what the agent reasons over, so the noise is
+paid for in context on every first call after any change to `xtask/`
+or its dependencies, which is exactly the situation where a template
+maintainer is iterating. And the obvious workaround is to pipe through
+`grep -v`, which is what happened in this session before the cause was
+looked at: a filter written against cargo's current wording, in a
+command whose exit status the pipeline then reports as grep's rather
+than the tool's. `CLAUDE.md` already warns against piping a command
+whose status is the thing being checked, so the noise is quietly
+pushing callers toward a pattern the same canon forbids.
+
+`cargo -q` suppresses all of it and changes nothing else: the
+subcommand's own stdout, its stderr and its exit status are untouched,
+and a compile error still prints. Applied here in commit `ce87176` to
+the two invocation examples in `.claude/commands/todo.md`, leaving the
+surrounding prose that names the command alone.
+
+Suggested for the template: write `cargo -q xtask ...` in the command
+files that show an invocation. The same argument covers the wrapper
+scripts, though those are usually read by a person watching a build
+rather than by an agent parsing a result, so the case there is weaker
+and the noise is arguably wanted.
+
+### tf-2026-08-30-todo-tooling-cannot-revise-a-captured-entry -- todo tooling cannot revise a captured entry
+
+`cargo xtask todo` offers `list`, `add` and `done`. Nothing revises a
+captured entry. Verified from `cargo xtask todo --help` on 2026-08-30:
+those three subcommands and `help`, and no fourth.
+
+`.claude/commands/todo.md` closes with "Never hand-edit `docs/todo.md`;
+go through `cargo xtask todo`". So the two template-provided halves
+contradict each other the moment a captured item needs a correction,
+and they contradict each other silently -- the rule reads as absolute
+and the missing capability is only discovered by looking for it.
+
+The case that produced this is ordinary rather than exotic. Eight items
+were captured from a design discussion in `7d4b733`. One of them said
+to write down that the VM host is trusted, but not the argument that
+led there, which is the part that goes stale first. Adding two
+paragraphs to that item's body is a revision, not a new entry, and
+there was no command for it: commit `283ad16` hand-edited the file,
+which is what the rules forbid. A capture tool with no revise path
+pushes every second thought into either a hand edit or a duplicate
+entry, and the duplicate is worse because `slug_exists` will not stop
+it -- the second entry is a different slug describing the same work.
+
+One measurement worth passing on, since it constrains the fix. The
+hand-edited body is a second paragraph separated by a blank line,
+which is a shape `todo add` never writes. `cargo xtask todo list`
+still parsed all fifteen entries afterwards, so the reader tolerates
+it. A writer would have to preserve that tolerance.
+
+Suggested for the template: add `todo edit --slug <slug>` that
+rewrites the summary, the body, or both, keeping the existing
+wrap-and-render path so a revised entry is indistinguishable from a
+freshly added one. Failing that, soften the rule in
+`.claude/commands/todo.md` to name the one edit the tooling cannot
+make, so an agent following it is not choosing between two
+instructions that cannot both be obeyed.
+
 ### tf-2026-08-18-idempotent-release-can-redefine-a-version -- idempotent release can redefine a version
 
 A follow-on to `tf-2026-08-18-template-ships-no-ci-or-release-workflow`,
