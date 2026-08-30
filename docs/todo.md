@@ -72,7 +72,7 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
-- **remote-clone-project-source** -- no project file on workstation or host
+- **remote-clone-project-source** -- drop the push once nothing needs it
   The guest-clone half landed with `generate-vagrantfile`: the bootstrap clones
   `[source]` inside the VM and runs a script from it. What remains is the
   workstation half, and it is larger than the slug suggests.
@@ -82,16 +82,15 @@ plan, decisions, and outcome.
   either. A repo bombyx has never opened cannot decide what runs on the
   machines outside the VM. See `docs/trust-boundary.md`.
 
-  That means `bombyx.toml` stops being read from the working directory and the
-  push stops entirely, so `vagrant_dir`, `Action::pushes` and the `tar`/`scp`
-  path go with it. The machine description and the repository URL move into
-  configuration the operator holds, keyed by project -- probably beside the
-  existing `config.toml`, which already lives outside any repo for the same
-  reason.
+  Two pieces, and only the second is this item. Moving the config out of the
+  repo is captured separately as `project-config-off-repo`, because it is a
+  design question rather than a deletion. What is left here is the push: once
+  nothing needs the pushed files, `vagrant_dir`, `Action::pushes` and the
+  `tar`/`scp` path all go, and `bombyx up` becomes three commands instead of
+  seven.
 
-  Note the direction of travel: `generate-vagrantfile` added `[vm]` and
-  `[source]` *to* `bombyx.toml`, so it put more of what bombyx depends on into
-  the repo. Those two tables are exactly what has to move.
+  Ordering: `project-config-off-repo` comes first. The push cannot be removed
+  while `vagrant_dir` is still how bombyx is told where the project is.
 
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
@@ -133,6 +132,30 @@ plan, decisions, and outcome.
   the lookup behind an interface so a tailnet or Consul provider can be added
   later without changing callers. The CLI is the first consumer, a dashboard is
   possible afterwards.
+
+- **project-config-off-repo** -- bombyx.toml must not be read from the repo
+  The second half of the boundary in `docs/trust-boundary.md`: neither the
+  workstation nor the VM host may read any file from the project's repo.
+  `bombyx.toml` is read from the working directory today, so it is the file
+  blocking that. Split out of `remote-clone-project-source`, which also covers
+  removing the push. The two are separable and this one is the harder half,
+  because it is a design question rather than a deletion. What has to be
+  decided. Where the config lives -- beside the existing `config.toml` in the
+  user config dir is the obvious candidate, since that file already sits outside
+  any repo for the same reason. How a project is identified without reading
+  anything from it: the directory name is convenient and wrong the moment two
+  clones differ, so the repository URL the operator supplied is more likely
+  right. And what `bombyx` does when asked to act on a project it has no entry
+  for. The cost is real and should be stated rather than discovered.
+  `bombyx.toml` is committed today, so a teammate who clones gets the machine
+  spec for free. Moving it out means every operator writes their own, and two of
+  them can disagree about a VM's size without either file showing it. That trade
+  is the point -- a repo bombyx has never opened cannot decide what runs outside
+  the VM -- but it is a trade. `generate-vagrantfile` added `[vm]` and
+  `[source]` to `bombyx.toml`, so those two tables are most of what moves. Also
+  inverts the README's Configure section, which currently explains the split as
+  project-file-committed versus host-file-private. That framing does not
+  survive.
 
 ## Done
 
