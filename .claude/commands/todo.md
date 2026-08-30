@@ -35,7 +35,7 @@ the user's words into a slug and a summary.
 2. Add it mechanically:
 
    ```
-   cargo xtask todo add --slug <slug> \
+   cargo -q xtask todo add --slug <slug> \
      --summary "<one-line summary, see budget below>"
    ```
 
@@ -67,8 +67,8 @@ the user's words into a slug and a summary.
 
 ## Listing pending items
 
-When called with no arguments, run `cargo xtask todo
-list` and show its output (each line is
+When called with no arguments, run `cargo -q xtask
+todo list` and show its output (each line is
 `<slug> -- <summary>`). Nothing else.
 
 ## Rules
