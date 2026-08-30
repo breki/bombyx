@@ -72,14 +72,18 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
-- **remote-clone-project-source** -- clone repo on VM host, no local checkout
-  Today `bombyx up` needs the project checked out on the workstation, which is
-  what the isolation is meant to avoid. Introduce a project-source abstraction:
-  a local checkout is one implementation, a git URL plus commit is another. In
-  the second case the workstation says "use repo X at commit Y" and the VM host
-  clones it and uses its vagrant directory. The repo stays the source of truth.
-  Note the limit found in discussion: cloning inside the guest cannot work,
-  because Vagrant needs the Vagrantfile before the VM exists.
+- **remote-clone-project-source** -- guest clones the repo, no host copy
+  Today `bombyx up` needs the project checked out on the workstation, and it
+  pushes `vagrant/` to the VM host. Project files therefore sit on two machines
+  that are not the VM. The decision recorded in `issues/trust-boundary-doc.md`
+  is that the guest is the only place project source exists, so neither the
+  workstation nor the VM host clones it. Introduce a project-source
+  abstraction: the workstation supplies a repository URL and a commit, and the
+  guest clones the repo after boot. This depends on `generate-vagrantfile`.
+  Vagrant needs the Vagrantfile before the VM exists, so it cannot come from
+  the project repo and bombyx has to generate it. The guest also needs a
+  credential to clone a private repo. The same document accepts that as a
+  scoped exposure.
 
 - **trust-boundary-doc** -- write down that the VM host is trusted
   Cloning the project anywhere outside the guest still puts untrusted code on a
