@@ -38,6 +38,40 @@ In practice:
   action, so the check goes there" says the same thing. Name
   the file, the function or the person, and let them act.
   Do not promote a module into a "layer" or a "tier".
+- **Never make the reader parse a sentence twice.** The
+  shapes below have each caused it here. **The list is
+  not closed and is not the rule** -- it began at (a),
+  and (c) and (e) then turned up in the next sentences
+  written under it, each time caught by a reader and not
+  by the list. The read-back check in the next bullet is
+  the rule; these are worked examples of what it catches.
+  (a) A subject held open across an embedded clause:
+  "project code an agent might be attacked through never
+  runs on the workstation" -- eight words before "never
+  runs" closes it. (b) A stack of modifiers in front of
+  the head noun, which costs the same memory. (c) A
+  phrasal verb split around its object, especially with
+  more prepositions behind it: "work the boundary out
+  from the code" -- "the boundary" reads as the object of
+  plain "work" until "out" lands, and then "out from"
+  stacks two prepositions. (d) A tail of nonfinite
+  clauses: "instead of finding it written down". (e) A
+  coordinated subject led by a bare pronoun: "so it and
+  the new document do not silently disagree" -- "so it"
+  reads as singular until "and" forces a rewind, and the
+  pronoun's antecedent is unclear as well. Name both
+  subjects, or split the clause off. Prefer short
+  subject-verb-object sentences. Two plain sentences beat
+  one compressed one every time.
+- **Read the sentence back before it ships.** The check
+  is mechanical: find the main verb on the first pass,
+  and take each phrasal verb whole. If you cannot, or if
+  the sentence has to be read twice to parse -- not to
+  absorb, to *parse* -- it is defective and gets split,
+  whatever its word count. Terseness is about words
+  spent, never about how much decoding the reader is left
+  to do. A comma cannot rescue a sentence built this way;
+  only splitting it can.
 - **Still not silence.** The "Narrate the work as it happens"
   rule under **Collaboration** stands -- one short sentence
   before a step, not a paragraph. Terseness applies to word
