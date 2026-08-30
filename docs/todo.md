@@ -88,6 +88,15 @@ plan, decisions, and outcome.
   VM host is part of the trusted computing base, and say why that is an
   acceptable trade rather than leaving the reader to infer it.
 
+  The reasoning, recorded while it is fresh. Vagrant needs the Vagrantfile
+  before the VM exists, so the project files cannot first appear inside the
+  guest -- something outside the guest has to hold them. That leaves two
+  options and no third. Either the VM host joins the trusted computing base,
+  or the Vagrant bootstrap model goes and the guest becomes the only place the
+  project exists. The first is the far smaller change and keeps the repo as
+  the source of truth, so it is the one to write up. Write up the fork as
+  well, or the next reader re-derives it from scratch.
+
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
   memory, and a single generic bootstrap provisioner that calls into bombyx.
