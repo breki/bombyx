@@ -24,15 +24,28 @@ you know which way it went.
 
 ## The boundary
 
-The guest is the only machine that holds the project's source
-code. Neither the workstation nor the VM host keeps a copy, a
+Two statements, and the second is stronger.
+
+**The guest is the only machine that holds the project's source
+code.** Neither the workstation nor the VM host keeps a copy, a
 clone, or a cache of it.
 
-What they do hold is a repository URL, a commit, and host
-configuration. That is metadata about the project rather than
-the project, and reading it tells an attacker where the code
-came from but does not hand them the code or anything derived
-from running it.
+**Neither machine reads any file from the project's
+repository.** Not the source, and not `bombyx.toml` or
+`vagrant/` either. A repository that bombyx has never opened
+cannot decide what runs on the machines outside the VM.
+
+What the workstation may still hold is a repository URL, a
+commit, and host configuration -- kept in its own configuration,
+not read out of the repo. That is metadata about the project
+rather than the project, and it tells an attacker where the code
+came from without handing them the code or anything derived from
+running it.
+
+The first statement is reached. The second is not: `bombyx.toml`
+is read from the working directory and `vagrant/` is pushed to
+the host, so both machines still depend on files the repository
+ships.
 
 ## Where project code lives today
 
@@ -181,11 +194,18 @@ Built, as of 2026-08-30:
 
 Not built. The captured work sits in `docs/todo.md`:
 
-- The workstation half of `remote-clone-project-source`.
-  `bombyx.toml` is read from the working directory and
-  `vagrant/` is still pushed, so a checkout is still required
-  on the machine this design exists to keep code off. **Until
-  that lands, the boundary described above is not reached.**
+- The workstation half of `remote-clone-project-source`, which
+  is larger than its name suggests. Reaching the second
+  statement above means `bombyx.toml` stops being read from the
+  repo and the push stops entirely, so `vagrant_dir` and the
+  `tar`/`scp` path go with it. The machine description and the
+  repository URL have to move into configuration the operator
+  holds, keyed by project.
+
+  Note the direction of travel. This change added `[vm]` and
+  `[source]` **to `bombyx.toml`**, so it put more of what
+  bombyx depends on into the repo, not less. Those tables are
+  what has to move.
 - `minimal-vagrantfile` -- what the generator should emit, and
   nothing more.
 - `provision-lifecycle-hooks` -- how the guest's setup is

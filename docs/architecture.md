@@ -41,8 +41,13 @@ The workstation never runs project code. The VM host runs
 `vagrant` and holds a directory per project. The guest is the
 only machine that clones the repository.
 
-`docs/trust-boundary.md` records which machines are allowed to
-hold project source, and what is still unfinished.
+The diagram shows today, not the target. The `project repo`
+box and the arrow leaving it are what the design is working to
+remove: the goal is that neither the workstation nor the VM
+host reads **any** file from the project's repo, `bombyx.toml`
+and `vagrant/` included. Both still do.
+`docs/trust-boundary.md` has the reasoning and the remaining
+steps.
 
 ## Library modules
 

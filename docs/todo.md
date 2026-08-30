@@ -72,18 +72,26 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
-- **remote-clone-project-source** -- guest clones the repo, no host copy
-  Today `bombyx up` needs the project checked out on the workstation, and it
-  pushes `vagrant/` to the VM host. Project files therefore sit on two machines
-  that are not the VM. The decision recorded in `issues/trust-boundary-doc.md`
-  is that the guest is the only place project source exists, so neither the
-  workstation nor the VM host clones it. Introduce a project-source
-  abstraction: the workstation supplies a repository URL and a commit, and the
-  guest clones the repo after boot. This depends on `generate-vagrantfile`.
-  Vagrant needs the Vagrantfile before the VM exists, so it cannot come from
-  the project repo and bombyx has to generate it. The guest also needs a
-  credential to clone a private repo. The same document accepts that as a
-  scoped exposure.
+- **remote-clone-project-source** -- no project file on workstation or host
+  The guest-clone half landed with `generate-vagrantfile`: the bootstrap clones
+  `[source]` inside the VM and runs a script from it. What remains is the
+  workstation half, and it is larger than the slug suggests.
+
+  The goal is that neither the workstation nor the VM host reads any file from
+  the project's repo -- not the source, and not `bombyx.toml` or `vagrant/`
+  either. A repo bombyx has never opened cannot decide what runs on the
+  machines outside the VM. See `docs/trust-boundary.md`.
+
+  That means `bombyx.toml` stops being read from the working directory and the
+  push stops entirely, so `vagrant_dir`, `Action::pushes` and the `tar`/`scp`
+  path go with it. The machine description and the repository URL move into
+  configuration the operator holds, keyed by project -- probably beside the
+  existing `config.toml`, which already lives outside any repo for the same
+  reason.
+
+  Note the direction of travel: `generate-vagrantfile` added `[vm]` and
+  `[source]` *to* `bombyx.toml`, so it put more of what bombyx depends on into
+  the repo. Those two tables are exactly what has to move.
 
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
