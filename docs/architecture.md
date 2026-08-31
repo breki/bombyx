@@ -37,6 +37,18 @@ The workstation never runs project code. The VM host runs
 `vagrant` and holds a directory per project. The guest is the
 only machine that clones the repository.
 
+**Three roles, not necessarily three machines.** `host` is an
+SSH alias, so it can name loopback and the workstation can be
+its own VM host. There is no local mode and none is needed.
+What that costs is the part of the isolation that depends on
+the host being elsewhere: a guest that escapes the hypervisor
+is already on your workstation, and network isolation from your
+own machine means nothing. The VM boundary still holds --
+separate kernel, no host filesystem, no credentials.
+`docs/tutorial.md` has the setup, and `docs/vm-host-wsl2.md`
+covers running the host as a WSL2 distribution on a Windows
+workstation.
+
 The diagram shows today, not the target. The `project repo`
 box and the arrow leaving it are what the design is working to
 remove: the goal is that neither the workstation nor the VM
