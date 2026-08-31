@@ -156,7 +156,7 @@ pub enum ConfigError {
 
     /// The committed project file carried a `host` key.
     ///
-    /// Refused rather than ignored. A committed host points at one
+    /// Refused rather than ignored. A committed host identifies one
     /// developer's machine, and a stale one that still parses
     /// is how `destroy` ends up deleting a directory on a
     /// colleague's host.

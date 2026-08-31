@@ -306,7 +306,8 @@ before the ref so `git` will not read it as an option.
 | `box` `repo` `ref` `script` | control characters | end the line in a Ruby file |
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
-| `repo` `ref` `script` | leading `-` | `git` reads it as an option |
+| `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
+| `host` `project` `vagrant_dir` `remote_root` | leading `-` | the program each one reaches would treat it as an option. For `host` that is live — it is `ssh`'s first positional argument. For the other three it is a precaution: two are shell-quoted, and `vagrant_dir` is joined onto the working directory before `tar` sees it |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after the push changed state |
@@ -316,16 +317,30 @@ The older fields have their own rules, in the same place.
 inside the project.
 
 `remote_root` has the strictest rules of the three, because
-bombyx runs `rm -rf` on a path derived from it. It must start
-with `~` or `/`, and it must name **at least one directory below
-that root** — so `~/vms` and `/srv/vms` are accepted while `~`,
-`/` and `~/` are refused. Joining the project name onto it then
-makes the directory bombyx creates and deletes at least two deep,
-which keeps a configuration mistake from targeting a top-level or
-home-adjacent directory. A `.` or `..` segment is refused as
-well: either one moves where the path resolves without changing
-how deep it counts, and `/.` with `project = "etc"` would
-otherwise pass as two segments while resolving to `/etc`.
+bombyx runs `rm -rf` on a path derived from it. All of them live
+in `config::root`, blank and leading-dash included, so a second
+caller cannot pick up half the set.
+
+It must start with `/` or `~/`, or be exactly `~`. A bare
+`~name` is refused even though it looks anchored: to a shell
+that means another user's home directory, and
+`quote_remote_path` leaves the tilde outside the quotes only for
+`~` and `~/`. So `~vms` would be emitted fully quoted and the
+remote shell would read it as an ordinary relative name,
+resolved against the SSH login directory — the outcome the
+anchoring rule exists to prevent.
+
+It must also contain **at least one directory below that root**,
+so `~/vms` and `/srv/vms` are accepted while `~`, `/` and `~/`
+are refused. Joining the project name onto it then makes the
+directory bombyx creates and deletes at least two deep, which
+keeps a configuration mistake from targeting a top-level or
+home-adjacent directory.
+
+A `.` or `..` segment is refused as well: either one moves where
+the path resolves without changing how deep it counts, and `/.`
+with `project = "etc"` would otherwise pass as two segments
+while resolving to `/etc`.
 
 ## Why three stages and not one
 

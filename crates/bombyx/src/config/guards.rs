@@ -58,9 +58,10 @@ pub(super) fn check_not_empty(
 /// `--upload-pack=/bin/sh` as an instruction naming a program to
 /// run on the other end, rather than as a branch name.
 ///
-/// **A new field whose value reaches a command line needs this
-/// too.** Seven use it today: `host`, `project`, `vagrant_dir`,
-/// `remote_root`, `ref`, `repo` and `script`.
+/// **Add a field whose value reaches a command line, and it
+/// requires this check too.** Seven use it today: `host`,
+/// `project`, `vagrant_dir`, `remote_root`, `ref`, `repo` and
+/// `script`.
 pub(super) fn check_not_an_option(
     field: &'static str,
     value: &str,
@@ -238,10 +239,11 @@ mod tests {
 
     #[test]
     fn the_option_message_names_the_tool_that_would_be_fooled() {
-        // One rule, several callers, and the message has to send
-        // the operator to the right place. Each pairing here is
-        // one the production code really produces: `ref` is
-        // handed to `git`, `vagrant_dir` ends up in `tar -C`.
+        // Several callers share this rule, so the message has
+        // to send the operator to the right place. Each pairing
+        // below is one the production code really produces:
+        // `ref` is handed to `git`, `vagrant_dir` ends up in
+        // `tar -C`.
         let err = check_not_an_option("ref", "--upload-pack=x", "git")
             .expect_err("must be refused");
         assert!(err.to_string().contains("git"), "{err}");
