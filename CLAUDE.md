@@ -43,9 +43,16 @@ In practice:
   has run against frosti" hides who did not run it, and
   "nothing reads the structure" hides that the code is
   bombyx while reaching for an abstraction where "the parsed
-  URL" was there to be named. Say "I have not run bombyx
+  URL" was there to be named. Say "we have not run bombyx
   against frosti" and "bombyx never reads the parsed URL". A
   subject that is a placeholder lets nobody act.
+- **The actor is usually "we".** Building this is joint work,
+  so say so: "we have not run it against frosti", not "I have
+  not" and not "it has not been run". Reserve "I" for
+  something only the assistant did -- an assumption it
+  made, a mistake it is correcting. Reserve "you" for what
+  only the operator can do, such as anything needing a
+  password on the VM host. Everything else is "we".
 - **Never make the reader parse a sentence twice.** The
   shapes below have each caused it here. **The list is
   not closed and is not the rule** -- it began at (a),
