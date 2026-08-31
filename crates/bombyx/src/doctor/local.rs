@@ -90,38 +90,33 @@ pub fn local_tool_finding(
     Finding::new(Scope::Local, name, outcome)
 }
 
-/// Reports whether the project still carries a Vagrantfile.
+/// Checks what `bombyx doctor` should say about `vagrant_dir`.
 ///
-/// This probe used to check the opposite. It failed when the
-/// project had no Vagrantfile, because bombyx pushed that file
-/// and could not boot without it.
+/// bombyx generates the Vagrantfile, so a project that has
+/// none of its own is the normal case, not a problem.
 ///
-/// bombyx now generates the Vagrantfile and writes it on the VM
-/// host after the push, so an absent one is the ordinary case.
-/// A present one is what deserves reporting: it is still
-/// archived and shipped, and then overwritten, so an operator
-/// editing it sees no effect on the VM and nothing explains
-/// why. Reporting it is the cheapest place to say so.
+/// Three cases:
 ///
-/// Three states, one of which still fails. A `vagrant_dir` that
-/// names no directory is a typo, and this is the cheapest place
-/// to catch it -- otherwise it surfaces as a `tar` failure after
-/// the remote directory has been created. The other two both
-/// pass: [`Outcome`] has no warning variant, and inventing a
-/// failure for a working configuration would be worse than a
-/// detail line.
+/// - The directory does not exist. That is a typo in
+///   `vagrant_dir`, and it is the one case that still fails.
+///   Catching it here is cheap; the alternative is a confusing
+///   `tar` error after bombyx has already created a directory
+///   on the VM host.
+/// - The directory exists with no Vagrantfile. Normal. Passes.
+/// - The directory exists *with* a Vagrantfile. Also passes,
+///   but says so, because that file gets pushed and then
+///   overwritten. Somebody editing it would see no effect on
+///   the VM and have nothing to tell them why.
+///
+/// The last case is really a warning, and [`Outcome`] has no
+/// warning to give. Passing with an explanation beats inventing
+/// a failure for a setup that works.
 #[must_use]
 pub fn vagrantfile_finding(local_dir: &Path) -> Finding {
     let outcome = if !local_dir.is_dir() {
-        // The check that survived the inversion. A typo in
-        // `vagrant_dir` used to show up as a missing Vagrantfile;
-        // now that an absent one is ordinary, the directory
-        // itself is what is left to notice, and noticing it here
-        // is far cheaper than a `tar` failure after bombyx has
-        // created the remote directory.
-        // The action first, the path second. The report
-        // truncates this column, and a long temp path pushed
-        // the only actionable words off the end.
+        // Action first, path second. The report truncates this
+        // column, so a long path would push the only words
+        // worth acting on off the end.
         Outcome::Fail(format!(
             "check `vagrant_dir` -- no directory at {}",
             local_dir.display()
@@ -245,12 +240,12 @@ mod tests {
 
     #[test]
     fn vagrantfile_finding_reports_a_project_file_as_ignored() {
-        // The meaning inverted when bombyx started generating
-        // this file. An absent one is now the ordinary case,
-        // and a present one is the surprise worth reporting:
-        // it is still pushed to the host and then overwritten,
-        // so an operator editing it would see no effect and
-        // have nothing telling them why.
+        // bombyx generates the Vagrantfile, so a project with
+        // none of its own is the ordinary case. One that has
+        // its own is the surprise worth reporting: the file is
+        // pushed to the host and then overwritten, so an
+        // operator editing it sees no effect on the VM and has
+        // nothing telling them why.
         //
         // Both are passes because neither blocks anything, and
         // `Outcome` has no warning variant. The detail carries

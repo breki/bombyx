@@ -396,6 +396,36 @@ re-deriving a style.
   part-way through, as root, having already changed some
   things and not others.
 
+## Code comments
+
+Extends **Documentation style** to every comment in the code,
+`///` and `//` alike, not only the module-level ones.
+
+- **Write for a capable junior.** Assume Rust and general
+  programming. Assume nothing about this codebase, `git`
+  internals, Ruby, or shell mechanics. Someone sixteen and
+  three months into the job should follow it on one read.
+- **Explain the mechanism before leaning on it.** If the point
+  turns on how a heredoc ends, what `#{}` does in Ruby, or
+  that `git` accepts options after positionals, say so first
+  and draw the conclusion second. A term used without
+  explanation is one the reader has to go and look up, and
+  most will not.
+- **Show the shape when the shape is the point.** Three lines
+  of example shell beat a paragraph describing it.
+- **Do not narrate the past.** No "this used to", "an earlier
+  version", "the first cut". bombyx is pre-release: nobody is
+  migrating from the old behaviour and nobody needs to
+  recognise it. Give the reason the code is the way it is,
+  which stands on its own -- "a rule in another file is the
+  one somebody forgets" needs no story about the version that
+  put it there. Commit messages and
+  `docs/developer/DIARY.md` are where history belongs.
+- **Length is not what is being minimised.** **Voice** governs
+  word choice here as everywhere. It does not govern whether
+  to explain, and a comment that is short and leaves the
+  reader stuck has failed.
+
 ## Coding Standards
 
 - Rust edition 2024

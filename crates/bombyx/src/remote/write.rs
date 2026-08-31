@@ -1,38 +1,62 @@
-//! Writing bombyx's generated files onto the VM host.
+//! Writing the files bombyx generates onto the VM host.
 //!
-//! The Vagrantfile and the bootstrap script are not shipped in
-//! the push. They are written over SSH afterwards, so the
-//! project cannot supply either -- see `docs/trust-boundary.md`.
+//! The Vagrantfile and the bootstrap script do not travel in
+//! the push with the project's other files. bombyx writes them
+//! separately, over SSH, after the push has landed. That is on
+//! purpose: it means a project cannot supply either of them,
+//! however it arranges its own directory. See
+//! `docs/trust-boundary.md`.
 //!
-//! A quoted heredoc carries the payload, which is what stops the
-//! host shell expanding anything in it. A Vagrantfile is Ruby,
-//! full of `#{...}` and `$`, and an unquoted delimiter would let
-//! the host shell evaluate those before vagrant ever read the
-//! file.
+//! Getting a whole file across an SSH connection is done with a
+//! shell *heredoc*, which looks like this:
+//!
+//! ```sh
+//! cat > somefile <<'END'
+//! ...the file content, however many lines...
+//! END
+//! ```
+//!
+//! The shell reads every line until it sees one that is exactly
+//! `END`, and feeds all of it to `cat`.
+//!
+//! The quotes around `'END'` matter more than they look. Without
+//! them, the shell would look *inside* the content for things to
+//! substitute -- anything with a `$` in it, for instance. A
+//! Vagrantfile is Ruby, and Ruby is full of `$` and `#{...}`, so
+//! the shell would mangle the file before `vagrant` ever read
+//! it. Quoting the delimiter tells the shell to keep its hands
+//! off and pass the lines through unchanged.
 
 use super::{Config, RemoteCommand, quote_remote_path};
 
-/// The delimiter a written file's heredoc closes on.
+/// The word a heredoc ends on, before [`delimiter_for`]
+/// lengthens it.
 ///
-/// A starting point rather than a fixed string: see
-/// [`delimiter_for`], which lengthens it until the payload
-/// cannot contain it.
+/// A starting point, not a fixed value: `delimiter_for` appends
+/// `_` until no line of the file being sent matches it.
 const HEREDOC: &str = "BOMBYX_EOF";
 
-/// A delimiter no line of `contents` is equal to.
+/// Picks an end-word that cannot appear in `contents`.
 ///
-/// A heredoc ends at the first line equal to its delimiter, so a
-/// payload containing that line would close it early and hand
-/// the remainder to the VM host's login shell as commands. That
-/// is the trusted machine, not the sandbox.
+/// Here is the problem. A heredoc ends at the first line equal
+/// to its end-word. So if the file we are sending happens to
+/// contain a line that is exactly `BOMBYX_EOF`, the shell stops
+/// reading there -- and treats everything after it as commands
+/// to run. On the VM host. Which is the machine we trust, not
+/// the sandbox.
 ///
-/// An earlier version relied on `Config::validate` refusing
-/// control characters, and asserted the invariant in a test over
-/// one fixture. Both are the wrong place: `write_file` is
-/// public, `Config`'s fields are public, and a guard in another
-/// module is exactly what a fifth `[vm]` field would be added
-/// without. Lengthening the delimiter cannot fail and needs no
-/// cooperation from a caller.
+/// The fix is to keep adding `_` to the end-word until no line
+/// of the file matches it. `BOMBYX_EOF`, then `BOMBYX_EOF_`,
+/// and so on. This always terminates, because the file is
+/// finite: eventually the word is longer than anything in it.
+///
+/// Note *where* this rule lives. It would be tempting to rely
+/// on config validation refusing such values instead, and to
+/// prove it with a test. Both are too far away. This function
+/// is public, so a caller can hand it anything at all, and a
+/// rule kept in another file is exactly the one somebody
+/// forgets when they add a field. Handling it right here
+/// cannot be forgotten and cannot fail.
 fn delimiter_for(contents: &str) -> String {
     let mut delimiter = HEREDOC.to_owned();
     while contents.lines().any(|line| line.trim() == delimiter) {
@@ -42,23 +66,29 @@ fn delimiter_for(contents: &str) -> String {
 }
 
 impl RemoteCommand {
-    /// Renders this command for a dry run, eliding a heredoc
-    /// body.
+    /// Renders this command for `--dry-run`, with the contents
+    /// of any heredoc left out.
     ///
-    /// Only the file writes carry one, and each carries a whole
-    /// file, so printing them in full turns `bombyx --dry-run
-    /// up` into roughly seventy lines in which a payload line
-    /// cannot be told from the next command. Every other command
-    /// renders exactly as [`Display`](std::fmt::Display) would:
-    /// eliding part of one would hide what bombyx runs.
+    /// `--dry-run` prints the commands bombyx would run without
+    /// running them. Two of those commands carry an entire file
+    /// each, so printing them as they are gives you about
+    /// seventy lines where you cannot tell a line of the file
+    /// from the start of the next command. This prints one line
+    /// per command instead, saying how many lines it left out.
     ///
-    /// **This is the one place a dry run stops being literal.**
-    /// The elided body is written to the host in full; only the
-    /// printing of it is dropped, and the line says how much.
+    /// **This is the only place a dry run does not show you
+    /// exactly what runs**, so it is worth being clear: the
+    /// file is still written to the host in full. Only the
+    /// *printing* is shortened, and the line tells you so.
     ///
-    /// An inherent method rather than a free function so it sits
-    /// beside `Display` in the docs. As a free function it was
-    /// missed at one of the two call sites that print a command.
+    /// Every other command comes out identical to what
+    /// [`Display`](std::fmt::Display) gives you. Shortening any
+    /// of those would hide something bombyx actually does.
+    ///
+    /// It is a method on `RemoteCommand` rather than a
+    /// standalone function so that it shows up next to
+    /// `Display` in the docs. Two places print a command, and a
+    /// standalone function is easy for one of them to miss.
     #[must_use]
     pub fn abbreviated(&self) -> String {
         let shown = self.to_string();
@@ -74,10 +104,11 @@ impl RemoteCommand {
         if body_at > shown.len() {
             return shown;
         }
-        // Counted to the closing delimiter, not to the end: what
-        // follows is the delimiter line and whatever quoting
-        // `Display` put around the argument, and neither is part
-        // of the file.
+        // Count up to the end-word, not to the end of the
+        // string. After the end-word comes the end-word's own
+        // line, plus whatever quote characters `Display` put
+        // around the whole argument. None of that is part of
+        // the file, so counting it would overstate the total.
         let elided = shown[body_at..]
             .lines()
             .take_while(|l| l.trim() != delimiter)
@@ -86,16 +117,21 @@ impl RemoteCommand {
     }
 }
 
-/// Builds the `ssh` command that writes `contents` to
-/// `dir/name` on the VM host.
+/// Builds the `ssh` command that writes `contents` into the
+/// file `name`, in the directory `dir`, on the VM host.
 ///
-/// Used for the Vagrantfile and the bootstrap script. bombyx
-/// generates both and writes them here rather than shipping them
-/// in the push, so the project cannot supply either.
+/// Nothing runs here. Like everything in `remote`, this only
+/// builds the command; `main` is what spawns it. That split is
+/// what lets the interesting part be unit-tested without a VM
+/// host anywhere near it.
 ///
-/// Safe for any payload. The heredoc delimiter is lengthened
-/// until no line of `contents` equals it, so nothing needs
-/// escaping and no caller has to have validated anything first.
+/// Used for the two files bombyx generates, the Vagrantfile and
+/// the bootstrap script.
+///
+/// You can pass any `contents` at all. The private
+/// `delimiter_for` picks an end-word the content cannot
+/// contain, so nothing here has to be escaped and no caller has
+/// to have checked it first.
 #[must_use]
 pub fn write_file(
     cfg: &Config,
@@ -105,9 +141,11 @@ pub fn write_file(
 ) -> RemoteCommand {
     let path = quote_remote_path(&format!("{dir}/{name}"));
     let delimiter = delimiter_for(contents);
-    // Without a trailing newline the delimiter would land on the
-    // same line as the file's last line, and the heredoc would
-    // never close.
+    // A heredoc ends at a line that is *exactly* the end-word.
+    // If the file does not end in a newline, the end-word would
+    // be stuck onto the back of the last line instead of sitting
+    // on its own, and the shell would keep reading forever
+    // looking for a match it will never find.
     let newline = if contents.ends_with('\n') { "" } else { "\n" };
     let script = format!(
         "cat > {path} <<'{delimiter}'\n{contents}{newline}{delimiter}\n"

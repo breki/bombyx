@@ -188,10 +188,15 @@ fn push_then(
 ) -> Vec<RemoteCommand> {
     let mut cmds = vec![remote::ensure_dir(cfg, dir)];
     cmds.extend(remote::push_dir(cfg, local_dir, dir, archive));
-    // After the push, not before. The archive is unpacked over
-    // this directory, so a Vagrantfile written first would be
-    // replaced by whatever the project shipped -- which is the
-    // file bombyx generates one to stop vagrant reading.
+    // The generated files must be written after the push, not
+    // before.
+    //
+    // The push unpacks the project's archive into this same
+    // directory. If we wrote our generated Vagrantfile first,
+    // unpacking would overwrite it with whatever the project
+    // shipped -- which is the exact file we generate one to
+    // avoid using. Everything would still appear to work, and
+    // vagrant would read the wrong file.
     for (name, contents) in vagrantfile::files(cfg) {
         cmds.push(remote::write_file(cfg, dir, name, &contents));
     }

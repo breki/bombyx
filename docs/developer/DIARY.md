@@ -2,6 +2,67 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-08-31
+
+**A review round where the comments were the defect**
+
+Two reviewers ran against the newtype diff and returned
+twenty-two findings, two of them reached independently by both.
+Nine were not about the code at all. They were about comments
+written *in that same diff* describing behaviour the code did
+not have.
+
+That is worth naming as a pattern rather than a run of bad
+luck. The diff had just rewritten every comment to explain more
+for a junior reader. Explaining more means asserting more, and
+each assertion is a thing that can be wrong. A guard that
+cannot fire, a rule described one way and implemented another,
+a shell line credited with a fix it does not deliver.
+
+The worst one was that last shape. `bootstrap.sh` re-points
+`origin` before fetching, and the comment said this stops the
+silent-wrong-answer case where a changed `repo` leaves you
+looking at the old code. It does not. A fetch updates the files
+the new repository has; it does not delete files only the old
+one had. So the clone becomes a mixture, and if the old repo
+carried a provisioning script where the new one does not, the
+guest runs the *old* repository's script, as root, and reports
+success. The fix removes the clone outright when the remote
+disagrees.
+
+Second: `chmod` and `exec` follow symlinks. Checking the config
+value said nothing about what the repository put at that path,
+so a repo could ship its provisioning script as a link to a
+system file and have the guest `chmod +x` it as root. The path
+is resolved with `readlink -f` now and refused if it lands
+outside the clone. Resolving the whole path matters -- a
+symlinked parent directory does the same job and a single-link
+check misses it. Verified against a four-case harness.
+
+Two of the fixes then had to be corrected by testing them,
+which is the part worth remembering.
+
+A reviewer suggested `git clean -xdff` after the checkout so
+the tree matches the repository. It would also delete every
+untracked and ignored file -- which in an agent VM is the
+agent's uncommitted work. `bombyx provision` silently
+destroying that is worse than carrying a stale file. Not added,
+and the reasoning is in the script so nobody re-adds it.
+
+And the test pinning the leading-dash rule was written on a
+wrong assumption. I expected the dash-shaped values to be
+refused by the URL check; they are not, because
+`check_not_an_option` runs first. The test failed and said so.
+The value that actually pins the rule is
+`-oProxyCommand=id:x`: one colon, no `://`, so the URL check
+reads it as SSH shorthand and accepts it outright.
+
+One reviewer suggestion did not survive contact either.
+Replacing a "see below" with a rustdoc link to
+`delimiter_for` fails the doc gate, because the gate runs
+rustdoc twice and the public pass refuses a public item linking
+a private one. Tested rather than argued.
+
 ### 2026-08-30
 
 **bombyx writes the Vagrantfile now**

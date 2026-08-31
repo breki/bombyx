@@ -130,9 +130,15 @@ classDiagram
     +u32 memory
   }
   class Source {
-    +String repo
+    +RepoUrl repo
     +String git_ref
-    +String script
+    +ScriptPath script
+  }
+  class RepoUrl {
+    +String value
+  }
+  class ScriptPath {
+    +String value
   }
   class Provider {
     <<enumeration>>
@@ -158,6 +164,8 @@ classDiagram
   Config *-- Vm : vm
   Config *-- Source : source
   Vm --> Provider
+  Source *-- RepoUrl : repo
+  Source *-- ScriptPath : script
   Overlay ..> Config : replaces fields of
   HostSources ..> Config : supplies host
   HostSources ..> HostOrigin : reports which won
@@ -263,15 +271,38 @@ first creates a machine.
 `bombyx.toml` travels inside a repo, so its values are treated
 as hostile input. Six reach the generated files.
 
+Two of the six are enforced by their type. `repo` is a
+`RepoUrl` and `script` is a `ScriptPath`, each a newtype whose
+constructor holds the rules, so an invalid one cannot be built
+-- by a config file or by a library caller. serde runs the
+constructor while deserializing, so a bad value is refused
+before a `Config` exists, and the error names the line.
+
+`box`, `ref`, `cpus` and `memory` are checked by
+`Config::validate` after parsing. The line is not how many
+rules a field has -- `ref` has two, the same as `repo`. It is
+whether a rule is specific to the value. `RepoUrl` and
+`ScriptPath` each carry one that means something only for them,
+so the type name says what was checked; the other four carry
+guards any string field would need, and a wrapper would promise
+nothing extra.
+
+Those four are therefore checked rather than made unbuildable,
+which is a weaker guarantee, because `Vm` and `Source` have
+public fields. Two things keep it survivable: `render` escapes
+for Ruby whatever it is handed, and `bootstrap.sh` passes `--`
+before the ref so `git` will not read it as an option.
+
 | Field | Refused | Because |
 |-------|---------|---------|
 | `box` `repo` `ref` `script` | empty or blank | no meaning when blank |
+| `box` `repo` `ref` `script` | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
 | `box` `repo` `ref` `script` | control characters | end the line in a Ruby file |
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` reads it as an option |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
-| `script` | leading `/` or `\`, a `..` segment, surrounding space | it is made executable and run as root inside the clone |
+| `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after the push changed state |
 
 The older fields have their own rules, in the same place:
@@ -302,9 +333,13 @@ before it. `render` escapes every `"`, `\` and `#` even though
 heredoc delimiter until no payload line equals it, rather than
 assuming the payload came from `render`.
 
-The repetition is not redundant. `Config`'s fields are public
-and both functions are public, so a library caller reaches them
-without passing through `validate` at all. A guard that lives in
+The repetition is not redundant, and the newtypes narrowed it
+rather than removing it. A library caller can no longer build a
+bad `repo` or `script`, because those fields hold `RepoUrl` and
+`ScriptPath` and their inner values are private. `box` and
+`git_ref` are still plain `String` fields on a public struct, so
+`render` can still be handed a quote, and `write_file` can still
+be handed a payload no renderer produced. A guard that lives in
 another module is the one a new field gets added without.
 
 ## Quality gates

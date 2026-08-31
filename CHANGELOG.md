@@ -20,6 +20,9 @@ and this project adheres to
   a `git` option, `repo` must be a real URL rather than a `<transport>::<rest>`
   remote helper such as `ext::` (which runs a command), and `script` must stay
   inside the clone.
+- The guest refuses a `source.script` that resolves outside the cloned project.
+  `chmod` and `exec` follow symlinks, so a repository could otherwise point the
+  script at a system file and have it made executable as root.
 
 ### Changed
 
@@ -45,6 +48,16 @@ and this project adheres to
   `up`.
 - `bombyx doctor` fails when `vagrant_dir` names no directory. It replaces the
   typo check lost when the Vagrantfile probe inverted.
+- A bad `repo` or `script` in `bombyx.toml` is now refused while the file is
+  being read rather than after, so the message names the line and column as well
+  as the field and the reason. The rules themselves are unchanged.
+- Config values are refused when they begin or end with whitespace. `box`,
+  `ref`, `repo` and `script` all reach either the generated Vagrantfile or a
+  command line in the guest, where a stray space fails obscurely and late.
+- Changing `source.repo` and re-provisioning now re-clones from scratch.
+  Fetching over the old clone left files only the previous repository had, so
+  the guest could run the old repository's provisioning script and report
+  success.
 
 ### Fixed
 

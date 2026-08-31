@@ -1,16 +1,25 @@
-//! Renders the two files bombyx writes on the VM host: the
+//! Builds the two files bombyx writes onto the VM host: the
 //! Vagrantfile and the bootstrap script.
 //!
-//! bombyx generates the Vagrantfile rather than taking one from
-//! the project, because the project's files do not exist
-//! anywhere Vagrant can read them before the VM boots. See
-//! `docs/trust-boundary.md` for why that is the arrangement.
+//! A Vagrantfile tells Vagrant how to build a VM. Normally a
+//! project writes its own and keeps it in its repo. bombyx
+//! writes it instead, because Vagrant has to read that file
+//! *before* the VM exists, so it cannot come from inside the
+//! VM -- and outside the VM is where we are trying not to put
+//! the project's files. `docs/trust-boundary.md` explains why.
 //!
-//! Two files, and the split is deliberate. The Vagrantfile
-//! varies per project and is rendered here. [`BOOTSTRAP`] is
-//! identical everywhere, so it ships verbatim and nothing is
-//! interpolated into it -- which keeps config values out of
-//! shell text this module composes.
+//! The split between the two files is worth understanding.
+//!
+//! The Vagrantfile changes per project -- different box,
+//! different memory -- so it is built here, with config values
+//! pasted into it.
+//!
+//! [`BOOTSTRAP`] is the same for every project, always. It is
+//! shipped exactly as written, and bombyx pastes nothing into
+//! it. Anything it needs to know arrives as an environment
+//! variable that Vagrant sets. That is the point: pasting
+//! config values into a shell script is where quoting bugs and
+//! injection holes come from, so we simply never do it.
 
 use crate::config::Config;
 
@@ -30,20 +39,31 @@ pub const VAGRANTFILE_NAME: &str = "Vagrantfile";
 /// stated once here.
 pub const BOOTSTRAP_NAME: &str = "bootstrap.sh";
 
-/// Escapes `value` for a double-quoted Ruby string literal.
+/// Wraps `value` in double quotes, ready to drop into Ruby.
 ///
-/// Three characters matter. A double quote ends the literal, a
-/// backslash starts an escape, and `#` begins interpolation
-/// (`#{...}`), which Ruby evaluates. Escaping every `#` rather
-/// than only the `#{` pair is deliberate: `\#` is just `#` in
-/// Ruby, so the blunt rule costs nothing and cannot be defeated
-/// by a spelling this one did not anticipate.
+/// Three characters would otherwise change what the Ruby means
+/// rather than appearing in it:
 ///
-/// [`Config::validate`](crate::config::Config) refuses all three
-/// in the fields that reach here, so through `bombyx.toml` this
-/// is unreachable. It is reachable through the library, whose
-/// `Config` fields are public, and the renderer should not
-/// depend on a guard living in another module to be correct.
+/// - `"` would end the string early.
+/// - `\` would start an escape sequence.
+/// - `#` starts Ruby's `#{...}`, which runs code and pastes the
+///   result in.
+///
+/// Each gets a `\` in front of it, which tells Ruby to treat it
+/// as an ordinary character.
+///
+/// We escape *every* `#`, not only the ones followed by `{`.
+/// `\#` is just `#` to Ruby, so escaping the harmless ones costs
+/// nothing -- and a rule with no exceptions cannot be got around
+/// by some spelling nobody thought of.
+///
+/// You may notice the config checks already refuse all three of
+/// these, which makes this look redundant. It is not. Those
+/// checks only run when the value came from `bombyx.toml`, and
+/// `Config`'s fields are public, so code using bombyx as a
+/// library can build one by hand and call straight in here. A
+/// function should not need a check in a different file to be
+/// correct.
 fn ruby_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');
@@ -57,12 +77,20 @@ fn ruby_string(value: &str) -> String {
     out
 }
 
-/// Renders the Vagrantfile for `cfg`.
+/// Builds the text of the Vagrantfile for `cfg`.
 ///
-/// Both providers take `cpus` and `memory` under the same
-/// names, so only the provider symbol differs. The Hyper-V
-/// spelling is written from that provider's documented options
-/// and **has never booted a machine** -- see
+/// Returns a `String`. Nothing is written to disk here, and
+/// nothing is sent anywhere -- `remote::write_file` does that.
+///
+/// A provider is the thing that actually runs the VM, libvirt
+/// or Hyper-V. Both of them happen to spell their settings the
+/// same way (`cpus`, `memory`), so the only difference between
+/// the two outputs is the provider's name.
+///
+/// Be careful with that convenience: the Hyper-V version was
+/// written from Hyper-V's documentation and **has never started
+/// a real machine**. If you are the first person to try it,
+/// expect to fix something. See
 /// [`Provider`](crate::config::Provider).
 #[must_use]
 pub fn render(cfg: &Config) -> String {
@@ -109,20 +137,26 @@ end
         cpus = vm.cpus,
         memory = vm.memory,
         bootstrap = ruby_string(BOOTSTRAP_NAME),
-        repo = ruby_string(&source.repo),
+        repo = ruby_string(source.repo.as_str()),
         git_ref = ruby_string(&source.git_ref),
-        script = ruby_string(&source.script),
+        script = ruby_string(source.script.as_str()),
         host_env = crate::remote::VM_HOST_ENV,
         hostname_env = crate::remote::VM_HOSTNAME_ENV,
     )
 }
 
-/// The files bombyx writes into the remote project directory.
+/// Every file bombyx writes into the project directory on the
+/// VM host, as `(name, contents)` pairs.
 ///
-/// One list, used by `plan` to build the write commands and by
-/// the tests that assert the heredoc invariant holds for every
-/// payload. Enumerating them separately in each place is how a
-/// third file would end up written but unchecked.
+/// The list exists once, here, and everything else reads it:
+/// `plan` to build the write commands, and the tests to check
+/// each file is safe to send.
+///
+/// That is the whole reason for the function. If the list were
+/// written out separately in each of those places, adding a
+/// third file would mean remembering all of them -- and the one
+/// people forget is the test, so the new file would be written
+/// to the host without ever being checked.
 #[must_use]
 pub fn files(cfg: &Config) -> [(&'static str, String); 2] {
     [
@@ -134,7 +168,7 @@ pub fn files(cfg: &Config) -> [(&'static str, String); 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Provider, Source, Vm};
+    use crate::config::{Provider, RepoUrl, ScriptPath, Source, Vm};
 
     fn cfg_with(provider: Provider) -> Config {
         let mut cfg = Config::for_tests();
@@ -145,20 +179,24 @@ mod tests {
             memory: 8192,
         };
         cfg.source = Source {
-            repo: "https://example.invalid/p.git".to_owned(),
+            repo: RepoUrl::parse("https://example.invalid/p.git".to_owned())
+                .expect("a valid fixture URL"),
             git_ref: "main".to_owned(),
-            script: "vagrant/provision.sh".to_owned(),
+            script: ScriptPath::parse("vagrant/provision.sh".to_owned())
+                .expect("a valid fixture path"),
         };
         cfg
     }
 
     #[test]
     fn carries_every_configured_value() {
-        // Pins the rendered line, not the value. The first cut
-        // asserted `out.contains("4")` for `cpus = 4`, which the
-        // box name `generic/ubuntu2204` and the version `0.4.1`
-        // both satisfy -- so deleting `v.cpus` from the template
-        // left the test green. Both reviewers caught it.
+        // Each needle is a whole rendered line, not just the
+        // value. Searching for `"4"` alone would pass no matter
+        // what: the box name `generic/ubuntu2204` and the
+        // version `0.4.1` both contain a 4, so the test would
+        // stay green even with `v.cpus` deleted from the
+        // template. A test that cannot fail is worse than none,
+        // because it looks like cover.
         let out = render(&cfg_with(Provider::Libvirt));
         for needle in [
             "config.vm.box = \"generic/ubuntu2204\"",
@@ -195,11 +233,12 @@ mod tests {
 
     #[test]
     fn forwards_the_vm_host_identity_into_the_guest() {
-        // A guest cannot work out which machine it runs on, so
-        // bombyx sets these on the vagrant process and the
-        // Vagrantfile hands them over. The project's own
-        // Vagrantfile used to do it; bombyx overwrites that file
-        // now, so the generated one has to.
+        // A guest has no way to work out which machine is
+        // running it. bombyx sets these two variables on the
+        // vagrant process on the VM host, but Vagrant does not
+        // pass its own environment into a VM, so the
+        // Vagrantfile has to hand them over deliberately. Since
+        // bombyx writes that file, this is where it happens.
         let out = render(&cfg_with(Provider::Libvirt));
         for var in [crate::remote::VM_HOST_ENV, crate::remote::VM_HOSTNAME_ENV]
         {

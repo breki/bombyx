@@ -55,7 +55,7 @@ pub use host::{
 pub(crate) use host::{
     HostProblem, host_places, host_problem, is_anchored_dir, resolve_host,
 };
-pub use vm::{Provider, Source, Vm};
+pub use vm::{Provider, RepoUrl, ScriptPath, Source, Vm};
 
 /// Default directory (relative to the project root) holding
 /// the Vagrantfile and provisioning scripts.
@@ -936,11 +936,12 @@ impl Config {
         self.validate_generated()
     }
 
-    /// Checks `box`, `repo`, `ref`, `script`, `cpus` and
-    /// `memory`.
+    /// Checks `box`, `ref`, `cpus` and `memory`.
     ///
-    /// These six are the ones bombyx renders into the
-    /// Vagrantfile, which is why they are checked together.
+    /// Not `repo` or `script`. Those are `RepoUrl` and
+    /// `ScriptPath`, whose constructors hold their rules, so
+    /// one that exists has already passed and there is nothing
+    /// left here to check.
     ///
     /// Split out of [`Config::validate`] only because that
     /// function outgrew the 100-line limit. The rules still sit
@@ -2140,9 +2141,12 @@ mod tests {
         assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus, 4);
         assert_eq!(cfg.vm.memory, 8192);
-        assert_eq!(cfg.source.repo, "https://example.invalid/myproject.git");
+        assert_eq!(
+            cfg.source.repo.as_str(),
+            "https://example.invalid/myproject.git"
+        );
         assert_eq!(cfg.source.git_ref, "main");
-        assert_eq!(cfg.source.script, "vagrant/provision.sh");
+        assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
     }
 
     #[test]
@@ -2228,7 +2232,11 @@ mod tests {
             // for one differently, so that case would fail as
             // a parse error before reaching the guard. It is
             // covered directly in `config::vm`'s tests instead.
-            for bad in ["a\"b", "a\\b", "a#{1}b"] {
+            for (bad, reason) in [
+                ("a\"b", "would end or escape"),
+                ("a\\b", "would end or escape"),
+                ("a#{1}b", "Ruby interpolation"),
+            ] {
                 let source: String = full_toml()
                     .lines()
                     .map(|l| {
@@ -2245,11 +2253,24 @@ mod tests {
                     source.contains(&format!("{field} = ")),
                     "{field} is not a key in the fixture"
                 );
-                let err = parse_full(&source).unwrap_err();
+                // The message is asserted, not the variant,
+                // because the two differ by field. `repo` and
+                // `script` are newtypes checked while serde
+                // deserializes, so a bad one arrives wrapped as
+                // `Parse`, which also names the line. `box` and
+                // `ref` are checked after parsing, as `Invalid`.
+                // Both spellings carry the field and the reason.
+                //
+                // The reason has to be asserted as well as the
+                // field. `toml` backticks field names in its own
+                // messages, so a field-only check also passes on
+                // `missing field` or `unknown field` -- and then
+                // this test would go green on a fixture that had
+                // drifted, while proving nothing about the guard.
+                let err = parse_full(&source).unwrap_err().to_string();
                 assert!(
-                    matches!(&err, ConfigError::Invalid { field: f, .. }
-                        if *f == field),
-                    "{field} must refuse {bad:?}, got {err:?}"
+                    err.contains(&format!("`{field}`")) && err.contains(reason),
+                    "{field} must refuse {bad:?} with {reason:?}, got {err}"
                 );
             }
         }
