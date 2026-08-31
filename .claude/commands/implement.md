@@ -144,13 +144,15 @@ particular:
 
 5. **Pre-launch code reviewers in the background**
    (optional optimisation). The next `/commit` runs
-   the Red Team and Artisan agents against the same
-   diff this implementation produces. When the diff
-   is *likely to stay stable* through user
-   verification, you can spawn both agents now with
-   `run_in_background: true` -- `subagent_type: red-team`
-   and `subagent_type: artisan` (pass `artisan` the
-   captured diff; `red-team` reads it itself). Follow the
+   the Red Team, Artisan and Fresh Reader agents against
+   the same diff this implementation produces. When the
+   diff is *likely to stay stable* through user
+   verification, you can spawn all three now with
+   `run_in_background: true` -- `subagent_type: red-team`,
+   `subagent_type: artisan` and
+   `subagent_type: fresh-reader` (pass `artisan` the
+   captured diff, `fresh-reader` the list of changed file
+   paths; `red-team` reads the diff itself). Follow the
    gating rules in `.claude/commands/code-reviewers.md`
    (the same file `/commit` step 3 uses, so the pre-launch
    and the commit-time review are identical). Note the agent
@@ -158,8 +160,9 @@ particular:
    results.
 
    **Skip the pre-launch** when:
-   - The diff is docs-only (`*.md` only) -- no
-     reviewers run for docs-only commits anyway.
+   - The diff is docs-only (`*.md` only). `/commit` may
+     still run `fresh-reader` alone there, but it is
+     cheap and not worth pre-launching.
    - User verification at step 6 is likely to
      invalidate the diff. Signals: the change
      introduces inference / heuristic logic, has

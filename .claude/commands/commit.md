@@ -34,12 +34,12 @@ gate.
    - A concise subject line (imperative mood, no period)
    - A brief body explaining what and why
 
-3. **Code review** -- Before E2E tests, spawn the **two**
+3. **Code review** -- Before E2E tests, spawn the **three**
    dedicated reviewer agents **in parallel** (in a single
-   message with two Agent tool calls). They are read-only by
-   construction -- neither has `Edit`/`Write`.
+   message with three Agent tool calls). They are read-only by
+   construction -- none has `Edit`/`Write`.
 
-   **IMPORTANT:** Always run both reviews when the diff
+   **IMPORTANT:** Always run all three reviews when the diff
    contains code changes: Rust (`.rs`, `.toml`),
    frontend (`.svelte`, `.js`, `.ts`, `.css`), config
    files (`playwright.config.ts`, `vite.config.js`,
@@ -49,15 +49,22 @@ gate.
    `.nginx`, `.env.example`, etc.).
    Never skip them -- even for "straightforward"
    changes. The only exception is commits that contain
-   no code at all (docs-only markdown, `.md` files).
+   no code at all (docs-only markdown, `.md` files) -- and
+   there, still consider `fresh-reader` alone when the
+   commit rewrites prose a newcomer lands on (`README.md`,
+   anything under `docs/`).
 
-   Spawn the **Red Team** (security & correctness,
-   `subagent_type: red-team`) and **Artisan** (code quality,
-   `subagent_type: artisan`) agents in the single parallel
-   message, giving each a one-line description of what the
-   change does. `red-team` runs `git diff --cached` itself;
-   `artisan` has no shell, so pass it the captured
-   `git diff --cached` output in its spawn prompt. The gating
+   Spawn **Red Team** (security & correctness,
+   `subagent_type: red-team`), **Artisan** (code quality,
+   `subagent_type: artisan`) and **Fresh Reader**
+   (comprehension, `subagent_type: fresh-reader`) in the
+   single parallel message, giving each a one-line
+   description of what the change does. `red-team` runs
+   `git diff --cached` itself; `artisan` has no shell, so
+   pass it the captured `git diff --cached` output in its
+   spawn prompt; `fresh-reader` gets the **list of changed
+   file paths** and no diff, because it reads the finished
+   files whole rather than what moved. The gating
    rules -- when to run, how to spawn, the diff-handoff rule
    (never `/tmp`; a `target/`-local file if one is truly
    needed), and the six labeled-bullet reporting format -- live
@@ -66,8 +73,8 @@ gate.
    live in the agent files under `.claude/agents/`.
 
    **Cross-confirmed findings:**
-   Before presenting findings, scan both reviewers'
-   output for overlap. Two findings are
+   Before presenting findings, scan all three reviewers'
+   output for overlap. Two or more findings are
    **cross-confirmed** when they describe the same
    root cause -- either:
    - Same `file:line` reference (or overlapping line
@@ -80,11 +87,17 @@ gate.
 
    Cross-confirmed findings are a stronger signal
    than unique ones. When found, present them under a
-   **Cross-confirmed** heading noting that both
-   reviewers flagged it independently. Empirically
-   (from sessions on this project's siblings) every
+   **Cross-confirmed** heading naming which reviewers
+   flagged it independently. Empirically (from sessions
+   on this project and its siblings) every
    cross-confirmed finding has been selected for
    fixing; unique findings have a lower hit rate.
+
+   A `fresh-reader` finding pairing with one of the
+   other two is worth extra weight: it means a defect is
+   both real and invisible from the files, so fixing the
+   code without fixing what it says would leave the next
+   reader in the same place.
 
    **Truncated reviewer output:**
    Before presenting findings, scan each reviewer's
@@ -127,8 +140,14 @@ gate.
    the answer before committing. Still surface **every**
    finding -- applied or escalated -- in your summary;
    never silently drop one. Cross-confirmed findings
-   (both reviewers, same root cause) are the strongest
-   signal -- note them as such.
+   (two or more reviewers, same root cause) are the
+   strongest signal -- note which ones agreed.
+
+   `fresh-reader`'s **What worked** section is not a
+   finding and needs no action. Do not act on it, and do
+   not drop it either: carry it into the summary, so the
+   passages it named are known to be load-bearing the
+   next time somebody trims comments.
 
    **Deferred findings backlog:**
 
@@ -138,10 +157,11 @@ gate.
    logged, as a backlog:
    - `docs/developer/redteam-log.md` (Red Team)
    - `docs/developer/artisan-log.md` (Artisan)
+   - `docs/developer/fresh-reader-log.md` (Fresh Reader)
 
-   Both are newest-first; new entries go right after the
-   `---`. Use a self-describing date-slug ID --
-   `<rt|aq>-<YYYY-MM-DD>-<kebab-slug>` (e.g.
+   All three are newest-first; new entries go right after
+   the `---`. Use a self-describing date-slug ID --
+   `<rt|aq|fr>-<YYYY-MM-DD>-<kebab-slug>` (e.g.
    `rt-2026-07-14-fetch-no-timeout`) -- so there is no
    central counter to maintain and the ID is greppable
    from commit messages. Each entry is the ID heading, a
@@ -150,7 +170,7 @@ gate.
    reverses a deferred item cites its ID inline
    ("supersedes rt-2026-07-14-..."). Stage any changed
    backlog file. **Threshold:** if 10+ items sit open in
-   either backlog, tell the user a full-codebase review
+   any one backlog, tell the user a full-codebase review
    is warranted.
 
 4. **Update development diary** (for significant changes):

@@ -1,10 +1,9 @@
 # Code reviewers (gating rules)
 
-Two adversarial reviewers guard every code commit. Their
-personas now live as first-class subagents in
-`.claude/agents/`, so their read-only nature is a harness
-guarantee (they have no `Edit`/`Write` tools), not just an
-instruction:
+Three reviewers guard every code commit. Their personas live as
+first-class subagents in `.claude/agents/`, so their read-only
+nature is a harness guarantee (they have no `Edit`/`Write`
+tools), not just an instruction:
 
 - **`red-team`** (`.claude/agents/red-team.md`) -- security &
   correctness. Tools: `Read, Grep, Glob, Bash`. It runs
@@ -15,6 +14,25 @@ instruction:
   no shell, so it is read-only by construction. Pass the diff to
   it in the spawn prompt (capture `git diff --cached` once in
   the calling skill and hand it over).
+- **`fresh-reader`** (`.claude/agents/fresh-reader.md`) --
+  comprehension. Tools: `Read, Grep, Glob` only. It reads the
+  changed files **whole**, not as a diff, because it is judging
+  what a newcomer lands on rather than what moved. Pass it the
+  list of changed file paths and a one-line description; do not
+  pass it the diff.
+
+**The three lanes do not overlap.** `red-team` asks whether the
+code is safe and correct, `artisan` whether it is well made, and
+`fresh-reader` whether a person arriving cold can work out what
+it does from the files alone. The third catches a class the
+other two are constitutionally blind to: both of them already
+know what the change is for, so neither can notice that the code
+never says.
+
+`fresh-reader` is also the only one asked what **worked**. Its
+report ends with the two or three explanations worth keeping,
+which is what stops them being edited away by somebody who
+cannot tell a load-bearing comment from padding.
 
 This file is the shared **gating** doc for both `/commit`
 (step 3) and `/implement` (Phase 3 pre-launch); it defines
@@ -23,32 +41,42 @@ review criteria themselves live in the agent files above.
 
 ## When to run
 
-Run **both** reviewers whenever the diff contains code changes:
+Run **all three** reviewers whenever the diff contains code
+changes:
 Rust (`.rs`, `.toml`), frontend (`.svelte`, `.js`, `.ts`,
 `.css`), config (`playwright.config.ts`, `vite.config.js`,
 `vitest.config.js`, ...), or deployment / infrastructure files
 (`.service`, `Dockerfile`, `docker-compose.yml`, `.conf`,
 `.nginx`, `.env.example`, ...). Never skip them, even for
 "straightforward" changes. The only exception is a commit with
-no code at all (docs-only markdown / `.md` files).
+no code at all (docs-only markdown / `.md` files) -- and even
+there, consider `fresh-reader` alone when the commit rewrites
+prose a newcomer will land on, such as `README.md` or anything
+under `docs/`.
 
 ## How to spawn
 
-Spawn both in a **single parallel message** -- one `Agent` call
-per reviewer -- so they run concurrently:
+Spawn all three in a **single parallel message** -- one `Agent`
+call per reviewer -- so they run concurrently:
 
 - `subagent_type: red-team`
 - `subagent_type: artisan`
+- `subagent_type: fresh-reader`
 
 Give each spawn:
 
 1. A one-line description of what the change does.
 2. For `artisan`, the captured `git diff --cached` output (it
-   has no shell). `red-team` runs the diff itself.
+   has no shell). `red-team` runs the diff itself. For
+   `fresh-reader`, the **list of changed file paths** and
+   nothing else -- it reads the files whole, and handing it a
+   diff defeats the point of the persona.
 3. The instruction to report each finding with the six labeled
    bullet fields: **ID**, **Source**, **Category**,
    **Description**, **Impact / Why it matters**, **Suggested
-   fix**.
+   fix**. `fresh-reader` uses its own three-field shape
+   (**What**, **Where it left me**, **What would have helped**)
+   and `FR-<n>` IDs; do not ask it for the six.
 
 **Diff handoff.** Never write the diff to `/tmp` (on Windows +
 Git Bash that resolves outside the workspace and is invisible to
