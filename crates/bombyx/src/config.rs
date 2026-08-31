@@ -20,13 +20,14 @@
 //! doc link: `validate` is private, and rustdoc rejects a
 //! public page pointing at a private item.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use thiserror::Error;
 
 use crate::name::{ScratchName, check_segment};
 
+mod error;
+mod guards;
 mod host;
 mod vm;
 
@@ -48,6 +49,7 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
      ref = \"main\"\n\
      script = \"vagrant/provision.sh\"\n";
 
+pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, USER_CONFIG_FILE,
     user_config_dir,
@@ -71,129 +73,6 @@ const DEFAULT_REMOTE_ROOT: &str = "~/vms";
 /// committed to a repo cannot make bombyx read it into memory
 /// without bound.
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
-
-/// Errors produced while loading a project configuration.
-#[derive(Debug, Error)]
-pub enum ConfigError {
-    /// The configuration file does not exist.
-    #[error("config file not found: {}", .0.display())]
-    NotFound(PathBuf),
-
-    /// The configuration file could not be read.
-    #[error("failed to read {}: {source}", .path.display())]
-    Read {
-        /// Path that could not be read.
-        path: PathBuf,
-        /// Underlying I/O error.
-        source: std::io::Error,
-    },
-
-    /// A configuration path exists but is not a regular file.
-    #[error("{} is not a regular file", .0.display())]
-    NotAFile(PathBuf),
-
-    /// A configuration file is implausibly large.
-    #[error("{} is larger than {MAX_CONFIG_BYTES} bytes", .0.display())]
-    TooLarge(PathBuf),
-
-    /// The configuration file is not valid TOML, or does not
-    /// match the expected shape.
-    ///
-    /// **Carries a summary, not the `toml` crate's `Display`.**
-    /// That rendering quotes the offending *source line* into the
-    /// message, and bombyx printed it straight to stderr:
-    ///
-    /// ```text
-    /// bombyx: loading bombyx.toml: invalid config in bombyx.toml:
-    /// TOML parse error at line 1, column 12
-    ///   |
-    /// 1 | -----BEGIN OPENSSH PRIVATE KEY-----
-    /// ```
-    ///
-    /// Reproduced against the built binary. `bombyx.toml` can be a
-    /// symlink -- the overlay path refuses one, the base path does
-    /// not, and nobody inspects a config after a clone -- so a
-    /// hostile repo could aim it at `~/.ssh/id_ed25519` and have a
-    /// line of it echoed.
-    ///
-    /// What is kept is the part that helps: the position and the
-    /// reason. What is dropped is the quoted line. Naming
-    /// `line 1, column 12` and "expected an equals" is enough to
-    /// correct a malformed config; the file's own contents are not
-    /// bombyx's to print.
-    #[error("invalid config in {}: {summary}", .path.display())]
-    Parse {
-        /// Path that failed to parse.
-        path: PathBuf,
-        /// Position and reason, without the source snippet.
-        summary: String,
-    },
-
-    /// A required field was present but empty.
-    #[error("`{field}` must not be empty")]
-    Empty {
-        /// Name of the offending field.
-        field: &'static str,
-    },
-
-    /// A field held a value outside its allowed shape.
-    #[error("invalid `{field}`: {reason}")]
-    Invalid {
-        /// Name of the offending field.
-        field: &'static str,
-        /// What rule the value broke.
-        reason: String,
-    },
-
-    /// The committed project file carried a `host` key.
-    ///
-    /// Refused rather than ignored. A committed host names one
-    /// developer's machine, and a stale one that still parses
-    /// is how `destroy` ends up deleting a directory on a
-    /// colleague's host.
-    #[error(
-        "`host` is not allowed in {}: it names one developer's \
-         machine, and this file is committed. Move that line to \
-         {places}",
-        .path.display()
-    )]
-    HostInProjectFile {
-        /// The project file carrying the key.
-        path: PathBuf,
-        /// Where the value belongs instead.
-        places: String,
-    },
-
-    /// No source supplied a VM host.
-    #[error(
-        "no VM host configured -- set it in {places}, pass \
-         --host, or set {HOST_ENV}"
-    )]
-    HostMissing {
-        /// The files that would supply one.
-        places: String,
-    },
-
-    /// The winning source supplied an unusable host.
-    ///
-    /// Separate from [`ConfigError::Invalid`] so the message can
-    /// name *where the value came from*. As a plain field error
-    /// the only path in it was the project file's -- the one file
-    /// now forbidden to carry a host -- so the message sent the
-    /// operator to edit the wrong thing.
-    #[error("invalid VM host from {origin}: {reason}")]
-    InvalidHost {
-        /// Which source supplied it.
-        origin: String,
-        /// What rule the value broke.
-        reason: String,
-    },
-}
-
-/// Characters allowed in a path on the VM host.
-fn is_remote_path_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '~')
-}
 
 /// Fewest real segments `remote_root` must contain.
 ///
@@ -384,55 +263,6 @@ fn reject_host_key(
         path: path.to_path_buf(),
         places: host_places(sources, local_config_path(path).as_deref()),
     })
-}
-
-/// Requires a path that stays inside the project directory.
-///
-/// The value is joined onto the working directory, and
-/// `Path::join` with an absolute operand *discards* the left
-/// side -- so `vagrant_dir = "/etc"` makes `up` archive `/etc`
-/// rather than a directory in the project. Since `bombyx.toml`
-/// travels inside a repo, that turned a clone into
-/// "tar the operator's `~/.ssh` and scp it to the host named in
-/// the same file".
-///
-/// Rooted spellings are checked directly rather than left to
-/// [`Path::is_absolute`], because that answers per-platform: a
-/// Windows drive prefix is not absolute on Unix, and the same
-/// config file is read on both.
-fn check_project_relative(
-    field: &'static str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    let invalid = |reason: &str| ConfigError::Invalid {
-        field,
-        reason: reason.to_owned(),
-    };
-
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return Err(invalid("must not name a drive"));
-    }
-    if value.starts_with('/') || value.starts_with('\\') {
-        return Err(invalid("must be relative to the project directory"));
-    }
-    if value.starts_with('~') {
-        return Err(invalid("must not start with `~`"));
-    }
-
-    // Everything left must be an ordinary segment. This is what
-    // rejects `..` and `.`, in any position rather than only at
-    // the front.
-    for component in Path::new(value).components() {
-        if !matches!(component, Component::Normal(_)) {
-            return Err(invalid(
-                "must be a plain relative path, with no `.`, \
-                 `..` or root",
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 /// Deserializes TOML, naming `path` in any error.
@@ -826,17 +656,12 @@ impl Config {
             ("vagrant_dir", &self.vagrant_dir),
             ("remote_root", &self.remote_root),
         ] {
-            if value.trim().is_empty() {
-                return Err(ConfigError::Empty { field });
-            }
-            if value.starts_with('-') {
-                return Err(ConfigError::Invalid {
-                    field,
-                    reason: "must not start with `-`, which \
-                             ssh and scp read as an option"
-                        .to_owned(),
-                });
-            }
+            guards::check_not_empty(field, value)?;
+            // These three reach `ssh` and `scp` as arguments,
+            // so they get the same rule `ref` gets for `git` --
+            // from the same function, which is why the tool is
+            // a parameter.
+            guards::check_not_an_option(field, value, "ssh and scp")?;
         }
 
         // `project` becomes one directory name on the host.
@@ -848,12 +673,12 @@ impl Config {
         // `vagrant_dir` is the one field that names a path on
         // *this* machine, so it is the one that can point the
         // archive at something outside the project.
-        check_project_relative("vagrant_dir", &self.vagrant_dir)?;
+        guards::check_project_relative("vagrant_dir", &self.vagrant_dir)?;
 
-        charset(
+        guards::check_charset(
             "remote_root",
             &self.remote_root,
-            is_remote_path_char,
+            guards::is_remote_path_char,
             "letters, digits, `.`, `_`, `-`, `/` or `~`",
         )?;
         // Everything below exists because bombyx *deletes* the
@@ -949,7 +774,14 @@ impl Config {
     /// remains the single entry point, so no caller can reach
     /// one half of the checks without the other.
     fn validate_generated(&self) -> Result<(), ConfigError> {
-        vm::validate(&self.vm, &self.source)
+        // `vm::validate` reports a `FieldError`, which knows
+        // nothing about config files. The `?` widens it into a
+        // `ConfigError` through the `From` impl in
+        // `config::error`, so a caller matching on
+        // `ConfigError::Invalid` sees the same thing whichever
+        // side of that line the check ran on.
+        vm::validate(&self.vm, &self.source)?;
+        Ok(())
     }
 
     /// Returns the project directory on the VM host, e.g.
@@ -978,25 +810,6 @@ impl Config {
     fn root(&self) -> &str {
         self.remote_root.trim_end_matches('/')
     }
-}
-
-/// Checks every character of `value` against `allowed`.
-fn charset(
-    field: &'static str,
-    value: &str,
-    allowed: fn(char) -> bool,
-    expected: &str,
-) -> Result<(), ConfigError> {
-    if let Some(bad) = value.chars().find(|c| !allowed(*c)) {
-        return Err(ConfigError::Invalid {
-            field,
-            reason: format!(
-                "character {bad:?} is not allowed; use only \
-                 {expected}"
-            ),
-        });
-    }
-    Ok(())
 }
 
 #[cfg(test)]

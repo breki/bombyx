@@ -22,7 +22,8 @@ use std::fmt;
 
 use serde::Deserialize;
 
-use super::ConfigError;
+use super::error::FieldError;
+use super::guards;
 
 /// The virtualization backend the generated Vagrantfile targets.
 ///
@@ -136,18 +137,22 @@ pub struct RepoUrl(String);
 impl RepoUrl {
     /// Checks `raw` and wraps it.
     ///
+    /// Takes `&str` rather than `String` so a value that is
+    /// about to be rejected costs no allocation, and so callers
+    /// holding a borrowed value need not make one.
+    ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Empty`] when `raw` is blank, and
-    /// [`ConfigError::Invalid`] when it begins or ends with
+    /// Returns [`FieldError::Empty`] when `raw` is blank, and
+    /// [`FieldError::Invalid`] when it begins or ends with
     /// whitespace, would break the generated Vagrantfile, would
     /// be read by `git` as an option, or names a remote helper
     /// rather than a repository.
-    pub fn parse(raw: String) -> Result<Self, ConfigError> {
-        check_renderable("repo", &raw)?;
-        check_not_an_option("repo", &raw)?;
-        check_repo_url(&raw)?;
-        Ok(Self(raw))
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        check_renderable("repo", raw)?;
+        guards::check_not_an_option("repo", raw, "git")?;
+        check_repo_url(raw)?;
+        Ok(Self(raw.to_owned()))
     }
 
     /// The value, as `git` and the Vagrantfile see it.
@@ -157,11 +162,26 @@ impl RepoUrl {
     }
 }
 
-impl TryFrom<String> for RepoUrl {
-    type Error = ConfigError;
+impl fmt::Display for RepoUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
+impl AsRef<str> for RepoUrl {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for RepoUrl {
+    type Error = FieldError;
+
+    /// What serde calls. The owned `String` it hands over is
+    /// dropped when the value is refused, which is why
+    /// [`RepoUrl::parse`] borrows instead.
     fn try_from(raw: String) -> Result<Self, Self::Error> {
-        Self::parse(raw)
+        Self::parse(&raw)
     }
 }
 
@@ -202,16 +222,16 @@ impl ScriptPath {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Empty`] when `raw` is blank, and
-    /// [`ConfigError::Invalid`] when it begins or ends with
+    /// Returns [`FieldError::Empty`] when `raw` is blank, and
+    /// [`FieldError::Invalid`] when it begins or ends with
     /// whitespace, would break the generated Vagrantfile, would
     /// be read by `git` as an option, or leaves the clone
     /// directory.
-    pub fn parse(raw: String) -> Result<Self, ConfigError> {
-        check_renderable("script", &raw)?;
-        check_not_an_option("script", &raw)?;
-        check_script_path(&raw)?;
-        Ok(Self(raw))
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        check_renderable("script", raw)?;
+        guards::check_not_an_option("script", raw, "git")?;
+        check_script_path(raw)?;
+        Ok(Self(raw.to_owned()))
     }
 
     /// The value, as the guest's shell sees it.
@@ -221,11 +241,24 @@ impl ScriptPath {
     }
 }
 
-impl TryFrom<String> for ScriptPath {
-    type Error = ConfigError;
+impl fmt::Display for ScriptPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
+impl AsRef<str> for ScriptPath {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ScriptPath {
+    type Error = FieldError;
+
+    /// What serde calls; see [`RepoUrl::try_from`].
     fn try_from(raw: String) -> Result<Self, Self::Error> {
-        Self::parse(raw)
+        Self::parse(&raw)
     }
 }
 
@@ -267,9 +300,9 @@ impl TryFrom<String> for ScriptPath {
 fn check_renderable(
     field: &'static str,
     value: &str,
-) -> Result<(), ConfigError> {
+) -> Result<(), FieldError> {
     if value.trim().is_empty() {
-        return Err(ConfigError::Empty { field });
+        return Err(FieldError::Empty { field });
     }
     // Surrounding whitespace is almost always a copy-paste
     // artifact, and every one of these fields fails obscurely
@@ -279,7 +312,7 @@ fn check_renderable(
     // and name nothing recognisable. Catching it here means the
     // operator sees it before anything is pushed.
     if value.trim() != value {
-        return Err(ConfigError::Invalid {
+        return Err(FieldError::Invalid {
             field,
             reason: "must not begin or end with whitespace".to_owned(),
         });
@@ -289,7 +322,7 @@ fn check_renderable(
         // differs: a BEL or a tab neither ends nor escapes a
         // Ruby literal, and telling an operator it does sends
         // them hunting a quoting problem they do not have.
-        return Err(ConfigError::Invalid {
+        return Err(FieldError::Invalid {
             field,
             reason: format!(
                 "control character {bad:?} is not allowed; use \
@@ -298,7 +331,7 @@ fn check_renderable(
         });
     }
     if let Some(bad) = value.chars().find(|c| *c == '"' || *c == '\\') {
-        return Err(ConfigError::Invalid {
+        return Err(FieldError::Invalid {
             field,
             reason: format!(
                 "character {bad:?} is not allowed; it would end \
@@ -307,47 +340,10 @@ fn check_renderable(
         });
     }
     if value.contains("#{") {
-        return Err(ConfigError::Invalid {
+        return Err(FieldError::Invalid {
             field,
             reason: "`#{` is Ruby interpolation and would be \
                      evaluated in the generated Vagrantfile"
-                .to_owned(),
-        });
-    }
-    Ok(())
-}
-
-/// Refuses a value `git` would treat as an option, not a value.
-///
-/// Command-line tools tell options apart from ordinary values
-/// by the leading `-`. So if a config value starts with `-` and
-/// we pass it to `git`, `git` reads it as an instruction to
-/// itself.
-///
-/// This is the second of two guards, not the only one. The
-/// guest runs `git fetch --depth 1 origin -- "$BOMBYX_REF"`,
-/// and that `--` already tells `git` that whatever follows is a
-/// value rather than an option.
-///
-/// It is kept anyway, because `git` accepts options *after*
-/// positional arguments -- which is easy to miss, since many
-/// tools do not. So a command that forgets the `--`, here or in
-/// a future one bombyx composes, would read
-/// `--upload-pack=/bin/sh` as an instruction naming a program
-/// to run on the other end rather than as a branch name.
-///
-/// `project`, `vagrant_dir` and `remote_root` need the same
-/// rule, for the same reason. If you add a field whose value
-/// reaches a command line, it needs this too.
-fn check_not_an_option(
-    field: &'static str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if value.starts_with('-') {
-        return Err(ConfigError::Invalid {
-            field,
-            reason: "must not start with `-`, which git reads as \
-                     an option"
                 .to_owned(),
         });
     }
@@ -371,14 +367,14 @@ fn check_not_an_option(
 /// below is looking for, and it refuses any `::`, so
 /// `ext::something` cannot slip through as "a host called ext
 /// with an empty path".
-fn check_repo_url(value: &str) -> Result<(), ConfigError> {
+fn check_repo_url(value: &str) -> Result<(), FieldError> {
     const ALLOWED: [&str; 4] = ["https://", "http://", "ssh://", "git://"];
     let scp_like =
         !value.contains("://") && value.contains(':') && !value.contains("::");
     if ALLOWED.iter().any(|p| value.starts_with(p)) || scp_like {
         return Ok(());
     }
-    Err(ConfigError::Invalid {
+    Err(FieldError::Invalid {
         field: "repo",
         reason: "must be an https, http, ssh or git URL, or \
                  `user@host:path`; a `<transport>::<rest>` \
@@ -408,7 +404,7 @@ fn check_repo_url(value: &str) -> Result<(), ConfigError> {
 /// Windows-style `\windows\x` never arrives -- and it rejects
 /// surrounding whitespace, so ` provision.sh` never arrives
 /// either.
-fn check_script_path(value: &str) -> Result<(), ConfigError> {
+fn check_script_path(value: &str) -> Result<(), FieldError> {
     let bad = if value.starts_with('/') {
         Some("must be relative to the clone root")
     } else if value.split('/').any(|s| s == "..") {
@@ -417,7 +413,7 @@ fn check_script_path(value: &str) -> Result<(), ConfigError> {
         None
     };
     match bad {
-        Some(reason) => Err(ConfigError::Invalid {
+        Some(reason) => Err(FieldError::Invalid {
             field: "script",
             reason: reason.to_owned(),
         }),
@@ -429,7 +425,7 @@ fn check_script_path(value: &str) -> Result<(), ConfigError> {
 ///
 /// One function, called from one place, so nobody can run half
 /// the checks by accident.
-pub(super) fn validate(vm: &Vm, source: &Source) -> Result<(), ConfigError> {
+pub(super) fn validate(vm: &Vm, source: &Source) -> Result<(), FieldError> {
     // `repo` and `script` are not checked here, and do not need
     // to be. They are `RepoUrl` and `ScriptPath`, and those
     // types run their checks when they are built, so one that
@@ -452,14 +448,14 @@ pub(super) fn validate(vm: &Vm, source: &Source) -> Result<(), ConfigError> {
     // Only `ref` reaches a command line. `box` does not:
     // vagrant resolves it, and it never becomes an argument
     // bombyx composes.
-    check_not_an_option("ref", &source.git_ref)?;
+    guards::check_not_an_option("ref", &source.git_ref, "git")?;
 
     // A machine with no CPU or no memory is refused here rather
     // than by vagrant, which would report it on the VM host
     // after the push has already changed state.
     for (field, value) in [("cpus", vm.cpus), ("memory", vm.memory)] {
         if value == 0 {
-            return Err(ConfigError::Invalid {
+            return Err(FieldError::Invalid {
                 field,
                 reason: "must be at least 1".to_owned(),
             });
@@ -483,54 +479,110 @@ mod tests {
 
     fn source() -> Source {
         Source {
-            repo: RepoUrl::parse("https://example.invalid/p.git".to_owned())
+            repo: RepoUrl::parse("https://example.invalid/p.git")
                 .expect("a valid fixture URL"),
             git_ref: "main".to_owned(),
-            script: ScriptPath::parse("vagrant/provision.sh".to_owned())
+            script: ScriptPath::parse("vagrant/provision.sh")
                 .expect("a valid fixture path"),
         }
     }
 
+    /// Builds either newtype from a string, discarding the
+    /// value, so a rule both share can be tested against both.
+    ///
+    /// Each entry is the field name and a constructor. The
+    /// closures capture nothing, so they become plain function
+    /// pointers and the array has one type.
+    type Build = fn(&str) -> Result<(), FieldError>;
+    fn both_newtypes() -> [(&'static str, Build); 2] {
+        [
+            ("repo", |s| RepoUrl::parse(s).map(|_| ())),
+            ("script", |s| ScriptPath::parse(s).map(|_| ())),
+        ]
+    }
+
+    /// Asserts `bad` is refused with a message mentioning
+    /// `reason`.
+    ///
+    /// Pinning the reason, not just the failure, is what makes
+    /// these tests notice a deleted rule. A value refused by
+    /// some *other* check would still fail `is_err()`, so a
+    /// weaker assertion goes green while the rule it covered
+    /// is gone.
+    fn refused_because(build: Build, bad: &str, reason: &str) {
+        let err = build(bad).expect_err("must be refused").to_string();
+        assert!(err.contains(reason), "{bad:?}: want {reason:?}, got {err}");
+    }
+
     #[test]
-    fn a_repo_url_refuses_what_git_would_not_clone() {
-        // The constructor holds every rule, so an invalid
-        // `RepoUrl` cannot be built at all -- not by a config
-        // file and not by a library caller.
-        //
-        // Each case names the rule it must trip, so a case that
-        // starts failing for a different reason shows up as a
-        // failure instead of passing quietly.
-        //
-        // Naming the rule is what makes this suite notice if
-        // the leading-dash check is deleted. Without it, `-x`
-        // would still be refused -- by the URL check, which
-        // catches it for a different reason -- and a test
-        // asserting only "this is refused" would stay green
-        // while the rule it covered was gone.
-        //
-        // `-oProxyCommand=id:x` is stronger still. One colon,
-        // no `://`, so the URL check reads it as the SSH
-        // shorthand `host:path` and accepts it outright. Delete
-        // the dash check and that value is not refused at all.
-        for (bad, reason) in [
-            ("ext::sh -c 'id > /pwned'", "must be an https"),
-            ("fd::7", "must be an https"),
-            ("not-a-url", "must be an https"),
-            ("", "must not be empty"),
-            ("   ", "must not be empty"),
-            (" https://example.invalid/p.git", "whitespace"),
-            ("https://example.invalid/p.git ", "whitespace"),
-            ("-x", "git reads as an option"),
-            ("-oProxyCommand=id:x", "git reads as an option"),
-            ("--upload-pack=/bin/sh:x", "git reads as an option"),
-            ("https://example.invalid/a\"b", "would end or escape"),
-        ] {
-            let err = RepoUrl::parse(bad.to_owned())
-                .expect_err("must be refused")
-                .to_string();
-            assert!(
-                err.contains(reason),
-                "{bad:?}: expected {reason:?}, got {err}"
+    fn both_newtypes_refuse_a_blank_value() {
+        for (field, build) in both_newtypes() {
+            for bad in ["", "   "] {
+                let _ = field;
+                refused_because(build, bad, "must not be empty");
+            }
+        }
+    }
+
+    #[test]
+    fn both_newtypes_refuse_surrounding_whitespace() {
+        // A copy-paste artifact that otherwise fails inside the
+        // guest, long after bombyx could have said so.
+        for (field, build) in both_newtypes() {
+            let good = if field == "repo" {
+                "https://example.invalid/p.git"
+            } else {
+                "vagrant/provision.sh"
+            };
+            for bad in [format!(" {good}"), format!("{good} ")] {
+                refused_because(build, &bad, "whitespace");
+            }
+        }
+    }
+
+    #[test]
+    fn both_newtypes_refuse_characters_that_break_the_ruby() {
+        // These reach a Ruby string literal in the generated
+        // Vagrantfile. `\windows\x` belongs here rather than
+        // with the path rules: it looks like a path mistake and
+        // is caught by the character rule.
+        for (field, build) in both_newtypes() {
+            let stem = if field == "repo" {
+                "https://example.invalid/"
+            } else {
+                "vagrant/"
+            };
+            for bad in [format!("{stem}a\"b"), format!("{stem}a\\b")] {
+                refused_because(build, &bad, "would end or escape");
+            }
+        }
+    }
+
+    #[test]
+    fn both_newtypes_refuse_a_value_git_reads_as_an_option() {
+        // `-oProxyCommand=id:x` is the case that pins this rule
+        // for `repo`. One colon, no `://`, so the URL check
+        // reads it as the SSH shorthand `host:path` and accepts
+        // it outright -- delete the dash rule and that value is
+        // not refused at all.
+        for (_, build) in both_newtypes() {
+            for bad in ["-x", "-oProxyCommand=id:x", "--upload-pack=/bin/sh:x"]
+            {
+                refused_because(build, bad, "git reads as an option");
+            }
+        }
+    }
+
+    #[test]
+    fn a_repo_url_refuses_anything_git_would_not_clone() {
+        // `git` remote helpers are written `name::rest`, and
+        // `ext::` runs the rest as a shell command rather than
+        // cloning anything.
+        for bad in ["ext::sh -c 'id > /pwned'", "fd::7", "not-a-url"] {
+            refused_because(
+                |s| RepoUrl::parse(s).map(|_| ()),
+                bad,
+                "must be an https",
             );
         }
     }
@@ -544,46 +596,38 @@ mod tests {
             "git://example.invalid/p.git",
             "git@github.com:breki/bombyx.git",
         ] {
-            let parsed = RepoUrl::parse(good.to_owned())
+            let parsed = RepoUrl::parse(good)
                 .unwrap_or_else(|e| panic!("{good:?}: {e}"));
             assert_eq!(parsed.as_str(), good);
         }
     }
 
     #[test]
-    fn a_script_path_must_stay_inside_the_clone() {
+    fn a_script_path_refuses_one_that_leaves_the_clone() {
         // Whatever this names is about to be made executable and
         // run as root in the guest.
-        //
-        // Each case names the rule it must trip, not just "this
-        // is refused". Asserting only `is_err()` hides which
-        // check fired, and the two are easy to confuse:
-        // `\windows\x` looks like a path rule and is actually
-        // caught by the character rule, because a backslash
-        // would escape the next character in the generated Ruby.
         for (bad, reason) in [
             ("/usr/bin/env", "relative to the clone root"),
             ("../../usr/bin/env", "`..` segment"),
             ("a/../../../etc/x", "`..` segment"),
-            (" provision.sh", "whitespace"),
-            ("provision.sh ", "whitespace"),
-            ("-x", "git reads as an option"),
-            ("", "must not be empty"),
-            ("a\"b", "would end or escape"),
-            ("a\\b", "would end or escape"),
         ] {
-            let err = ScriptPath::parse(bad.to_owned())
-                .expect_err("must be refused")
-                .to_string();
-            assert!(
-                err.contains(reason),
-                "{bad:?}: expected {reason:?}, got {err}"
-            );
+            refused_because(|s| ScriptPath::parse(s).map(|_| ()), bad, reason);
         }
 
-        let ok = ScriptPath::parse("vagrant/provision.sh".to_owned())
+        let ok = ScriptPath::parse("vagrant/provision.sh")
             .expect("a plain relative path");
         assert_eq!(ok.as_str(), "vagrant/provision.sh");
+    }
+
+    #[test]
+    fn the_newtypes_render_as_the_value_they_hold() {
+        let repo = RepoUrl::parse("https://example.invalid/p.git").unwrap();
+        assert_eq!(repo.to_string(), "https://example.invalid/p.git");
+        assert_eq!(repo.as_ref(), "https://example.invalid/p.git");
+
+        let script = ScriptPath::parse("vagrant/provision.sh").unwrap();
+        assert_eq!(script.to_string(), "vagrant/provision.sh");
+        assert_eq!(script.as_ref(), "vagrant/provision.sh");
     }
 
     #[test]
@@ -606,7 +650,7 @@ mod tests {
             s.git_ref = bad.to_owned();
             let err = validate(&vm(), &s).unwrap_err();
             assert!(
-                matches!(&err, ConfigError::Invalid { field: "ref", .. }),
+                matches!(&err, FieldError::Invalid { field: "ref", .. }),
                 "ref must refuse {bad:?}, got {err:?}"
             );
         }
@@ -620,7 +664,7 @@ mod tests {
         let mut s = source();
         s.git_ref = "ma\u{7}in".to_owned();
         let err = validate(&vm(), &s).unwrap_err();
-        let ConfigError::Invalid { reason, .. } = &err else {
+        let FieldError::Invalid { reason, .. } = &err else {
             panic!("{err:?}");
         };
         assert!(reason.contains("control character"), "{reason}");

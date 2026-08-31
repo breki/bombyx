@@ -179,10 +179,10 @@ mod tests {
             memory: 8192,
         };
         cfg.source = Source {
-            repo: RepoUrl::parse("https://example.invalid/p.git".to_owned())
+            repo: RepoUrl::parse("https://example.invalid/p.git")
                 .expect("a valid fixture URL"),
             git_ref: "main".to_owned(),
-            script: ScriptPath::parse("vagrant/provision.sh".to_owned())
+            script: ScriptPath::parse("vagrant/provision.sh")
                 .expect("a valid fixture path"),
         };
         cfg

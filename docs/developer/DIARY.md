@@ -63,6 +63,29 @@ Replacing a "see below" with a rustdoc link to
 rustdoc twice and the public pass refuses a public item linking
 a private one. Tested rather than argued.
 
+**A third copy of the same rule**
+
+Acting on the deferred design findings turned up something
+neither reviewer did. One of them said the leading-dash rule
+existed twice -- once as a function in `config/vm.rs`, once
+hand-inlined in `Config::validate` -- so unifying them meant
+finding both. Grepping afterwards to check the job was done
+found a third, in `config/host.rs`.
+
+That one stays duplicated, and the reason is worth writing
+down. The shared guard returns a `FieldError`, which carries a
+field name and nothing else. A bad host has to be reported with
+the *source* it came from -- a flag, an environment variable,
+or one of two files -- because "invalid host" without saying
+where it came from sends the operator to edit the wrong file.
+Routing it through the shared function would lose that. It has
+a comment now saying widen both.
+
+The lesson is not about the dash rule. It is that "unify the
+duplication" needs the same treatment as any other guard: grep
+for the shape after fixing it, because the reviewer who found
+two copies had no reason to believe there was a third.
+
 ### 2026-08-30
 
 **bombyx writes the Vagrantfile now**

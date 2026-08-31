@@ -100,6 +100,14 @@ pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
     if value.trim().is_empty() {
         return Some(HostProblem::Empty);
     }
+    // The same rule as `guards::check_not_an_option`, written
+    // out again rather than shared. That function returns a
+    // `FieldError`, which carries a field name and nothing else,
+    // and a bad host has to be reported with the *source* it
+    // came from -- a flag, an environment variable, or one of
+    // two files. Converting between the two would lose that.
+    //
+    // If you widen this rule, widen it there too.
     if value.starts_with('-') {
         return Some(HostProblem::Invalid(
             "must not start with `-`, which ssh and scp read as \
