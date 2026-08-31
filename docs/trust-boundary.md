@@ -158,10 +158,9 @@ untrustworthy. Scoping it -- read-only, one repository,
 short-lived -- limits what stealing it is worth. Scoping does
 not prevent the theft. This is an accepted exposure rather than
 a solved problem, and it qualifies the phrase "no credentials"
-in `README.md`. No alternative has been designed. A forwarded
-agent, a fetch proxy on the VM host, or source baked into a
-base image would each change the picture, and none of them
-exists.
+in `README.md`. A forwarded agent, a fetch proxy on the VM
+host, or source baked into a base image would each change the
+picture, and none of them exists.
 
 **Nothing can size the VM before the VM exists.** A project
 that declares its memory and CPU needs in its own repository

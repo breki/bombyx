@@ -38,6 +38,14 @@ In practice:
   action, so the check goes there" says the same thing. Name
   the file, the function or the person, and let them act.
   Do not promote a module into a "layer" or a "tier".
+  **"Nothing" and "No X" as a subject break the same rule**,
+  and are easy to miss because they read as plain. "Nothing
+  has run against frosti" hides who did not run it, and
+  "nothing reads the structure" hides that the code is
+  bombyx while reaching for an abstraction where "the parsed
+  URL" was there to be named. Say "I have not run bombyx
+  against frosti" and "bombyx never reads the parsed URL". A
+  subject that is a placeholder lets nobody act.
 - **Never make the reader parse a sentence twice.** The
   shapes below have each caused it here. **The list is
   not closed and is not the rule** -- it began at (a),

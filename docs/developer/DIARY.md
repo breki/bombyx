@@ -38,9 +38,10 @@ What is verified and what is not. Vagrant 2.4.9 with
 vagrant-libvirt 0.12.2 turned out to be installed on this
 workstation, the same versions frosti runs, so `vagrant validate`
 parses the generated file. That is kept as an `#[ignore]`-tagged
-test. `shellcheck` reports `bootstrap.sh` clean. Nothing has run
-against frosti, so nothing shows that the host accepts the
-heredoc write or that the guest can reach the git host.
+test. `shellcheck` reports `bootstrap.sh` clean. This has never run
+against frosti, so two things stay unknown: whether the host
+accepts the heredoc write, and whether the guest can reach the
+git host.
 
 The review round caught the thing that mattered. The generated
 Vagrantfile left Vagrant's default share on, so the guest

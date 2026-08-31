@@ -55,7 +55,7 @@ directory:
 - `Vagrantfile` -- rendered per project. Ruby.
 - `bootstrap.sh` -- **identical for every project**, so it is a
   constant compiled into the binary with `include_str!` and shipped
-  verbatim. Nothing is interpolated into it.
+  verbatim. bombyx interpolates nothing into it.
 
 One nesting level disappears. `repo`, `ref` and `script` reach the
 guest as environment variables set by Vagrant, so they never become
@@ -87,8 +87,8 @@ cannot contain such a character should say so where it lives.
   into shell text. Removes one of three nested quoting contexts,
   which was the largest risk in the change.
 - **2026-08-30 -- All four `[vm]` fields are required**: `provider`,
-  `box`, `cpus`, `memory`. No defaults, so a project's VM size is
-  visible in its own repo. Consequence accepted: every existing
+  `box`, `cpus`, `memory`. A project must state all four, so its
+  VM size is visible in its own repo. Consequence accepted: every existing
   `bombyx.toml` stops validating until it gains the section.
 - **2026-08-30 -- The provisioner clones the repository inside the
   guest** and runs a script from the clone. This closes the
