@@ -58,8 +58,18 @@ and this project adheres to
   Fetching over the old clone left files only the previous repository had, so
   the guest could run the old repository's provisioning script and report
   success.
+- The message refusing a config value that starts with `-` is worded so it reads
+  correctly whichever program it names. It said "which ssh and scp reads as an
+  option".
+- The message refusing a shallow `remote_root` says what the rule requires: at
+  least one directory below `/` or `~`. It said "at least 1 directory deep",
+  which reads as a constraint on the wrong thing.
 
 ### Fixed
+
+- A `remote_root` of `~name` was accepted as an absolute path and then sent to
+  the VM host as a relative one, resolved against the SSH login directory. It
+  must now start with `/` or `~/`, or be exactly `~`.
 
 ### Removed
 

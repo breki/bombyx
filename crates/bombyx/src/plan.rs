@@ -85,7 +85,7 @@ impl Action {
 /// **A dry run also elides the two file writes' payloads.** Each
 /// carries a whole file -- the generated Vagrantfile and the
 /// bootstrap script -- and printing both in full buries the plan
-/// they belong to. The printed line names the heredoc and how
+/// they belong to. The printed line identifies the heredoc and how
 /// many lines it dropped, and what is written to the host is the
 /// full content regardless; see
 /// [`RemoteCommand::abbreviated`].

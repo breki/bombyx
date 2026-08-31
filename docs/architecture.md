@@ -97,8 +97,14 @@ probe commands, `doctor` decides what their output means.
 | Module | Owns |
 |--------|------|
 | `plan` | which commands run, and in what order |
-| `config` | `bombyx.toml`, host resolution, every field rule |
-| `config::vm` | `[vm]`, `[source]`, and their guards |
+| `config` | `bombyx.toml`, and the `Config` every command reads |
+| `config::read` | reading a config file: symlinks, size, overlay path |
+| `config::error` | `ConfigError` for a file, `FieldError` for a value |
+| `config::guards` | the rules more than one field shares |
+| `config::host` | where the VM host name comes from, and its shape |
+| `config::root` | what `remote_root` may be, and why it is strict |
+| `config::source` | `[source]`, and the two checked types it holds |
+| `config::vm` | `[vm]`, and the checks a type cannot express |
 | `vagrantfile` | rendering the Vagrantfile and the bootstrap |
 | `remote` | building `ssh`/`scp`/`tar` argv, quoting |
 | `remote::write` | the heredoc that writes a generated file |
@@ -216,7 +222,7 @@ classDiagram
 
   Action --> ScratchName : Scratch and Discard carry one
   Action ..> RemoteCommand : plan() produces a list
-  PushArchive ..> RemoteCommand : names the tar and scp
+  PushArchive ..> RemoteCommand : supplies the tar and scp paths
   Tty ..> RemoteCommand : decides ssh -t
 ```
 
@@ -276,7 +282,7 @@ Two of the six are enforced by their type. `repo` is a
 constructor holds the rules, so an invalid one cannot be built
 -- by a config file or by a library caller. serde runs the
 constructor while deserializing, so a bad value is refused
-before a `Config` exists, and the error names the line.
+before a `Config` exists, and the error identifies the line.
 
 `box`, `ref`, `cpus` and `memory` are checked by
 `Config::validate` after parsing. The line is not how many
@@ -305,11 +311,21 @@ before the ref so `git` will not read it as an option.
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after the push changed state |
 
-The older fields have their own rules, in the same place:
-`project` must be one path segment, `vagrant_dir` must stay
-inside the project, and `remote_root` must be anchored and
-several directories deep, because bombyx runs `rm -rf` on a path
-derived from it.
+The older fields have their own rules, in the same place.
+`project` must be one path segment, and `vagrant_dir` must stay
+inside the project.
+
+`remote_root` has the strictest rules of the three, because
+bombyx runs `rm -rf` on a path derived from it. It must start
+with `~` or `/`, and it must name **at least one directory below
+that root** — so `~/vms` and `/srv/vms` are accepted while `~`,
+`/` and `~/` are refused. Joining the project name onto it then
+makes the directory bombyx creates and deletes at least two deep,
+which keeps a configuration mistake from targeting a top-level or
+home-adjacent directory. A `.` or `..` segment is refused as
+well: either one moves where the path resolves without changing
+how deep it counts, and `/.` with `project = "etc"` would
+otherwise pass as two segments while resolving to `/etc`.
 
 ## Why three stages and not one
 

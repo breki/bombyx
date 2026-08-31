@@ -211,9 +211,9 @@ mod tests {
 
     #[test]
     fn classify_sanitizes_the_detail_it_stores() {
-        // The other half of what used to be one test in `report`:
-        // the rendered line is that module's guarantee, and what
-        // `classify` puts in the `Outcome` is this one's. A host
+        // Two modules, two guarantees, so two tests. The
+        // rendered line is `report`'s guarantee; what `classify`
+        // puts in the `Outcome` is this module's. A host
         // emitting cursor escapes could otherwise have them
         // travel in a `Finding` to any consumer that reads the
         // outcome programmatically rather than rendering it.

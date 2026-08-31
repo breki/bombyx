@@ -53,6 +53,13 @@ In practice:
   made, a mistake it is correcting. Reserve "you" for what
   only the operator can do, such as anything needing a
   password on the VM host. Everything else is "we".
+  **In code comments the actor is usually the program**, and
+  naming it beats "we": bombyx is what hands a value to
+  `ssh`, and `check_renderable` is what refuses a quote.
+  "We" there is the same placeholder subject the bullet
+  above rules out, one step better disguised. Keep "we" for
+  prose about the work -- a diary entry, a commit message, a
+  reply -- where the people really are the actors.
 - **Never make the reader parse a sentence twice.** The
   shapes below have each caused it here. **The list is
   not closed and is not the rule** -- it began at (a),
@@ -83,6 +90,42 @@ In practice:
   names, list them: "checks `box`, `repo`, `ref` and
   `script`". Prefer short subject-verb-object sentences.
   Two plain sentences beat one compressed one every time.
+- **Write sentences with verbs in them.** "Two types, and
+  the split is the point." has no verb doing any work: the
+  first half is a bare noun phrase, and "is the point" tells
+  the reader that something matters without saying what. It
+  reads as clipped and knowing, and it costs a translation
+  step. Write "The module has two types. They are separate
+  for a reason." The same defect wears several disguises --
+  "One copy.", "One rule, two error shapes.", "A shape
+  without a field name.", "Not a script, a record." -- and
+  the tell is the same in all of them: **a fragment with a
+  count or a noun in front, and no verb**. It is not
+  terseness, it is a sentence with its verb removed, and the
+  reader pays for the removal. Say who does what.
+- **No compressed idioms where a plain clause fits.** "the
+  file's own contents are not bombyx's to print" packs a
+  possessive and an infinitive into a construction the reader
+  has to unpack before they can act on it. Write "it is not
+  bombyx's responsibility to print the file contents."
+  Related shapes: "that is for the caller to decide", "not
+  ours to say", "the operator's to fix". Each one saves two
+  words and costs a re-read. Name the actor and give them a
+  verb.
+- **Avoid verbs that can be read as nouns.** "Each field
+  names the program it actually reaches" garden-paths:
+  "names" reads as a plural noun after "field", and the
+  reader only learns it was the verb on hitting "the
+  program". Write "Each field specifies the program it will
+  reach." The offenders here are the words this codebase
+  reaches for most -- **names, lists, guards, checks, runs,
+  points, files, calls, needs** -- all of them nouns as
+  readily as verbs. The trap springs hardest right after a
+  noun subject, where a plural reading is available; "the
+  guard names `git`" is fine because "guard names" cannot
+  be one phrase. Substitutes that carry no noun reading:
+  *specifies, states, identifies, enumerates, protects,
+  verifies, executes, indicates, invokes, requires*.
 - **Read the sentence back before it ships.** The check
   is mechanical: find the main verb on the first pass,
   and take each phrasal verb whole. If you cannot, or if

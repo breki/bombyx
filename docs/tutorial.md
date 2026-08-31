@@ -481,7 +481,7 @@ generates, boot.
 
 The two writes print as one line each. Each carries a whole
 file, and printing both in full would bury the plan they belong
-to, so the line names the heredoc and how many lines it dropped.
+to, so the line identifies the heredoc and how many lines it dropped.
 The full contents are written to the host either way -- this is
 the one place `--dry-run` summarises rather than showing you
 everything.

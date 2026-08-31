@@ -72,19 +72,107 @@ hand-inlined in `Config::validate` -- so unifying them meant
 finding both. Grepping afterwards to check the job was done
 found a third, in `config/host.rs`.
 
-That one stays duplicated, and the reason is worth writing
-down. The shared guard returns a `FieldError`, which carries a
-field name and nothing else. A bad host has to be reported with
-the *source* it came from -- a flag, an environment variable,
-or one of two files -- because "invalid host" without saying
-where it came from sends the operator to edit the wrong file.
-Routing it through the shared function would lose that. It has
-a comment now saying widen both.
+We left that one duplicated, with a comment saying to widen
+both, and the comment gave a reason that turned out to be
+wrong. It said the shared guard returns a `FieldError` carrying
+only a field name, while a bad host has to name the *source* it
+came from -- a flag, an environment variable, or one of two
+files -- so routing `host` through the guard would lose that.
+Two reviewers checked the claim in the next round and both
+found it false. `FieldError::Invalid` carries a reason string,
+and `Config::load` attaches the source itself, so nothing is
+lost. The third copy is gone now, and `host_problem` calls the
+three shared guards.
 
-The lesson is not about the dash rule. It is that "unify the
+The duplicate had already drifted before anyone noticed, which
+is the argument the comment should have made against itself.
+Parameterising the message for `git` singularised its verb, so
+the `ssh and scp` caller emitted "which ssh and scp reads as an
+option" while `host.rs` still said "read". The wording is
+"would treat" now, which works with one subject or two, and a
+test asserts the whole sentence rather than a fragment -- a
+`contains` check steps straight over a broken verb.
+
+Two lessons, and neither is about the dash rule. "Unify the
 duplication" needs the same treatment as any other guard: grep
 for the shape after fixing it, because the reviewer who found
-two copies had no reason to believe there was a third.
+two copies had no reason to believe there was a third. And a
+comment explaining why a duplicate stays is a claim about the
+code, so it gets checked like one -- this one was one
+three-line conversion away from being disproved, and stood for
+a day.
+
+**Splitting the config, and what the split found**
+
+`config.rs` was 2,076 lines and `config/vm.rs` was 697, so a
+reviewer asked for a split. Four seams turned out to be
+obvious once we looked: reading a file off disk (`read`), the
+`remote_root` rules (`root`), the `[source]` table with its two
+checked types (`source`), and the Ruby-literal guard, which
+four fields share and which therefore belongs in `guards` with
+the other shared rules. `config.rs` came out at 1,806 lines and
+`vm.rs` at 202.
+
+Moving code is the cheapest way to find things wrong with it,
+and this move found two.
+
+The doc comment on the `minimal()` test helper existed *twice*,
+stacked, left by an earlier line-range edit. Rust concatenates
+consecutive `///` blocks without complaint, so it had been
+rendering as one paragraph that repeated itself, and no gate
+notices. Worth knowing for the next `sed` range: a duplicated
+doc block compiles, formats and passes clippy.
+
+And `remote_root`'s depth rule was stated three ways. The
+constant said one segment, the error message said "at least 1
+directory deep" -- which is ungrammatical and reads as a
+constraint on the wrong thing -- and `docs/architecture.md`
+said "several". The message now names what the rule actually
+requires, a directory *below* the root, and a test asserts the
+whole sentence so the three cannot drift again. That is the
+canon rule about a prose rule needing a test with the same
+example, applied to an error string.
+
+**`~vms` looked anchored and resolved relatively**
+
+The review of the split found a member of the `remote_root`
+family the guard let through, and it is worth writing down
+because the two halves were each correct on their own.
+
+`root::check` accepted any value starting with `~`, on the
+reasoning that `~` is a root. `quote_remote_path` leaves the
+tilde outside the quotes only for `~` and `~/`, because those
+are the spellings it knows the shell expands. So `~vms` passed
+the anchoring rule and was then emitted fully quoted, which
+makes it an ordinary relative name resolved against the SSH
+login directory -- exactly the outcome the anchoring rule's own
+message says it prevents.
+
+The damage was bounded: `~vms` under `$HOME` is still two
+segments deep, so the depth guarantee held by accident. But it
+was measured against the wrong root, and a later change to
+`quote_remote_path` that expanded a bare `~name` would have
+turned it into another user's home directory.
+
+The rule now requires `/` or `~/`, or exactly `~`. The lesson
+is the ordinary one about a guard that spans two files: the
+check and the quoter each had a defensible idea of what "a
+root" meant, and neither file said the two had to agree.
+
+**Two more prose rules, both from a reader who was not us**
+
+The operator caught two shapes in one sitting. "Two types, and
+the split is the point." is a noun phrase with the verb
+removed, and "is the point" says something matters without
+saying what. "the file's own contents are not bombyx's to
+print" packs a possessive and an infinitive into an idiom the
+reader has to unpack. Both are now in `CLAUDE.md`, with the
+plain rewrite beside them, and we swept the tree for each --
+six instances of the first, two of the second.
+
+The pattern behind both is the same one the "parse a sentence
+twice" rule already covers: terseness measured in words rather
+than in decoding cost. Neither sentence was long.
 
 ### 2026-08-30
 

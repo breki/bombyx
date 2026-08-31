@@ -165,7 +165,7 @@ fn vagrant_script(cfg: &Config, dir: &str, args: &[&str]) -> String {
 /// local terminal to allocate against at all -- without one, ssh
 /// prints `Pseudo-terminal will not be allocated because stdin is
 /// not a terminal.` and carries on with no PTY, which is measured
-/// and is why the caller checks stdin.
+/// and is why the caller inspects stdin.
 ///
 /// It also carries `-o LogLevel=ERROR`, and that is not tidying.
 /// A tty session makes ssh print `Connection to <host> closed.` to
@@ -416,10 +416,11 @@ mod tests {
 
     /// The ssh options that precede the destination, in order.
     ///
-    /// Asserted as a whole rather than by index: an earlier version
-    /// of these tests pinned `args[1]` as the host, so inserting
-    /// `-o LogLevel=ERROR` moved the host without failing anything
-    /// until the argv was compared entirely.
+    /// Asserted as a whole rather than by index. A test pinning
+    /// `args[1]` as the host passes an argv where a new option
+    /// has pushed the host somewhere else: the index still holds
+    /// a string, just the wrong one. Comparing the whole list is
+    /// what notices.
     fn opts_before_host(c: &RemoteCommand) -> Vec<String> {
         c.args
             .iter()

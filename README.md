@@ -108,10 +108,10 @@ you can open a shell into.
 
 ## Configure
 
-There are two pieces, and the split is the point. The project
-file describes the *project* and is committed. Which machine
-runs the VMs is yours, and is configured once, outside any
-repo.
+Configuration comes in two pieces, and they are separate for a
+reason. The project file describes the *project*, and it is
+committed. Which machine runs the VMs is yours, so you
+configure it once, outside any repo.
 
 Drop a `bombyx.toml` in the project you want a VM for:
 
