@@ -4,10 +4,6 @@ bombyx runs `vagrant` on a remote VM host over SSH, so an agent
 works inside a VM and the workstation stays clean. It composes
 `ssh`, `scp`, `tar` and `vagrant` and reimplements none of them.
 
-> The diagrams are Mermaid, which GitHub renders in place. They
-> were not previewed while being written: this workstation has
-> no renderer, so the first real check is this page on GitHub.
-
 ## The three machines
 
 ```mermaid
