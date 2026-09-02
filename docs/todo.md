@@ -93,9 +93,9 @@ plan, decisions, and outcome.
   already receives an archive that no program there reads -- the generated
   Vagrantfile disables the `/vagrant` share and names only bombyx's own
   bootstrap script, so the unpacked files sit unread. `vagrant_dir` is the
-  only config value naming a
-  location inside the checkout, and the push is its only consumer. Removing
-  the push first means the moved config never needs a path to a checkout.
+  only config value naming a location inside the checkout, and the push is
+  its only consumer. Removing the push first means the moved config never
+  needs a path to a checkout.
   GitHub issue #10; planned in `docs/issues/project-config-off-repo.md`.
 
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
@@ -145,10 +145,10 @@ plan, decisions, and outcome.
   `bombyx.toml` is read from the working directory today, so it is the file
   blocking that.
 
-  Planned in `docs/issues/project-config-off-repo.md`, which holds the
-  decisions and supersedes what this entry used to argue. GitHub issue #16.
-  It is chunk 2 of three: `remote-clone-project-source` comes first and
-  `project-selection-flag` comes after.
+  The decisions live in `docs/issues/project-config-off-repo.md`; this entry
+  is a pointer at it. GitHub issue #16. It is chunk 2 of three:
+  `remote-clone-project-source` comes first and `project-selection-flag`
+  comes after.
 
   The cost is real and should be stated rather than discovered.
   `bombyx.toml` is committed today, so a teammate who clones gets the machine
