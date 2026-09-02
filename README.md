@@ -117,6 +117,12 @@ Drop a `bombyx.toml` in the project you want a VM for:
 ```toml
 project = "myproject"    # VM + directory name on the host
 
+# Optional, shown with its default. It sits above `[vm]`
+# because a bare key after a table header belongs to that
+# table: written at the bottom it would parse as
+# `source.remote_root` and the file would be refused.
+remote_root = "~/vms"    # root on the host for project dirs
+
 [vm]                     # required: the machine to build
 provider = "libvirt"     # libvirt or hyperv
 box = "generic/ubuntu2204"
@@ -127,9 +133,6 @@ memory = 8192            # MiB
 repo = "https://github.com/you/myproject"
 ref = "main"
 script = "vagrant/provision.sh"   # run from the clone
-
-# optional, shown with defaults
-remote_root = "~/vms"    # root on the host for project dirs
 ```
 
 **bombyx writes the Vagrantfile; the project does not.** It is

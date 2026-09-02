@@ -4,6 +4,8 @@
 //! assert the commands bombyx *would* run without needing a
 //! VM host.
 
+use std::path::Path;
+
 use assert_cmd::Command;
 use bombyx::config::{CONFIG_DIR_ENV, HOST_ENV, USER_CONFIG_FILE};
 use bombyx::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
@@ -508,6 +510,70 @@ fn a_host_cannot_smuggle_an_ssh_option() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("must not start with"));
+}
+
+/// Every `bombyx.toml` this repository shows a reader must load.
+///
+/// The three samples had `remote_root` written *after* the
+/// `[source]` table. TOML binds a bare key to the table above
+/// it, so it parsed as `source.remote_root` and bombyx refused
+/// the file -- which is what a reader following the tutorial
+/// got on their first command.
+///
+/// `CLAUDE.md` asks for a test using the document's own
+/// example, so this extracts the blocks rather than restating
+/// them. Restating them is how the two came to disagree.
+#[test]
+fn the_documented_sample_configs_load() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("the crate sits two levels below the repo root");
+
+    // The fenced block starting at `project = ` in each doc,
+    // and the sample file whole.
+    let from_doc = |name: &str| {
+        let text = std::fs::read_to_string(repo.join(name))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let start = text
+            .find("project = \"myproject\"")
+            .unwrap_or_else(|| panic!("{name} shows no sample config"));
+        let end = text[start..]
+            .find("```")
+            .unwrap_or_else(|| panic!("{name}: unterminated code fence"));
+        text[start..start + end].to_owned()
+    };
+
+    let samples = [
+        ("README.md", from_doc("README.md")),
+        ("docs/tutorial.md", from_doc("docs/tutorial.md")),
+        (
+            "bombyx.toml.sample",
+            std::fs::read_to_string(repo.join("bombyx.toml.sample"))
+                .unwrap_or_else(|e| {
+                    panic!("{}: {e}", repo.join("bombyx.toml.sample").display())
+                }),
+        ),
+    ];
+
+    for (name, source) in samples {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("bombyx.toml"), &source).unwrap();
+        std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+        write_user_config(&dir, "host = \"vmhost\"\n");
+        let out = bombyx_in(&dir).args(["--dry-run", "status"]).output();
+        let out = out.unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            out.status.success(),
+            "{name} does not load: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("vagrant 'status'"),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
 }
 
 #[test]

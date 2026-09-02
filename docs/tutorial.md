@@ -297,6 +297,8 @@ myproject/                  your project repo
 ```toml
 project = "myproject"    # VM and directory name on the host
 
+remote_root = "~/vms"    # root on the host for project dirs
+
 [vm]                     # required: the machine to build
 provider = "libvirt"
 box = "debian/bookworm64"
@@ -308,7 +310,6 @@ repo = "https://github.com/you/myproject"
 ref = "main"
 script = "vagrant/provision.sh"
 
-remote_root = "~/vms"    # root on the host for project dirs
 ```
 
 `[vm]` and `[source]` are required and have no defaults. bombyx

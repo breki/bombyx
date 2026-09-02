@@ -4,6 +4,55 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-02
 
+**The documented config never worked**
+
+Three files show a reader what a `bombyx.toml` looks like:
+`README.md`, `docs/tutorial.md` and `bombyx.toml.sample`. All
+three put `remote_root` after the `[source]` table. TOML binds a
+bare key to the table above it, so it parsed as
+`source.remote_root`, and bombyx refused the file. Copy the
+tutorial's block, run any command, get an error naming a field
+you did not write.
+
+Nobody noticed because nobody copies their own sample. We write
+the config by hand, and the hand-written one puts the scalars
+first out of habit. The tutorial was tested by reading it.
+
+`CLAUDE.md` already has the rule this needed -- "a rule stated in
+prose needs a test using the same example" -- written after three
+files disagreed with the code about a filename. It was applied to
+that one transformation and not made general. An integration
+test now extracts the block from each document and loads it, so
+the samples cannot drift from the parser again.
+
+**A preflight that fails on things the command does not need.**
+`doctor` sent the `vagrant-libvirt` probe whatever the project's
+provider was. Hyper-V is built into Vagrant and has no plugin, so
+a Hyper-V project against a Hyper-V host got a red row and exit
+1 while every command worked. This is the second instance in one
+day: the `tar` row did the same thing, and the fix for it added a
+sentence claiming the class was gone. Writing "a red report
+always means `up` is in trouble" is the kind of claim that should
+prompt checking every row before it ships.
+
+**`--help` was wrong about losing work, twice over.** It said
+`provision` runs the script "from the fresh clone", which tells
+an operator their uncommitted work in the VM is gone. The
+bootstrap fetches into the existing clone and deliberately skips
+`git clean`, so untracked files survive -- but `checkout --force`
+does overwrite edits to tracked files. Both the old wording and
+the replacement were wrong, in opposite directions, and the
+accurate statement is narrower than either.
+
+**Two commit messages in this cycle claimed fixes that had not
+landed.** One said `bombyx --help` was corrected when the edit
+had gone to the wrong enum of two with near-identical doc
+comments. The other said a claim was scoped in the architect
+skill when it was scoped in two of six places, not including
+that one. Both were caught by a reviewer reading the message
+against the diff, which is an argument for the reviewers seeing
+the message and not only the code.
+
 **The push was dead for two weeks and nobody noticed**
 
 `bombyx up` built a tar archive of the project's `vagrant/`

@@ -26,9 +26,11 @@ pub enum Action {
     /// Separate from [`Action::Up`] because vagrant provisions
     /// a machine only when it first creates it. Every later
     /// `vagrant up` skips the provisioners -- whether the VM
-    /// was halted or running -- so an edited script reaches the
-    /// guest and nothing executes it, while `up` reports
-    /// success.
+    /// was halted or running -- so the guest stays on the
+    /// commit it checked out when it was created, while `up`
+    /// reports success. This re-runs `bootstrap.sh`, which
+    /// fetches and checks out `source.ref` again in the clone
+    /// the guest already has.
     ///
     /// Requires a machine that already exists: `vagrant
     /// provision` has nothing to provision on a VM that was

@@ -62,12 +62,27 @@ and this project adheres to
 - The message refusing a shallow `remote_root` says what the rule requires: at
   least one directory below `/` or `~`. It said "at least 1 directory deep",
   which reads as a constraint on the wrong thing.
+- The help for bombyx provision says what it does to work inside the guest:
+  untracked files survive, and the checkout overwrites edits to tracked files.
+  It previously said the script runs from a "fresh clone", which reads as losing
+  both.
 
 ### Fixed
 
 - A `remote_root` of `~name` was accepted as an absolute path and then sent to
   the VM host as a relative one, resolved against the SSH login directory. It
   must now start with `/` or `~/`, or be exactly `~`.
+- The sample bombyx.toml in README.md, docs/tutorial.md and bombyx.toml.sample
+  could not be loaded. All three wrote remote_root after the [source] table, and
+  TOML binds a bare key to the table above it, so it parsed as
+  source.remote_root and every command failed while reading the file. The sample
+  file also still carried the removed vagrant_dir key and had no [vm] or
+  [source] table. An integration test now loads all three, extracted from the
+  documents rather than restated.
+- bombyx doctor no longer sends the vagrant-libvirt probe to a project whose
+  provider is hyperv. Hyper-V is built into Vagrant and has no plugin to find,
+  so the row failed, and doctor exited non-zero, on a host where every VM
+  command worked.
 
 ### Removed
 

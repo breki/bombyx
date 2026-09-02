@@ -2,7 +2,7 @@
 #
 # Copy this to `bombyx.toml` in the ROOT OF THE PROJECT you
 # want a VM for -- not here. Each project carries its own
-# config next to the `vagrant/` directory it describes.
+# config.
 #
 # THERE IS NO `host` KEY HERE, AND ONE IS REFUSED.
 # Which machine runs the VMs is a property of whoever is
@@ -12,11 +12,6 @@
 # Project name. Doubles as the VM's directory name on the
 # host, e.g. ~/vms/myproject.
 project = "myproject"
-
-# Directory in THIS repo holding the Vagrantfile and
-# provisioning scripts. Pushed to the host on every `up`,
-# which is what keeps the repo the source of truth.
-vagrant_dir = "vagrant"
 
 # Root on the VM host under which project directories are
 # created. Scratch VMs land in
@@ -32,6 +27,31 @@ vagrant_dir = "vagrant"
 # A leading `~` is expanded by the remote shell; anywhere else
 # it is rejected, as are shell metacharacters.
 remote_root = "~/vms"
+
+# EVERY KEY BELOW A TABLE HEADER BELONGS TO THAT TABLE.
+# `remote_root` sits above `[vm]` for that reason: written
+# after `[source]` it would parse as `source.remote_root` and
+# the whole file would be refused.
+
+# The machine to build. Required, and none of the four has a
+# default -- there is no defensible guess for a base image.
+[vm]
+provider = "libvirt"          # libvirt or hyperv
+box = "generic/ubuntu2204"
+cpus = 4
+memory = 8192                 # MiB
+
+# What the guest clones once it is running. Required. bombyx
+# sends no project file anywhere: the VM fetches the repository
+# itself and runs `script` out of its own clone.
+#
+# A private repository needs a credential inside the guest, and
+# code in there can read it. See docs/trust-boundary.md.
+[source]
+repo = "https://github.com/you/myproject"
+ref = "main"
+script = "vagrant/provision.sh"   # path inside the clone
+
 
 # WHERE THE VM HOST GOES INSTEAD
 #
