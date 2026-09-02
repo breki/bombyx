@@ -9,26 +9,37 @@
 `docs/trust-boundary.md` states two rules. The guest is the
 only machine holding the project's source, and neither the
 workstation nor the VM host reads any file from the project's
-repository. The first is reached. The second is not, because
-bombyx reads `bombyx.toml` out of the working directory.
+repository.
 
-Moving that file is what this item covers. It is a design
-question rather than a deletion: the config has to live
-somewhere, and bombyx has to work out which project a command
-is about without opening anything the repository ships.
+Neither rule holds yet, and that document's status banner
+says so. The guest no longer receives a mount of the
+project -- the generated Vagrantfile disables the `/vagrant`
+share -- but the workstation still holds the checkout the
+push is built from, and the VM host still holds the unpacked
+copy. Two files block the second rule: `bombyx.toml`, which
+bombyx reads out of the working directory, and the pushed
+`vagrant/` directory.
+
+This document covers both. Removing the push is a deletion.
+Moving the config is a design question: the config has to
+live somewhere, and bombyx has to work out which project a
+command is about without opening anything the repository
+ships.
 
 ## Context
 
 ### What reads the project file today
 
-`main.rs:39` defaults `--config` to `bombyx.toml`, so a bare
-`bombyx up` reads the file in the working directory.
+`crates/bombyx/src/bin/bombyx/main.rs:45` defaults
+`--config` to `bombyx.toml`, so a bare `bombyx up` reads the
+file in the working directory. (There are two `main.rs` files
+in this repo; the other is `xtask`'s.)
 `Config::load` (`config.rs:398`) reads it, then reads an
 overlay beside it (`bombyx.local.toml`, from
 `read::local_config_path`), then ranks four host sources and
 merges.
 
-Six values come out of the repository: `project`,
+Five values come out of the repository: `project`,
 `vagrant_dir`, `remote_root`, `[vm]` and `[source]`. `host`
 already comes from the operator: `--host`, `BOMBYX_HOST`, the
 overlay, or `config.toml` in the user config directory.
@@ -37,7 +48,7 @@ refused a `host` key outright.
 
 ### The push is already dead weight
 
-`push_then` (`plan.rs:180`) ensures the remote directory
+`push_then` (`plan.rs:181`) ensures the remote directory
 exists, unpacks the project's `vagrant/` into it, and *then*
 writes the generated Vagrantfile and bootstrap over the top.
 The generated Vagrantfile disables Vagrant's default
@@ -63,43 +74,88 @@ now.
 
 ## Open questions
 
-- Ordering: drop the push first, or move the config first?
-- Where the per-project configuration lives, and its shape.
-- How bombyx is told which project a command is about.
-- What happens when there is no entry for a project.
-- What becomes of the `bombyx.local.toml` overlay, which is
-  defined as sitting beside the project file.
+Three are live, and none of them blocks chunk 1. The five
+design questions this document opened with -- the ordering,
+where the config lives, how a project is named, what a
+missing entry does, and the overlay's fate -- were settled on
+2026-09-02 and are recorded under `## Decisions` below.
+
 - Whether reading `.git/config` in the working directory to
-  find the remote URL is inside the boundary. It is not
-  committed content and no branch can change it, but it is a
-  file in the project's directory.
+  find the remote URL is inside the boundary. `.git/config`
+  is not part of what a repository ships: `git` writes it
+  locally when you clone, and checking out a branch never
+  rewrites it. So somebody who controls a branch cannot plant
+  a value there for bombyx to act on, which is the threat the
+  boundary exists to stop. It is still a file in the
+  project's directory, which is what makes it a question.
+
+  No part of the plan waits on this answer, because chunk 3
+  makes the operator name the project instead. The question
+  returns if that argument becomes tiresome.
+
+- Whether `remote_root` stays per-project, as it is above and
+  as it is today, or becomes a top-level default in the
+  registry with a per-project override.
+
+- What happens to `VmCmd::Destroy`'s confirmation positional
+  once `--project` exists. See chunk 3.
 
 ## Plan
 
 Three chunks, in this order. Each is its own commit.
 
-**1. Drop the push.** Delete `remote::push_dir`,
-`PushArchive`, `Action::pushes` and the `vagrant_dir` field,
-and remove the `tar`/`scp` pair from `push_then` in
-`plan.rs`. `bombyx up` goes from seven remote commands to
-four. `doctor`'s `vagrant_dir` probe goes too. This is the
-only chunk that changes what runs on the VM host.
+**1. Drop the push.** `remote::push_dir`
+(`remote.rs:282`) returns three commands, not two: `tar`,
+`scp`, and the `ssh` that unpacks the archive and deletes it.
+All three go, and with them `push_dir` itself, `PushArchive`,
+`Action::pushes` and the `vagrant_dir` field. `plan()` loses
+its `local_dir` and `archive` parameters (`plan.rs:93`), and
+`main.rs:312` loses the `TempDir` workspace it builds when
+`action.pushes()` is true. `doctor`'s local `vagrant_dir`
+check goes too -- `doctor::local::vagrantfile_finding`
+(`doctor/local.rs:115`), which reads the filesystem here and
+is not one of the probes sent to the host.
 
-**2. Move the project settings into the registry.** Extend
-the per-developer `config.toml` with a `[projects.<name>]`
-table carrying `remote_root`, `[vm]`, `[source]` and an
-optional `host`. Delete `ProjectFile`, `Overlay`,
+`bombyx up` goes from seven steps to four: `mkdir`, the two
+generated-file writes, and `vagrant up`. Of the original
+seven, `tar` and `scp` run on the workstation, so the count
+is of `RemoteCommand` values rather than of processes on the
+VM host. Three integration tests pin the seven-element
+program vector and have to change with it:
+`integration_test.rs:165`, `:273` and `:292`.
+
+This is the only chunk that changes what runs on the VM
+host.
+
+**2. Move the project settings into the registry.** The
+per-developer `config.toml`, called the registry from here
+on, gains a `[projects.<name>]` table per project, carrying
+`remote_root`, `[vm]`, `[source]` and an optional `host`.
+Delete `ProjectFile`, `Overlay`,
 `read::local_config_path`, `Config::with_overlay` and
-`HostOrigin::Overlay`. `Config::load` stops taking a path to
+`HostOrigin::Overlay`. `main.rs:278` calls
+`local_config_path` outside `Config::load`, to print the
+"overrides" notice, and that call site goes with it.
+`Config::load` stops taking a path to
 a project file and takes a project name instead. Host
 ranking becomes flag, environment, the project's `host`, the
 top-level `host`.
 
 **3. Select the project explicitly.** `--project <name>`
-becomes a required global argument for every `Cmd::Vm`
-subcommand, and `--config` keeps pointing at the registry
-file rather than at a project file. `bombyx self-update`
-needs neither, as today.
+becomes a required global argument for every `VmCmd` variant
+(`main.rs:90`). `bombyx self-update` needs it no more than it
+needs a config today.
+
+`--config` changes meaning here rather than keeping it: it
+defaults to `bombyx.toml` in the working directory today, and
+afterwards it names the registry file, defaulting to
+`config.toml` in the user config directory.
+
+`VmCmd::Destroy` already takes a positional `project`
+(`main.rs:115`), which exists as a confirmation prompt rather
+than as selection. Whether `bombyx --project myproj destroy
+myproj` is acceptable, or the confirmation should change
+shape, is open.
 
 Documentation lands with the chunk that causes it.
 `README.md`'s Configure section inverts: it currently
@@ -111,13 +167,16 @@ reached. `docs/architecture.md`, `docs/tutorial.md` and
 
 ## Test strategy
 
-Rust unit tests for the config loading and lookup, and
-integration tests with `--dry-run` against the real binary
-for the plan changes, which is where the removed `tar`/`scp`
-commands are asserted today (`plan.rs:384` and `:487`).
+Rust unit tests for the config loading and lookup. The plan
+changes are asserted in two places today and both have to
+move: the `#[cfg(test)]` unit tests inside `plan.rs`
+(`:384` and `:487`), and the binary-level integration tests
+that run the real binary under `--dry-run`
+(`integration_test.rs:165`, `:273`, `:292`).
 
 Definition of Done item 3 applies to chunk 1: it changes the
-commands bombyx emits, so it needs a real run against frosti.
+commands bombyx emits, so it needs a real run against frosti,
+the libvirt VM host this project is developed against.
 Chunk 2 changes only where values are read from, and the
 emitted commands stay identical, which a dry run can show.
 

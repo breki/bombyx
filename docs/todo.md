@@ -92,7 +92,8 @@ plan, decisions, and outcome.
   Ordering: this comes first, before `project-config-off-repo`. The VM host
   already receives an archive that no program there reads -- the generated
   Vagrantfile disables the `/vagrant` share and names only bombyx's own
-  bootstrap script, so the unpacked files sit unread. `vagrant_dir` is the only config value naming a
+  bootstrap script, so the unpacked files sit unread. `vagrant_dir` is the
+  only config value naming a
   location inside the checkout, and the push is its only consumer. Removing
   the push first means the moved config never needs a path to a checkout.
   GitHub issue #10; planned in `docs/issues/project-config-off-repo.md`.
@@ -142,25 +143,21 @@ plan, decisions, and outcome.
   The second half of the boundary in `docs/trust-boundary.md`: neither the
   workstation nor the VM host may read any file from the project's repo.
   `bombyx.toml` is read from the working directory today, so it is the file
-  blocking that. Split out of `remote-clone-project-source`, which also covers
-  removing the push. The two are separable and this one is the harder half,
-  because it is a design question rather than a deletion. What has to be
-  decided. Where the config lives -- beside the existing `config.toml` in the
-  user config dir is the obvious candidate, since that file already sits outside
-  any repo for the same reason. How a project is identified without reading
-  anything from it: the directory name is convenient and wrong the moment two
-  clones differ, so the repository URL the operator supplied is more likely
-  right. And what `bombyx` does when asked to act on a project it has no entry
-  for. The cost is real and should be stated rather than discovered.
+  blocking that.
+
+  Planned in `docs/issues/project-config-off-repo.md`, which holds the
+  decisions and supersedes what this entry used to argue. GitHub issue #16.
+  It is chunk 2 of three: `remote-clone-project-source` comes first and
+  `project-selection-flag` comes after.
+
+  The cost is real and should be stated rather than discovered.
   `bombyx.toml` is committed today, so a teammate who clones gets the machine
-  spec for free. Moving it out means every operator writes their own, and two of
-  them can disagree about a VM's size without either file showing it. That trade
-  is the point -- a repo bombyx has never opened cannot decide what runs outside
-  the VM -- but it is a trade. `generate-vagrantfile` added `[vm]` and
-  `[source]` to `bombyx.toml`, so those two tables are most of what moves. Also
-  inverts the README's Configure section, which currently explains the split as
-  project-file-committed versus host-file-private. That framing does not
-  survive.
+  spec for free. Moving it out means every operator writes their own, and two
+  of them can disagree about a VM's size without either file showing it. That
+  trade is the point -- a repo bombyx has never opened cannot decide what runs
+  outside the VM -- but it is a trade. It also inverts the README's Configure
+  section, which explains the split as project-file-committed versus
+  host-file-private. That framing does not survive.
 
 - **newtype-remaining-config-fields** -- types for the six checked fields
   Six config values carry validation rules and are still bare `String` or `u32`:
