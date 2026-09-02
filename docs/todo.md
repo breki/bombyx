@@ -86,11 +86,17 @@ plan, decisions, and outcome.
   repo is captured separately as `project-config-off-repo`, because it is a
   design question rather than a deletion. What is left here is the push: once
   nothing needs the pushed files, `vagrant_dir`, `Action::pushes` and the
-  `tar`/`scp` path all go, and `bombyx up` becomes three commands instead of
+  `tar`/`scp` path all go, and `bombyx up` becomes four commands instead of
   seven.
 
-  Ordering: `project-config-off-repo` comes first. The push cannot be removed
-  while `vagrant_dir` is still how bombyx is told where the project is.
+  Ordering: this comes first, before `project-config-off-repo`. The VM host
+  already receives an archive that no program there reads -- the generated
+  Vagrantfile disables the `/vagrant` share and names only bombyx's own
+  bootstrap script, so the unpacked files sit unread. `vagrant_dir` is the
+  only config value naming a location inside the checkout, and the push is
+  its only consumer. Removing the push first means the moved config never
+  needs a path to a checkout.
+  GitHub issue #10; planned in `docs/issues/project-config-off-repo.md`.
 
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
@@ -137,25 +143,21 @@ plan, decisions, and outcome.
   The second half of the boundary in `docs/trust-boundary.md`: neither the
   workstation nor the VM host may read any file from the project's repo.
   `bombyx.toml` is read from the working directory today, so it is the file
-  blocking that. Split out of `remote-clone-project-source`, which also covers
-  removing the push. The two are separable and this one is the harder half,
-  because it is a design question rather than a deletion. What has to be
-  decided. Where the config lives -- beside the existing `config.toml` in the
-  user config dir is the obvious candidate, since that file already sits outside
-  any repo for the same reason. How a project is identified without reading
-  anything from it: the directory name is convenient and wrong the moment two
-  clones differ, so the repository URL the operator supplied is more likely
-  right. And what `bombyx` does when asked to act on a project it has no entry
-  for. The cost is real and should be stated rather than discovered.
+  blocking that.
+
+  The decisions live in `docs/issues/project-config-off-repo.md`; this entry
+  is a pointer at it. GitHub issue #16. It is chunk 2 of three:
+  `remote-clone-project-source` comes first and `project-selection-flag`
+  comes after.
+
+  The cost is real and should be stated rather than discovered.
   `bombyx.toml` is committed today, so a teammate who clones gets the machine
-  spec for free. Moving it out means every operator writes their own, and two of
-  them can disagree about a VM's size without either file showing it. That trade
-  is the point -- a repo bombyx has never opened cannot decide what runs outside
-  the VM -- but it is a trade. `generate-vagrantfile` added `[vm]` and
-  `[source]` to `bombyx.toml`, so those two tables are most of what moves. Also
-  inverts the README's Configure section, which currently explains the split as
-  project-file-committed versus host-file-private. That framing does not
-  survive.
+  spec for free. Moving it out means every operator writes their own, and two
+  of them can disagree about a VM's size without either file showing it. That
+  trade is the point -- a repo bombyx has never opened cannot decide what runs
+  outside the VM -- but it is a trade. It also inverts the README's Configure
+  section, which explains the split as project-file-committed versus
+  host-file-private. That framing does not survive.
 
 - **newtype-remaining-config-fields** -- types for the six checked fields
   Six config values carry validation rules and are still bare `String` or `u32`:
@@ -169,6 +171,14 @@ plan, decisions, and outcome.
   them in one function, so the constructor wraps something that exists. Not for
   the generate-vagrantfile PR: the config modules have been re-cut in four
   commits over two days and the review flagged the churn.
+
+- **project-selection-flag** -- `--project` names the project explicitly
+  Chunk 3 of the project-config-off-repo work; GitHub issue #18. Depends on
+  project-config-off-repo. Once a project's settings live in the operator's
+  registry, bombyx has to be told which project a command is about. `--project
+  <name>` becomes a required global argument for every VM subcommand. Inferring
+  it from the working directory git remote was rejected: naming the project
+  explicitly means bombyx reads nothing at all from the project directory.
 
 ## Done
 

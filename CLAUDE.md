@@ -271,6 +271,12 @@ for tools that are not present:
   real push.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
+- **Read a large file in pieces.** Over roughly 500 lines,
+  `grep -n` for the item you want and then `sed -n` the range
+  around it. Reading `crates/bombyx/src/config.rs` (1747
+  lines) whole produced 66KB that overflowed into a persisted
+  file, and every fact the session actually used came from
+  the greps that followed it.
 - **Edit YAML and doc-comment neighbourhoods with `Edit`, not a
   slurp-mode regex.** `perl -0pi -e 's/.../.../'` over a whole
   file has no idea which block it landed in. One substitution
@@ -525,6 +531,12 @@ Extends **Documentation style** to every comment in the code,
   machine bombyx was compiled for.
 - All public items must have doc comments
 - Wrap markdown at 80 characters per line
+- **Fixing an over-long line means reflowing its whole
+  paragraph.** Patching the one line pushes the overflow onto
+  the next and leaves half-empty lines mid-paragraph, which a
+  reader takes for a paragraph break. Three edits in a row
+  went that way in one sitting, and the reviewer then filed
+  the ragged result as a finding.
 - Maximum code line width: 80 characters (`rustfmt.toml`)
 - **Validate a field's invariants where the field
   lives.** Put the rule in the module that owns the
