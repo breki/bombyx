@@ -6,14 +6,14 @@ nature is a harness guarantee (they have no `Edit`/`Write`
 tools), not just an instruction:
 
 - **`red-team`** (`.claude/agents/red-team.md`) -- security &
-  correctness. Tools: `Read, Grep, Glob, Bash`. It runs
-  `git diff --cached` and `git log` itself, so it needs the
-  shell.
+  correctness. Tools: `Read, Grep, Glob, Bash`. It runs `git
+  show` and `git log` itself, so it needs the shell. Tell it
+  which commit range to review.
 - **`artisan`** (`.claude/agents/artisan.md`) -- code quality &
   craftsmanship beyond clippy. Tools: `Read, Grep, Glob` only --
   no shell, so it is read-only by construction. Pass the diff to
-  it in the spawn prompt (capture `git diff --cached` once in
-  the calling skill and hand it over).
+  it in the spawn prompt (capture it once in the calling skill
+  and hand it over).
 - **`fresh-reader`** (`.claude/agents/fresh-reader.md`) --
   comprehension. Tools: `Read, Grep, Glob` only. It reads the
   changed files **whole**, not as a diff, because it is judging
@@ -34,14 +34,33 @@ report ends with the two or three explanations worth keeping,
 which is what stops them being edited away by somebody who
 cannot tell a load-bearing comment from padding.
 
-This file is the shared **gating** doc for both `/commit`
-(step 3) and `/implement` (Phase 3 pre-launch); it defines
-*which* reviewers run, *when*, and *how* to spawn them. The
-review criteria themselves live in the agent files above.
+This file defines *which* reviewers run, *when*, and *how* to
+spawn them. The review criteria themselves live in the agent
+files above. `/commit` is the only caller.
+
+## Reviews run after the commit
+
+The target is a **commit**, never the index. `/commit` commits
+first, then spawns the reviewers against what it just made.
+Fixes from a round land as their own commit, and the next round
+reviews that. The reasoning is in `CLAUDE.md` under **Commits
+and releases**; the operational consequences are:
+
+- Pass a **commit range**, not a staged diff. For a first round
+  that is `HEAD~1..HEAD` -- capture it once with
+  `git show HEAD` or `git diff HEAD~1..HEAD`.
+- **Never amend the commit under review.** A reviewer holding
+  a SHA must be able to trust it still means what it meant.
+- Give the reviewers the *previous* commit as context when the
+  round is reviewing a fix commit, so a fix can be judged
+  against what it was fixing.
+- **The cycle stops when a round produces nothing you choose to
+  fix.** All-deferred, all-declined or all-already-covered is
+  the last round. Do not chase an empty report.
 
 ## When to run
 
-Run **all three** reviewers whenever the diff contains code
+Run **all three** reviewers whenever the commit contains code
 changes:
 Rust (`.rs`, `.toml`), frontend (`.svelte`, `.js`, `.ts`,
 `.css`), config (`playwright.config.ts`, `vite.config.js`,
@@ -66,11 +85,11 @@ call per reviewer -- so they run concurrently:
 Give each spawn:
 
 1. A one-line description of what the change does.
-2. For `artisan`, the captured `git diff --cached` output (it
-   has no shell). `red-team` runs the diff itself. For
-   `fresh-reader`, the **list of changed file paths** and
-   nothing else -- it reads the files whole, and handing it a
-   diff defeats the point of the persona.
+2. The commit range under review. For `artisan`, the captured
+   diff as well (it has no shell); `red-team` runs `git show`
+   itself. For `fresh-reader`, the **list of changed file
+   paths** and nothing else -- it reads the files whole, and
+   handing it a diff defeats the point of the persona.
 3. The instruction to report each finding with the six labeled
    bullet fields: **ID**, **Source**, **Category**,
    **Description**, **Impact / Why it matters**, **Suggested
@@ -80,9 +99,9 @@ Give each spawn:
 
 **Diff handoff.** Never write the diff to `/tmp` (on Windows +
 Git Bash that resolves outside the workspace and is invisible to
-the user). `red-team` reads it via `git diff --cached`;
-`artisan` receives it inline. If a file is genuinely needed, use
-a git-ignored path under `target/`.
+the user). `red-team` reads it via `git show`; `artisan`
+receives it inline. If a file is genuinely needed, use a
+git-ignored path under `target/`.
 
 Each agent's final message *is* its report (a plain-text finding
 list, or "No issues found."), consumed by the calling skill --

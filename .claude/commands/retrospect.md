@@ -84,9 +84,6 @@ on.
      other work.
    - Reviewer agents ran serially when they could
      have been one parallel message.
-   - The /commit reviewers could have been
-     pre-launched during `/implement` Phase 3 so
-     `/commit` had results waiting.
 
 4. **Cleanup** -- stale, duplicate, or redundant
    entries in canon or memory (including `.claude/`
@@ -173,7 +170,7 @@ Quality:
 Speed:
   2-serial-reviewers [propose]
     Short: fix iteration ran gates serially.
-    Long: Red Team and Artisan ran in parallel, but
+    Long: the three reviewers ran in parallel, but
       the follow-up fixes ran validate/fmt/validate
       one at a time (turns 8-11), roughly doubling the
       wall time of that stretch.

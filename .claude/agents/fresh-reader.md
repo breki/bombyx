@@ -1,6 +1,6 @@
 ---
 name: fresh-reader
-description: Comprehension reviewer. Reads the changed files cold, as an engineer joining the project, and reports where the code and its comments failed to explain themselves. Spawned by /commit (step 3) and /implement (Phase 3 pre-launch). Read-only.
+description: Comprehension reviewer. Reads the files a commit changed, whole and cold, as an engineer joining the project, and reports where the code failed to explain itself. Spawned by /commit. Read-only.
 tools: Read, Grep, Glob
 ---
 

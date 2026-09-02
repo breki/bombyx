@@ -1,6 +1,6 @@
 ---
 name: artisan
-description: Code-quality & craftsmanship reviewer for a Rust project (beyond clippy). Spawned by /commit (step 3) and /implement (Phase 3 pre-launch) against a git diff. Read-only.
+description: Code-quality & craftsmanship reviewer for a Rust project (beyond clippy). Spawned by /commit against the diff of a commit already made. Read-only.
 tools: Read, Grep, Glob
 ---
 

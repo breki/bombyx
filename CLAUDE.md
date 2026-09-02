@@ -632,16 +632,47 @@ one direct bookkeeping commit for the version bump.)
 
 Committing and releasing are separate:
 
-- **`/commit`** is a save-point. It reviews, updates the
-  diary and the `CHANGELOG.md` `[Unreleased]` block, and
-  commits. It does **not** bump the version, touch
-  `Cargo.lock`, or run `cargo xtask validate` -- multiple
-  commits land between releases, and forcing each one to
-  make a SemVer decision turns the version field into
+- **`/commit`** is a save-point. It updates the diary and the
+  `CHANGELOG.md` `[Unreleased]` block, commits, and **then**
+  runs the code reviewers. It does **not** bump the version,
+  touch `Cargo.lock`, or run `cargo xtask validate` --
+  multiple commits land between releases, and forcing each one
+  to make a SemVer decision turns the version field into
   accounting rather than a description of what users run.
   `/commit` never runs `cargo xtask validate`; run it
   manually at your own shell when you want the full gate on a
   work-in-progress.
+
+**Reviews run after the commit, and their fixes get their own
+commit.** The cycle is: commit, review, commit the fixes,
+review again. Never amend the commit under review, and never
+fold a fix into the commit that the review found it in.
+
+Three reasons this order is better than reviewing first.
+
+The reviewers get an immutable target. Reviewing a staged diff
+means reviewing something that changes while they read it --
+this repo has already had a reviewer report against a working
+tree that no longer compiled, because the fixes for its own
+earlier findings had landed underneath it.
+
+The history says what happened. A fix folded into the commit
+that needed it leaves no trace that anything was found, so the
+next reader cannot tell a reviewed commit from an unreviewed
+one. A separate commit naming the finding IDs is the record.
+
+And the fixes get reviewed. A fix is code, and code written
+under review pressure is exactly the code most likely to be
+wrong -- this repo has a `sed` range that deleted a brace, a
+reviewer suggestion that broke the doc gate, and a "fix" that
+would have deleted an agent's uncommitted work. Folding fixes
+into the reviewed commit is how those ship unexamined.
+
+**The cycle stops when a round produces nothing we choose to
+fix.** A round whose findings are all deferred, declined or
+already covered is the last one. Do not keep going for a clean
+sheet: reviewers will always find something, and the stopping
+rule is agreement on what matters, not an empty report.
 - **`/release`** is the sole version-bumper. It infers the
   bump from the accumulated `[Unreleased]` entries
   (`**BREAKING:**` or a non-empty `### Removed` -> major,
@@ -672,7 +703,10 @@ just when the code compiles:
    changes the commands bombyx emits. `--dry-run` proves
    the argv; it does not prove the remote side accepts it.
    "tests pass" is not "the command works".
-4. **Self-review the diff** before committing.
+4. **Self-review the diff** before committing. This is
+   your own read, and it stays *before* the commit -- the
+   three reviewer agents run after it, and neither
+   replaces the other.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
 `cargo xtask validate` checks:

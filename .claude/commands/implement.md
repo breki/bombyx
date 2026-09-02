@@ -142,45 +142,7 @@ particular:
    to `issues/<slug>.md`. Pass `--summary "<text>"` to
    override the pending summary for the Done entry.
 
-5. **Pre-launch code reviewers in the background**
-   (optional optimisation). The next `/commit` runs
-   the Red Team, Artisan and Fresh Reader agents against
-   the same diff this implementation produces. When the
-   diff is *likely to stay stable* through user
-   verification, you can spawn all three now with
-   `run_in_background: true` -- `subagent_type: red-team`,
-   `subagent_type: artisan` and
-   `subagent_type: fresh-reader` (pass `artisan` the
-   captured diff, `fresh-reader` the list of changed file
-   paths; `red-team` reads the diff itself). Follow the
-   gating rules in `.claude/commands/code-reviewers.md`
-   (the same file `/commit` step 3 uses, so the pre-launch
-   and the commit-time review are identical). Note the agent
-   IDs in conversation context so `/commit` can reuse the
-   results.
-
-   **Skip the pre-launch** when:
-   - The diff is docs-only (`*.md` only). `/commit` may
-     still run `fresh-reader` alone there, but it is
-     cheap and not worth pre-launching.
-   - User verification at step 6 is likely to
-     invalidate the diff. Signals: the change
-     introduces inference / heuristic logic, has
-     open clarifying questions, involves user data
-     the agent hasn't seen, or introduces an undo /
-     inverse / optimistic-concurrency path. That
-     last shape is review-volatile because it hinges
-     on a backend contract an adversarial review
-     routinely overturns -- an undo or inverse that
-     looks right for the simple case but breaks the
-     recurring / concurrent one, so the design gets
-     reshaped after review and the heavy gates would
-     run twice. Stale pre-launched findings are worse
-     than no pre-launch -- they describe code that no
-     longer exists. When in doubt, skip; `/commit`
-     will spawn fresh reviewers when it runs.
-
-6. Verify the change manually -- actually run it,
+5. Verify the change manually -- actually run it,
    do not infer from a green suite. For a change to
    the commands bombyx emits, that means a real
    push against a real VM host (Definition of Done
@@ -190,12 +152,14 @@ particular:
    path where one exists. Report plainly what was
    exercised and what was not.
 
-7. Commit with `/commit`. If pre-launched reviewers
-   from step 5 are still in flight, `/commit` should
-   wait for them rather than spawning duplicates.
-   If their findings already arrived, `/commit`
-   consumes them directly.
+6. Commit with `/commit`.
 
+   **Do not pre-launch the code reviewers here.** They
+   review a *commit*, and there is not one yet -- the
+   reasoning is in `CLAUDE.md` under **Commits and
+   releases**. `/commit` spawns all three itself after the
+   commit lands, and drives the fix-and-review-again cycle
+   from there.
 ## Rules
 
 - Never skip the plan phase, even for a small change.
