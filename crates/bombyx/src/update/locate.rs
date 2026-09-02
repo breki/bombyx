@@ -121,7 +121,7 @@ mod tests {
         move |key| owned.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     }
 
-    /// Both platform orders, so a test names the one it means.
+    /// Both platform orders, so a test states the one it means.
     const WINDOWS: bool = true;
     const UNIX: bool = false;
 

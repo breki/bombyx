@@ -72,18 +72,25 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
-- **remote-clone-project-source** -- guest clones the repo, no host copy
-  Today `bombyx up` needs the project checked out on the workstation, and it
-  pushes `vagrant/` to the VM host. Project files therefore sit on two machines
-  that are not the VM. The decision recorded in `issues/trust-boundary-doc.md`
-  is that the guest is the only place project source exists, so neither the
-  workstation nor the VM host clones it. Introduce a project-source
-  abstraction: the workstation supplies a repository URL and a commit, and the
-  guest clones the repo after boot. This depends on `generate-vagrantfile`.
-  Vagrant needs the Vagrantfile before the VM exists, so it cannot come from
-  the project repo and bombyx has to generate it. The guest also needs a
-  credential to clone a private repo. The same document accepts that as a
-  scoped exposure.
+- **remote-clone-project-source** -- drop the push once nothing needs it
+  The guest-clone half landed with `generate-vagrantfile`: the bootstrap clones
+  `[source]` inside the VM and runs a script from it. What remains is the
+  workstation half, and it is larger than the slug suggests.
+
+  The goal is that neither the workstation nor the VM host reads any file from
+  the project's repo -- not the source, and not `bombyx.toml` or `vagrant/`
+  either. A repo bombyx has never opened cannot decide what runs on the
+  machines outside the VM. See `docs/trust-boundary.md`.
+
+  Two pieces, and only the second is this item. Moving the config out of the
+  repo is captured separately as `project-config-off-repo`, because it is a
+  design question rather than a deletion. What is left here is the push: once
+  nothing needs the pushed files, `vagrant_dir`, `Action::pushes` and the
+  `tar`/`scp` path all go, and `bombyx up` becomes three commands instead of
+  seven.
+
+  Ordering: `project-config-off-repo` comes first. The push cannot be removed
+  while `vagrant_dir` is still how bombyx is told where the project is.
 
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
@@ -91,14 +98,6 @@ plan, decisions, and outcome.
   Everything project-specific moves out. A short Vagrantfile is also easier to
   keep identical across Windows and Linux hosts, since provider-specific
   features are what turn it into a nest of conditionals.
-
-- **generate-vagrantfile** -- generate per provider from bombyx templates
-  Once the Vagrantfile is minimal it is nearly identical everywhere, so projects
-  need not own it at all. Keep per-provider templates inside bombyx (libvirt,
-  hyperv) and generate the file from bombyx's own model of the VM. Provider
-  knowledge then lives in one place instead of being copied into every project
-  repo, and a second virtualization backend becomes a template rather than a
-  rewrite.
 
 - **provision-lifecycle-hooks** -- named hooks replace one bash provision script
   Provisioning is currently one bash script run by Vagrant at VM creation.
@@ -134,7 +133,48 @@ plan, decisions, and outcome.
   later without changing callers. The CLI is the first consumer, a dashboard is
   possible afterwards.
 
+- **project-config-off-repo** -- bombyx.toml must not be read from the repo
+  The second half of the boundary in `docs/trust-boundary.md`: neither the
+  workstation nor the VM host may read any file from the project's repo.
+  `bombyx.toml` is read from the working directory today, so it is the file
+  blocking that. Split out of `remote-clone-project-source`, which also covers
+  removing the push. The two are separable and this one is the harder half,
+  because it is a design question rather than a deletion. What has to be
+  decided. Where the config lives -- beside the existing `config.toml` in the
+  user config dir is the obvious candidate, since that file already sits outside
+  any repo for the same reason. How a project is identified without reading
+  anything from it: the directory name is convenient and wrong the moment two
+  clones differ, so the repository URL the operator supplied is more likely
+  right. And what `bombyx` does when asked to act on a project it has no entry
+  for. The cost is real and should be stated rather than discovered.
+  `bombyx.toml` is committed today, so a teammate who clones gets the machine
+  spec for free. Moving it out means every operator writes their own, and two of
+  them can disagree about a VM's size without either file showing it. That trade
+  is the point -- a repo bombyx has never opened cannot decide what runs outside
+  the VM -- but it is a trade. `generate-vagrantfile` added `[vm]` and
+  `[source]` to `bombyx.toml`, so those two tables are most of what moves. Also
+  inverts the README's Configure section, which currently explains the split as
+  project-file-committed versus host-file-private. That framing does not
+  survive.
+
+- **newtype-remaining-config-fields** -- types for the six checked fields
+  Six config values carry validation rules and are still bare `String` or `u32`:
+  `host`, `project`, `vagrant_dir`, `remote_root`, `box` and `ref`, plus
+  `cpus`/`memory` whose only rule is a floor. `RepoUrl`, `ScriptPath` and
+  `ScratchName` show the shape. `Config`, `Vm` and `Source` all have public
+  fields, so every one of those six can be set by hand with no check running.
+  The checks live in `Config::validate`, `vm::validate` and `source::validate`,
+  which only the loading path calls. `remote_root` is the one to do first: it
+  reaches `rm -rf`, it has six rules, and `config::root` already holds all of
+  them in one function, so the constructor wraps something that exists. Not for
+  the generate-vagrantfile PR: the config modules have been re-cut in four
+  commits over two days and the review flagged the churn.
+
 ## Done
+
+- [**generate-vagrantfile**](issues/generate-vagrantfile.md)
+  -- generate per provider from bombyx templates
+  (2026-08-30)
 
 - [**trust-boundary-doc**](issues/trust-boundary-doc.md)
   -- write down that the VM host is trusted

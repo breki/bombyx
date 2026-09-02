@@ -22,9 +22,10 @@ module_name_repetitions = "allow"
 # src/main.rs and src/bin/). Each entry is a regex fragment
 # passed to `cargo llvm-cov --ignore-filename-regex`. Use this
 # for hardware-bound leaf modules that can't run under llvm-cov
-# in CI (see CLAUDE.md "Coverage exceptions for hardware-bound
-# code"); the template itself needs none. Use single-quoted
-# TOML literal strings so backslashes reach the regex verbatim.
+# in CI (see docs/developer/build-recipes.md, "Coverage
+# exceptions for hardware-bound code"); this project needs
+# none. Use single-quoted TOML literal strings so backslashes
+# reach the regex verbatim.
 # [workspace.metadata.coverage]
 # ignore = ['src[/\\]audio[/\\]playback\.rs']
 

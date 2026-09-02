@@ -105,7 +105,8 @@ fn validate_ignore_patterns(
 /// line-leading `ignore = [...]` is recognised; the dotted-key
 /// (`coverage.ignore = ...`) and inline-table
 /// (`coverage = { ignore = ... }`) spellings are not (a
-/// deliberate limit of the hand-rolled scan; see CLAUDE.md).
+/// deliberate limit of the hand-rolled scan; see
+/// docs/developer/build-recipes.md).
 fn parse_coverage_ignore(manifest: &str) -> Vec<String> {
     let body = coverage_section_body(manifest);
     ignore_value_region(&body)

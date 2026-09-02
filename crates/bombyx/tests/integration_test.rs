@@ -53,7 +53,7 @@ fn project_dir() -> TempDir {
 /// so these tests were exercising a path nothing shipped.
 fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     let path = dir.join("bombyx.toml");
-    std::fs::write(&path, "project = \"myproject\"\n").unwrap();
+    std::fs::write(&path, completed("project = \"myproject\"\n")).unwrap();
     let (cfg, _) = bombyx::config::Config::load(
         &path,
         &bombyx::config::HostSources {
@@ -65,10 +65,41 @@ fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     cfg
 }
 
-/// A fixture whose `bombyx.toml` is exactly `source`.
+/// The `[vm]` and `[source]` tables every project file needs.
+///
+/// bombyx generates the Vagrantfile, so it has to be told what
+/// machine to build and where the guest clones the project
+/// from. Neither section has a default.
+const REQUIRED_TABLES: &str = "\n[vm]\n\
+     provider = \"libvirt\"\n\
+     box = \"generic/ubuntu2204\"\n\
+     cpus = 2\n\
+     memory = 2048\n\
+     \n\
+     [source]\n\
+     repo = \"https://example.invalid/myproject.git\"\n\
+     ref = \"main\"\n\
+     script = \"vagrant/provision.sh\"\n";
+
+/// Appends [`REQUIRED_TABLES`] when `source` omits them.
+///
+/// These tests vary one top-level key and care nothing about
+/// the machine description, so spelling it out in each would
+/// bury the line under test. A test *about* a missing section
+/// includes `[vm]` itself and is left alone.
+fn completed(source: &str) -> String {
+    if source.contains("[vm]") {
+        source.to_owned()
+    } else {
+        format!("{source}{REQUIRED_TABLES}")
+    }
+}
+
+/// A fixture whose `bombyx.toml` is `source`, with the required
+/// `[vm]` and `[source]` tables appended when absent.
 fn project_dir_with(source: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join("bombyx.toml"), source).unwrap();
+    std::fs::write(dir.path().join("bombyx.toml"), completed(source)).unwrap();
     std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
     dir
 }
@@ -129,17 +160,25 @@ fn up_makes_the_dir_then_pushes_then_boots() {
     // even if the boot ran before the push.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
-    assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
+    assert_eq!(
+        programs(&lines),
+        vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
+    );
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(lines[1].contains("--exclude=./.vagrant"));
     assert!(lines[3].contains("tar -xzf"));
+    // The generated files land after the unpack, or the archive
+    // would replace them, and each prints as one elided line.
+    assert!(lines[4].contains("cat > ~/'vms/myproject/Vagrantfile'"));
+    assert!(lines[4].contains("lines elided"), "{}", lines[4]);
+    assert!(lines[5].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
     assert!(
-        lines[4].ends_with(&format!(
+        lines[6].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'up'\"",
             vm_env()
         )),
         "{}",
-        lines[4]
+        lines[6]
     );
 }
 
@@ -229,15 +268,18 @@ fn provision_pushes_then_runs_vagrant_provision() {
     // nothing was applied.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "provision"]);
-    assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
+    assert_eq!(
+        programs(&lines),
+        vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
+    );
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
-        lines[4].ends_with(&format!(
+        lines[6].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'provision'\"",
             vm_env()
         )),
         "{}",
-        lines[4]
+        lines[6]
     );
 }
 
@@ -245,15 +287,18 @@ fn provision_pushes_then_runs_vagrant_provision() {
 fn scratch_pushes_into_a_project_scoped_dir() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "scratch", "pr-1234"]);
-    assert_eq!(programs(&lines), vec!["ssh", "tar", "scp", "ssh", "ssh"]);
+    assert_eq!(
+        programs(&lines),
+        vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
+    );
     assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
-        lines[4].ends_with(&format!(
+        lines[6].ends_with(&format!(
             "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up'\"",
             vm_env()
         )),
         "{}",
-        lines[4]
+        lines[6]
     );
 }
 
@@ -420,29 +465,55 @@ fn row_tag<'a>(
 
 #[test]
 fn doctor_judges_the_local_vagrantfile_check_on_its_own() {
-    // The local checks must be evaluated independently of the
-    // host, so a typo in `vagrant_dir` is caught whether or not
-    // the VM host answers. Both cases are asserted, because only
-    // the pair rules out a check that always returns the same
-    // thing.
+    // The local checks are evaluated independently of the host,
+    // so this row is decided whether or not the VM host answers.
+    // Both cases are asserted, because only the pair rules out a
+    // check that always returns the same thing.
+    //
+    // This probe used to *fail* when the project had no
+    // Vagrantfile, which also caught a typo in `vagrant_dir`
+    // cheaply. bombyx generates the Vagrantfile now, so an
+    // absent one is ordinary and both cases pass -- what
+    // distinguishes them is the detail. Nothing catches that
+    // typo through the missing file. The probe now fails on
+    // the missing *directory* instead, which is the same typo
+    // caught one step earlier.
     let dir = project_dir_with("project = \"myproject\"\n");
     write_user_config(&dir, "host = \"nosuchhost.invalid\"\n");
 
-    let missing = bombyx_in(&dir).args(["doctor"]).assert().failure();
-    let out = String::from_utf8(missing.get_output().stdout.clone()).unwrap();
+    let row = |out: &str| {
+        out.lines()
+            .find(|l| l.contains("local") && l.contains("Vagrantfile"))
+            .unwrap_or_default()
+            .to_owned()
+    };
+
+    // A `vagrant_dir` naming no directory is a typo, and this
+    // is the one state that still fails. It replaces the signal
+    // the old probe gave by failing on a missing Vagrantfile.
+    let absent = bombyx_in(&dir).args(["doctor"]).assert().failure();
+    let out = String::from_utf8(absent.get_output().stdout.clone()).unwrap();
     let lines: Vec<String> = out.lines().map(str::to_owned).collect();
     assert_eq!(
         row_tag(&lines, "local", "Vagrantfile"),
         Some("FAIL"),
         "{out}"
     );
+    assert!(row(&out).contains("check `vagrant_dir`"), "{out}");
 
     std::fs::create_dir(dir.path().join("vagrant")).unwrap();
+    let generated = bombyx_in(&dir).args(["doctor"]).assert().failure();
+    let out = String::from_utf8(generated.get_output().stdout.clone()).unwrap();
+    let lines: Vec<String> = out.lines().map(str::to_owned).collect();
+    assert_eq!(row_tag(&lines, "local", "Vagrantfile"), Some("ok"), "{out}");
+    assert!(row(&out).contains("generated by bombyx"), "{out}");
+
     std::fs::write(dir.path().join("vagrant/Vagrantfile"), "# vm").unwrap();
     let present = bombyx_in(&dir).args(["doctor"]).assert().failure();
     let out = String::from_utf8(present.get_output().stdout.clone()).unwrap();
     let lines: Vec<String> = out.lines().map(str::to_owned).collect();
     assert_eq!(row_tag(&lines, "local", "Vagrantfile"), Some("ok"), "{out}");
+    assert!(row(&out).contains("ignored"), "{out}");
     // Still a failing run overall -- the host does not resolve --
     // which is what makes the row assertion the load-bearing one.
     assert_eq!(
@@ -715,4 +786,48 @@ fn cli_help_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Usage"));
+}
+
+/// Parses the generated Vagrantfile with the real `vagrant`.
+///
+/// Ignored by default because it needs vagrant installed with a
+/// provider plugin, which CI does not have. Run it with
+/// `cargo xtask test --ignored`.
+///
+/// Worth having because every unit test around the renderer
+/// asserts that bombyx produced the text it meant to, and none
+/// of them can say whether vagrant accepts it. A syntax error
+/// would otherwise surface on the VM host, after a push has
+/// already changed state there.
+///
+/// It lives here rather than beside the renderer so its body,
+/// which never runs under coverage, does not count against that
+/// small module's per-module floor.
+#[test]
+#[ignore = "needs vagrant and a provider plugin installed"]
+fn the_generated_vagrantfile_is_one_vagrant_accepts() {
+    let dir = TempDir::new().unwrap();
+    let cfg = load_cfg(dir.path());
+    std::fs::write(
+        dir.path().join(bombyx::vagrantfile::VAGRANTFILE_NAME),
+        bombyx::vagrantfile::render(&cfg),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join(bombyx::vagrantfile::BOOTSTRAP_NAME),
+        bombyx::vagrantfile::BOOTSTRAP,
+    )
+    .unwrap();
+
+    let out = std::process::Command::new("vagrant")
+        .arg("validate")
+        .current_dir(dir.path())
+        .output()
+        .expect("vagrant must be on PATH for this test");
+    assert!(
+        out.status.success(),
+        "vagrant rejected the generated file:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
 }

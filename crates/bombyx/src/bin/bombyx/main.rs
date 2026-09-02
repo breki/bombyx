@@ -665,7 +665,10 @@ impl Ran {
 fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     if dry_run {
         for cmd in commands {
-            println!("{cmd}");
+            // `abbreviated`, not `Display`: the two file writes
+            // each carry a whole file, and printing them in full
+            // buries the plan. It says where it elided.
+            println!("{}", cmd.abbreviated());
         }
         return Ok(Ran::Ok);
     }
@@ -699,7 +702,13 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
             .status()
             .with_context(|| format!("running {}", cmd.program))?;
         if !status.success() {
-            eprint_lines(&format!("bombyx: {cmd} failed: {status}\n"));
+            // `abbreviated`, not `Display`, for the same reason the
+            // dry run uses it: a failed write would otherwise bury
+            // the exit status under forty lines of shell script.
+            eprint_lines(&format!(
+                "bombyx: {} failed: {status}\n",
+                cmd.abbreviated()
+            ));
             return Ok(Ran::Failed(exit_status_byte(status)));
         }
     }

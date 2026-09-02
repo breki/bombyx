@@ -620,7 +620,8 @@ push in CI as well as in `validate`, where the advisory audit cannot go.
 metadata` plus the licence texts already unpacked in the cargo
 registry, and the release workflow writes it into every archive.
 
-Three details worth carrying upstream rather than rediscovering.
+Three details are worth carrying upstream rather than
+rediscovering.
 `private = { ignore = true }` in `deny.toml` reads as "skip our own
 unpublished crates" and does not: cargo-deny skips *any* package with
 `publish = false`, wherever it lives, so a GPL-only path dependency

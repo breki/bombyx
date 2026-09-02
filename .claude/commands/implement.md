@@ -113,10 +113,10 @@ particular:
 
 ## Phase 3 -- Finalise
 
-1. Run `cargo xtask validate`. All eight gates must
-   pass: dependency cooldown, fmt, duplication
-   <= 6%, clippy, doc links, tests, coverage >= 90%,
-   and the RUSTSEC audit.
+1. Run `cargo xtask validate`. All nine gates must
+   pass. `CLAUDE.md`'s **Definition of Done** lists them
+   in execution order; do not restate the list here, or
+   the two copies will disagree about how many there are.
 
 2. If the change affects developer workflow or skills,
    update the relevant files under `.claude/commands/`
@@ -142,42 +142,7 @@ particular:
    to `issues/<slug>.md`. Pass `--summary "<text>"` to
    override the pending summary for the Done entry.
 
-5. **Pre-launch code reviewers in the background**
-   (optional optimisation). The next `/commit` runs
-   the Red Team and Artisan agents against the same
-   diff this implementation produces. When the diff
-   is *likely to stay stable* through user
-   verification, you can spawn both agents now with
-   `run_in_background: true` -- `subagent_type: red-team`
-   and `subagent_type: artisan` (pass `artisan` the
-   captured diff; `red-team` reads it itself). Follow the
-   gating rules in `.claude/commands/code-reviewers.md`
-   (the same file `/commit` step 3 uses, so the pre-launch
-   and the commit-time review are identical). Note the agent
-   IDs in conversation context so `/commit` can reuse the
-   results.
-
-   **Skip the pre-launch** when:
-   - The diff is docs-only (`*.md` only) -- no
-     reviewers run for docs-only commits anyway.
-   - User verification at step 6 is likely to
-     invalidate the diff. Signals: the change
-     introduces inference / heuristic logic, has
-     open clarifying questions, involves user data
-     the agent hasn't seen, or introduces an undo /
-     inverse / optimistic-concurrency path. That
-     last shape is review-volatile because it hinges
-     on a backend contract an adversarial review
-     routinely overturns -- an undo or inverse that
-     looks right for the simple case but breaks the
-     recurring / concurrent one, so the design gets
-     reshaped after review and the heavy gates would
-     run twice. Stale pre-launched findings are worse
-     than no pre-launch -- they describe code that no
-     longer exists. When in doubt, skip; `/commit`
-     will spawn fresh reviewers when it runs.
-
-6. Verify the change manually -- actually run it,
+5. Verify the change manually -- actually run it,
    do not infer from a green suite. For a change to
    the commands bombyx emits, that means a real
    push against a real VM host (Definition of Done
@@ -187,11 +152,14 @@ particular:
    path where one exists. Report plainly what was
    exercised and what was not.
 
-7. Commit with `/commit`. If pre-launched reviewers
-   from step 5 are still in flight, `/commit` should
-   wait for them rather than spawning duplicates.
-   If their findings already arrived, `/commit`
-   consumes them directly.
+6. Commit with `/commit`.
+
+   **Do not pre-launch the code reviewers here.** They
+   review a *commit*, and there is not one yet -- the
+   reasoning is in `CLAUDE.md` under **Commits and
+   releases**. `/commit` spawns all three itself after the
+   commit lands, and drives the fix-and-review-again cycle
+   from there.
 
 ## Rules
 

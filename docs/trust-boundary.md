@@ -7,30 +7,45 @@ because the reasoning is easy to lose and expensive to rebuild,
 and because several planned pieces of work only make sense once
 you know which way it went.
 
-> **This is a decision, not a description. bombyx does not
-> work this way yet.**
+> **Partly built. Read the status of each part below.**
 >
-> "The boundary" below states the target. "Where project code
-> lives today" states the current behaviour, which is
-> different, and which was read from `crates/bombyx/src/plan.rs`
-> rather than recalled. Nothing here has been built, and the
-> `README.md` still describes the mechanism being replaced.
+> "The boundary" states the target. "Where project code lives
+> today" states the current behaviour, which is still
+> different, and which was read from
+> `crates/bombyx/src/plan.rs` rather than recalled.
 >
-> Treat every section after "Two ways to satisfy the
-> constraint" as a design that has been decided and not yet
-> tested against anything.
+> What landed: bombyx generates the Vagrantfile and writes it
+> on the VM host, and the guest clones the project itself. What
+> has not: the workstation still holds a checkout, because
+> `bombyx.toml` is read from the working directory and
+> `vagrant/` is still pushed.
+>
+> Nothing here has run against a real VM host.
 
 ## The boundary
 
-The guest is the only machine that holds the project's source
-code. Neither the workstation nor the VM host keeps a copy, a
+There are two statements here, and the second is stronger.
+
+**The guest is the only machine that holds the project's source
+code.** Neither the workstation nor the VM host keeps a copy, a
 clone, or a cache of it.
 
-What they do hold is a repository URL, a commit, and host
-configuration. That is metadata about the project rather than
-the project, and reading it tells an attacker where the code
-came from but does not hand them the code or anything derived
-from running it.
+**Neither machine reads any file from the project's
+repository.** Not the source, and not `bombyx.toml` or
+`vagrant/` either. A repository that bombyx has never opened
+cannot decide what runs on the machines outside the VM.
+
+What the workstation may still hold is a repository URL, a
+commit, and host configuration -- kept in its own configuration,
+not read out of the repo. That is metadata about the project
+rather than the project, and it tells an attacker where the code
+came from without handing them the code or anything derived from
+running it.
+
+The first statement is reached. The second is not: `bombyx.toml`
+is read from the working directory and `vagrant/` is pushed to
+the host, so both machines still depend on files the repository
+ships.
 
 ## Where project code lives today
 
@@ -45,10 +60,15 @@ scp .bombyx-push-<n>.tar.gz vmhost:.bombyx-push-<n>.tar.gz
 ssh vmhost "cd ~/vms/<project> && tar -xzf ~/.bombyx-push-<n>.tar.gz"
 ```
 
-Three machines end up holding project files. The workstation
-holds the checkout the archive is built from. The VM host holds
-the unpacked copy. The guest holds a third copy through
-Vagrant's synced folder.
+Two machines end up holding project files. The workstation
+holds the checkout the archive is built from, and the VM host
+holds the unpacked copy.
+
+It used to be three. Vagrant mounts the Vagrantfile's directory
+at `/vagrant` unless told otherwise, which put the VM host's
+copy inside the guest as well. The generated Vagrantfile
+disables that share, so the guest now holds only what it cloned
+itself.
 
 The first of those three is the machine the whole design exists
 to protect. `README.md` opens by saying that running an agent
@@ -138,10 +158,9 @@ untrustworthy. Scoping it -- read-only, one repository,
 short-lived -- limits what stealing it is worth. Scoping does
 not prevent the theft. This is an accepted exposure rather than
 a solved problem, and it qualifies the phrase "no credentials"
-in `README.md`. No alternative has been designed. A forwarded
-agent, a fetch proxy on the VM host, or source baked into a
-base image would each change the picture, and none of them
-exists.
+in `README.md`. A forwarded agent, a fetch proxy on the VM
+host, or source baked into a base image would each change the
+picture, and none of them exists.
 
 **Nothing can size the VM before the VM exists.** A project
 that declares its memory and CPU needs in its own repository
@@ -159,21 +178,42 @@ egress allowed by those rules has to include the git host
 deliberately. Getting this wrong fails at clone time rather
 than at boot, which is late and confusing.
 
-## What is not built yet
+## What is built and what is not
 
-None of it. The captured work sits in `docs/todo.md`:
+Built, as of 2026-08-30:
 
-- `generate-vagrantfile` -- bombyx emits the Vagrantfile from
-  per-provider templates. Everything else depends on this.
+- `generate-vagrantfile` -- bombyx renders the Vagrantfile from
+  `[vm]` in `bombyx.toml` and writes it, with a bootstrap
+  script, onto the VM host. The generated file disables the
+  default `/vagrant` share, so the pushed copy is not mounted
+  into the guest.
+- The guest-clone half of `remote-clone-project-source` -- the
+  bootstrap clones `[source]` inside the guest and runs a
+  script from it.
+
+Not built. The captured work sits in `docs/todo.md`:
+
+- The workstation half of `remote-clone-project-source`, which
+  is larger than its name suggests. Reaching the second
+  statement above means `bombyx.toml` stops being read from the
+  repo and the push stops entirely, so `vagrant_dir` and the
+  `tar`/`scp` path go with it. The machine description and the
+  repository URL have to move into configuration the operator
+  holds, keyed by project.
+
+  Note the direction of travel. This change added `[vm]` and
+  `[source]` **to `bombyx.toml`**, so it put more of what
+  bombyx depends on into the repo, not less. Those tables are
+  what has to move.
 - `minimal-vagrantfile` -- what the generator should emit, and
   nothing more.
-- `remote-clone-project-source` -- the workstation supplies a
-  URL and a commit, and the guest clones.
-- `provision-lifecycle-hooks` -- how step 5 is specified.
+- `provision-lifecycle-hooks` -- how the guest's setup is
+  specified.
 - `per-host-resource-profiles` -- carries the sizing question
   above.
 - `host-network-isolation` -- carries the egress question
-  above.
+  above, and is what the guest needs in order to reach the git
+  host at all.
 
-Until those land, `bombyx up` behaves as described under
-"Where project code lives today".
+The credential the guest needs for a private repository is
+still accepted and unsolved.

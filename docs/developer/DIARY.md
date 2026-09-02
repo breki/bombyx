@@ -2,6 +2,278 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-02
+
+**Primitive obsession: why `box`, `ref` and four `Config`
+fields should not stay `String`**
+
+The operator stated a standard: prefer strong types, avoid
+primitive obsession. We had written and defended one argument
+in three places, and that standard shows it is wrong.
+
+`docs/architecture.md` and two doc comments said `box`, `ref`
+and the four `Config` fields stay `String` because
+"their rules are the generic ones any string field would need,
+so a type would promise nothing extra."
+
+The mistake is in the last clause. What a type promises is not
+that its rules are interesting. It promises that they *ran*.
+`Config`, `Vm` and `Source` all have public fields, so any code
+can build one by hand and reach the guest with no check at all,
+and that is as true of a field with dull rules as of one with
+sharp rules.
+
+Eight checked values are still bare, and all three places now
+say so as a gap rather than a decision. `remote_root` is the one to
+do first: it reaches `rm -rf`, and `config::root` already holds
+all of its rules in a single function, so the constructor would
+wrap something that exists.
+Captured as `newtype-remaining-config-fields`.
+
+Not done in the same PR. The config modules had been re-cut in
+four commits over two days and the review had already flagged
+the churn.
+
+### 2026-08-31
+
+**A review round where the comments were the defect**
+
+Two reviewers ran against the newtype diff and returned
+twenty-two findings, two of them reached independently by both.
+Nine were not about the code at all. They were about comments
+written *in that same diff* describing behaviour the code did
+not have.
+
+That is worth naming as a pattern rather than a run of bad
+luck. The diff had just rewritten every comment to explain more
+for a junior reader. Explaining more means asserting more, and
+each assertion is a thing that can be wrong. A guard that
+cannot fire, a rule described one way and implemented another,
+a shell line credited with a fix it does not deliver.
+
+The worst one was that last shape. `bootstrap.sh` re-points
+`origin` before fetching, and the comment said this stops the
+silent-wrong-answer case where a changed `repo` leaves you
+looking at the old code. It does not. A fetch updates the files
+the new repository has; it does not delete files only the old
+one had. So the clone becomes a mixture, and if the old repo
+carried a provisioning script where the new one does not, the
+guest runs the *old* repository's script, as root, and reports
+success. The fix removes the clone outright when the remote
+disagrees.
+
+Second: `chmod` and `exec` follow symlinks. Checking the config
+value said nothing about what the repository put at that path,
+so a repo could ship its provisioning script as a link to a
+system file and have the guest `chmod +x` it as root. The path
+is resolved with `readlink -f` now and refused if it lands
+outside the clone. Resolving the whole path matters -- a
+symlinked parent directory does the same job and a single-link
+check misses it. Verified against a four-case harness.
+
+Two of the fixes then had to be corrected by testing them,
+which is the part worth remembering.
+
+A reviewer suggested `git clean -xdff` after the checkout so
+the tree matches the repository. It would also delete every
+untracked and ignored file -- which in an agent VM is the
+agent's uncommitted work. `bombyx provision` silently
+destroying that is worse than carrying a stale file. Not added,
+and the reasoning is in the script so nobody re-adds it.
+
+And the test pinning the leading-dash rule was written on a
+wrong assumption. I expected the dash-shaped values to be
+refused by the URL check; they are not, because
+`check_not_an_option` runs first. The test failed and said so.
+The value that actually pins the rule is
+`-oProxyCommand=id:x`: one colon, no `://`, so the URL check
+reads it as SSH shorthand and accepts it outright.
+
+One reviewer suggestion did not survive contact either.
+Replacing a "see below" with a rustdoc link to
+`delimiter_for` fails the doc gate, because the gate runs
+rustdoc twice and the public pass refuses a public item linking
+a private one. Tested rather than argued.
+
+**A third copy of the same rule**
+
+Acting on the deferred design findings turned up something
+neither reviewer did. One of them said the leading-dash rule
+existed twice -- once as a function in `config/vm.rs`, once
+hand-inlined in `Config::validate` -- so unifying them meant
+finding both. Grepping afterwards to check the job was done
+found a third, in `config/host.rs`.
+
+We left that one duplicated, with a comment saying to widen
+both, and the comment gave a reason that turned out to be
+wrong. It said the shared guard returns a `FieldError` carrying
+only a field name, while a bad host has to name the *source* it
+came from -- a flag, an environment variable, or one of two
+files -- so routing `host` through the guard would lose that.
+Two reviewers checked the claim in the next round and both
+found it false. `FieldError::Invalid` carries a reason string,
+and `Config::load` attaches the source itself, so nothing is
+lost. The third copy is gone now, and `host_problem` calls the
+three shared guards.
+
+The duplicate had already drifted before anyone noticed, which
+is the argument the comment should have made against itself.
+Parameterising the message for `git` singularised its verb, so
+the `ssh and scp` caller emitted "which ssh and scp reads as an
+option" while `host.rs` still said "read". The wording is
+"would treat" now, which works with one subject or two, and a
+test asserts the whole sentence rather than a fragment -- a
+`contains` check steps straight over a broken verb.
+
+Two lessons, and neither is about the dash rule. "Unify the
+duplication" needs the same treatment as any other guard: grep
+for the shape after fixing it, because the reviewer who found
+two copies had no reason to believe there was a third. And a
+comment explaining why a duplicate stays is a claim about the
+code, so it gets checked like one -- this one was one
+three-line conversion away from being disproved, and stood for
+a day.
+
+**Splitting the config, and what the split found**
+
+`config.rs` was 2,076 lines and `config/vm.rs` was 697, so a
+reviewer asked for a split. Four seams turned out to be
+obvious once we looked: reading a file off disk (`read`), the
+`remote_root` rules (`root`), the `[source]` table with its two
+checked types (`source`), and the Ruby-literal guard, which
+four fields share and which therefore belongs in `guards` with
+the other shared rules. `config.rs` came out at 1,806 lines and
+`vm.rs` at 202.
+
+Moving code is the cheapest way to find things wrong with it,
+and this move found two.
+
+The doc comment on the `minimal()` test helper existed *twice*,
+stacked, left by an earlier line-range edit. Rust concatenates
+consecutive `///` blocks without complaint, so it had been
+rendering as one paragraph that repeated itself, and no gate
+notices. Worth knowing for the next `sed` range: a duplicated
+doc block compiles, formats and passes clippy.
+
+And `remote_root`'s depth rule was stated three ways. The
+constant said one segment, the error message said "at least 1
+directory deep" -- which is ungrammatical and reads as a
+constraint on the wrong thing -- and `docs/architecture.md`
+said "several". The message now names what the rule actually
+requires, a directory *below* the root, and a test asserts the
+whole sentence so the three cannot drift again. That is the
+canon rule about a prose rule needing a test with the same
+example, applied to an error string.
+
+**`~vms` looked anchored and resolved relatively**
+
+The review of the split found a member of the `remote_root`
+family the guard let through, and it is worth writing down
+because the two halves were each correct on their own.
+
+`root::check` accepted any value starting with `~`, on the
+reasoning that `~` is a root. `quote_remote_path` leaves the
+tilde outside the quotes only for `~` and `~/`, because those
+are the spellings it knows the shell expands. So `~vms` passed
+the anchoring rule and was then emitted fully quoted, which
+makes it an ordinary relative name resolved against the SSH
+login directory -- exactly the outcome the anchoring rule's own
+message says it prevents.
+
+The damage was bounded: `~vms` under `$HOME` is still two
+segments deep, so the depth guarantee held by accident. But it
+was measured against the wrong root, and a later change to
+`quote_remote_path` that expanded a bare `~name` would have
+turned it into another user's home directory.
+
+The rule now requires `/` or `~/`, or exactly `~`. The lesson
+is the ordinary one about a guard that spans two files: the
+check and the quoter each had a defensible idea of what "a
+root" meant, and neither file said the two had to agree.
+
+**Two more prose rules, both from a reader who was not us**
+
+The operator caught two shapes in one sitting. "Two types, and
+the split is the point." is a noun phrase with the verb
+removed, and "is the point" says something matters without
+saying what. "the file's own contents are not bombyx's to
+print" packs a possessive and an infinitive into an idiom the
+reader has to unpack. Both are now in `CLAUDE.md`, with the
+plain rewrite beside them, and we swept the tree for each --
+six instances of the first, two of the second.
+
+The pattern behind both is the same one the "parse a sentence
+twice" rule already covers: terseness measured in words rather
+than in decoding cost. Neither sentence was long.
+
+### 2026-08-30
+
+**bombyx writes the Vagrantfile now**
+
+The Vagrantfile used to come from the project, and that put the
+trust boundary out of reach. Vagrant reads the file before the VM
+exists, so a project-supplied one has to sit on some machine
+outside the guest. `docs/trust-boundary.md` decided the guest is
+the only machine allowed to hold project source. The file
+therefore cannot come from the project at all: bombyx renders it
+from `[vm]` in `bombyx.toml` and writes it on the host after the
+push, and the guest clones the project itself.
+
+Two files go over, not one, and that came from operator review.
+The first design put the provisioning script inline as a Ruby
+heredoc, so config values crossed three nested contexts: Ruby, a
+shell inside Ruby, and a shell on the VM host. Vagrant's shell
+provisioner takes `path:` and `env:`, so the script became a
+separate file that never varies. It ships verbatim through
+`include_str!`, and `repo`, `ref` and `script` reach the guest as
+environment variables Vagrant sets. One quoting layer went away,
+and it was the dangerous one.
+
+The second correction came from the dry run. `up` builds seven
+commands now, two of which carry a whole file, so `--dry-run`
+printed about seventy lines in which a payload line could not be
+told from the next command. Separating on blank lines would not
+have helped, because both payloads contain blank lines. Each
+write prints as one line now, naming the heredoc and how many
+lines it dropped. `remote::abbreviated` does that, in the library
+rather than in `src/bin/`, which the coverage gate cannot see.
+
+What is verified and what is not. Vagrant 2.4.9 with
+vagrant-libvirt 0.12.2 turned out to be installed on this
+workstation, the same versions frosti runs, so `vagrant validate`
+parses the generated file. That is kept as an `#[ignore]`-tagged
+test. `shellcheck` reports `bootstrap.sh` clean. This has never run
+against frosti, so two things stay unknown: whether the host
+accepts the heredoc write, and whether the guest can reach the
+git host.
+
+The review round caught the thing that mattered. The generated
+Vagrantfile left Vagrant's default share on, so the guest
+mounted the workstation's pushed copy of the project -- the copy
+the whole design exists to keep out of it, and on a firewalled
+host a mount that hangs rather than failing. The tutorial had
+taught disabling it, in the very file bombyx now overwrites. So
+the change did not do what it was for, and no test noticed
+because no test asked.
+
+Two more of the same shape. Overwriting the project's
+Vagrantfile also broke the hand-over of `BOMBYX_VM_HOST` into
+the guest, which that file used to perform and which the README
+still described. And `check_renderable` guarded the Ruby literal
+while the same three fields reached `git` argv and a path run as
+root in the guest -- `ref = "--upload-pack=..."` read as an
+option, `repo = "ext::sh -c ..."` running a command instead of
+cloning. `vagrant_dir` and `remote_root` had carried those rules
+for weeks. That is the "guard one field, check its siblings"
+rule, missed again, on the commit that quoted it in its own
+plan.
+
+The doctor probe kept its failing branch after all. It used to
+fail on a missing Vagrantfile, which caught a typo in
+`vagrant_dir`; an absent Vagrantfile is ordinary now, so it
+fails on a missing *directory* instead -- the same typo, one
+step earlier.
+
 ### 2026-08-18
 
 **Output that walked off the right edge of the screen**

@@ -13,7 +13,7 @@
 //! lockfile-churning update (`cargo update`) therefore can
 //! flag many fresh transitive versions at once; see
 //! `RUSTBASE_DEP_AGE_ALLOW` and the supply-chain notes in
-//! `CLAUDE.md` for the intended workflow.
+//! `docs/developer/supply-chain.md` for the intended workflow.
 //!
 //! The shared registry-fetch and date-verdict machinery lives
 //! in the parent [`super`] module; this submodule imports it.
