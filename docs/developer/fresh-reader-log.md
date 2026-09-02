@@ -9,27 +9,6 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-09-02-vagrant-dir-two-consumers
-
-**Category:** False claim
-
-`docs/issues/project-config-off-repo.md` says the push is
-`vagrant_dir`'s only consumer, in the ordering argument and again
-in `docs/todo.md`. There are two: `main.rs:310` derives `local_dir`
-from it, and `main.rs:342` hands that to `doctor_run`. Chunk 1
-removes both, so the conclusion holds and the sentence overstates.
-
-### fr-2026-09-02-gitignore-does-not-stop-shipping
-
-**Category:** False claim
-
-The same document waves `bombyx.local.toml` out of scope because
-it is gitignored, "so a repository cannot ship one". `.gitignore:33`
-says the opposite in its own comment: "a tracked one would be
-applied on checkout by everyone who clones". `.gitignore` stops an
-accidental commit, not a deliberate one. Either the real reason the
-overlay is out of scope gets written down, or it is in scope.
-
 ### fr-2026-09-02-chunk-one-does-not-reach-statement-one
 
 **Category:** Contradiction within one document

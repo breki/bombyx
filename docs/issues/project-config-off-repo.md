@@ -1,6 +1,6 @@
 # project-config-off-repo
 
-**Status:** Planning
+**Status:** In progress
 **Captured:** 2026-08-30
 **Started:** 2026-09-02
 
@@ -35,10 +35,12 @@ it belongs with chunk 1, which is what makes the claim true.
 Two files block the second rule. `bombyx.toml` is read from
 the working directory, and the `vagrant/` directory is pushed
 to the VM host. `bombyx.local.toml` is read from the working
-directory as well, but it is gitignored (`.gitignore:38`), so
-a repository cannot ship one, and the second rule is about
-what the repository ships. It is removed in chunk 2 for a
-different reason, given under `## Decisions`.
+directory as well. `.gitignore:38` lists it, which stops an
+accidental commit and not a deliberate one -- the comment above
+that line says as much, and a force-added file is tracked like
+any other. So it is inside the second rule, not outside it.
+Chunk 2 removes it anyway, for the separate reason given under
+`## Decisions`.
 
 This document covers both blockers. Removing the push is a
 deletion. Moving the config is a design question: the config
@@ -80,12 +82,15 @@ in the pushed copy.
 The VM host receives an archive that no program there reads.
 
 This matters for ordering. `vagrant_dir` is the only config
-value naming a location inside the checkout, and the push is
-its only consumer. Removing the push removes `vagrant_dir`,
-and then no repo-relative path is left for an off-repo config
-to resolve. Doing the move first would instead require a
-per-project absolute checkout path on the workstation, which
-is the dependency this work exists to delete.
+value naming a location inside the checkout. It has two
+consumers, and chunk 1 removes both: the push, and the
+`doctor` check that looks for a Vagrantfile in that directory
+(`main.rs:342` hands `doctor_run` a path derived from it).
+Removing them removes `vagrant_dir`, and then no repo-relative
+path is left for an off-repo config to resolve. Doing the move
+first would instead require a per-project absolute checkout
+path on the workstation, which is the dependency this work
+exists to delete.
 
 ## Open questions
 
@@ -249,3 +254,35 @@ commands stay identical, which a dry run can show.
   registry file and the keys the entry needs. bombyx writes
   nothing on the operator's behalf, which is how a missing
   `bombyx.toml` behaves today.
+
+## Progress log
+
+### 2026-09-02 -- chunk 1 landed
+
+The push is gone. `remote::push_dir`, `PushArchive`,
+`Action::pushes` and the `vagrant_dir` config field are deleted,
+`plan()` lost its `local_dir` and `archive` parameters, and
+`main.rs` no longer builds a `TempDir` workspace. `bombyx up` is
+four `ssh` commands.
+
+Three things went further than the plan said, each because the
+push was their only reason to exist. `doctor` lost its local
+`scp` check and its `tar` and `scp` host probes -- bombyx runs
+`scp` nowhere now, and `tar` only in `self-update`. It also lost
+`vagrantfile_finding` entirely: all three of that check's cases
+were about a directory bombyx no longer reads. And
+`guards::check_project_relative` went, because `vagrant_dir` was
+its only caller.
+
+`host`'s error message named "ssh and scp" and now names `ssh`
+alone, which is a correctness fix rather than tidying: the
+message tells the operator which program the value reaches.
+
+`cargo xtask validate` passes, coverage 97.9%. Deleting the
+integration test that ran a real `doctor` took
+`ProbeResult::from_output` below the threshold, so it gained
+direct unit tests.
+
+**Not verified against a real VM host.** This chunk changes
+what executes there, so Definition of Done item 3 applies and is
+not met. frosti was unreachable from this session.

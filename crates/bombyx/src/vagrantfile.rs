@@ -260,7 +260,8 @@ mod tests {
     #[test]
     fn points_the_provisioner_at_the_bootstrap_script() {
         // The two names must agree or vagrant reports a missing
-        // path after the push has already changed state.
+        // path after bombyx has already created a directory
+        // on the host.
         let out = render(&cfg_with(Provider::Libvirt));
         assert!(out.contains(BOOTSTRAP_NAME), "{out}");
         assert!(out.contains("config.vm.provision"), "{out}");

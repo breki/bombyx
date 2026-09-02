@@ -51,32 +51,29 @@ workstation.
 workstation                  vmhost (VM host)
   bombyx  ──── ssh ────►  vagrant ──► agent VM
      │                          ▲          │
-     ├── pushes vagrant/ ───────┘          │
-     └── writes Vagrantfile ───────────────┘
+     └── writes Vagrantfile ────┘          │
+         and bootstrap.sh                  │
                                   clones the repo itself
 ```
 
 Two rules shape the design:
 
-1. **The repo is the source of truth.** Each project keeps
-   its `vagrant/` directory in its own repo, and `bombyx up`
-   pushes it to the host before booting.
+1. **The guest is the only machine holding your code.**
+   bombyx sends the VM host two files, and it generates both
+   of them: a Vagrantfile from `[vm]` in `bombyx.toml`, and a
+   bootstrap script. Vagrant needs the Vagrantfile before the
+   VM exists, so it cannot come from inside the guest. Once
+   the VM is up, the guest clones the project itself from
+   `[source]`.
 
-   *The Vagrantfile is the exception, and it is the first
-   step of a larger change.* bombyx generates that file from
-   `[vm]` in `bombyx.toml` and writes it on the host after
-   the push, because vagrant needs it before the VM exists
-   and so it cannot come from inside the guest. The guest
-   then clones the project itself.
-
-   Pushing `vagrant/` at all still requires a checkout on
-   your workstation, which is the machine this design exists
-   to keep project code off. That part has not changed yet.
-   The decision, the argument for it, and what it costs are
-   in [trust-boundary.md](docs/trust-boundary.md).
-2. **Wrap, don't reimplement.** bombyx composes `ssh`,
-   `scp` and `vagrant`. If it breaks, `ssh vmhost` and
-   `vagrant up` by hand still work.
+   Your workstation still reads `bombyx.toml` out of the
+   project's directory, which is the last thing it reads from
+   the repo. The decision, the argument for it, and what it
+   costs are in
+   [trust-boundary.md](docs/trust-boundary.md).
+2. **Wrap, don't reimplement.** bombyx composes `ssh` and
+   `vagrant`. If it breaks, `ssh vmhost` and `vagrant up` by
+   hand still work.
 
 ## Install
 
@@ -130,15 +127,14 @@ ref = "main"
 script = "vagrant/provision.sh"   # run from the clone
 
 # optional, shown with defaults
-vagrant_dir = "vagrant"  # dir in this repo pushed to the host
 remote_root = "~/vms"    # root on the host for project dirs
 ```
 
 **bombyx writes the Vagrantfile; the project does not.** It is
 generated from `[vm]` and written on the VM host on every `up`,
-`provision` and `scratch`, so a `Vagrantfile` left in
-`vagrant_dir` is pushed and then overwritten. `bombyx doctor`
-says so if it finds one.
+`provision` and `scratch`. A `Vagrantfile` committed in your
+project is never read by anything: bombyx does not send it, and
+the guest's clone is not what Vagrant boots from.
 
 Neither `[vm]` nor `[source]` has defaults, and both are
 required. There is no defensible default for a base image, and
@@ -250,17 +246,15 @@ without reasoning about precedence.
 
 Validation runs *after* the merge, so an override is subject to
 exactly the same checks as the committed file rather than being
-a way around them. That includes the rule that `vagrant_dir`
-must stay inside the project: it is joined onto the working
-directory, and an absolute path would silently replace it,
-making `up` archive somewhere else entirely.
+a way around them. That includes every rule on `remote_root`,
+which is the value `destroy` builds an `rm -rf` path from.
 
 ## Use
 
 ```bash
 bombyx doctor             # check the preconditions, change nothing
-bombyx up                 # push vagrant/, boot the VM
-bombyx provision          # push vagrant/, re-run provisioning
+bombyx up                 # write the generated files, boot the VM
+bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
@@ -282,18 +276,18 @@ Two lifecycles, on purpose:
   survives, which is the point: malware that persists to
   survive credential rotation has nothing to persist to.
 
-Every command accepts `--dry-run`, which prints the exact
-`ssh`/`scp` invocation instead of running it. Run `bombyx
-doctor` first on a new host: `up` creates a directory and ships
-a tarball before it runs `vagrant`, so without it a missing
-piece is reported half-way through.
+Every command accepts `--dry-run`, which prints the exact `ssh`
+invocation instead of running it. Run `bombyx doctor` first on a
+new host: `up` creates a directory and writes two files before
+it runs `vagrant`, so without it a missing piece is reported
+half-way through.
 
 [docs/usage.md](docs/usage.md) is the full reference. It covers
 why `provision` is a separate command, why `destroy` asks for
 the project name, what teardown removes, how to read the
-`doctor` report, and how the push is built -- including the
-quoting details that keep a config file from running code on
-your workstation.
+`doctor` report, and how the generated files are written --
+including the quoting details that keep a config file from
+running code on your workstation.
 
 ## Updating bombyx
 

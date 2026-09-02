@@ -4,12 +4,10 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use std::path::Path;
-
 use crate::config::Config;
 use crate::doctor;
 use crate::name::ScratchName;
-use crate::remote::{self, PushArchive, RemoteCommand, Tty};
+use crate::remote::{self, RemoteCommand, Tty};
 use crate::vagrantfile;
 
 /// What the user asked bombyx to do.
@@ -28,7 +26,7 @@ pub enum Action {
     /// a machine only when it first creates it. Every later
     /// `vagrant up` skips the provisioners -- whether the VM
     /// was halted or running -- so an edited script reaches the
-    /// host and nothing executes it, while the push reports
+    /// guest and nothing executes it, while `up` reports
     /// success.
     ///
     /// Requires a machine that already exists: `vagrant
@@ -53,19 +51,7 @@ pub enum Action {
     Discard(ScratchName),
 }
 
-impl Action {
-    /// Whether carrying out this action pushes the Vagrant
-    /// directory, and so needs a local archive.
-    #[must_use]
-    pub fn pushes(&self) -> bool {
-        matches!(self, Self::Up | Self::Provision | Self::Scratch(_))
-    }
-}
-
 /// Returns the ordered commands that carry out `action`.
-///
-/// `local_dir` is the absolute path of the project's Vagrant
-/// directory; `archive` names the transient push archive.
 ///
 /// `tty` is threaded through to every vagrant invocation this
 /// builds, rather than being added while spawning, so the printed
@@ -90,30 +76,12 @@ impl Action {
 /// full content regardless; see
 /// [`RemoteCommand::abbreviated`].
 #[must_use]
-pub fn plan(
-    action: &Action,
-    cfg: &Config,
-    local_dir: &Path,
-    archive: &PushArchive,
-    tty: Tty,
-) -> Vec<RemoteCommand> {
+pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
     match action {
-        Action::Up => push_then(
-            cfg,
-            &cfg.remote_project_dir(),
-            local_dir,
-            archive,
-            &["up"],
-            tty,
-        ),
-        Action::Provision => push_then(
-            cfg,
-            &cfg.remote_project_dir(),
-            local_dir,
-            archive,
-            &["provision"],
-            tty,
-        ),
+        Action::Up => write_then(cfg, &cfg.remote_project_dir(), &["up"], tty),
+        Action::Provision => {
+            write_then(cfg, &cfg.remote_project_dir(), &["provision"], tty)
+        }
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
         Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
@@ -128,14 +96,9 @@ pub fn plan(
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir(), tty),
-        Action::Scratch(name) => push_then(
-            cfg,
-            &cfg.remote_scratch_dir(name),
-            local_dir,
-            archive,
-            &["up"],
-            tty,
-        ),
+        Action::Scratch(name) => {
+            write_then(cfg, &cfg.remote_scratch_dir(name), &["up"], tty)
+        }
         Action::Discard(name) => {
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
@@ -163,40 +126,26 @@ fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
     ]
 }
 
-/// Ensures `dir` exists on the host, pushes the project's
-/// Vagrant directory into it, then runs `vagrant` with `args`
-/// there.
+/// Ensures `dir` exists on the host, writes the generated files
+/// into it, then runs `vagrant` with `args` there.
 ///
 /// Shared by `up`, `scratch` and `provision`, which differ only
 /// in the directory they target and the vagrant arguments they
-/// end with. Routing all three through one helper is what keeps
-/// the push from drifting: every caller ships the local
-/// directory first, so vagrant always acts on the working tree
-/// rather than on whatever a previous run left behind.
+/// end with. Routing all three through one helper is what stops
+/// them drifting: `vagrant` needs the Vagrantfile bombyx
+/// generates, so every caller has to write it before booting.
 ///
 /// `args` is a slice rather than one string, matching
 /// [`remote::vagrant_in`]. A single string would turn a
 /// two-word invocation into one quoted argument, which fails on
-/// the host after the push has already changed state.
-fn push_then(
+/// the host after the directory has already been created.
+fn write_then(
     cfg: &Config,
     dir: &str,
-    local_dir: &Path,
-    archive: &PushArchive,
     args: &[&str],
     tty: Tty,
 ) -> Vec<RemoteCommand> {
     let mut cmds = vec![remote::ensure_dir(cfg, dir)];
-    cmds.extend(remote::push_dir(cfg, local_dir, dir, archive));
-    // The generated files must be written after the push, not
-    // before.
-    //
-    // The push unpacks the project's archive into this same
-    // directory. If we wrote our generated Vagrantfile first,
-    // unpacking would overwrite it with whatever the project
-    // shipped -- which is the exact file we generate one to
-    // avoid using. Everything would still appear to work, and
-    // vagrant would read the wrong file.
     for (name, contents) in vagrantfile::files(cfg) {
         cmds.push(remote::write_file(cfg, dir, name, &contents));
     }
@@ -220,13 +169,7 @@ mod tests {
     }
 
     fn plan_for(action: &Action, tty: Tty) -> Vec<RemoteCommand> {
-        plan(
-            action,
-            &cfg(),
-            Path::new("/repo/vagrant"),
-            &PushArchive::new(Path::new("/work"), "42"),
-            tty,
-        )
+        plan(action, &cfg(), tty)
     }
 
     #[test]
@@ -331,13 +274,7 @@ mod tests {
     }
 
     fn run(action: &Action) -> Vec<RemoteCommand> {
-        plan(
-            action,
-            &cfg(),
-            Path::new("/repo/vagrant"),
-            &PushArchive::new(Path::new("/work"), "42"),
-            Tty::NoPty,
-        )
+        plan(action, &cfg(), Tty::NoPty)
     }
 
     fn scripts(action: &Action) -> Vec<String> {
@@ -367,7 +304,8 @@ mod tests {
         ScratchName::parse(name).unwrap()
     }
 
-    // This test and `provision_pushes_then_reprovisions` spell out
+    // This test and `provision_writes_the_files_then_reprovisions`
+    // spell out
     // the same five-command script, differing only in the trailing
     // `vagrant 'up'` versus `vagrant 'provision'`. A review proposed
     // an `expected_push(dir, subcommand)` helper and the duplication
@@ -381,23 +319,15 @@ mod tests {
     // `push_then` gains its own exact-script test -- three copies
     // change the judgement.
     #[test]
-    fn up_makes_the_dir_then_pushes_then_boots() {
-        // Order is the point twice over. Booting before the
-        // push would run `vagrant up` with no Vagrantfile in
-        // place, and writing the generated files before the
-        // push would let the archive replace them.
+    fn up_makes_the_dir_writes_the_files_then_boots() {
+        // Order is the point. `vagrant up` reads the Vagrantfile
+        // from the directory it runs in, so both generated files
+        // have to be written before the boot, into a directory
+        // that already exists.
         assert_eq!(
             scripts_head(&Action::Up),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
-                "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
-                 /repo/vagrant --exclude=./.vagrant \
-                 --exclude=./.git .",
-                "cd /work && scp .bombyx-push-42.tar.gz \
-                 vmhost:.bombyx-push-42.tar.gz",
-                "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
-                 ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
-                 ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
                 "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
                  <<'BOMBYX_EOF'",
                 "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh' \
@@ -422,35 +352,37 @@ mod tests {
     }
 
     #[test]
-    fn a_push_writes_both_generated_files_before_booting() {
-        // Order is the whole point. Both files have to land
-        // *after* the archive is unpacked, or the push would
-        // overwrite the generated Vagrantfile with whatever the
-        // project shipped -- which is the file this change
-        // exists to stop vagrant reading.
+    fn both_generated_files_are_written_before_booting() {
+        // Order is the whole point. `vagrant` reads the
+        // Vagrantfile when it starts, so a file written after the
+        // boot command would never be read, and the boot would
+        // fail on a directory holding no Vagrantfile at all.
+        //
+        // The directory has to exist first as well, which is what
+        // pins `mkdir` at index 0.
         for action in [
             Action::Up,
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
             let s = scripts(&action);
-            let untar = only_at(&s, "tar -xzf");
             let vagrantfile = only_at(&s, "/Vagrantfile'");
             let bootstrap = only_at(&s, "/bootstrap.sh'");
             let boot = s.len() - 1;
+            assert_eq!(only_at(&s, "mkdir -p"), 0, "{action:?}");
             assert!(
-                untar < vagrantfile && vagrantfile < boot,
+                vagrantfile < boot,
                 "{action:?}: Vagrantfile written out of order"
             );
             assert!(
-                untar < bootstrap && bootstrap < boot,
+                bootstrap < boot,
                 "{action:?}: bootstrap written out of order"
             );
         }
     }
 
     #[test]
-    fn actions_that_do_not_push_write_nothing() {
+    fn actions_that_do_not_boot_write_nothing() {
         // A write on `down` or `destroy` would recreate the
         // directory teardown had just removed.
         for action in [
@@ -467,38 +399,27 @@ mod tests {
     }
 
     #[test]
-    fn scratch_pushes_before_booting() {
-        // Without the push, `scratch` boots an empty dir.
+    fn scratch_writes_the_files_before_booting() {
+        // Without the two writes, `scratch` boots a directory
+        // holding no Vagrantfile.
         let cmds = run(&Action::Scratch(scratch("pr-1234")));
         let programs: Vec<&str> =
             cmds.iter().map(|c| c.program.as_str()).collect();
-        // Seven, not five: the two writes of the generated
-        // Vagrantfile and bootstrap script sit between the
-        // unpack and the boot.
-        assert_eq!(
-            programs,
-            vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
-        );
+        // Four, and every one of them is `ssh`: bombyx no longer
+        // runs anything on the workstation for a VM action.
+        assert_eq!(programs, vec!["ssh", "ssh", "ssh", "ssh"]);
         assert!(cmds[0].args[1].contains("mkdir -p"));
         assert!(cmds.last().unwrap().args[1].ends_with("vagrant 'up'"));
     }
 
     #[test]
-    fn provision_pushes_then_reprovisions() {
+    fn provision_writes_the_files_then_reprovisions() {
         // Pins the literal shell, so the command's whole effect
         // on the host is readable in one place.
         assert_eq!(
             scripts_head(&Action::Provision),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
-                "cd /work && tar -czf .bombyx-push-42.tar.gz -C \
-                 /repo/vagrant --exclude=./.vagrant \
-                 --exclude=./.git .",
-                "cd /work && scp .bombyx-push-42.tar.gz \
-                 vmhost:.bombyx-push-42.tar.gz",
-                "ssh vmhost \"{ cd ~/'vms/myproject' && tar -xzf \
-                 ~/'.bombyx-push-42.tar.gz'; }; rc=\\$?; rm -f \
-                 ~/'.bombyx-push-42.tar.gz'; exit \\$rc\"",
                 "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
                  <<'BOMBYX_EOF'",
                 "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh' \
@@ -514,9 +435,8 @@ mod tests {
     fn provision_and_up_take_the_same_shape() {
         // The invariant the shared helper exists to keep: the
         // two differ in their last step and nowhere else. A
-        // `provision` that grew its own push logic could skip
-        // the push and re-run the stale copy on the host --
-        // the bug the command was added to fix.
+        // `provision` that grew its own file-writing logic could
+        // boot against a stale Vagrantfile on the host.
         let up = run(&Action::Up);
         let pr = run(&Action::Provision);
         assert_eq!(up.len(), pr.len());
@@ -725,24 +645,17 @@ mod tests {
     }
 
     #[test]
-    fn only_pushing_actions_need_an_archive() {
-        // Named for pushing rather than booting: `provision`
-        // needs the archive without booting anything, so tying
-        // the rule to "boots" would have made it the exception
+    fn only_the_three_writing_actions_write() {
+        // `provision` writes without booting anything, so a rule
+        // phrased around booting would have made it an exception
         // instead of a third member of the set.
-        assert!(Action::Up.pushes());
-        assert!(Action::Scratch(scratch("x")).pushes());
-        assert!(Action::Provision.pushes());
-        for a in [
-            Action::Down,
-            Action::Status,
-            Action::Shell,
-            Action::Reset,
-            Action::Destroy,
-            Action::Doctor,
-            Action::Discard(scratch("x")),
-        ] {
-            assert!(!a.pushes(), "{a:?} must not need an archive");
+        for action in
+            [Action::Up, Action::Provision, Action::Scratch(scratch("x"))]
+        {
+            assert!(
+                scripts(&action).iter().any(|s| s.contains("cat > ")),
+                "{action:?} must write the generated files"
+            );
         }
     }
 }

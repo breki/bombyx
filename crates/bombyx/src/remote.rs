@@ -8,7 +8,7 @@
 //!
 //! This module is the builders and the VM-host identity constants.
 //! Two neighbours hold the pieces they are built from: `command`
-//! defines [`RemoteCommand`] and [`PushArchive`], and `quote` holds
+//! defines [`RemoteCommand`], and `quote` holds
 //! the POSIX quoting primitives -- pure functions with their own
 //! dense test block and no dependency on [`Config`], which is why
 //! they read as a separate unit. Both are re-exported, so
@@ -19,11 +19,9 @@ pub mod probe;
 mod quote;
 mod write;
 
-pub use command::{PushArchive, RemoteCommand};
+pub use command::RemoteCommand;
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::write_file;
-
-use std::path::Path;
 
 use crate::config::Config;
 
@@ -250,74 +248,6 @@ pub fn vagrant(cfg: &Config, args: &[&str], tty: Tty) -> RemoteCommand {
     vagrant_in(cfg, &cfg.remote_project_dir(), args, tty)
 }
 
-/// Builds the commands that push a local directory's
-/// **contents** into `remote_dir` on the VM host.
-///
-/// The repo stays the source of truth; the host receives a
-/// copy before every boot so the two cannot drift.
-///
-/// This ships a tar archive rather than using `scp -r` or
-/// `rsync`, for two reasons:
-///
-/// - `scp -r <dir> host:<dest>/` copies *into* an existing
-///   destination, like `cp -r`. The first push creates
-///   `<dest>/<dir>`; the second creates
-///   `<dest>/<dir>/<dir>`. Extracting a tar over an
-///   existing tree instead overwrites in place, so
-///   repeated pushes are idempotent.
-/// - `rsync` is not present on a stock Windows workstation,
-///   which is where bombyx runs. `tar`, `scp` and `ssh` all
-///   are.
-///
-/// `.vagrant/` holds the VM's identity on the host and is
-/// excluded from the archive, so a developer who has ever run
-/// `vagrant` locally cannot overwrite the host's copy and
-/// orphan a running VM. `.git/` is excluded because there is
-/// no reason to ship it.
-///
-/// The tradeoff of extract-in-place is that a file deleted
-/// locally is not removed from the host; run `vagrant
-/// destroy` and re-push if the remote tree needs pruning.
-#[must_use]
-pub fn push_dir(
-    cfg: &Config,
-    local_dir: &Path,
-    remote_dir: &str,
-    archive: &PushArchive,
-) -> Vec<RemoteCommand> {
-    let remote_archive = quote_remote_path(&format!("~/{}", archive.name));
-    // Cleanup runs whether or not the extract succeeded: a
-    // half-written archive left in the project directory
-    // would be swept into the tree `vagrant up` runs in.
-    let unpack = format!(
-        "{{ cd {dir} && tar -xzf {a}; }}; rc=$?; rm -f {a}; exit $rc",
-        dir = quote_remote_path(remote_dir),
-        a = remote_archive,
-    );
-    let local = local_dir.to_string_lossy().into_owned();
-    let dest = format!("{}:{}", cfg.host, archive.name);
-    vec![
-        // `-C <dir> .` archives the contents, not the
-        // directory itself, so extraction lands files
-        // directly in `remote_dir`.
-        RemoteCommand::new(
-            "tar",
-            &[
-                "-czf",
-                &archive.name,
-                "-C",
-                &local,
-                "--exclude=./.vagrant",
-                "--exclude=./.git",
-                ".",
-            ],
-        )
-        .in_dir(&archive.dir),
-        RemoteCommand::new("scp", &[&archive.name, &dest]).in_dir(&archive.dir),
-        RemoteCommand::new("ssh", &[&cfg.host, &unpack]),
-    ]
-}
-
 /// Builds the `ssh` command that creates `dir` on the VM
 /// host if it does not yet exist.
 #[must_use]
@@ -412,7 +342,6 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
 mod tests {
     use super::*;
     use crate::name::ScratchName;
-    use std::path::PathBuf;
 
     /// The ssh options that precede the destination, in order.
     ///
@@ -527,19 +456,6 @@ mod tests {
     /// exist to catch.
     fn vm_env() -> String {
         format!("{VM_HOST_ENV}='vmhost' {VM_HOSTNAME_ENV}=$(hostname -s)")
-    }
-
-    fn archive() -> PushArchive {
-        PushArchive::new(Path::new("/work"), "42")
-    }
-
-    fn push() -> Vec<RemoteCommand> {
-        push_dir(
-            &cfg(),
-            Path::new("/repo/vagrant"),
-            "~/vms/myproject",
-            &archive(),
-        )
     }
 
     #[test]
@@ -665,114 +581,11 @@ mod tests {
     }
 
     #[test]
-    fn push_emits_exactly_three_steps_in_order() {
-        let cmds = push();
-        let programs: Vec<&str> =
-            cmds.iter().map(|c| c.program.as_str()).collect();
-        assert_eq!(programs, vec!["tar", "scp", "ssh"]);
-    }
-
-    #[test]
-    fn push_archives_contents_not_the_directory() {
-        // `-C <dir> .` is what makes the push idempotent:
-        // archiving the directory itself would nest it one
-        // level deeper on every push.
-        assert_eq!(
-            push()[0].args,
-            vec![
-                "-czf",
-                ".bombyx-push-42.tar.gz",
-                "-C",
-                "/repo/vagrant",
-                "--exclude=./.vagrant",
-                "--exclude=./.git",
-                "."
-            ]
-        );
-    }
-
-    #[test]
-    fn push_excludes_the_hosts_vm_identity() {
-        // Shipping a local `.vagrant/` overwrites the host's
-        // machine id and orphans the running VM.
-        assert!(
-            push()[0].args.iter().any(|a| a == "--exclude=./.vagrant"),
-            "the push must not carry a local .vagrant/"
-        );
-    }
-
-    #[test]
-    fn push_runs_tar_and_scp_in_the_archive_dir() {
-        // Both must use the bare file name, or an absolute
-        // Windows path makes scp read `C:` as a host name.
-        let cmds = push();
-        let dir = Some(PathBuf::from("/work"));
-        assert_eq!(cmds[0].dir, dir);
-        assert_eq!(cmds[1].dir, dir);
-        assert_eq!(cmds[2].dir, None);
-    }
-
-    #[test]
-    fn push_never_passes_a_drive_letter_to_scp() {
-        let archive = PushArchive::new(
-            Path::new(r"C:\Users\igor\AppData\Local\Temp"),
-            "42",
-        );
-        let cmds = push_dir(
-            &cfg(),
-            Path::new("/repo/vagrant"),
-            "~/vms/myproject",
-            &archive,
-        );
-        for arg in &cmds[1].args {
-            assert!(
-                !arg.contains(r":\"),
-                "scp argument {arg:?} carries a drive letter"
-            );
-        }
-    }
-
-    #[test]
-    fn push_copies_the_archive_to_the_remote_home() {
-        assert_eq!(
-            push()[1].args,
-            vec![".bombyx-push-42.tar.gz", "vmhost:.bombyx-push-42.tar.gz"]
-        );
-    }
-
-    #[test]
-    fn push_removes_the_archive_even_when_extraction_fails() {
-        // `&&`-chaining the cleanup would leave a corrupt
-        // archive inside the tree `vagrant up` runs in.
-        assert_eq!(
-            push()[2].args[1],
-            "{ cd ~/'vms/myproject' && tar -xzf \
-             ~/'.bombyx-push-42.tar.gz'; }; rc=$?; rm -f \
-             ~/'.bombyx-push-42.tar.gz'; exit $rc"
-        );
-    }
-
-    #[test]
-    fn push_never_uses_scp_recursive() {
-        // Regression guard: `scp -r` into an existing
-        // destination nests the directory on every push.
-        for c in &push() {
-            assert!(
-                !(c.program == "scp" && c.args.iter().any(|a| a == "-r")),
-                "push must not use scp -r"
-            );
-        }
-    }
-
-    #[test]
-    fn push_targets_the_dir_vagrant_runs_in() {
-        // The Vagrantfile must land where `vagrant up` runs,
-        // otherwise the boot fails with no Vagrantfile.
+    fn vagrant_runs_in_the_project_dir() {
+        // `vagrant up` reads the Vagrantfile from the directory
+        // it runs in, so the command has to cd there first.
         let cfg = cfg();
-        let dir = cfg.remote_project_dir();
-        let cmds = push_dir(&cfg, Path::new("/repo/vagrant"), &dir, &archive());
-        let quoted = quote_remote_path(&dir);
-        assert!(cmds[2].args[1].contains(&format!("cd {quoted} &&")));
+        let quoted = quote_remote_path(&cfg.remote_project_dir());
         assert!(
             vagrant(&cfg, &["up"], Tty::NoPty).args[1]
                 .starts_with(&format!("cd {quoted} &&"))

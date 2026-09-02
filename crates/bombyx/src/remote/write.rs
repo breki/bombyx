@@ -1,11 +1,10 @@
 //! Writing the files bombyx generates onto the VM host.
 //!
-//! The Vagrantfile and the bootstrap script do not travel in
-//! the push with the project's other files. bombyx writes them
-//! separately, over SSH, after the push has landed. That is on
-//! purpose: it means a project cannot supply either of them,
-//! however it arranges its own directory. See
-//! `docs/trust-boundary.md`.
+//! bombyx sends the Vagrantfile and the bootstrap script over
+//! SSH, and they are the only project files any machine outside
+//! the guest holds. Neither comes from the project's repository,
+//! so a project cannot supply either of them however it arranges
+//! its own directory. See `docs/trust-boundary.md`.
 //!
 //! Getting a whole file across an SSH connection is done with a
 //! shell *heredoc*, which looks like this:

@@ -72,32 +72,6 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
-- **remote-clone-project-source** -- drop the push once nothing needs it
-  The guest-clone half landed with `generate-vagrantfile`: the bootstrap clones
-  `[source]` inside the VM and runs a script from it. What remains is the
-  workstation half, and it is larger than the slug suggests.
-
-  The goal is that neither the workstation nor the VM host reads any file from
-  the project's repo -- not the source, and not `bombyx.toml` or `vagrant/`
-  either. A repo bombyx has never opened cannot decide what runs on the
-  machines outside the VM. See `docs/trust-boundary.md`.
-
-  Two pieces, and only the second is this item. Moving the config out of the
-  repo is captured separately as `project-config-off-repo`, because it is a
-  design question rather than a deletion. What is left here is the push: once
-  nothing needs the pushed files, `vagrant_dir`, `Action::pushes` and the
-  `tar`/`scp` path all go, and `bombyx up` becomes four commands instead of
-  seven.
-
-  Ordering: this comes first, before `project-config-off-repo`. The VM host
-  already receives an archive that no program there reads -- the generated
-  Vagrantfile disables the `/vagrant` share and names only bombyx's own
-  bootstrap script, so the unpacked files sit unread. `vagrant_dir` is the
-  only config value naming a location inside the checkout, and the push is
-  its only consumer. Removing the push first means the moved config never
-  needs a path to a checkout.
-  GitHub issue #10; planned in `docs/issues/project-config-off-repo.md`.
-
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
   memory, and a single generic bootstrap provisioner that calls into bombyx.
@@ -159,12 +133,12 @@ plan, decisions, and outcome.
   section, which explains the split as project-file-committed versus
   host-file-private. That framing does not survive.
 
-- **newtype-remaining-config-fields** -- types for the six checked fields
-  Six config values carry validation rules and are still bare `String` or `u32`:
-  `host`, `project`, `vagrant_dir`, `remote_root`, `box` and `ref`, plus
+- **newtype-remaining-config-fields** -- types for the five checked fields
+  Five config values carry validation rules and are still bare `String` or
+  `u32`: `host`, `project`, `remote_root`, `box` and `ref`, plus
   `cpus`/`memory` whose only rule is a floor. `RepoUrl`, `ScriptPath` and
   `ScratchName` show the shape. `Config`, `Vm` and `Source` all have public
-  fields, so every one of those six can be set by hand with no check running.
+  fields, so every one of those five can be set by hand with no check running.
   The checks live in `Config::validate`, `vm::validate` and `source::validate`,
   which only the loading path calls. `remote_root` is the one to do first: it
   reaches `rm -rf`, it has six rules, and `config::root` already holds all of
@@ -181,6 +155,10 @@ plan, decisions, and outcome.
   explicitly means bombyx reads nothing at all from the project directory.
 
 ## Done
+
+- [**remote-clone-project-source**](issues/project-config-off-repo.md)
+  -- dropped the push; no program read the archive
+  (2026-09-02)
 
 - [**generate-vagrantfile**](issues/generate-vagrantfile.md)
   -- generate per provider from bombyx templates

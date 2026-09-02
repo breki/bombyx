@@ -4,6 +4,65 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-02
 
+**The push was dead for two weeks and nobody noticed**
+
+`bombyx up` built a tar archive of the project's `vagrant/`
+directory, copied it to the VM host and unpacked it there. Then
+it wrote the generated Vagrantfile and bootstrap script over the
+top, and booted. The generated Vagrantfile disables Vagrant's
+default `/vagrant` share, so the guest never mounted any of it,
+and its only `path:` names bombyx's own bootstrap script.
+
+So the archive landed on the VM host and no program there read
+it. That has been true since `generate-vagrantfile` disabled the
+share, and we did not see it. The plan we wrote for
+`project-config-off-repo` says the config move has to come
+first, because `vagrant_dir` is how bombyx is told where the
+project is. Reading the code to write that plan is what turned
+up the opposite: the push had no consumer, and removing it takes
+`vagrant_dir` with it.
+
+Worth naming as a shape. A change that removes the *reader* of
+something leaves the writer standing, compiling and tested. The
+tests kept passing because they asserted the argv, and the argv
+was still correct -- it was just pointless. Nothing in a test
+suite asks "does anyone consume this".
+
+**Three checks outlived what they checked.** `doctor` probed the
+VM host for `tar` and `scp`, checked `scp` locally, and reported
+on the project's `Vagrantfile`. All four existed for the push.
+`guards::check_project_relative` existed for `vagrant_dir` and
+had no other caller. Removing a capability leaves this debris
+everywhere, and the compiler finds only the part written in
+Rust: the rest is prose. `README.md`, `docs/usage.md` and
+`docs/tutorial.md` between them described the push twenty-five
+times, including a "How the push works" section and two `doctor`
+transcripts showing rows that no longer print.
+
+**A message that named the wrong program.** `host`'s refusal
+said the value "must not start with `-`, which ssh and scp would
+treat as an option". bombyx runs no `scp` now. That message
+exists to tell the operator which program the value reaches, so
+naming a program bombyx never invokes is not a stale comment, it
+is a wrong answer to the question the message was written to
+answer.
+
+**Deleting a test can uncover a gap somewhere else.** The
+integration test that ran a real `doctor` was the only thing
+exercising `ProbeResult::from_output`, and dropping it took
+`doctor.rs` to 65% and failed the coverage gate. The function
+had never had a test of its own; it had a passenger.
+
+`docs/trust-boundary.md` now has its first statement true: the
+guest is the only machine holding the project's source. That
+document also claimed it was *already* true, at line 45, while
+saying eighteen lines later that two machines hold project
+files. A reviewer found the contradiction two commits ago.
+
+**Not run against a real VM host.** This changes what executes
+there, so the argv is all we have proven. frosti was unreachable
+from the session.
+
 **Primitive obsession: why `box`, `ref` and four `Config`
 fields should not stay `String`**
 

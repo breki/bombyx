@@ -106,11 +106,10 @@ pub fn needs_moving_aside() -> bool {
 /// `Ok(None)` when nothing is installed yet: `cargo install` will
 /// simply create it, and there is nothing to move or restore.
 ///
-/// `unique` distinguishes this update from any other, for the
-/// same reason [`crate::remote::PushArchive`] takes one: a
-/// leftover from an earlier update may still be mapped by a
-/// running process and therefore impossible to delete *or*
-/// overwrite, so a fixed name would eventually fail.
+/// `unique` distinguishes this update from any other: a leftover
+/// from an earlier update may still be mapped by a running
+/// process and therefore impossible to delete *or* overwrite, so
+/// a fixed name would eventually fail.
 ///
 /// # Errors
 ///

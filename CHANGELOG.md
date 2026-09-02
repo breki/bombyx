@@ -37,17 +37,15 @@ and this project adheres to
 - `--dry-run` prints the two generated files as one line each, naming the
   heredoc and how many lines it dropped. The full content is still written to
   the host.
-- `bombyx doctor` no longer fails when the project has no Vagrantfile, since
-  bombyx generates one. It reports a project Vagrantfile as ignored instead.
+- `bombyx doctor` no longer reports on the project's `Vagrantfile` at all.
+  bombyx generates that file and never reads a project-supplied one.
 - The generated Vagrantfile disables Vagrant's default `/vagrant` synced folder.
-  Leaving it on mounted the workstation's pushed copy of the project into the
-  guest, and hangs on a VM host whose firewall drops guest-initiated NFS.
+  Leaving it on mounts the VM host's copy of the directory into the guest, and
+  hangs on a VM host whose firewall drops guest-initiated NFS.
 - bombyx forwards `BOMBYX_VM_HOST` and `BOMBYX_VM_HOSTNAME` into the guest
   itself. This used to be the project's job in its own Vagrantfile; since bombyx
   now overwrites that file, a hand-written block would be deleted on the next
   `up`.
-- `bombyx doctor` fails when `vagrant_dir` names no directory. It replaces the
-  typo check lost when the Vagrantfile probe inverted.
 - A bad `repo` or `script` in `bombyx.toml` is now refused while the file is
   being read rather than after, so the message names the line and column as well
   as the field and the reason. The rules themselves are unchanged.
@@ -72,6 +70,17 @@ and this project adheres to
   must now start with `/` or `~/`, or be exactly `~`.
 
 ### Removed
+
+- **BREAKING:** bombyx no longer pushes the project directory to the VM host.
+  The generated Vagrantfile disables the `/vagrant` share, so no program on the
+  host or in the guest read the pushed files. `bombyx up` is now four `ssh`
+  commands instead of seven, and bombyx runs nothing on the workstation.
+- **BREAKING:** the `vagrant_dir` config key. It existed only to tell the push
+  what to archive.
+- `bombyx doctor` no longer checks for `scp`, locally or on the host, and no
+  longer reports on a project `Vagrantfile`. bombyx runs neither `scp` nor a
+  project-supplied Vagrantfile now. The local `tar` check stays, because
+  `bombyx self-update` unpacks the release archive with it.
 
 ## [0.4.1] - 2026-08-18
 
