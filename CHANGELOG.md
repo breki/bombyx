@@ -62,10 +62,11 @@ and this project adheres to
 - The message refusing a shallow `remote_root` says what the rule requires: at
   least one directory below `/` or `~`. It said "at least 1 directory deep",
   which reads as a constraint on the wrong thing.
-- The help for bombyx provision says what it does to work inside the guest:
-  untracked files survive, and the checkout overwrites edits to tracked files.
-  It previously said the script runs from a "fresh clone", which reads as losing
-  both.
+- The help for `bombyx provision` says what it does to work inside the guest.
+  The checkout is forced, so it overwrites edits to tracked files, and an
+  untracked file too when the fetched commit adds one at the same path. It
+  previously said the script runs from a "fresh clone", which reads as losing
+  everything.
 
 ### Fixed
 
@@ -79,10 +80,17 @@ and this project adheres to
   file also still carried the removed vagrant_dir key and had no [vm] or
   [source] table. An integration test now loads all three, extracted from the
   documents rather than restated.
-- bombyx doctor no longer sends the vagrant-libvirt probe to a project whose
-  provider is hyperv. Hyper-V is built into Vagrant and has no plugin to find,
-  so the row failed, and doctor exited non-zero, on a host where every VM
-  command worked.
+- `bombyx doctor` no longer sends the `vagrant-libvirt` probe to a project
+  whose provider is `hyperv`. Hyper-V ships inside Vagrant and has no plugin to
+  find, so the row reported a missing plugin that project never needed. Such a
+  project now gets a `provider` row reading `skip`, because bombyx has never
+  driven a Hyper-V host and has no probe to write for one -- an absent row
+  would read as a check that passed.
+- The llms.txt sample config could not be loaded either: it still named the
+  removed vagrant_dir key and had no [vm] or [source] table. It is now covered
+  by the same test as the other three, which extracts the whole fenced block
+  rather than the part from one key onwards, so a bad key written above project
+  is caught too.
 
 ### Removed
 
@@ -98,8 +106,8 @@ and this project adheres to
   project `Vagrantfile`. The `tar` and `scp` rows are gone, locally and on the
   host: bombyx runs neither for any VM command. `bombyx self-update` still
   needs `git`, `curl` and `tar`, and `doctor` deliberately says nothing about
-  them, so a red report always means `up` is in trouble. On a machine without
-  `tar`, `doctor` used to exit 1 while every VM command worked.
+  them. On a machine without `tar`, `doctor` used to exit 1 while every VM
+  command worked.
 
 ## [0.4.1] - 2026-08-18
 

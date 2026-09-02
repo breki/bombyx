@@ -169,6 +169,26 @@ plan, decisions, and outcome.
   in the same pass: git is the first program self-update runs, and it is missing
   from every list of the tools it needs, including the clap help.
 
+- **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
+  Found by the red-team review of 58099a8 (RT-2), verified by reading
+  vagrantfile.rs and plan.rs. The generated Vagrantfile emits
+  `config.vm.provider :<name> do |v|`, which configures a provider if vagrant
+  chooses it. It does not choose it. No plan passes `--provider`, and bombyx
+  sets no VAGRANT_DEFAULT_PROVIDER, so vagrant picks whatever the host makes
+  available. On a Linux VM host with only vagrant-libvirt installed, a project
+  with provider = "hyperv" boots a libvirt machine. The `:hyperv` settings block
+  never applies, so the cpus and memory in bombyx.toml are ignored and the VM
+  comes up at vagrant defaults. Nothing reports the mismatch. Until 58099a8 the
+  libvirt plugin probe caught this by accident: a hyperv project got a red
+  doctor row, for the wrong reason. That probe is now conditional and a hyperv
+  project gets a skip row instead, so the accident is gone and the defect is
+  visible. The fix is to pass the provider to vagrant rather than only
+  describing it -- `vagrant up --provider <name>`, or VAGRANT_DEFAULT_PROVIDER
+  in the command bombyx already builds. Then `doctor` should check that the host
+  can supply the provider the project asks for, which is the honest version of
+  the probe that was removed. Provider::Hyperv is documented as never exercised,
+  so any fix here cannot be verified without a Windows VM host.
+
 ## Done
 
 - [**remote-clone-project-source**](issues/project-config-off-repo.md)

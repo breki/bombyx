@@ -58,7 +58,14 @@ gap easy to miss.
 then runs `vagrant provision` instead of `vagrant up`. That
 re-runs the bootstrap in the guest, which fetches `[source]`
 again at the ref you configured and runs the script from the
-fresh clone. The VM has to exist already: on one that was never
+clone the guest already has.
+
+The checkout is forced, so it overwrites your edits to tracked
+files, and it overwrites an untracked file as well when the
+fetched commit adds one at the same path. Untracked files
+survive only where the commit has nothing at that path. There is
+deliberately no `git clean`: in an agent VM the untracked files
+are the agent's work. The VM has to exist already: on one that was never
 booted, `provision` creates the remote directory and writes the
 files before vagrant reports it has nothing to provision, so run
 `up` first.
@@ -100,10 +107,11 @@ generated the rest. Teardown is re-runnable -- a directory with
 no Vagrantfile is removed rather than treated as an error -- so
 an interrupted `up` cannot leave one stranded.
 
-`remote_root` must be an anchored path at least one directory
-deep, with no `.` or `..` segment. bombyx deletes the directory
-it derives from it, so a root of `/`, `~` or `~/.` is refused
-when the config loads rather than at teardown.
+`remote_root` must start with `/` or `~/`, or be exactly `~`,
+and must name at least 1 directory below that anchor, with no
+`.` or `..` segment. bombyx deletes the directory it derives
+from it, so a root of `/`, `~` or `~/.` is refused when the
+config loads rather than at teardown.
 
 ## Checking a host with doctor
 
@@ -122,6 +130,13 @@ $ bombyx doctor
 all checks passed
 ```
 
+The `libvirt provider` row appears only when `[vm] provider` is
+`libvirt`. A Hyper-V project gets a `provider` row reading
+`skip` instead: Hyper-V has no plugin to grep for, and bombyx
+has never driven a Hyper-V host, so there is no honest probe to
+send. The row stays in the report rather than vanishing, because
+an absent row reads as a check that passed.
+
 It runs every check rather than stopping at the first failure,
 and exits non-zero if any fails. It **creates, deletes and
 modifies nothing** — with one honest exception worth naming: the
@@ -136,8 +151,9 @@ workstation.
 
 `ssh` is the only local program `doctor` checks, because it is
 the only one a VM command runs. `bombyx self-update` also needs
-`git`, `curl` and `tar`; `doctor` deliberately says nothing
-about those, so a red report always means `up` is in trouble.
+`git`, `curl` and `tar`, and `doctor` deliberately says nothing
+about those: a row that fails for a tool no VM command runs
+teaches operators to ignore the exit code.
 
 The `vagrant` line is the one that earns the command: it asks
 the **non-interactive** shell, which is the one bombyx gets.

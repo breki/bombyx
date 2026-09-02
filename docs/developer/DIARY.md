@@ -14,26 +14,40 @@ bare key to the table above it, so it parsed as
 tutorial's block, run any command, get an error naming a field
 you did not write.
 
-Nobody noticed because nobody copies their own sample. We write
-the config by hand, and the hand-written one puts the scalars
-first out of habit. The tutorial was tested by reading it.
+We did not notice, because we never copy our own sample. We
+write the config by hand, and by habit we put the scalars first.
+We tested the tutorial by reading it.
 
 `CLAUDE.md` already has the rule this needed -- "a rule stated in
 prose needs a test using the same example" -- written after three
-files disagreed with the code about a filename. It was applied to
-that one transformation and not made general. An integration
-test now extracts the block from each document and loads it, so
-the samples cannot drift from the parser again.
+files disagreed with the code about a filename. We applied it to
+that one transformation and never generalized it. An
+integration test now extracts the block from each document and
+loads it, so the samples cannot drift from the parser again.
 
-**A preflight that fails on things the command does not need.**
+**`doctor` failed a project for a plugin it does not use.**
 `doctor` sent the `vagrant-libvirt` probe whatever the project's
-provider was. Hyper-V is built into Vagrant and has no plugin, so
-a Hyper-V project against a Hyper-V host got a red row and exit
-1 while every command worked. This is the second instance in one
-day: the `tar` row did the same thing, and the fix for it added a
-sentence claiming the class was gone. Writing "a red report
-always means `up` is in trouble" is the kind of claim that should
-prompt checking every row before it ships.
+provider was, and Hyper-V ships inside Vagrant with no plugin to
+find. This is the second instance in one day: the `tar` row did
+the same thing, and the fix for it added a sentence claiming the
+class was gone. Writing "a red report always means `up` is in
+trouble" is the kind of claim that should prompt checking every
+row before it ships.
+
+The first draft of that fix said the row failed "on a host where
+every VM command worked". We have never run bombyx against a
+Hyper-V host -- `config::vm` says so in as many words -- so that
+sentence described an observation nobody made. The argument for
+the fix never needed it.
+
+Dropping the row turned out to be wrong on its own. A review
+pointed out that bombyx never passes `--provider` to vagrant and
+the generated Vagrantfile only *configures* a provider, so a
+Hyper-V project on a libvirt host boots a libvirt machine at
+vagrant's default size. The libvirt probe was catching that by
+accident, for the wrong reason. The row is now a `skip` naming
+what was not checked, and the real defect is captured as
+`provider-configured-not-selected`.
 
 **`--help` was wrong about losing work, twice over.** It said
 `provision` runs the script "from the fresh clone", which tells

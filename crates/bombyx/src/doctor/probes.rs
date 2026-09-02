@@ -83,18 +83,48 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
         ),
     ];
 
-    // Only for a libvirt project. The probe greps
-    // `vagrant plugin list` for `vagrant-libvirt`; Hyper-V is
-    // built into Vagrant and has no plugin to find, so sending
-    // it to a Hyper-V project fails a host where every VM
-    // command works.
-    if cfg.vm.provider == Provider::Libvirt {
-        probes.push(HostProbe::plain(
+    // The provider probe greps `vagrant plugin list` for
+    // `vagrant-libvirt`, which only answers a question a libvirt
+    // project is asking. Hyper-V ships inside Vagrant and has no
+    // plugin to find, so sending the probe there reports a
+    // failure about a plugin that project never needed.
+    //
+    // What a non-libvirt project gets instead is
+    // [`provider_finding`], a skip rather than an absent row.
+    match cfg.vm.provider {
+        Provider::Libvirt => probes.push(HostProbe::plain(
             "libvirt provider",
             remote::probe::provider(cfg),
-        ));
+        )),
+        Provider::Hyperv => {}
     }
     probes
+}
+
+/// The provider row for a project `host_probes` cannot check.
+///
+/// `None` for libvirt, whose probe is in the list above.
+/// Otherwise a [`Outcome::Skip`], because leaving the row out
+/// would shrink the report and an absent row reads as a check
+/// that passed.
+///
+/// bombyx has never driven a Hyper-V host, so there is no probe
+/// here to write honestly -- see `Provider::Hyperv`. Saying so
+/// in the report is the whole point: the operator learns that
+/// this part of their configuration is unverified rather than
+/// approved.
+#[must_use]
+pub fn provider_finding(cfg: &Config) -> Option<Finding> {
+    // Every variant named, so adding a provider is a compile
+    // error here rather than a row that silently stops printing.
+    match cfg.vm.provider {
+        Provider::Libvirt => None,
+        p @ Provider::Hyperv => Some(Finding::new(
+            Scope::Host,
+            "provider",
+            Outcome::Skip(format!("not checked for {p}")),
+        )),
+    }
 }
 
 /// The commands `probes` would run, in order.
@@ -181,14 +211,28 @@ mod tests {
         Config::for_tests()
     }
 
-    /// A config naming `provider`, otherwise the shared one.
-    fn cfg_with_provider(provider: &str) -> Config {
+    /// The shared config, with `provider` replaced.
+    fn cfg_with(provider: Provider) -> Config {
         let mut c = cfg();
-        c.vm.provider = match provider {
-            "hyperv" => Provider::Hyperv,
-            _ => Provider::Libvirt,
-        };
+        c.vm.provider = provider;
         c
+    }
+
+    #[test]
+    fn a_non_libvirt_provider_gets_a_skip_row_not_silence() {
+        // Dropping the row would shrink the report, and a reader
+        // compares what they see against the documented output.
+        // An absent row reads as "checked and fine"; a skip says
+        // bombyx did not look.
+        assert_eq!(provider_finding(&cfg_with(Provider::Libvirt)), None);
+
+        let f = provider_finding(&cfg_with(Provider::Hyperv))
+            .expect("a non-libvirt provider must still get a row");
+        assert_eq!(f.scope, Scope::Host);
+        match &f.outcome {
+            Outcome::Skip(why) => assert!(why.contains("hyperv"), "{why}"),
+            other => panic!("must not pass or fail: {other:?}"),
+        }
     }
 
     #[test]
@@ -203,8 +247,8 @@ mod tests {
             host_probes(c).iter().map(|p| p.name).collect::<Vec<_>>()
         };
         let row = "libvirt provider";
-        assert!(names(&cfg_with_provider("libvirt")).contains(&row));
-        assert!(!names(&cfg_with_provider("hyperv")).contains(&row));
+        assert!(names(&cfg_with(Provider::Libvirt)).contains(&row));
+        assert!(!names(&cfg_with(Provider::Hyperv)).contains(&row));
     }
 
     fn ran(success: bool, stdout: &str, stderr: &str) -> ProbeResult {

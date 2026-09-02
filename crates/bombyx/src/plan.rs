@@ -30,7 +30,9 @@ pub enum Action {
     /// commit it checked out when it was created, while `up`
     /// reports success. This re-runs `bootstrap.sh`, which
     /// fetches and checks out `source.ref` again in the clone
-    /// the guest already has.
+    /// the guest already has. The checkout is forced, so it
+    /// overwrites edits to tracked files and any untracked file
+    /// the fetched commit adds at the same path.
     ///
     /// Requires a machine that already exists: `vagrant
     /// provision` has nothing to provision on a VM that was

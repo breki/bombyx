@@ -10,7 +10,7 @@ Cargo workspace, CLI only:
 - `crates/bombyx` — core library and CLI binary
   - `config.rs` — `bombyx.toml` parsing, validation, paths
   - `name.rs` — validated `ScratchName` (one path segment)
-  - `remote.rs` — ssh/scp/tar command construction (pure)
+  - `remote.rs` — ssh command construction (pure)
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `plan.rs` — `Action` → ordered command list
   - `doctor.rs` — the check model; submodules own the rest
@@ -28,16 +28,19 @@ subsystem — those were removed from the template.
 
 ## Model
 
-bombyx never manages VMs directly. It pushes a project's
-`vagrant/` directory to the VM host and runs `vagrant`
-there over SSH. The project repo is the source of truth;
-the host holds a cache refreshed on every `up`.
+bombyx never manages VMs directly. It generates a
+Vagrantfile and a bootstrap script from `bombyx.toml`,
+writes both onto the VM host over SSH, and runs `vagrant`
+there. The VM host's own filesystem holds no project file;
+the guest clones the repository itself once it is running.
+The workstation still holds a checkout, because
+`bombyx.toml` is read from the working directory.
 
 ## Commands
 
 ```
-bombyx up                 # push vagrant/, boot the VM
-bombyx provision          # push vagrant/, re-run provisioning
+bombyx up                 # write the generated files, boot the VM
+bombyx provision          # re-run provisioning in the guest
 bombyx down               # halt the VM
 bombyx shell              # shell inside the VM (ssh -t)
 bombyx status             # vagrant status
@@ -64,8 +67,19 @@ running it).
 
 ```toml
 project = "myproject"    # required
-vagrant_dir = "vagrant"  # optional
-remote_root = "~/vms"    # optional
+remote_root = "~/vms"    # optional; keep it above the tables,
+                         # a bare key after `[source]` binds to it
+
+[vm]                     # required, no defaults
+provider = "libvirt"     # libvirt or hyperv; only libvirt exercised
+box = "generic/ubuntu2204"
+cpus = 4
+memory = 8192            # MiB
+
+[source]                 # required: what the guest clones
+repo = "https://github.com/you/myproject"
+ref = "main"
+script = "vagrant/provision.sh"   # path inside the clone
 ```
 
 The VM host belongs to the developer, not the project: each
@@ -95,11 +109,11 @@ so an override cannot bypass the checks on the committed
 file, and bombyx prints one stderr line naming the override
 when it is in force.
 
-`vagrant_dir` must be a plain relative path. It is joined
-onto the working directory and `Path::join` discards the
-left side for an absolute operand, so an absolute value
-made `up` archive that directory instead -- a repo could
-tar `~/.ssh` and scp it to the host it also named.
+`remote_root` must be anchored (`/` or `~/`, or exactly `~`)
+and name at least one directory below that anchor. bombyx
+creates, writes into and -- on teardown -- deletes the
+directory it derives from the value, so a root that resolves
+to a top-level directory is refused when the config loads.
 
 ## Build Commands
 
@@ -115,7 +129,7 @@ cargo xtask dupes             # duplication check (<=6%)
 cargo xtask audit             # RUSTSEC advisories
 ```
 
-`cargo xtask validate` is the canonical gate (8 steps);
+`cargo xtask validate` is the canonical gate (9 steps);
 all commits and the Stop hook run it. Never use raw
 `cargo test` / `cargo clippy`.
 
