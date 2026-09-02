@@ -9,17 +9,6 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-09-02-chunk-one-does-not-reach-statement-one
-
-**Category:** Contradiction within one document
-
-The plan says chunk 1 makes `docs/trust-boundary.md`'s first
-statement true. Its own Problem section gives two reasons that
-statement fails -- the workstation's checkout and the VM host's
-unpacked copy -- and chunk 1 removes only the second. The
-workstation keeps a checkout until chunk 2 stops reading
-`bombyx.toml` from the working directory.
-
 ### fr-2026-09-02-which-trust-boundary-lines-change
 
 **Category:** Instruction a reader cannot act on

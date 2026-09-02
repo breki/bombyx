@@ -1,7 +1,8 @@
 //! Checking bombyx's preconditions before they cost anything.
 //!
 //! `bombyx up` changes state before it runs `vagrant`: it
-//! creates a directory on the host and ships a tarball there.
+//! creates a directory on the host and writes two generated
+//! files into it.
 //! So a host that is missing something reports it half-way
 //! through. This module models the up-front check instead.
 //!
@@ -111,9 +112,11 @@ impl ProbeResult {
 pub enum VersionAnswer {
     /// There is no version flag worth asking for.
     ///
-    /// `scp` is the case: it answers no version flag, and asking
-    /// prints a usage message that would land in the report as
-    /// noise.
+    /// Every tool `doctor` checks today answers one, so nothing
+    /// produces this variant now. It stays because the choice is
+    /// per tool and some answer nothing useful -- `scp` prints a
+    /// usage message -- and because the alternative is asking
+    /// anyway and putting that message in the report.
     NotAsked,
     /// It ran. Whatever it printed is here, exit status included.
     Answered(ProbeResult),
@@ -171,12 +174,13 @@ mod tests {
     use super::*;
     use std::process::Output;
 
-    /// A finished process, built without spawning one.
+    /// A finished process, with a caller-chosen exit code.
     ///
-    /// `ExitStatus` has no public constructor, so the status
-    /// comes from a real command that is guaranteed to exist on
-    /// every platform bombyx targets: the shell builtin `true`
-    /// on Unix, `cmd /c exit 0` on Windows.
+    /// `ExitStatus` has no public constructor, so the status has
+    /// to come from a real process. `sh -c 'exit N'` supplies it
+    /// on Unix and `cmd /c exit N` on Windows -- both are always
+    /// present, and both take the code as an argument, which a
+    /// fixed command such as `true` could not.
     fn output(code: i32, stdout: &str, stderr: &str) -> Output {
         let status = if cfg!(windows) {
             std::process::Command::new("cmd")

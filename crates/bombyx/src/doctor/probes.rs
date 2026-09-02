@@ -68,7 +68,7 @@ impl HostProbe {
 
 /// The host probes, in order.
 ///
-/// Reachability is first and gates the rest: five more waits on
+/// Reachability is first and gates the rest: four more waits on
 /// a dead host teach nothing the first failure did not.
 #[must_use]
 pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {

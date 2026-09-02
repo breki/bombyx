@@ -1,9 +1,10 @@
 //! Project configuration (`bombyx.toml`).
 //!
-//! A bombyx project keeps its VM definition in the project
-//! repo, not on the VM host: the repo is the source of
-//! truth and the host holds only a cache. This module reads
-//! that per-project configuration.
+//! A bombyx project describes its VM in `bombyx.toml`, in the
+//! project repo. The VM host holds nothing from that repo:
+//! bombyx renders the Vagrantfile from `[vm]` and writes it
+//! there on every `up`. This module reads that per-project
+//! configuration.
 //!
 //! **The VM host is not part of it.** Which machine runs the
 //! VMs is a property of the developer, not of the project --
@@ -1304,14 +1305,15 @@ mod tests {
 
     #[test]
     fn rejects_an_unknown_key() {
-        // A typo must be reported, not silently defaulted:
-        // the symptom would otherwise be a push into the
-        // wrong remote directory.
+        // A typo must be reported, not silently defaulted. A
+        // silently defaulted key builds the VM to the wrong
+        // specification, and the message the operator gets
+        // describes the VM rather than the typo.
         let src = "project = \"p\"\n\
-                   vagrantdir = \"infra/vm\"\n";
+                   remote_rot = \"~/vms\"\n";
         let err = parse(src).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
-        assert!(err.to_string().contains("vagrantdir"));
+        assert!(err.to_string().contains("remote_rot"));
     }
 
     #[test]
@@ -1511,8 +1513,8 @@ mod tests {
     fn rejects_an_unknown_provider() {
         // Failing at parse rather than at boot: an unknown
         // provider renders a Vagrantfile no vagrant can use,
-        // and the error would arrive on the VM host after a
-        // push has already changed state.
+        // and the error would arrive on the VM host after
+        // bombyx had already created a directory there.
         let source = full_toml().replace("libvirt", "virtualbox");
         let err = parse_full(&source).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }), "{err:?}");

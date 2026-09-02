@@ -2,7 +2,7 @@
 //! came from.
 //!
 //! A rule that several fields share lives here once, so widening
-//! it reaches all of them at the same time. Seven fields use the
+//! it reaches all of them at the same time. Six fields use the
 //! leading-dash rule, four use the Ruby-literal rule, and both
 //! the blank check and the character check have several callers.
 //!
@@ -142,7 +142,7 @@ pub(super) fn check_renderable(
     // comes back as `repository '...' does not exist`; a
     // leading one makes `git` read the value as a local path
     // and name nothing recognisable. Catching it here means the
-    // operator sees it before anything is pushed.
+    // operator sees it before bombyx reaches the VM host.
     if value.trim() != value {
         return Err(FieldError::Invalid {
             field,
@@ -206,10 +206,9 @@ mod tests {
 
     #[test]
     fn the_option_message_reads_the_same_for_one_tool_or_two() {
-        // No field names two programs today, and `host` did
-        // until the push was removed. The function still takes an
-        // arbitrary `tool` string, so the sentence has to work
-        // with a plural subject as well as a singular one. This
+        // `tool` is an arbitrary string, so a caller may name
+        // two programs at once and the sentence has to stay
+        // grammatical when one does. No caller does today. This
         // asserts the whole message rather than a fragment,
         // because a broken verb is exactly what a `contains`
         // check steps over.

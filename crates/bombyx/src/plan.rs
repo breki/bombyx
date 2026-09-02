@@ -17,10 +17,11 @@ use crate::vagrantfile;
 /// name is already validated by the time it gets here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    /// Push the Vagrant dir and boot the project VM.
-    Up,
-    /// Push the Vagrant dir and re-run provisioning on the
+    /// Write the generated files on the VM host and boot the
     /// project VM.
+    Up,
+    /// Write the generated files and re-run provisioning in the
+    /// guest.
     ///
     /// Separate from [`Action::Up`] because vagrant provisions
     /// a machine only when it first creates it. Every later
@@ -114,8 +115,8 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
 ///
 /// The destroy step tolerates a directory with no Vagrantfile,
 /// which is reachable without any unusual input -- an
-/// interrupted first push leaves the directory created but
-/// empty. A bare `vagrant destroy -f` fails there, and since
+/// `up` interrupted between the `mkdir` and the Vagrantfile
+/// write leaves the directory created but empty. A bare `vagrant destroy -f` fails there, and since
 /// `execute` stops at the first failure the removal would never
 /// run, leaving a directory no bombyx command could clear.
 /// Skipping the destroy instead makes teardown re-runnable.
@@ -174,12 +175,10 @@ mod tests {
 
     #[test]
     fn every_action_carries_the_tty_choice_it_should() {
-        // The first version of this test asserted only that `tar`
-        // and `scp` lack `-t` -- which their literal argv always
-        // did, so it could never fail, and it left `destroy` and
-        // `discard` silently un-threaded. Classifying every action
-        // is what makes a new one a decision rather than an
-        // omission.
+        // Classifying every action is what makes a new one a
+        // decision rather than an omission. A test that checked
+        // only the actions it remembered would leave `destroy`
+        // and `discard` silently un-threaded.
         for action in all_actions() {
             // Doctor is the only action with no tty-bearing
             // command: its probes are parsed, and a PTY would fold
@@ -206,18 +205,17 @@ mod tests {
     }
 
     #[test]
-    fn only_ssh_is_ever_given_a_tty_flag() {
-        // `-t` means something else entirely to `tar`, and nothing
-        // to `scp`.
+    fn every_command_in_a_plan_is_ssh() {
+        // `-t` is an `ssh` option, and the tty tests above assert
+        // where it appears. This is the premise those rest on: no
+        // plan contains a program that could be handed `-t`
+        // meaning something else. `-t` is a `tar` option and is
+        // not an `scp` option at all, so reintroducing a
+        // workstation-side step without revisiting the tty rule
+        // is what this refuses.
         for action in all_actions() {
             for c in &plan_for(&action, Tty::Allocate) {
-                if c.program != "ssh" {
-                    assert!(
-                        !c.args.iter().any(|a| a == "-t"),
-                        "{action:?}: {} got -t",
-                        c.program
-                    );
-                }
+                assert_eq!(c.program, "ssh", "{action:?}");
             }
         }
     }
@@ -306,9 +304,9 @@ mod tests {
 
     // This test and `provision_writes_the_files_then_reprovisions`
     // spell out
-    // the same five-command script, differing only in the trailing
+    // the same four-command script, differing only in the trailing
     // `vagrant 'up'` versus `vagrant 'provision'`. A review proposed
-    // an `expected_push(dir, subcommand)` helper and the duplication
+    // an `expected_script(dir, subcommand)` helper and the duplication
     // is kept deliberately: these blocks are meant to be dumb pins
     // that read as the exact shell bombyx emits, and two
     // independently written expectations cannot both drift the same
@@ -316,7 +314,7 @@ mod tests {
     // `provision_and_up_take_the_same_shape` below carries the
     // "these two differ only in their last step" claim the helper
     // would have made visible. Revisit if a third caller of
-    // `push_then` gains its own exact-script test -- three copies
+    // `write_then` gains its own exact-script test -- three copies
     // change the judgement.
     #[test]
     fn up_makes_the_dir_writes_the_files_then_boots() {
@@ -382,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_that_do_not_boot_write_nothing() {
+    fn actions_that_write_no_files() {
         // A write on `down` or `destroy` would recreate the
         // directory teardown had just removed.
         for action in [
@@ -473,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn down_halts_without_pushing() {
+    fn down_only_halts() {
         let cmds = run(&Action::Down);
         let env = vm_env();
         assert_eq!(cmds.len(), 1);

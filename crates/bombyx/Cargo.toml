@@ -27,9 +27,9 @@ path = "src/bin/bombyx/main.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
-# The push archive goes in a private per-run directory, so a
-# co-user cannot pre-create the path and a second run cannot
-# collide with the first.
+# `self-update` downloads and unpacks into a private per-run
+# directory, so a co-user cannot pre-create the path and two
+# updates cannot collide.
 tempfile = "3.27"
 # PATH lookup. Executability bits, PATHEXT ordering, quoted
 # entries and backtracking past unusable candidates are all easy

@@ -10,12 +10,15 @@ use super::{
 
 /// The detail for a local tool, from whatever it printed.
 ///
-/// Keeps the name and version, which for `tar` matters:
-/// `bsdtar` and GNU `tar` differ on `--exclude` pattern
-/// matching and the push depends on it. Some builds print the
-/// banner on stderr -- `ssh -V` always does -- so both streams
-/// are considered rather than reporting a pass with nothing in
-/// it.
+/// Keeps the name and the version string. Which build answered
+/// is worth showing, because a working `ssh` and a working
+/// `ssh` of the right vintage are different facts: OpenSSH
+/// changed how `scp` quotes remote paths in 9.0, and version
+/// skew is the first thing to check when a remote command
+/// behaves differently on two workstations. Some builds print
+/// the banner on stderr -- `ssh -V` always does -- so both
+/// streams are considered rather than reporting a pass with
+/// nothing in it.
 fn tool_banner(result: &ProbeResult) -> String {
     let text = if result.stdout.trim().is_empty() {
         &result.stderr
@@ -142,9 +145,10 @@ mod tests {
 
     #[test]
     fn a_local_tool_with_no_version_flag_reports_where_it_came_from() {
-        // `scp` answers no version flag, so the directory is the
-        // useful fact -- it is what makes a hijacked binary
-        // visible.
+        // With no version to show, the directory is the useful
+        // fact -- it is what makes a hijacked binary visible.
+        // `scp` stands in for a tool that answers nothing worth
+        // printing; `doctor` does not check it.
         let f = local_tool_finding(
             "scp",
             Some(Path::new("/usr/bin/scp")),

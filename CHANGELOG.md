@@ -27,9 +27,9 @@ and this project adheres to
 ### Changed
 
 - **BREAKING:** bombyx generates the Vagrantfile and writes it on the VM host. A
-  project's own Vagrantfile is still pushed but is overwritten, so it no longer
-  has any effect. Vagrant needs that file before the VM exists, which is why it
-  cannot come from inside the guest.
+  project's own Vagrantfile is never read by anything: bombyx does not send it,
+  and the guest's clone is not what Vagrant boots from. Vagrant needs that file
+  before the VM exists, which is why it cannot come from inside the guest.
 - **BREAKING:** `bombyx.toml` now requires a `[vm]` table (`provider`, `box`,
   `cpus`, `memory`) and a `[source]` table (`repo`, `ref`, `script`). None of
   the seven has a default, so every existing config must gain both tables before
@@ -76,7 +76,9 @@ and this project adheres to
   host or in the guest read the pushed files. `bombyx up` is now four `ssh`
   commands instead of seven, and bombyx runs nothing on the workstation.
 - **BREAKING:** the `vagrant_dir` config key. It existed only to tell the push
-  what to archive.
+  what to archive. Delete the line from `bombyx.toml`: the config refuses
+  unknown keys, so leaving it makes every command fail while loading, with a
+  message naming the line and listing the keys that are valid.
 - `bombyx doctor` no longer checks for `scp`, locally or on the host, and no
   longer reports on a project `Vagrantfile`. bombyx runs neither `scp` nor a
   project-supplied Vagrantfile now. The local `tar` check stays, because

@@ -191,10 +191,11 @@ fn up_keeps_the_tilde_expandable() {
 
 #[test]
 fn up_runs_nothing_on_the_workstation() {
-    // Every step is an `ssh`. bombyx used to build a tar archive
-    // and `scp` it across, which is what made a Windows drive
-    // letter (`C:\...`) reach a program that reads everything
-    // before the first colon as a host name.
+    // Every step is an `ssh`, so no path from this machine
+    // reaches a program's argv. That matters on Windows, where a
+    // local path starts with a drive letter and any program
+    // reading `host:file` -- `scp`, GNU `tar` -- would take the
+    // `C` for a host name.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
     assert!(programs(&lines).iter().all(|p| *p == "ssh"), "{lines:?}");
@@ -242,10 +243,10 @@ fn a_broken_local_config_is_reported() {
 
 #[test]
 fn provision_writes_the_files_then_runs_vagrant_provision() {
-    // The gap this command closes: `up` ships an edited
-    // provisioning script and `vagrant up` on a running VM
-    // never executes it, so the push reports success while
-    // nothing was applied.
+    // The gap this command closes: `vagrant up` on a machine
+    // that already exists skips the provisioners, so the guest
+    // keeps running the script it cloned when it was created and
+    // `up` reports success.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "provision"]);
     assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
@@ -318,6 +319,52 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
         stderr.contains("vmhost:~/vms/myproject"),
         "must name the target: {stderr:?}"
     );
+}
+
+/// `doctor` run for real, not as a dry run.
+///
+/// The dry-run tests below cover which commands `doctor` would
+/// send. This one covers the half they cannot reach: spawning a
+/// local tool, rendering the report, and the exit code. That
+/// code is the whole point of the command -- an operator or a
+/// script reads it to decide whether `up` is worth trying -- and
+/// `src/bin/` is excluded from the coverage gate, so without a
+/// test here a change to it fails nothing.
+///
+/// It points at a host that cannot resolve, so it needs no VM
+/// host and no network.
+#[test]
+fn doctor_fails_and_says_which_check_failed() {
+    let dir = project_dir();
+    write_user_config(&dir, "host = \"nosuchhost.invalid\"\n");
+
+    let out = bombyx_in(&dir).args(["doctor"]).assert().failure();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+
+    // The local check passes and the host check does not, which
+    // is what distinguishes a report from a blanket failure.
+    assert!(
+        text.lines()
+            .any(|l| l.contains("local") && l.contains("ssh")),
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l.contains("nosuchhost.invalid") && l.contains("FAIL")),
+        "{text}"
+    );
+
+    // Only `ssh` is checked locally. `tar` and `curl` belong to
+    // self-update, and a red row for either would make the exit
+    // code say nothing about whether `up` works.
+    for absent in ["tar", "scp"] {
+        assert!(
+            !text
+                .lines()
+                .any(|l| l.contains("local") && l.contains(absent)),
+            "doctor must not check {absent} locally: {text}"
+        );
+    }
 }
 
 #[test]
@@ -395,8 +442,11 @@ fn a_dangerous_remote_root_is_refused_at_load() {
 
 #[test]
 fn scratch_rejects_a_traversing_name() {
-    // Quoting stops injection but not traversal: without
-    // validation this extracts the local tree over /etc.
+    // Quoting stops injection but not traversal. The name
+    // becomes a directory on the VM host, and without validation
+    // that directory is the one `mkdir -p` creates, the one the
+    // generated files are written into, and the one `discard`
+    // hands to `rm -rf`.
     let dir = project_dir();
     bombyx_in(&dir)
         .args(["--dry-run", "scratch", "../../../../etc"])
@@ -430,7 +480,7 @@ fn scratch_rejects_an_empty_name() {
 #[test]
 fn a_host_cannot_smuggle_an_ssh_option() {
     // `host` reaches `ssh` as its first positional argument and
-    // neither ssh nor scp honours `--`, so a leading `-` is read
+    // `ssh` does not honour `--`, so a leading `-` is read
     // as an option. It can no longer arrive from a repo, but a
     // per-developer file or a mistyped flag still reaches the
     // same argv.
@@ -445,13 +495,16 @@ fn a_host_cannot_smuggle_an_ssh_option() {
 
 #[test]
 fn a_typo_in_the_config_is_reported() {
-    let dir = project_dir_with("project = \"p\"\nvagrantdir = \"x\"\n");
+    // `remote_rot`, a near-miss of a key that exists. A typo of
+    // a key that never existed would pass for the same reason
+    // whether or not `deny_unknown_fields` were set.
+    let dir = project_dir_with("project = \"p\"\nremote_rot = \"x\"\n");
     write_user_config(&dir, "host = \"vmhost\"\n");
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("vagrantdir"));
+        .stderr(predicate::str::contains("remote_rot"));
 }
 
 #[test]
@@ -582,7 +635,7 @@ fn the_host_env_var_outranks_the_files() {
 }
 
 #[test]
-fn status_does_not_push() {
+fn status_sends_exactly_one_command() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "status"]);
     assert_eq!(lines.len(), 1);

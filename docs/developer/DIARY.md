@@ -28,7 +28,7 @@ tests kept passing because they asserted the argv, and the argv
 was still correct -- it was just pointless. Nothing in a test
 suite asks "does anyone consume this".
 
-**Three checks outlived what they checked.** `doctor` probed the
+**Four checks outlived what they checked.** `doctor` probed the
 VM host for `tar` and `scp`, checked `scp` locally, and reported
 on the project's `Vagrantfile`. All four existed for the push.
 `guards::check_project_relative` existed for `vagrant_dir` and
@@ -53,11 +53,16 @@ exercising `ProbeResult::from_output`, and dropping it took
 `doctor.rs` to 65% and failed the coverage gate. The function
 had never had a test of its own; it had a passenger.
 
-`docs/trust-boundary.md` now has its first statement true: the
-guest is the only machine holding the project's source. That
-document also claimed it was *already* true, at line 45, while
-saying eighteen lines later that two machines hold project
-files. A reviewer found the contradiction two commits ago.
+`docs/trust-boundary.md` gets half of its first statement: the
+VM host now holds no project code. Only half, and the first
+draft of this change claimed the whole thing -- all three
+reviewers caught it. The workstation still holds a checkout,
+because `bombyx.toml` is read from the working directory, and
+removing the push did nothing about that. The deferred finding
+saying exactly this was sitting in `fresh-reader-log.md` while
+the document was edited to assert the opposite, which is the
+part worth remembering: a claim that flatters the work you just
+did is the one to check hardest.
 
 **Not run against a real VM host.** This changes what executes
 there, so the argv is all we have proven. frosti was unreachable
