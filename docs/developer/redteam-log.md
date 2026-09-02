@@ -5,6 +5,62 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-02-documented-config-is-rejected
+
+**Category:** Documentation that does not work
+
+`README.md` and `docs/tutorial.md` both show a sample `bombyx.toml`
+with `remote_root` written *after* the `[source]` table. TOML binds a
+bare key to the table above it, so it parses as `source.remote_root`
+and the config is refused. Reproduced by copying the tutorial's block
+verbatim: "unknown field `remote_root`, expected one of `repo`,
+`ref`, `script`". `bombyx.toml.sample` is broken differently -- it
+still carries `vagrant_dir` and has no `[vm]` or `[source]` at all,
+so copying it fails to load too.
+
+The fix is to move `remote_root` above `[vm]` in both samples and
+rewrite the sample file. `CLAUDE.md` asks for a test using the
+document's own example, which would stop this recurring.
+
+### rt-2026-09-02-doctor-fails-on-hyperv-projects
+
+**Category:** A gating check that gates the wrong thing
+
+`doctor::host_probes` always adds the `libvirt provider` probe,
+whatever `[vm] provider` says. On a `provider = "hyperv"` project
+against a host without `vagrant-libvirt`, `doctor` prints a FAIL row
+and exits 1 while every VM command works.
+
+This is the same class as the `tar` row removed in 92c2e74, and the
+sentence added in 43e29ce -- "a red report always means `up` is in
+trouble" -- is false while this probe is unconditional.
+
+### rt-2026-09-02-home-does-not-isolate-ssh-config
+
+**Category:** A comment asserting a property the platform does not give
+
+`doctor_fails_and_says_which_check_failed` sets `HOME` and
+`USERPROFILE` to the fixture and claims that stops `ssh` reading the
+operator's `~/.ssh/config`. OpenSSH on Unix takes the home directory
+from the passwd entry, not from `$HOME`. Measured: with `HOME`
+pointed at a fixture whose `ssh_config` rewrites an alias,
+`ssh -G <alias>` ignores it. The isolation works only on the Windows
+port, so the test still inherits a `Host *` `ProxyCommand` on Linux
+and macOS.
+
+A stub `ssh` first on `PATH` is the lever that works on both.
+
+### rt-2026-09-02-three-comments-still-describe-the-push
+
+**Category:** Stale prose about a removed capability
+
+`remote/probe.rs` says `up` "creates the remote directory and ships a
+tarball before `vagrant` fails"; `config/root.rs` justifies its depth
+rule with `up` extracting "a tarball into `/etc`"; `remote/quote.rs`
+explains a quoting rule with `scp` writing to the real home
+directory. All three state current behaviour and all three are
+false. Three sweeps missed them.
+
 ### rt-2026-08-31-chmod-symlink-race
 
 **Category:** TOCTOU / privilege escalation (guest)

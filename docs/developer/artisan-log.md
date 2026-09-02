@@ -4,6 +4,51 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-02-provision-help-implies-lost-work
+
+**Category:** User-facing help wrong about data loss
+
+`bombyx help provision` says it "fetches your repository again and
+runs the script from the fresh clone". `bootstrap.sh` fetches into
+the *existing* clone and re-clones only when `repo` itself changed,
+and it deliberately skips `git clean` so the agent's untracked work
+survives. "Fresh clone" tells the operator that work is gone.
+
+The accurate statement is narrower than either version: untracked
+files survive, and `checkout --force` does discard local edits to
+tracked files.
+
+### aq-2026-09-02-provision-help-omits-the-state-change
+
+**Category:** Help text omits what the command changes
+
+`Up`'s help names the file writes; `Provision`'s says only "Re-run
+provisioning in the guest", though `plan()` routes both through
+`write_then`, and on a VM that was never booted `provision` creates
+the remote directory. The help reads as read-only for a command that
+is not.
+
+### aq-2026-09-02-action-provision-doc-is-push-era
+
+**Category:** The two-enum trap, third occurrence
+
+`Action::Provision` in `plan.rs` still explains itself with "an
+edited script reaches the guest and nothing executes it". Nothing
+ships a script to the guest. `VmCmd::Provision` in `main.rs` was
+rewritten and this one was not -- the same pair that was missed in
+92c2e74, missed again in the opposite direction.
+
+### aq-2026-09-02-writing-actions-listed-three-times
+
+**Category:** A rule hand-listed in three places
+
+Which actions write the generated files is spelled out in `plan()`,
+in `every_other_action_writes_nothing`'s classifier, and in
+`only_the_three_writing_actions_write`. The test comment claims the
+set is derived; only the iteration is. One
+`Action::writes_files(&self)` with an exhaustive match would make a
+new action a compile error instead of a silent omission.
+
 ### aq-2026-09-02-commit-md-outgrown-shape
 
 **Category:** Document size / abstraction boundary

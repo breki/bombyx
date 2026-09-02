@@ -9,6 +9,62 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-02-two-more-files-describe-the-push
+
+**Category:** Files no sweep opened
+
+`bombyx.toml.sample` and `llms.txt` both describe the push as current
+behaviour, and `README.md` and `docs/vm-host-setup.md` point readers
+at them. `llms.txt` is the file whose name promises a machine can
+read it first; it says bombyx "pushes a project's `vagrant/`
+directory" and that "the host holds a cache refreshed on every `up`".
+It also says `validate` has eight steps where `CLAUDE.md` says nine.
+
+### fr-2026-09-02-host-setup-tells-you-to-write-a-vagrantfile
+
+**Category:** Two documents giving opposite instructions
+
+`docs/vm-host-setup.md`'s "Configuration for each project" says every
+project needs "a `vagrant/` directory containing a Vagrantfile" and
+that bombyx does not ship one "because the project repository is
+meant to be the source of truth". `docs/tutorial.md` says the
+opposite in as many words: bombyx renders it, a committed one is read
+by nothing, delete it. The same page also says bombyx does not
+control the synced folder, which the generated Vagrantfile disables
+unconditionally, and names "the jutro VM" with no definition.
+
+### fr-2026-09-02-boundary-claim-unqualified-in-five-places
+
+**Category:** One rule, two strengths
+
+`docs/trust-boundary.md` qualifies "the VM host holds no project
+code" once -- the guest's disk image is a file on the host -- and
+repeats it unqualified at three other points in the same file, plus
+`CLAUDE.md`, `.claude/skills/architect/SKILL.md` and
+`crates/bombyx/README.md`. A reader meets the strong form first and
+may never reach the qualification.
+
+### fr-2026-09-02-main-narrates-its-own-history
+
+**Category:** Voice
+
+Six comments in `main.rs` explain the code by saying what it used to
+be: "It used to say 'thin by design'", "the first cut of this fix",
+"An earlier version answered a non-zero `curl` with ...". Two of them
+describe a `matches!` "four hundred lines away" that no longer
+exists, which costs a search of the file. `CLAUDE.md` rules the shape
+out by name.
+
+### fr-2026-09-02-architect-skill-calls-main-thin
+
+**Category:** Canon disagreeing with the code it describes
+
+The architect skill calls `main.rs` "(thin)" and says to keep logic
+out of it. `main.rs` opens by refusing that description: "It used to
+say 'thin by design', and that is worth not claiming", and the
+self-update sequence lives there. The rule the skill wants is "keep
+new decisions out", not "it is thin".
+
 ### fr-2026-09-02-project-field-unaccounted
 
 **Category:** Gap in the plan
