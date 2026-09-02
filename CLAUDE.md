@@ -265,11 +265,11 @@ for tools that are not present:
   for this project is running bombyx against a real VM host
   (Definition of Done item 3), not a script.
 - **The VM host is remote and not always reachable.** Any
-  command that actually talks to it (`ssh`, `scp`, `vagrant`)
-  may fail for reasons unrelated to the change under test.
+  command that actually talks to it (`ssh`, `vagrant`) may
+  fail for reasons unrelated to the change under test.
   Prefer `--dry-run` for argv-level checks, and say so
   explicitly when a claim rests on a dry run rather than a
-  real push.
+  real run against the VM host.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
 - **Read a large file in pieces.** Over roughly 500 lines,

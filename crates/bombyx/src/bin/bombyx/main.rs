@@ -88,14 +88,17 @@ enum Cmd {
 /// project config and a host.
 #[derive(Subcommand)]
 enum VmCmd {
-    /// Push the Vagrant dir and boot the project VM
+    /// Write the generated files on the VM host and boot the
+    /// project VM
     Up,
-    /// Push the Vagrant dir and re-run provisioning
+    /// Re-run provisioning in the guest
     ///
     /// Vagrant provisions only when it first creates a VM, so
-    /// every later `up` ships an edited provisioning script to
-    /// the host without executing it. This applies it. The VM
-    /// must already exist: run `up` first.
+    /// every later `up` leaves the guest running the script it
+    /// cloned when it was created. This re-runs the bootstrap,
+    /// which fetches your repository again and runs the script
+    /// from the fresh clone. The VM must already exist: run
+    /// `up` first.
     Provision,
     /// Halt the project VM
     Down,
@@ -661,9 +664,14 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     // plan change something and only then discover that its next
     // program is missing: the change-state-then-fail behaviour
     // the whole `doctor` command exists to prevent.
-    // `self-update` is where this bites, since its plan mixes
-    // `curl` and `tar`; a VM plan is `ssh` throughout, and a
-    // missing `ssh` stops it before the first step.
+    //
+    // A VM plan is `ssh` throughout today, so the map holds one
+    // entry and a missing `ssh` stops the plan before the
+    // `mkdir`. The loop keeps that property if a plan ever gains
+    // a second program. It does not cover `self-update`, which
+    // reaches `execute` one command at a time through `ran_ok`
+    // and so resolves `tar` only after `curl` has already
+    // downloaded the archive.
     let mut resolved: HashMap<&str, PathBuf> = HashMap::new();
     for cmd in commands {
         if let Entry::Vacant(slot) = resolved.entry(&cmd.program) {

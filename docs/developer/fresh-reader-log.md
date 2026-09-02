@@ -9,16 +9,6 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-09-02-which-trust-boundary-lines-change
-
-**Category:** Instruction a reader cannot act on
-
-"`:45` corrected -- it claims that already" does not say what edit
-to make, and points at the half of `:45` that becomes true rather
-than the half that goes stale. The status banner at `:10-23` and
-the argv listing at `:57-61` describe a push chunk 1 deletes, and
-the plan does not say whether they are in scope.
-
 ### fr-2026-09-02-project-field-unaccounted
 
 **Category:** Gap in the plan

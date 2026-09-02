@@ -116,10 +116,11 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
 /// The destroy step tolerates a directory with no Vagrantfile,
 /// which is reachable without any unusual input -- an
 /// `up` interrupted between the `mkdir` and the Vagrantfile
-/// write leaves the directory created but empty. A bare `vagrant destroy -f` fails there, and since
-/// `execute` stops at the first failure the removal would never
-/// run, leaving a directory no bombyx command could clear.
-/// Skipping the destroy instead makes teardown re-runnable.
+/// write leaves the directory created but empty. A bare
+/// `vagrant destroy -f` fails there, and since `execute` stops
+/// at the first failure the removal would never run, leaving a
+/// directory no bombyx command could clear. Skipping the
+/// destroy instead makes teardown re-runnable.
 fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
     vec![
         remote::destroy_vm_if_present(cfg, dir, tty),
@@ -380,17 +381,19 @@ mod tests {
     }
 
     #[test]
-    fn actions_that_write_no_files() {
+    fn every_other_action_writes_nothing() {
         // A write on `down` or `destroy` would recreate the
         // directory teardown had just removed.
-        for action in [
-            Action::Down,
-            Action::Status,
-            Action::Reset,
-            Action::Destroy,
-            Action::Discard(scratch("pr-1234")),
-        ] {
-            for s in scripts(&action) {
+        //
+        // Derived from `all_actions()` rather than listed, so a
+        // new action joins this test by existing. Listing the
+        // set by hand is how `shell` and `doctor` came to be
+        // absent from both halves of the rule.
+        let writes = |a: &Action| {
+            matches!(a, Action::Up | Action::Provision | Action::Scratch(_))
+        };
+        for action in all_actions().iter().filter(|a| !writes(a)) {
+            for s in scripts(action) {
                 assert!(!s.contains("cat > "), "{action:?} writes: {s}");
             }
         }
@@ -403,8 +406,8 @@ mod tests {
         let cmds = run(&Action::Scratch(scratch("pr-1234")));
         let programs: Vec<&str> =
             cmds.iter().map(|c| c.program.as_str()).collect();
-        // Four, and every one of them is `ssh`: bombyx no longer
-        // runs anything on the workstation for a VM action.
+        // Four, and every one of them is `ssh`: a VM action
+        // runs no program on the workstation.
         assert_eq!(programs, vec!["ssh", "ssh", "ssh", "ssh"]);
         assert!(cmds[0].args[1].contains("mkdir -p"));
         assert!(cmds.last().unwrap().args[1].ends_with("vagrant 'up'"));

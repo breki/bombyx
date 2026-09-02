@@ -338,15 +338,31 @@ fn doctor_fails_and_says_which_check_failed() {
     let dir = project_dir();
     write_user_config(&dir, "host = \"nosuchhost.invalid\"\n");
 
-    let out = bombyx_in(&dir).args(["doctor"]).assert().failure();
+    // `~/.ssh/config` is not consulted. A `Host *` block with a
+    // `ProxyCommand` is common on a work laptop, and
+    // `ConnectTimeout` is not inherited by one, so a proxy that
+    // accepts the connection and then goes quiet would hang this
+    // test. Pointing HOME at the fixture is the same precaution
+    // `-F /dev/null` gives a hand-run `ssh`.
+    let out = bombyx_in(&dir)
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .args(["doctor"])
+        .assert()
+        .failure();
     let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
 
-    // The local check passes and the host check does not, which
-    // is what distinguishes a report from a blanket failure.
+    // Exactly one check failed, and it is the host one. The
+    // count is what rules out a blanket failure: on a machine
+    // with no `ssh` at all every row would say FAIL, and a test
+    // asserting only "some row says FAIL" would stay green
+    // through exactly the regression it exists to catch.
+    assert!(text.contains("1 check failed"), "{text}");
     assert!(
-        text.lines()
-            .any(|l| l.contains("local") && l.contains("ssh")),
-        "{text}"
+        text.lines().any(|l| {
+            l.contains("local") && l.contains("ssh") && l.contains("ok")
+        }),
+        "the local ssh row must pass: {text}"
     );
     assert!(
         text.lines()
@@ -354,10 +370,11 @@ fn doctor_fails_and_says_which_check_failed() {
         "{text}"
     );
 
-    // Only `ssh` is checked locally. `tar` and `curl` belong to
-    // self-update, and a red row for either would make the exit
-    // code say nothing about whether `up` works.
-    for absent in ["tar", "scp"] {
+    // `ssh` is the only local program checked. `git`, `curl` and
+    // `tar` belong to self-update, and a red row for any of them
+    // would make the exit code say nothing about whether `up`
+    // works.
+    for absent in ["tar", "scp", "curl", "git"] {
         assert!(
             !text
                 .lines()
@@ -681,8 +698,8 @@ fn cli_help_flag() {
 /// Worth having because every unit test around the renderer
 /// asserts that bombyx produced the text it meant to, and none
 /// of them can say whether vagrant accepts it. A syntax error
-/// would otherwise surface on the VM host, after a push has
-/// already changed state there.
+/// would otherwise surface on the VM host, after bombyx has
+/// already created the directory and written both files there.
 ///
 /// It lives here rather than beside the renderer so its body,
 /// which never runs under coverage, does not count against that

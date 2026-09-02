@@ -46,8 +46,13 @@ bombyx/
     bombyx/
       src/
         lib.rs          # crate root, re-exports
-        config.rs       # bombyx.toml parsing
-        remote.rs       # SSH command building
+        plan.rs         # which commands run, in what order
+        config.rs       # bombyx.toml parsing (submodules)
+        remote.rs       # SSH command building (submodules)
+        vagrantfile.rs  # renders the two generated files
+        doctor.rs       # preflight checks (submodules)
+        update.rs       # self-update (submodules)
+        name.rs term.rs tool.rs
         bin/bombyx/
           main.rs       # CLI entry point (thin)
       tests/
@@ -78,7 +83,7 @@ Computes remote paths (`remote_project_dir`,
 
 ### `remote` -- command construction
 
-Pure functions returning a `Command { program, args }`.
+Pure functions returning a `RemoteCommand { program, args, dir }`.
 **Nothing here spawns a process.** That separation is
 what makes quoting, path joining and command composition
 unit-testable with no VM host in the loop.
@@ -110,20 +115,31 @@ Not published. `validate`, `test`, `clippy`, `fmt`,
 | Unsafe code | Forbidden (`#[forbid(unsafe_code)]`) |
 | Advisories | RUSTSEC clean |
 
-All gates enforced by `cargo xtask validate` and the
-Claude Code Stop hook.
+`cargo xtask validate` runs nine gates; the six above are
+the ones worth memorising, and `CLAUDE.md` under
+**Definition of Done** lists all nine in execution order.
+
+The Claude Code Stop hook runs a **subset**: fmt-check,
+clippy, doc and test. It skips coverage and duplication
+deliberately, because both are slow -- see
+`.claude/hooks/stop-check.sh`. A coverage regression is
+caught by `validate`, not by the hook.
 
 ## Adding a New Subcommand
 
 1. Write tests first (TDD).
 2. Add the command-building function in `remote.rs`
    with unit tests asserting the exact argv.
-3. Add the `Cmd` variant and its `plan()` arm in
-   `main.rs`.
-4. Add an integration test driving the real binary with
+3. Add the `VmCmd` variant and its `action_of` arm in
+   `main.rs` -- the CLI surface, and nothing else.
+4. Add the `Action` variant and its `plan()` arm in
+   `plan.rs`, with the unit test asserting the ordered
+   commands. This is where the logic goes: `main.rs` is
+   excluded from coverage.
+5. Add an integration test driving the real binary with
    `--dry-run`.
-5. Run `cargo xtask validate`.
-6. Commit with `/commit`.
+6. Run `cargo xtask validate`.
+7. Commit with `/commit`.
 
 Keep logic out of `main.rs`: it is excluded from
 coverage, so anything non-trivial there ships untested.

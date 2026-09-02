@@ -113,7 +113,6 @@ without it a missing piece is reported half-way through:
 
 ```console
 $ bombyx doctor
-  local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
@@ -132,12 +131,13 @@ vagrant has never run as that user, vagrant itself creates
 so the probe neither writes more than that nor stalls on a
 firewalled endpoint. When SSH itself fails the remaining host checks are
 skipped rather than each waiting on a dead host. Locally it does
-execute `tar` and `ssh` to read their versions, so it is not a
-no-op on your workstation.
+execute `ssh` to read its version, so it is not a no-op on your
+workstation.
 
-`tar` is checked only because `bombyx self-update` unpacks the
-release archive with it. No VM command runs `tar`, and none runs
-`scp` at all.
+`ssh` is the only local program `doctor` checks, because it is
+the only one a VM command runs. `bombyx self-update` also needs
+`git`, `curl` and `tar`; `doctor` deliberately says nothing
+about those, so a red report always means `up` is in trouble.
 
 The `vagrant` line is the one that earns the command: it asks
 the **non-interactive** shell, which is the one bombyx gets.
@@ -153,9 +153,9 @@ provider` checks vagrant's own exit status and matches an
 anchored plugin name, because `vagrant plugin list` exits zero
 even with nothing installed.
 
-The local lines name the directory each tool came from. bombyx
-resolves `tar` and `ssh` against `PATH` explicitly rather
-than leaving it to the operating system, which on Windows
+The local line names the directory `ssh` came from. bombyx
+resolves it against `PATH` explicitly rather than leaving it to
+the operating system, which on Windows
 searches the working directory first — and bombyx runs inside a
 repository whose contents arrive with whatever branch you
 checked out.
@@ -176,8 +176,8 @@ invocation instead of running it:
 ```console
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
-ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (21 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (96 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (247 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
