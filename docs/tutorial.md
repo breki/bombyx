@@ -301,7 +301,8 @@ remote_root = "~/vms"    # optional; keep it above [vm]
 
 [vm]                     # required: the machine to build
 provider = "libvirt"
-box = "debian/bookworm64"   # see the chsh note in Part 3
+box = "debian/bookworm64"   # the chsh line in provision.sh
+                            # below explains this choice
 cpus = 4
 memory = 8192            # MiB; agents want room to build
 
@@ -465,7 +466,7 @@ one a VM command runs.
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (247 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (265 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -549,9 +550,12 @@ bombyx provision
 was created -- and reports success, which is what makes the gap
 easy to miss. `provision` re-runs the bootstrap, which fetches
 your repository again and checks it out in the clone the guest
-already has, so commit the change first. That checkout is
-forced: it overwrites edits to tracked files, and an untracked
-file where the new commit adds one at the same path.
+already has, so push the change first. That checkout is forced:
+it overwrites edits to tracked files, and an untracked file
+where the new commit adds one at the same path. It also
+detaches HEAD, so committing inside the guest is not enough --
+the next `provision` leaves that commit on no branch. See
+[usage.md](usage.md) for what survives.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM instead of your project one:

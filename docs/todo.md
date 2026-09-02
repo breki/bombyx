@@ -186,8 +186,13 @@ plan, decisions, and outcome.
   describing it -- `vagrant up --provider <name>`, or VAGRANT_DEFAULT_PROVIDER
   in the command bombyx already builds. Then `doctor` should check that the host
   can supply the provider the project asks for, which is the honest version of
-  the probe that was removed. Provider::Hyperv is documented as never exercised,
-  so any fix here cannot be verified without a Windows VM host.
+  the probe that was removed.
+
+  Two halves, and only one is blocked. Passing the provider to vagrant is
+  verifiable on the libvirt host we already use: `vagrant up --provider hyperv`
+  on a Linux host refuses instead of substituting, which is the point -- a loud
+  failure rather than a wrong VM. Only making Hyper-V actually work needs a
+  Windows VM host, and Provider::Hyperv is documented as never exercised.
 
 ## Done
 

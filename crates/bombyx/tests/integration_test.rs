@@ -517,23 +517,64 @@ fn a_host_cannot_smuggle_an_ssh_option() {
         .stderr(predicate::str::contains("must not start with"));
 }
 
-/// This repository shows a reader four sample configs. Each one
-/// must load.
+/// The elided-line counts the documents quote are the real ones.
 ///
-/// Three of them wrote `remote_root` after the
-/// `[source]` table. TOML binds a bare key to the table above
-/// it, so it parsed as `source.remote_root` and bombyx refused
-/// the file -- which is what a reader following the tutorial
-/// got on their first command.
+/// `docs/usage.md` and `docs/tutorial.md` print a `--dry-run`
+/// transcript, and each generated file shows as one line naming
+/// how many it dropped. Those numbers were measured by hand and
+/// went stale inside the very commit that measured them: six
+/// comment lines were added to `bootstrap.sh` afterwards, and
+/// 247 became 253 with nothing to notice.
 ///
-/// The fourth, in `llms.txt`, still named a config key that had
-/// been deleted.
+/// A number copied into prose is a claim about the code, and
+/// `CLAUDE.md` asks for a test using the document's own example.
+#[test]
+fn the_documented_elided_counts_are_real() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("the crate sits two levels below the repo root");
+
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "up"]);
+    let counts: Vec<&str> = lines
+        .iter()
+        .filter_map(|l| l.split_once('(').and_then(|(_, r)| r.split_once(')')))
+        .map(|(n, _)| n)
+        .filter(|n| n.ends_with(" lines elided"))
+        .collect();
+    assert_eq!(counts.len(), 2, "up must write two files: {lines:?}");
+
+    for name in ["docs/usage.md", "docs/tutorial.md"] {
+        let text = std::fs::read_to_string(repo.join(name))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        for count in &counts {
+            assert!(
+                text.contains(count),
+                "{name} does not show \"{count}\"; bombyx prints it"
+            );
+        }
+    }
+}
+
+/// Every sample `bombyx.toml` this repository shows a reader
+/// must load, exactly as written.
 ///
-/// `CLAUDE.md` asks for a test using the document's own example,
-/// so this extracts the blocks rather than restating them.
-/// Restating them is how the two came to disagree. Adding a
-/// fifth sample means adding it to the list below, which is the
-/// one thing this cannot derive.
+/// Three of them wrote `remote_root` after the `[source]` table.
+/// TOML binds a bare key to the table above it, so it parsed as
+/// `source.remote_root` and bombyx refused the file -- which is
+/// what a reader following the tutorial got on their first
+/// command. A fourth, in `llms.txt`, still named a config key
+/// that had been deleted, and went two review rounds unnoticed
+/// after the others were fixed.
+///
+/// That last part is why the file list is scanned rather than
+/// written down. A hand-kept list is what let `llms.txt` sit
+/// broken while its three siblings were repaired.
+///
+/// `CLAUDE.md` asks for a test using the document's own
+/// example, so this extracts the blocks rather than restating
+/// them. Restating them is how the two came to disagree.
 #[test]
 fn the_documented_sample_configs_load() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -541,46 +582,38 @@ fn the_documented_sample_configs_load() {
         .and_then(Path::parent)
         .expect("the crate sits two levels below the repo root");
 
-    // The whole fenced block, not the part from one key onwards.
-    // Anchoring on `project = ` would drop anything above it --
-    // and "keep bare keys above the tables" is what these
-    // samples now teach, so the lines most likely to move next
-    // are the ones an anchored search would stop seeing.
-    let from_doc = |name: &str| {
-        let text = std::fs::read_to_string(repo.join(name))
+    // Every file a reader might copy from. Scanned, not listed:
+    // `.sample` is loaded whole, and the prose files contribute
+    // whichever fenced block holds the anchor key.
+    let mut samples: Vec<(String, String)> = Vec::new();
+    for name in tracked_docs(repo) {
+        let text = std::fs::read_to_string(repo.join(&name))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let key = text
-            .find("project = \"myproject\"")
-            .unwrap_or_else(|| panic!("{name} shows no sample config"));
-        let fence = text[..key]
-            .rfind("```")
-            .unwrap_or_else(|| panic!("{name}: sample is not in a fence"));
-        let body = &text[fence..];
-        let start = body
-            .find('\n')
-            .unwrap_or_else(|| panic!("{name}: fence has no body"))
-            + 1;
-        let end = body[start..]
-            .find("```")
-            .unwrap_or_else(|| panic!("{name}: unterminated code fence"));
-        body[start..start + end].to_owned()
-    };
+        if name.ends_with(".sample") {
+            samples.push((name, text));
+        } else if let Some(block) = fenced_sample(&text) {
+            samples.push((name, block));
+        }
+    }
 
-    let samples = [
-        ("README.md", from_doc("README.md")),
-        ("docs/tutorial.md", from_doc("docs/tutorial.md")),
-        ("llms.txt", from_doc("llms.txt")),
-        (
-            "bombyx.toml.sample",
-            std::fs::read_to_string(repo.join("bombyx.toml.sample"))
-                .unwrap_or_else(|e| {
-                    panic!("{}: {e}", repo.join("bombyx.toml.sample").display())
-                }),
-        ),
-    ];
+    // A scan that finds nothing passes vacuously, and an
+    // extraction bug looks exactly like a document with no
+    // sample in it.
+    assert!(
+        samples.len() >= 4,
+        "expected at least four samples, found {:?}",
+        samples.iter().map(|(n, _)| n).collect::<Vec<_>>()
+    );
 
     for (name, source) in samples {
-        let dir = project_dir_with(&source);
+        // Written verbatim, not through `project_dir_with`:
+        // that helper calls `completed`, which appends the
+        // required tables when the text has no `[vm]`. A sample
+        // missing them is half of what this test exists to
+        // catch, and the helper would silently repair it.
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("bombyx.toml"), &source).unwrap();
+        std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
         write_user_config(&dir, "host = \"vmhost\"\n");
         let out = bombyx_in(&dir).args(["--dry-run", "status"]).output();
         let out = out.unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -595,6 +628,46 @@ fn the_documented_sample_configs_load() {
             String::from_utf8_lossy(&out.stdout)
         );
     }
+}
+
+/// The repository files that may carry a sample config.
+///
+/// `git ls-files` rather than a directory walk, so a stray copy
+/// in `target/` or an editor backup cannot join the set.
+fn tracked_docs(repo: &Path) -> Vec<String> {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "*.md", "*.txt", "*.sample"])
+        .current_dir(repo)
+        .output()
+        .expect("git ls-files must run");
+    assert!(out.status.success(), "git ls-files failed");
+    String::from_utf8(out.stdout)
+        .expect("git output must be utf-8")
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The fenced block holding the sample config, if the text has
+/// one.
+///
+/// The *whole* fence, not the part from the anchor key onwards.
+/// Anchoring on `project = ` would drop anything above it, and
+/// "keep bare keys above the tables" is what these samples now
+/// teach -- so the lines most likely to move next are the ones
+/// an anchored search would stop seeing.
+fn fenced_sample(text: &str) -> Option<String> {
+    let key = text.find("project = \"myproject\"")?;
+    let fence = text[..key].rfind("```")?;
+    let body = &text[fence..];
+    let start = body.find('\n')? + 1;
+    let end = body[start..].find("```")?;
+    let block = body[start..start + end].to_owned();
+    // The backwards search lands on the *closing* fence of an
+    // earlier block when the key appears in prose first, which
+    // yields the text between two blocks. Then the sample was
+    // never checked and the failure names the wrong cause.
+    block.contains("project = \"myproject\"").then_some(block)
 }
 
 #[test]

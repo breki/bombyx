@@ -32,7 +32,9 @@ pub enum Action {
     /// fetches and checks out `source.ref` again in the clone
     /// the guest already has. The checkout is forced, so it
     /// overwrites edits to tracked files and any untracked file
-    /// the fetched commit adds at the same path.
+    /// the fetched commit adds at the same path. It also
+    /// detaches HEAD, so a commit made in the guest ends up on
+    /// no branch after the next provision.
     ///
     /// Requires a machine that already exists: `vagrant
     /// provision` has nothing to provision on a VM that was
@@ -113,7 +115,7 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
 /// Destroys the VM defined in `dir`, then removes `dir`.
 ///
 /// Shared by `destroy` and `discard`, which differ only in
-/// which directory they target. The order is load-bearing:
+/// which directory they target. The steps cannot be swapped:
 /// `vagrant` runs *inside* the directory, so removing it first
 /// would leave nothing to run in.
 ///

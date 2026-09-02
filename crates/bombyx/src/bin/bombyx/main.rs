@@ -100,15 +100,22 @@ enum VmCmd {
     /// fetches your repository and checks out `ref` again in
     /// the clone the guest already has.
     ///
-    /// What that does to work in the guest, from
-    /// `bootstrap.sh`: the checkout is forced, so it overwrites
-    /// your edits to tracked files, and it overwrites an
-    /// untracked file too when the fetched commit adds one at
-    /// the same path. Untracked files survive only where the
-    /// commit has nothing at that path. Pointing `source.repo`
-    /// at a different repository removes the clone and starts
-    /// over, losing everything; rewriting the same URL with or
-    /// without a trailing `/` or `.git` does not.
+    /// `bootstrap.sh` forces that checkout, so it overwrites
+    /// your edits to tracked files. It also overwrites an
+    /// untracked file when the fetched commit adds one at the
+    /// same path. An untracked file survives only where the
+    /// commit has nothing at that path.
+    ///
+    /// A forced checkout of `FETCH_HEAD` detaches HEAD, so
+    /// committing in the guest does not protect work either: the
+    /// next provision moves HEAD away and leaves that commit on
+    /// no branch, findable only through `git reflog`. Push it to
+    /// survive a provision.
+    ///
+    /// Pointing `source.repo` at a different repository removes
+    /// the clone and starts over, which loses everything.
+    /// Rewriting the same URL with or without a trailing `/` or
+    /// `.git` keeps the clone.
     ///
     /// The VM must already exist: run `up` first.
     Provision,
@@ -733,12 +740,7 @@ fn doctor_run(cfg: &Config) -> Ran {
     // `doctor` over them would make a red report mean nothing
     // about whether `up` works.
     report.add(local_tool("ssh", Some("-V")));
-    report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
-    // A provider bombyx cannot probe still gets a row, so the
-    // report does not quietly shrink for a Hyper-V project.
-    if let Some(f) = doctor::provider_finding(cfg) {
-        report.add(f);
-    }
+    report.add_all(doctor::host_findings(cfg, spawn_probe));
 
     print_lines(&report.render(&cfg.host));
     if report.ok() { Ran::Ok } else { Ran::Failed(1) }

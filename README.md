@@ -19,6 +19,7 @@ agent works inside it.
 - [Use](#use)
 - [Updating bombyx](#updating-bombyx)
   - [Why the binary is renamed](#why-the-binary-is-renamed)
+  - [A version number is the only thing compared](#a-version-number-is-the-only-thing-compared)
 - [Telling the VM which host it runs on](#telling-the-vm-which-host-it-runs-on)
 - [Development](#development)
 - [Status](#status)
@@ -120,7 +121,7 @@ project = "myproject"    # VM + directory name on the host
 remote_root = "~/vms"    # optional; keep it above [vm]
 
 [vm]                     # required: the machine to build
-provider = "libvirt"     # libvirt or hyperv; only libvirt tried
+provider = "libvirt"     # use libvirt; see docs/todo.md for hyperv
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192            # MiB

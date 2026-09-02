@@ -62,14 +62,29 @@ clone the guest already has.
 
 The checkout is forced, so it overwrites your edits to tracked
 files, and it overwrites an untracked file as well when the
-fetched commit adds one at the same path. Untracked files
-survive only where the commit has nothing at that path. There is
-deliberately no `git clean`: in an agent VM the untracked files
-are the agent's work. The VM has to exist already: on one that was never
+fetched commit adds one at the same path. An untracked file
+survives only where the commit has nothing at that path. There
+is deliberately no `git clean`: in an agent VM the untracked
+files are the agent's work.
+
+**Committing inside the guest does not protect it either.** A
+forced checkout of `FETCH_HEAD` detaches HEAD, so a commit the
+agent makes afterwards sits on no branch, and the next
+`provision` moves HEAD away from it. `git log` stops showing it
+and only `git reflog` can find it. Push the work out to survive
+a provision.
+
+**Changing `source.repo` loses everything.** The guest removes
+the clone and starts over when the URL names a different
+repository. Rewriting the same URL with or without a trailing
+`/` or `.git` is not a different repository and keeps the
+clone.
+
+The VM has to exist already: on one that was never
 booted, `provision` creates the remote directory and writes the
 files before vagrant reports it has nothing to provision, so run
 `up` first.
-It applies to the project VM only -- a scratch VM is
+`provision` targets the project VM only -- a scratch VM is
 disposable, so the answer there is `discard` followed by
 `scratch`.
 
@@ -107,9 +122,9 @@ generated the rest. Teardown is re-runnable -- a directory with
 no Vagrantfile is removed rather than treated as an error -- so
 an interrupted `up` cannot leave one stranded.
 
-`remote_root` must start with `/` or `~/`, or be exactly `~`,
-and must name at least 1 directory below that anchor, with no
-`.` or `..` segment. bombyx deletes the directory it derives
+`remote_root` must start with `/` or `~/`, and must name at
+least 1 directory below that anchor, with no `.` or `..`
+segment. So `/`, `~`, `~/` and `~/.` are all refused. bombyx deletes the directory it derives
 from it, so a root of `/`, `~` or `~/.` is refused when the
 config loads rather than at teardown.
 
@@ -135,7 +150,15 @@ The `libvirt provider` row appears only when `[vm] provider` is
 `skip` instead: Hyper-V has no plugin to grep for, and bombyx
 has never driven a Hyper-V host, so there is no honest probe to
 send. The row stays in the report rather than vanishing, because
-an absent row reads as a check that passed.
+an absent row reads as a check that passed, and the summary line
+counts it.
+
+Setting `provider = "hyperv"` does not get you a Hyper-V VM
+today. bombyx writes the settings block for it but never tells
+vagrant which provider to use, so vagrant picks whatever the
+host offers -- on a libvirt host, a libvirt VM at vagrant's
+default size. That is `provider-configured-not-selected` in
+`docs/todo.md`.
 
 It runs every check rather than stopping at the first failure,
 and exits non-zero if any fails. It **creates, deletes and
@@ -193,7 +216,7 @@ invocation instead of running it:
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (247 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (265 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 

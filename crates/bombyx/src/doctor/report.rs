@@ -67,12 +67,45 @@ impl Report {
 
     /// Whether every probe that ran found its precondition met.
     ///
-    /// A skip does not count against the report: it is not
-    /// evidence of a problem, and the failure that caused it is
-    /// already on its own line.
+    /// A skip does not count against the report, because it is
+    /// not evidence of a problem. Two things produce one, and
+    /// only the first leaves a failure elsewhere in the report:
+    /// a gating probe failed, so the rest never ran; or bombyx
+    /// has no probe to send at all, which is what
+    /// `probes::provider_finding` reports for a provider it
+    /// cannot check. [`Report::summary`] names the skips for
+    /// that reason.
     #[must_use]
     pub fn ok(&self) -> bool {
         self.failures() == 0
+    }
+
+    /// The closing line: what failed, and what was not checked.
+    ///
+    /// Skips are counted as well as failures. A skip is not
+    /// evidence of a problem, so it does not make the report
+    /// fail, but "all checks passed" over a report containing
+    /// one is the reading the skip row exists to prevent -- see
+    /// `probes::provider_finding`, whose whole argument is that
+    /// an absent row looks like a check that passed.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let failed = self.failures();
+        let skipped = self
+            .findings
+            .iter()
+            .filter(|f| matches!(f.outcome, Outcome::Skip(_)))
+            .count();
+        let head = match failed {
+            0 => "all checks passed".to_owned(),
+            1 => "1 check failed".to_owned(),
+            n => format!("{n} checks failed"),
+        };
+        match skipped {
+            0 => head,
+            1 => format!("{head}, 1 skipped"),
+            n => format!("{head}, {n} skipped"),
+        }
     }
 
     /// How many probes failed.
@@ -125,13 +158,7 @@ impl Report {
             );
             let _ = writeln!(out, "{}", line.trim_end());
         }
-        match self.failures() {
-            0 => out.push_str("all checks passed\n"),
-            1 => out.push_str("1 check failed\n"),
-            n => {
-                let _ = writeln!(out, "{n} checks failed");
-            }
-        }
+        let _ = writeln!(out, "{}", self.summary());
         out
     }
 }
@@ -139,6 +166,30 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_report_whose_only_non_pass_is_a_skip_says_so() {
+        // "all checks passed" over a skip is the reading the
+        // skip row exists to prevent: it tells the operator
+        // bombyx looked at something it did not look at.
+        let mut r = Report::default();
+        r.add(Finding::new(
+            Scope::Local,
+            "ssh",
+            Outcome::Pass(String::new()),
+        ));
+        r.add(Finding::new(
+            Scope::Host,
+            "provider",
+            Outcome::Skip("not checked for hyperv".to_owned()),
+        ));
+        assert!(r.ok(), "a skip must not fail the report");
+        assert_eq!(r.summary(), "all checks passed, 1 skipped");
+        assert!(
+            r.render("vmhost")
+                .ends_with("all checks passed, 1 skipped\n")
+        );
+    }
 
     fn host_finding(name: &str, outcome: Outcome) -> Finding {
         Finding::new(Scope::Host, name, outcome)
