@@ -69,8 +69,9 @@ Two rules shape the design:
    inside a checkout, because `bombyx.toml` is read from the
    working directory, so the machine this design exists to
    protect still has the code on it. Closing that is the work
-   the decision record calls `project-config-off-repo`. The
-   argument, and what it costs, are in
+   planned in
+   [project-config-off-repo.md](docs/issues/project-config-off-repo.md).
+   The argument, and what it costs, are in
    [trust-boundary.md](docs/trust-boundary.md).
 2. **Wrap, don't reimplement.** bombyx composes `ssh` and
    `vagrant`. If it breaks, `ssh vmhost` and `vagrant up` by

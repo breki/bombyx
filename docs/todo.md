@@ -154,6 +154,21 @@ plan, decisions, and outcome.
   it from the working directory git remote was rejected: naming the project
   explicitly means bombyx reads nothing at all from the project directory.
 
+- **self-update-resolves-tar-late** -- two downloads before it notices no tar
+  Found by the red-team review of 92c2e74 (RT-7), verified by reading the call
+  sites rather than by running it. bombyx resolves every program a plan needs up
+  front, so a missing binary stops the run before anything changes state. That
+  covers VM plans, which are a single program throughout. It does not cover
+  self-update: ran_ok calls execute with one command at a time, and self_update
+  calls ran_ok three separate times. So tar is resolved at the extraction step,
+  after curl has already fetched the checksums and the archive. On a machine
+  with git and curl but no tar, bombyx self-update does two network round trips
+  and then fails. The comment above the resolution loop now says plainly that
+  the loop does not cover self-update, so the code and the prose agree; closing
+  the gap means resolving git, curl and tar before the first fetch. Worth fixing
+  in the same pass: git is the first program self-update runs, and it is missing
+  from every list of the tools it needs, including the clap help.
+
 ## Done
 
 - [**remote-clone-project-source**](issues/project-config-off-repo.md)

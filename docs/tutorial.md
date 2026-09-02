@@ -132,8 +132,10 @@ Host vmhost
     IdentityFile ~/.ssh/id_ed25519
 ```
 
-The alias is what goes in `bombyx.toml`. Name it whatever you
-like; `vmhost` is used throughout this tutorial.
+The alias is what goes in your own `config.toml`, which Part 1
+sets up below -- never in `bombyx.toml`, which bombyx refuses a
+`host` key outright. Name it whatever you like; `vmhost` is
+used throughout this tutorial.
 
 Then prove it works without a password prompt, because that is
 the form bombyx needs:
@@ -439,7 +441,6 @@ From the project directory:
 
 ```console
 $ bombyx doctor
-  local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
@@ -455,16 +456,16 @@ that is wrong. Fix anything that is not `ok` before continuing:
 `up` creates a directory on the host and writes two files before
 it runs `vagrant`, so a missing piece otherwise surfaces
 half-way through. `usage.md` explains how to read each line.
-(`tar` is checked for `bombyx self-update`, which unpacks the
-release archive with it; no VM command runs it.)
+`ssh` is the only local program checked, because it is the only
+one a VM command runs.
 
 ### Look at what `up` would do
 
 ```console
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
-ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (21 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (96 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (247 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -577,7 +578,6 @@ fails, rather than making you wait on a dead host for each one:
 
 ```console
 $ bombyx doctor
-  local   tar               ok    bsdtar 3.8.4 in C:\Windows\system32
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
   vmhost  ssh               FAIL  ssh: Could not resolve hostname vmhost: No ...
   vmhost  login shell       skip  no ssh
@@ -594,8 +594,8 @@ The failures you are most likely to hit, and where each one is
 dealt with:
 
 - **`Could not resolve hostname`** -- there is no `Host` entry
-  for the alias in `~/.ssh/config`, or it is misspelled in
-  `bombyx.toml`. Part 1.
+  for the alias in `~/.ssh/config`, or it is misspelled in your
+  `config.toml`. Part 1.
 - **SSH asks for a password.** Key auth is not set up, and
   bombyx cannot answer a prompt. Part 1.
 - **`vagrant: command not found` over SSH, but it works when

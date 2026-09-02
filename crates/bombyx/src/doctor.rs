@@ -110,13 +110,14 @@ impl ProbeResult {
 /// and only a second argument told them apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionAnswer {
-    /// There is no version flag worth asking for.
+    /// No version was asked for.
     ///
-    /// Every tool `doctor` checks today answers one, so nothing
-    /// produces this variant now. It stays because the choice is
-    /// per tool and some answer nothing useful -- `scp` prints a
-    /// usage message -- and because the alternative is asking
-    /// anyway and putting that message in the report.
+    /// Two ways to arrive here, and only one of them reaches a
+    /// verdict. The caller may decide a tool answers nothing
+    /// worth printing, which no tool `doctor` checks does
+    /// today. Or the tool was never found on `PATH`, and then
+    /// [`local_tool_finding`] fails on the missing path without
+    /// reading this at all.
     NotAsked,
     /// It ran. Whatever it printed is here, exit status included.
     Answered(ProbeResult),

@@ -9,7 +9,7 @@ works inside a VM and the workstation stays clean. It composes
 ```mermaid
 flowchart LR
   subgraph ws["workstation"]
-    repo["project repo<br/>bombyx.toml, vagrant/"]
+    repo["project repo<br/>bombyx.toml"]
     cli["bombyx"]
   end
 
@@ -44,7 +44,8 @@ What that costs is the part of the isolation that depends on
 the host being elsewhere: a guest that escapes the hypervisor
 is already on your workstation, and network isolation from your
 own machine means nothing. The VM boundary still holds --
-separate kernel, no host filesystem, no credentials.
+separate kernel, no host filesystem, none of your credentials
+(see `docs/trust-boundary.md` for the one the guest does need).
 `docs/tutorial.md` has the setup, and `docs/vm-host-wsl2.md`
 covers running the host as a WSL2 distribution on a Windows
 workstation.

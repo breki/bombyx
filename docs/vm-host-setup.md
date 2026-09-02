@@ -17,8 +17,8 @@ end, which explains what changes.
 > having already changed some things and not others.
 >
 > Setting up the host is also not bombyx's job. bombyx
-> composes `ssh`, `scp`, `tar` and `vagrant`, and nothing
-> more. See "wrap, don't reimplement" in `README.md`.
+> composes `ssh` and `vagrant`, and nothing more. See
+> "wrap, don't reimplement" in `README.md`.
 >
 > Steps 1 and 2 were verified on Ubuntu 24.04.4 with Vagrant
 > 2.4.9 in August 2026. Steps marked *(unverified)* have not
@@ -46,10 +46,9 @@ it by hand.
 |-------|-------------|
 | Host | `sshd` running, key auth working *non-interactively* |
 | Host | A POSIX login shell (`bash` or `sh`, not `csh` or `fish`) |
-| Host | `tar` and `scp` available on `PATH` |
 | Host | `vagrant` available on the **non-interactive** `PATH` |
 | Host | The project directory writable, or its nearest parent |
-| Local | `ssh`, `scp` and `tar` on `PATH` |
+| Local | `ssh` on `PATH` (`bombyx self-update` also wants `git`, `curl` and `tar`) |
 
 ### What the host needs in order to run VMs at all
 
@@ -255,24 +254,14 @@ remedies are here:
 
 ```console
 $ bombyx doctor
-  local   tar               ok    bsdtar 3.8.4 in C:\Windows\system32
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 in C:\Windows...
-  local   scp               ok    C:\Windows\System32\OpenSSH
-  local   Vagrantfile       ok
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
-  vmhost  tar               ok    /usr/bin/tar
-  vmhost  scp               ok    /usr/bin/scp
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/you (will create /home/you/vms/...
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
 all checks passed
 ```
-
-Either `tar` works. The bundled `bsdtar` in `C:\Windows\system32`
-is what a stock Windows workstation has, and the GNU `tar` that
-comes with Git for Windows is equally fine; `doctor` reports
-whichever it found first on the `PATH`.
 
 The manual equivalents are below, and remain useful when you
 want to see the raw output or are setting up before bombyx is
@@ -284,7 +273,6 @@ when you log in and type commands by hand.
 ```bash
 ssh <host> true                 # the alias and key auth work
 ssh <host> vagrant --version    # the important one
-ssh <host> 'command -v tar'
 ssh <host> 'vagrant plugin list'                    # see below
 ssh <host> 'virsh -c qemu:///system net-list --all' # see below
 ```
@@ -339,8 +327,8 @@ advance. Vagrant works perfectly when you SSH in and type
 `vagrant` yourself, because that is an interactive login shell
 with a fuller `PATH`. bombyx, using the same account on the
 same machine, gets `bash: vagrant: command not found`. Worse,
-it gets it in the middle of a push, after it has already
-created the remote directory and copied a tarball across.
+it gets it in the middle of an `up`, after it has already
+created the remote directory and written two files into it.
 
 You can see the difference directly:
 

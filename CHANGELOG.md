@@ -79,10 +79,12 @@ and this project adheres to
   what to archive. Delete the line from `bombyx.toml`: the config refuses
   unknown keys, so leaving it makes every command fail while loading, with a
   message naming the line and listing the keys that are valid.
-- `bombyx doctor` no longer checks for `scp`, locally or on the host, and no
-  longer reports on a project `Vagrantfile`. bombyx runs neither `scp` nor a
-  project-supplied Vagrantfile now. The local `tar` check stays, because
-  `bombyx self-update` unpacks the release archive with it.
+- `bombyx doctor` checks one local program, `ssh`, and no longer reports on a
+  project `Vagrantfile`. The `tar` and `scp` rows are gone, locally and on the
+  host: bombyx runs neither for any VM command. `bombyx self-update` still
+  needs `git`, `curl` and `tar`, and `doctor` deliberately says nothing about
+  them, so a red report always means `up` is in trouble. On a machine without
+  `tar`, `doctor` used to exit 1 while every VM command worked.
 
 ## [0.4.1] - 2026-08-18
 
