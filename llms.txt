@@ -12,6 +12,10 @@ Cargo workspace, CLI only:
   - `name.rs` — validated `ScratchName` (one path segment)
   - `remote.rs` — ssh command construction (pure)
   - `remote/probe.rs` — the read-only `doctor` probe scripts
+  - `vagrantfile.rs` — renders the Vagrantfile, embeds the
+    bootstrap script
+  - `templates/bootstrap.sh` — the script the guest runs,
+    identical for every project
   - `plan.rs` — `Action` → ordered command list
   - `doctor.rs` — the check model; submodules own the rest
     - `doctor/probes.rs` — which probes run, reading a result
@@ -20,7 +24,8 @@ Cargo workspace, CLI only:
     - `doctor/local.rs` — the workstation-side checks
     - `doctor/report.rs` — collecting and rendering findings
   - `tool.rs` — `PATH` lookup, never the working directory
-  - `bin/bombyx/main.rs` — clap parsing, thin dispatch
+  - `bin/bombyx/main.rs` — clap parsing, host-provenance
+    reporting, process spawning, the self-update ordering
 - `xtask` — build automation (not published)
 
 No web crate, no frontend, no E2E suite, no deploy
@@ -49,12 +54,15 @@ bombyx reset              # restore fresh-install snapshot
 bombyx destroy <project>  # destroy the VM, remove its dir
 bombyx scratch <name>     # boot a throwaway VM
 bombyx discard <name>     # destroy a throwaway VM, remove its dir
+bombyx self-update        # replace the binary; needs git, curl, tar
 ```
 
 `destroy` requires the project name as confirmation.
 `destroy` and `discard` both `rm -rf` the host directory after
 destroying the VM; `remote_root` therefore rejects `..`, and
-`remote::remove_dir` refuses a target under two segments deep.
+`Config::validate` is the only check on `remote_root`;
+`remote::remove_dir` carries a `debug_assert` that is a
+backstop for a hand-built path, not the guard.
 
 Global flags: `--config <path>` (default `bombyx.toml`),
 `--host <alias>`, `--dry-run` (print the argv instead of
@@ -109,7 +117,7 @@ so an override cannot bypass the checks on the committed
 file, and bombyx prints one stderr line naming the override
 when it is in force.
 
-`remote_root` must be anchored (`/` or `~/`, or exactly `~`)
+`remote_root` must be anchored (`/` or `~/`)
 and name at least one directory below that anchor. bombyx
 creates, writes into and -- on teardown -- deletes the
 directory it derives from the value, so a root that resolves
@@ -130,7 +138,8 @@ cargo xtask audit             # RUSTSEC advisories
 ```
 
 `cargo xtask validate` is the canonical gate (9 steps);
-all commits and the Stop hook run it. Never use raw
+`/release` runs it as the release gate and the Stop hook runs
+a subset; `/commit` does not run it at all. Never use raw
 `cargo test` / `cargo clippy`.
 
 ## Conventions

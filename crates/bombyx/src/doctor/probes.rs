@@ -68,8 +68,9 @@ impl HostProbe {
 
 /// The host probes, in order.
 ///
-/// Reachability is first and gates the rest: four more waits on
-/// a dead host teach nothing the first failure did not.
+/// Reachability is first and gates the rest: the probes behind
+/// it would each wait on a dead host and teach nothing the first
+/// failure did not.
 #[must_use]
 pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
     let mut probes = vec![
@@ -89,8 +90,8 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
     // plugin to find, so sending the probe there reports a
     // failure about a plugin that project never needed.
     //
-    // What a non-libvirt project gets instead is
-    // [`provider_finding`], a skip rather than an absent row.
+    // A non-libvirt project gets `provider_finding` instead,
+    // which is a skip row rather than an absent one.
     match cfg.vm.provider {
         Provider::Libvirt => probes.push(HostProbe::plain(
             "libvirt provider",
@@ -101,12 +102,13 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
     probes
 }
 
-/// The provider row for a project `host_probes` cannot check.
+/// The provider row for a project that `host_probes` cannot
+/// check.
 ///
-/// `None` for libvirt, whose probe is in the list above.
-/// Otherwise a [`Outcome::Skip`], because leaving the row out
-/// would shrink the report and an absent row reads as a check
-/// that passed.
+/// This returns `None` for libvirt, whose probe is in the list
+/// above. For any other provider it returns an
+/// [`Outcome::Skip`], because leaving the row out would shrink
+/// the report, and an absent row reads as a check that passed.
 ///
 /// bombyx has never driven a Hyper-V host, so there is no probe
 /// here to write honestly -- see `Provider::Hyperv`. Saying so
@@ -135,6 +137,29 @@ pub fn provider_finding(cfg: &Config) -> Option<Finding> {
 #[must_use]
 pub fn probe_commands(probes: &[HostProbe]) -> Vec<RemoteCommand> {
     probes.iter().map(|p| p.command.clone()).collect()
+}
+
+/// Every host finding for `cfg`, in report order.
+///
+/// The probes plus the rows no probe can produce. Callers get
+/// this rather than composing [`host_probes`], [`run_probes`]
+/// and [`provider_finding`] themselves, because a caller that
+/// forgot the last one would build a report with no provider
+/// row at all -- which is the state [`provider_finding`] exists
+/// to prevent. Composing it here means there is one order and
+/// one set, and `bombyx doctor` is not the only thing that can
+/// get them right.
+///
+/// `run` carries out one probe. It is a parameter so this stays
+/// free of process spawning; the binary passes the real one and
+/// tests pass a canned verdict.
+pub fn host_findings<F>(cfg: &Config, run: F) -> Vec<Finding>
+where
+    F: FnMut(&HostProbe) -> Outcome,
+{
+    let mut findings = run_probes(&host_probes(cfg), run);
+    findings.extend(provider_finding(cfg));
+    findings
 }
 
 /// Confirms the host shell ran a POSIX construct correctly.
@@ -216,6 +241,20 @@ mod tests {
         let mut c = cfg();
         c.vm.provider = provider;
         c
+    }
+
+    #[test]
+    fn host_findings_carries_the_provider_row_for_every_provider() {
+        // The row is the point: a caller that assembled the
+        // report by hand could leave it out, and an absent row
+        // reads as a check that passed.
+        let has = |c: &Config, row: &str| {
+            host_findings(c, |_| Outcome::Pass(String::new()))
+                .iter()
+                .any(|f| f.name == row)
+        };
+        assert!(has(&cfg_with(Provider::Libvirt), "libvirt provider"));
+        assert!(has(&cfg_with(Provider::Hyperv), "provider"));
     }
 
     #[test]

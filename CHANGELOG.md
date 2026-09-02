@@ -62,24 +62,27 @@ and this project adheres to
 - The message refusing a shallow `remote_root` says what the rule requires: at
   least one directory below `/` or `~`. It said "at least 1 directory deep",
   which reads as a constraint on the wrong thing.
-- The help for `bombyx provision` says what it does to work inside the guest.
+- The help for `bombyx provision` says what a re-provision costs work inside
+  the guest.
   The checkout is forced, so it overwrites edits to tracked files, and an
-  untracked file too when the fetched commit adds one at the same path. It
-  previously said the script runs from a "fresh clone", which reads as losing
-  everything.
+  untracked file too when the fetched commit adds one at the same path. It also
+  detaches HEAD, so a commit made in the guest lands on no branch after the
+  next provision. The help previously said the script runs from a "fresh
+  clone", which reads as losing everything, and then that untracked files
+  survive, which reads as a guarantee.
 
 ### Fixed
 
 - A `remote_root` of `~name` was accepted as an absolute path and then sent to
   the VM host as a relative one, resolved against the SSH login directory. It
-  must now start with `/` or `~/`, or be exactly `~`.
+  must now start with `/` or `~/`.
 - The sample bombyx.toml in README.md, docs/tutorial.md and bombyx.toml.sample
   could not be loaded. All three wrote remote_root after the [source] table, and
   TOML binds a bare key to the table above it, so it parsed as
   source.remote_root and every command failed while reading the file. The sample
   file also still carried the removed vagrant_dir key and had no [vm] or
-  [source] table. An integration test now loads all three, extracted from the
-  documents rather than restated.
+  [source] table. An integration test now loads every sample the repository
+  shows, extracted from the documents rather than restated.
 - `bombyx doctor` no longer sends the `vagrant-libvirt` probe to a project
   whose provider is `hyperv`. Hyper-V ships inside Vagrant and has no plugin to
   find, so the row reported a missing plugin that project never needed. Such a
@@ -91,6 +94,9 @@ and this project adheres to
   by the same test as the other three, which extracts the whole fenced block
   rather than the part from one key onwards, so a bad key written above project
   is caught too.
+- bombyx doctor counts skipped checks in its closing line. A report whose only
+  non-pass was a skip ended with "all checks passed", which is the reading the
+  skip row exists to prevent.
 
 ### Removed
 

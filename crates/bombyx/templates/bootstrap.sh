@@ -147,20 +147,32 @@ fi
 if [ -d "$CLONE_DIR/.git" ]; then
     git -C "$CLONE_DIR" fetch --depth 1 origin -- "$BOMBYX_REF"
     git -C "$CLONE_DIR" checkout --force FETCH_HEAD
-    # Deliberately no `git clean` here. It would make the
-    # checkout match the repository exactly, but it deletes
-    # untracked files -- which in this VM means whatever the
-    # agent has been working on and not yet committed. Losing
-    # that on a `bombyx provision` is worse than carrying a
-    # file the upstream repo deleted. The case that actually
-    # mattered, a changed `repo`, is handled above by removing
-    # the clone outright.
+    # Deliberately no `git clean` here. It would make the tree
+    # match the commit exactly, but it deletes untracked files
+    # -- which in this VM means whatever the agent has been
+    # working on and not yet committed.
     #
-    # This narrows the loss, it does not remove it. `--force`
-    # above still overwrites an untracked file when the fetched
-    # commit carries one at the same path: git only refuses that
+    # What that costs is a tree that is a superset of the
+    # commit: build output and generated files stay behind. It
+    # is not a tree that disagrees about tracked files, because
+    # `--force` above already deletes a tracked file the new
+    # commit does not have. Stale leftovers are a fair price for
+    # not deleting the agent's work.
+    #
+    # It narrows the loss rather than removing it, in two ways
+    # worth knowing.
+    #
+    # `--force` overwrites an untracked file when the fetched
+    # commit carries one at the same path; git refuses that only
     # without `--force`. So an agent's `notes.md` survives until
     # upstream adds a `notes.md`, and then it goes silently.
+    #
+    # And checking out `FETCH_HEAD` detaches HEAD. A commit the
+    # agent makes after that sits on no branch, and the next
+    # provision moves HEAD away from it: `git log` stops showing
+    # it and only the reflog can find it. Committing inside the
+    # guest is therefore not a way to survive a provision --
+    # pushing is.
 else
     git clone --depth 1 --branch "$BOMBYX_REF" \
         -- "$BOMBYX_REPO" "$CLONE_DIR"
