@@ -703,6 +703,11 @@ just when the code compiles:
    and a missing `cargo-deny` is an error rather than a warning
    because there is no network here to be down
 
+Gates 7, 8 and 9 are the supply-chain three, and
+`docs/developer/supply-chain.md` explains each one: why `deny`
+runs offline and in CI while `audit` deliberately does not, and
+why `Validate OK` does not mean the dependencies were audited.
+
 The dependency-cooldown gate runs **first** (it is a no-op
 on an unchanged lockfile, and fails fast on a within-cooldown
 dependency before anything compiles it); after it the gates
@@ -857,97 +862,22 @@ so each run evaluates only feedback newer than the last, via
 `cargo xtask backfeed-diff` -- it never re-scans the whole
 downstream file.
 
-## Workspace lints and xtask overrides
+## Build and toolchain recipes
 
-The workspace forbids `unsafe_code` via
-`[workspace.lints.rust]` so production crates inherit
-the policy by default. If a derived project needs OS-
-specific code in `xtask/` (for example, calling Win32
-APIs for process management on Windows -- the canonical
-case being `OpenProcess` / `TerminateProcess` /
-`CreateToolhelp32Snapshot` for stale-server cleanup),
-the recipe is to redefine the lints block locally for
-`xtask` only rather than weakening the workspace policy:
+Three recipes live in `docs/developer/build-recipes.md`, because
+each is needed rarely and none is a rule you follow on every
+commit: **scoped `unsafe` in `xtask`** (the workspace forbids
+`unsafe_code`, so build tooling that needs an OS API redefines
+the lint block for `xtask` alone), **coverage exceptions for
+hardware-bound code** (extract the unmockable I/O into a leaf
+submodule and name it in `[workspace.metadata.coverage]`, so the
+90% gate stays honest), and the **edition-2024 migration** fixes.
 
-```toml
-# xtask/Cargo.toml
-[lints.rust]
-warnings = "deny"
-unsafe_code = "allow"   # xtask is build tooling, scoped exception
-
-[lints.clippy]
-# inherit the workspace clippy block by re-declaring
-# or by overriding selectively
-```
-
-Production crates keep `[lints] workspace = true` and
-remain `unsafe`-forbidden. Document the scoped
-exception with a comment near the use site so reviewers
-can verify the unsafe block is genuinely necessary.
-
-## Coverage exceptions for hardware-bound code
-
-The 90% coverage gate (see Definition of Done) assumes
-every code path can run under `cargo llvm-cov` in CI.
-Real projects routinely have I/O paths that can't:
-audio playback, network calls against external
-services, native API calls (Win32, CoreAudio, ALSA),
-GPIO on embedded targets. The recipe for keeping the
-gate honest without weakening it:
-
-1. **Extract the hardware-bound code into a sibling
-   submodule.** Given `foo.rs` that contains both
-   business logic and an I/O call, split into `foo.rs`
-   (the orchestrator) and `foo/bar.rs` (the I/O leaf).
-   The leaf module should be as small as possible --
-   ideally just the unmockable call plus its
-   immediate error mapping.
-2. **Exclude the leaf submodule via manifest config.**
-   Add its path (a regex fragment) to
-   `[workspace.metadata.coverage] ignore` in the **root
-   `Cargo.toml`** -- no need to fork `xtask`:
-
-   ```toml
-   [workspace.metadata.coverage]
-   # Each entry is a regex fragment merged into the coverage
-   # --ignore-filename-regex baseline. Use single-quoted TOML
-   # literal strings so backslashes reach the regex verbatim
-   # (no doubling).
-   ignore = ['src[/\\]audio[/\\]playback\.rs']
-   ```
-
-   `cargo xtask coverage` merges these with its built-in
-   baseline (`src/main.rs`, `src/bin/`); the leaf module is
-   exempted from the gate, the orchestrator is not. An absent
-   section leaves the baseline unchanged, and a
-   missing/unreadable manifest degrades to the baseline rather
-   than failing. A pattern that would match *every* file
-   (empty, `.`, `.*`, `.+`) is rejected -- it would silently
-   neuter the gate. Only the `[workspace.metadata.coverage]` +
-   line-leading `ignore = [...]` shape is read; the dotted-key
-   (`coverage.ignore = ...`) and inline-table spellings are
-   not.
-3. **Add a `*_TEST_*` env-var escape hatch in the
-   excluded module.** For example, `RUSTBASE_TEST_AUDIO`
-   short-circuits the real native call and returns a
-   fixed `Ok`/`Err` shape. This keeps the parent
-   module's post-call success and error branches
-   testable -- they're the parts that actually carry
-   business logic, and they remain inside the 90% gate.
-
-What this gets you: the orchestrator is fully covered
-(including both branches of its `match
-play_audio_native() { Ok => ..., Err => ... }`), the
-leaf is honestly acknowledged as untested in CI, and
-there's no `#[cfg(test)]` test-only branch leaking into
-production code paths.
-
-When NOT to use this recipe: if the I/O can be faked
-with a trait + dependency injection at the call site
-without contortions, do that instead. The submodule-
-plus-ignore-regex pattern is for cases where the
-indirection itself would obscure the code more than it
-reveals.
+Read that file before weakening a lint or a gate. The rule those
+recipes exist to protect: production crates keep
+`[lints] workspace = true` and stay `unsafe`-forbidden, and a
+coverage exclusion covers the I/O leaf, never the orchestrator
+around it.
 
 ## Shell wrappers: bash and PowerShell twins
 
@@ -1035,36 +965,6 @@ rather than replacing them. Derived projects should
 (product names, acronyms, external systems) to that
 file rather than redefining the list.
 
-## Edition-2024 migration notes
-
-The template ships on Rust edition 2024. Projects
-inheriting from an older snapshot of the template (or
-upgrading from edition 2021) routinely hit a small set
-of mechanical fixes that `cargo fix --edition` either
-applies automatically or flags:
-
-- **Unsafe extern blocks**: `extern "C" { fn foo(); }`
-  must become `unsafe extern "C" { fn foo(); }`. Each
-  declaration inside is still individually `unsafe fn`.
-- **Match ergonomics tightening**: bare `ref` patterns
-  inside a binding that already implies a reference
-  must be dropped. `match x { Some(ref y) => ... }`
-  becomes `match x { Some(y) => ... }` when the outer
-  match already produces a reference.
-- **`gen` is reserved**: any identifier called `gen`
-  (variables, function names, struct fields) needs the
-  raw-identifier form `r#gen` or a rename.
-- **Nested `if let` -> let chains**: clippy's autofix
-  collapses `if x { if y { ... } }` into
-  `if x && y { ... }` once `let`-chains are stable.
-  This is a clippy fix rather than an edition fix, but
-  it lands at the same time and is worth running in the
-  same pass.
-
-Run `cargo fix --edition --workspace` followed by
-`cargo xtask validate` and expect a small follow-up
-pass for the items above.
-
 ## Version source of truth
 
 The project version lives in
@@ -1077,202 +977,27 @@ script can rewrite both on release, or pull the value
 from `Cargo.toml` via the build -- a CLI binary can use
 `env!("CARGO_PKG_VERSION")`.
 
+
 ## Supply-chain hygiene
 
-Six `cargo xtask` commands guard the dependency tree. Two of them
-are about **licences** rather than vulnerabilities, and the split
-matters because the two hazards behave differently:
+The detail lives in `docs/developer/supply-chain.md`: what each
+of the six guard commands does, why `deny` runs offline in CI
+while `audit` deliberately does not, why the licence file is
+over-inclusive on purpose, and what none of it covers.
 
-- **`cargo xtask deny`** runs `cargo deny check licenses bans
-  sources` against `deny.toml`. It is **offline** -- it reads
-  `Cargo.lock` and the metadata already on disk -- which is why it
-  runs as `validate` step 4 *and* on every push in CI, where
-  `audit` deliberately does not. An advisory can appear overnight
-  and fail a pull request that changed nothing; a licence cannot
-  change under you that way. A missing `cargo-deny` is an error
-  here, not a warning, because there is no network to be down.
+Two rules to hold without opening that file:
 
-  The allow-list is every licence in the current tree and no
-  more: MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception,
-  Unicode-3.0, Unlicense. `LGPL-2.1-or-later` is deliberately
-  absent even though `r-efi` offers it, because an SPDX `OR` is
-  satisfied by any allowed member -- so that crate resolves to MIT
-  and a crate that is *only* copyleft fails the gate.
-
-- **`cargo xtask licenses`** generates `THIRD-PARTY-LICENSES` for
-  one target, and the release workflow writes it into every
-  archive. This is compliance, not tidiness: MIT and Apache-2.0
-  both require the licence and notice to travel with a distributed
-  binary, and `serde`, `clap`, `anyhow` and the `windows-sys` tree
-  are all in the shipped binary under one or the other. Until this
-  existed the archives held only bombyx's own `LICENSE`, so the
-  obligation was unmet from the first published binary. Texts come
-  from the registry sources already on disk; nothing is
-  downloaded.
-
-  **The set is what goes into building the binary for one
-  target**, which took three restrictions: crates reachable from a
-  *distributed* workspace member (so not `xtask`'s tree), through
-  *normal* dependencies (so not `assert_cmd`, `predicates`,
-  `difflib`), resolved for the *one* platform named by `--target`
-  (so not `r-efi`). That is 50 crates on
-  `x86_64-pc-windows-msvc` against 87 before. Pass `--target` from
-  the release matrix, or the host triple is used -- and it fails
-  rather than guessing one, because a guessed triple resolves
-  another platform's set and still exits 0.
-
-  **It says "goes into building", not "links", and that wording is
-  load-bearing.** Within those three restrictions the set is
-  deliberately over-inclusive: proc-macro crates run at compile
-  time and are not in the binary (8 of the 50, including the
-  `unicode-ident` whose `Unicode-3.0` used to be quoted as the
-  reason this file exists -- it reaches bombyx only through
-  `clap_derive`, `serde_derive` and `thiserror-impl`), and
-  `resolve.nodes[].deps` reports an optional dependency the build
-  never enables with the same `kind: null` as a real edge
-  (`cargo tree -e normal` says 47 where the walk says 50). Pruning
-  either means reimplementing feature resolution, which fails
-  quietly and in the direction that matters. An unnecessary
-  attribution costs nothing; a false sentence in a legal document
-  does, so the sentence is what gets kept true.
-
-  **A crate shipping no licence terms fails the command**, with
-  `--max-missing N` to raise the bar deliberately. Naming them in
-  the file was not enough: if the registry sources are absent every
-  crate comes back text-less, and the tool would write a short file
-  announcing that none of them ship a licence and exit 0. "Terms"
-  is narrower than what the tool *collects*: `NOTICE`, `AUTHORS`
-  and `COPYRIGHT` are gathered because they carry obligations of
-  their own, but a crate shipping only an `AUTHORS` list has given
-  us nothing to reproduce, so it does not satisfy the gate. Nor
-  does an empty `LICENSE`. The generator runs in every-push CI as
-  well as the release, because a gate that first fires after the
-  tag exists costs a moved tag.
-
-  It is not committed (`.gitignore`), because it is derived from
-  `Cargo.lock` and would drift the moment a dependency moved.
-
-The other four are about vulnerabilities and freshness:
-
-- **`cargo xtask audit`** runs `cargo audit` (RUSTSEC) over
-  `Cargo.lock`, failing on any vulnerability (advisory
-  *warnings* -- unsound / unmaintained / yanked -- are
-  reported, not fatal). It runs late in `validate`, so
-  **`validate` needs `cargo-audit` installed
-  (`cargo install cargo-audit`) and network access** to the
-  advisory DB.
-
-  **Inside `validate` a missing tool or an unreachable
-  advisory DB is a printed warning, not a failure**, so an
-  offline machine is not blocked. The consequence is worth
-  stating plainly: `Validate OK` does **not** mean the
-  dependencies were audited. The standalone
-  `cargo xtask audit` errors on both instead, and that is
-  the spelling a release uses.
-
-  **Releases audit twice, and neither copy is optional.**
-  `/release` runs the standalone command as its own step
-  after `validate`, which blocks the tag from being created;
-  the `gates` job in `.github/workflows/release.yml` runs it
-  as well, which blocks the binaries from being published.
-  The second one is the copy nobody can skip. Every-push CI
-  still leaves audit out on purpose -- an advisory filed
-  overnight would fail a pull request that changed nothing.
-
-  **What this does not cover.** An advisory against a
-  dependency you have not touched is caught only at the next
-  release, because `dep-age-check` looks at *changed* deps by
-  design and nothing else watches. There is no provenance
-  vetting (no `cargo-vet`), so nothing distinguishes an audited
-  crate from one that merely has no advisory yet, and no
-  automated update cadence, so a dependency whose vulnerability
-  is already fixed upstream sits at the old version until
-  someone runs `/update-deps`.
-- **`cargo xtask dep-age cargo <package> [version]`**
-  reports how many days ago a version was published (on-demand,
-  a single package). Add **`--latest-aged`** to instead print
-  the **highest** version that has cleared the cooldown
-  (selected by version, not publish date) -- the pin target the
-  `/update-deps` workflow feeds to `cargo update --precise`.
-  The `cargo` argument names the registry; it is the only one
-  supported, and is kept so adding a second later needs no
-  change to the command line.
-- **`cargo xtask dep-age-check`** enforces the cooldown as the
-  **first** `validate` step, so a dependency adopted within the
-  cooldown fails the gate before the compile steps (Clippy,
-  Test, Coverage) build and run its build script. It checks
-  **only the dependencies added or version-bumped in the working
-  tree versus `HEAD`**, so it fires exactly when a dependency is
-  adopted and costs nothing -- no network -- on a commit that
-  leaves `Cargo.lock` untouched. A *whole-tree* gate is
-  deliberately avoided: it would flag every already-locked
-  version on every routine update. Like `audit`, an
-  unreachable registry / missing `HEAD` baseline degrades to a
-  warning, not a hard failure.
-- **`cargo xtask dep-preflight`** is the *pre-compile* twin of
-  `dep-age-check`. Where the gate reports a cooldown breach
-  *after* the fact, preflight *remediates* it *before* you
-  build: it reads the changed Rust crates (same `HEAD` diff as
-  the gate) and, for each one still inside the cooldown, pins
-  it down to its newest aged version with
-  `cargo update --precise`, looping until the whole changed set
-  is aged or no aged version fits the resolved requirements.
-  Every step touches only the registry index and the lockfile,
-  so no crate tarball is fetched and no build script runs until
-  the tree is clean. Use it as a front door: `cargo add <dep>`
-  (updates the lockfile, no compile) -> `cargo xtask
-  dep-preflight` -> `cargo build`. Rust / crates.io only.
-
-**Why both a gate *and* a preflight?** `dep-age-check` is a
-*post-resolution* check -- by the time it fails, `cargo` has
-already downloaded *and compiled* the fresh crates, running
-their build scripts (`cc`, `ring`, ...) on your machine. The
-gate protects the committed lockfile (and everyone who builds
-from it); it does not protect the build host during the window.
-`dep-preflight` closes that host-side gap, but only when you
-run it *instead of* going straight to `cargo build` -- it
-cannot intercept a bare `cargo build` that resolves and
-compiles in one shot. The only thing that protects *every*
-invocation automatically is cargo's in-resolver
-**`-Zmin-publish-age`** (RFC 3923), which refuses to *select* a
-too-new version so it is never fetched or built. That flag's
-client side is nightly-only as of now; once it stabilizes on
-stable, layer it in front of (or in place of) these xtask
-commands. Until then, `dep-age-check` is the CI-enforced gate
-(runs on stable) and `dep-preflight` is the opt-in host-side
-hardening.
-
-**Dependency-version cooldown.** Do not adopt a dependency
-version published fewer than 14 days ago without a stated
-justification -- that window is when a compromised or
-malicious release is most likely still live. Security fixes
-are exempt (the fix's urgency outweighs the cooldown). Check
-a candidate before adding it:
-`cargo xtask dep-age cargo <crate> <version>`; it exits
-non-zero when the version is within the cooldown.
-
-`validate` enforces this automatically for changed deps via
-the `dep-age-check` step above. When you *do* adopt a
-fresh version with justification (or a security fix), name it
-in the **`RUSTBASE_DEP_AGE_ALLOW`** env var
-(`name@version`, comma-separated) so the gate passes while
-leaving an auditable record of what was waved through --
-e.g. `RUSTBASE_DEP_AGE_ALLOW=serde@1.0.999 cargo xtask
-validate`.
-
-**`cargo update` interaction.** The gate checks *every*
-newly-locked registry dependency, **transitive ones included**
--- so it is a no-op only on commits that leave `Cargo.lock`
-untouched, not on every "routine" commit. A lockfile-churning
-update (`cargo update`) can bump many transitive crates to
-versions published within the cooldown, and the gate
-will fail listing all of them. That is intended -- a bulk
-update is exactly when a freshly-published (possibly
-compromised) transitive release slips in. The recommended
-workflow: run the update, then either wait out the cooldown
-before committing, or, once you've reviewed the flagged
-versions, bulk-approve them with
-`RUSTBASE_DEP_AGE_ALLOW=a@1.2.3,b@4.5.6,... cargo xtask
-validate`. Prefer scoped updates (`cargo update -p <crate>`)
-over a blanket `cargo update` so the flagged set stays small
-and reviewable.
+- **Do not adopt a dependency version published fewer than 14
+  days ago without a stated justification.** That window is when
+  a compromised release is most likely still live. Security
+  fixes are exempt. Check a candidate with
+  `cargo xtask dep-age cargo <crate> <version>`; it exits
+  non-zero inside the cooldown. When you do adopt a fresh
+  version deliberately, name it in `RUSTBASE_DEP_AGE_ALLOW`
+  (`name@version`, comma-separated) so the gate passes and
+  leaves a record of what was waved through.
+- **`Validate OK` does not mean the dependencies were audited.**
+  Inside `validate`, a missing `cargo-audit` or an unreachable
+  advisory DB is a printed warning, so an offline machine is not
+  blocked. The standalone `cargo xtask audit` errors on both,
+  and that is the spelling a release uses.
