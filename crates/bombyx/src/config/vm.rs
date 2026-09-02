@@ -31,7 +31,7 @@ use super::guards::check_renderable;
 /// An enum rather than a string so an unknown value fails while
 /// the config is being read. A string would reach the VM host,
 /// render a Vagrantfile no `vagrant` can use, and report it only
-/// after the push had already changed state there.
+/// after bombyx had already created a directory there.
 ///
 /// `#[serde(rename_all = "lowercase")]` is what lets
 /// `provider = "libvirt"` in the TOML select the `Libvirt`
@@ -115,7 +115,7 @@ pub(super) fn validate(vm: &Vm) -> Result<(), FieldError> {
 
     // A machine with no CPU or no memory is refused here rather
     // than by vagrant, which would report it on the VM host
-    // after the push has already changed state.
+    // after bombyx has already created a directory on the host.
     for (field, value) in [("cpus", vm.cpus), ("memory", vm.memory)] {
         if value == 0 {
             return Err(FieldError::Invalid {
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn a_machine_with_no_cpu_is_refused() {
         // vagrant would refuse this too, but only on the VM
-        // host, after the push has already changed state there.
+        // host, after bombyx has already created a directory there.
         let mut v = vm();
         v.cpus = 0;
         let err = validate(&v).unwrap_err();

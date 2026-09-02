@@ -76,8 +76,6 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
         HostProbe::plain("ssh", remote::probe::reachable(cfg)).gating(),
         HostProbe::plain("login shell", remote::probe::posix_shell(cfg))
             .with_verdict(posix_shell_verdict),
-        HostProbe::plain("tar", remote::probe::command(cfg, "tar")),
-        HostProbe::plain("scp", remote::probe::command(cfg, "scp")),
         HostProbe::plain("vagrant", remote::probe::command(cfg, "vagrant")),
         HostProbe::plain(
             "project dir",

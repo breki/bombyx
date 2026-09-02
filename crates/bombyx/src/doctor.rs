@@ -41,7 +41,7 @@ mod readonly;
 mod report;
 mod text;
 
-pub use local::{local_tool_finding, vagrantfile_finding};
+pub use local::local_tool_finding;
 pub use probes::{
     HostProbe, Verdict, classify, host_probes, probe_commands, run_probes,
 };
@@ -164,4 +164,57 @@ pub fn not_on_path(name: &str) -> String {
 #[must_use]
 pub fn cannot_run(what: &str, err: &str) -> String {
     format!("cannot run {what}: {err}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Output;
+
+    /// A finished process, built without spawning one.
+    ///
+    /// `ExitStatus` has no public constructor, so the status
+    /// comes from a real command that is guaranteed to exist on
+    /// every platform bombyx targets: the shell builtin `true`
+    /// on Unix, `cmd /c exit 0` on Windows.
+    fn output(code: i32, stdout: &str, stderr: &str) -> Output {
+        let status = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/c", &format!("exit {code}")])
+                .status()
+        } else {
+            std::process::Command::new("sh")
+                .args(["-c", &format!("exit {code}")])
+                .status()
+        }
+        .expect("the shell must be runnable");
+        Output {
+            status,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_probe_result_carries_both_streams_and_the_verdict() {
+        let r = ProbeResult::from_output(&output(0, "out", "err"));
+        assert!(r.success);
+        assert_eq!(r.stdout, "out");
+        assert_eq!(r.stderr, "err");
+
+        let r = ProbeResult::from_output(&output(1, "", "boom"));
+        assert!(!r.success);
+        assert_eq!(r.stderr, "boom");
+    }
+
+    #[test]
+    fn a_probe_result_keeps_invalid_utf8_rather_than_failing() {
+        // A probe reads whatever the host printed, and a byte
+        // sequence that is not UTF-8 must not lose the rest of
+        // the line. `from_utf8_lossy` substitutes U+FFFD.
+        let mut out = output(0, "", "");
+        out.stdout = vec![b'a', 0xff, b'b'];
+        let r = ProbeResult::from_output(&out);
+        assert_eq!(r.stdout, "a\u{fffd}b");
+    }
 }

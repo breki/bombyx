@@ -5,15 +5,11 @@
 //! it reaches all of them at the same time. Seven fields use the
 //! leading-dash rule, four use the Ruby-literal rule, and both
 //! the blank check and the character check have several callers.
-//! `check_project_relative` has one caller today and is here
-//! because it is the same kind of work.
 //!
 //! Everything here returns [`FieldError`], not `ConfigError`.
 //! These functions check a value and nothing else. The caller
 //! decides whether the value came from a file, and reports it
 //! that way. See `config::error`.
-
-use std::path::{Component, Path};
 
 use super::error::FieldError;
 
@@ -42,8 +38,8 @@ pub(super) fn check_not_empty(
 ///
 /// `tool` names the program in the message, because the answer
 /// to "which program?" is what tells the operator where to
-/// look: `host` reaches `ssh` and `scp`, `ref` reaches `git`,
-/// and `vagrant_dir` reaches `tar`.
+/// look: `host` reaches `ssh`, `ref` and `repo` reach `git`,
+/// and `project` reaches the shell script `ssh` runs.
 ///
 /// **For `ref` this is the second of two guards, not the only
 /// one.** The guest runs
@@ -59,9 +55,8 @@ pub(super) fn check_not_empty(
 /// run on the other end, rather than as a branch name.
 ///
 /// **Add a field whose value reaches a command line, and it
-/// requires this check too.** Seven use it today: `host`,
-/// `project`, `vagrant_dir`, `remote_root`, `ref`, `repo` and
-/// `script`.
+/// requires this check too.** Six use it today: `host`,
+/// `project`, `remote_root`, `ref`, `repo` and `script`.
 pub(super) fn check_not_an_option(
     field: &'static str,
     value: &str,
@@ -70,9 +65,9 @@ pub(super) fn check_not_an_option(
     if value.starts_with('-') {
         // "would treat" rather than "reads", because `tool` is
         // sometimes two programs at once. A verb agreeing with a
-        // single subject turns ungrammatical the moment the
-        // caller passes "ssh and scp", and the test below is
-        // what holds this wording in place.
+        // single subject turns ungrammatical the moment a caller
+        // passes "ssh and scp", and the test below is what holds
+        // this wording in place.
         return Err(FieldError::invalid(
             field,
             format!(
@@ -98,52 +93,6 @@ pub(super) fn check_charset(
             format!("character {bad:?} is not allowed; use only {expected}"),
         ));
     }
-    Ok(())
-}
-
-/// Requires a path that stays inside the project directory.
-///
-/// The value gets joined onto the working directory, and
-/// `Path::join` **discards the left side** when the right one is
-/// absolute. So an absolute value does not extend the project
-/// path, it replaces it -- and since this config travels inside
-/// a repository, that turns a clone into a tool that archives
-/// whatever directory the repo specifies.
-///
-/// The rooted spellings are tested by hand rather than through
-/// `Path::is_absolute`, because that answers differently per
-/// platform: a Windows drive prefix is not absolute on Unix, and
-/// the same config file gets read on both.
-pub(super) fn check_project_relative(
-    field: &'static str,
-    value: &str,
-) -> Result<(), FieldError> {
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return Err(FieldError::invalid(field, "must not name a drive"));
-    }
-    if value.starts_with('/') || value.starts_with('\\') {
-        return Err(FieldError::invalid(
-            field,
-            "must be relative to the project directory",
-        ));
-    }
-    if value.starts_with('~') {
-        return Err(FieldError::invalid(field, "must not start with `~`"));
-    }
-
-    // Everything left must be an ordinary segment. This is what
-    // rejects `..` and `.`, in any position rather than only at
-    // the front.
-    for component in Path::new(value).components() {
-        if !matches!(component, Component::Normal(_)) {
-            return Err(FieldError::invalid(
-                field,
-                "must be a plain relative path, with no `.`, `..` or root",
-            ));
-        }
-    }
-
     Ok(())
 }
 
@@ -242,23 +191,24 @@ mod tests {
         // Several callers share this rule, so the message has
         // to send the operator to the right place. Each pairing
         // below is one the production code really produces:
-        // `ref` is handed to `git`, `vagrant_dir` ends up in
-        // `tar -C`.
+        // `ref` is handed to `git`, and `host` becomes `ssh`'s
+        // first positional argument.
         let err = check_not_an_option("ref", "--upload-pack=x", "git")
             .expect_err("must be refused");
         assert!(err.to_string().contains("git"), "{err}");
 
-        let err = check_not_an_option("vagrant_dir", "-x", "tar")
+        let err = check_not_an_option("host", "-x", "ssh")
             .expect_err("must be refused");
-        assert!(err.to_string().contains("tar"), "{err}");
+        assert!(err.to_string().contains("ssh"), "{err}");
 
         assert!(check_not_an_option("ref", "main", "git").is_ok());
     }
 
     #[test]
     fn the_option_message_reads_the_same_for_one_tool_or_two() {
-        // `host`, `project`, `vagrant_dir` and `remote_root`
-        // name two programs at once, so the sentence has to work
+        // No field names two programs today, and `host` did
+        // until the push was removed. The function still takes an
+        // arbitrary `tool` string, so the sentence has to work
         // with a plural subject as well as a singular one. This
         // asserts the whole message rather than a fragment,
         // because a broken verb is exactly what a `contains`

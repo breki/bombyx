@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -28,7 +28,7 @@ use bombyx::doctor::{
 };
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
-use bombyx::remote::{PushArchive, RemoteCommand, Tty};
+use bombyx::remote::{RemoteCommand, Tty};
 use bombyx::term;
 use bombyx::update::{self, asset};
 use clap::{Parser, Subcommand};
@@ -305,30 +305,6 @@ fn run() -> Result<Ran> {
     let action = action_of(&vm, &cfg)?;
     let tty = tty_choice();
 
-    // `tar` runs from the archive directory, so the source
-    // directory has to be absolute.
-    let local_dir = std::env::current_dir()
-        .context("resolving the current directory")?
-        .join(&cfg.vagrant_dir);
-
-    // Only a pushing action needs a workspace. It is a
-    // private directory owned by this run and removed when
-    // the guard drops, so concurrent runs cannot collide and
-    // no file bombyx did not create is ever deleted.
-    let workspace = if action.pushes() {
-        Some(TempDir::new().context("creating a temp directory")?)
-    } else {
-        None
-    };
-    // A non-pushing action never reads the archive, so the
-    // fallback directory is not used for anything.
-    let archive = PushArchive::new(
-        workspace
-            .as_ref()
-            .map_or_else(|| Path::new("."), TempDir::path),
-        &run_id(),
-    );
-
     // Every action renders its dry run the same way, through
     // `plan`, so no subcommand can describe a run it would not
     // perform -- doctor included. Ordered so the two doctor
@@ -336,12 +312,12 @@ fn run() -> Result<Ran> {
     // structs, and a live run never builds their command lines
     // twice.
     if cli.dry_run {
-        return execute(&plan(&action, &cfg, &local_dir, &archive, tty), true);
+        return execute(&plan(&action, &cfg, tty), true);
     }
     if matches!(action, Action::Doctor) {
-        return Ok(doctor_run(&cfg, &local_dir));
+        return Ok(doctor_run(&cfg));
     }
-    execute(&plan(&action, &cfg, &local_dir, &archive, tty), false)
+    execute(&plan(&action, &cfg, tty), false)
 }
 
 /// Checks for a newer release and installs it.
@@ -721,12 +697,12 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// result, the skip cascade, rendering, the exit code -- lives in
 /// `bombyx::doctor`, for the reason its module doc gives. What is
 /// left here is process spawning.
-fn doctor_run(cfg: &Config, local_dir: &Path) -> Ran {
+fn doctor_run(cfg: &Config) -> Ran {
     let mut report = Report::default();
+    // `tar` is here for `bombyx self-update`, which unpacks the
+    // release archive with it. No VM action runs `tar` any more.
     report.add(local_tool("tar", Some("--version")));
     report.add(local_tool("ssh", Some("-V")));
-    report.add(local_tool("scp", None));
-    report.add(doctor::vagrantfile_finding(local_dir));
     report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
 
     print_lines(&report.render(&cfg.host));

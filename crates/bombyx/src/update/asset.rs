@@ -156,10 +156,9 @@ pub fn download_command(
 /// whole archive would also unpack `LICENSE` and `README.md`.
 ///
 /// **`tar` is given only bare names, and runs in `work`.** Not
-/// tidiness -- the same precaution `PushArchive` documents for
-/// `scp`, for the same reason and against a worse failure. GNU
-/// tar applies the `host:file` rule to `-f`, so an absolute
-/// Windows path makes it try to reach a machine called `C`:
+/// tidiness. GNU tar applies the `host:file` rule to `-f`, so an
+/// absolute Windows path makes it try to reach a machine called
+/// `C`:
 ///
 /// ```text
 /// tar (child): Cannot connect to C: resolve failed
@@ -542,8 +541,7 @@ mod tests {
         // "Cannot connect to C: resolve failed"; a backslash path
         // in `-C` is mangled instead. Both were measured. The
         // command therefore runs *in* the work directory and every
-        // argument is a bare name -- the same shape `push_dir`
-        // uses for `scp`, and asserted the same way.
+        // argument is a bare name.
         let work = Path::new(r"C:\Users\igor\AppData\Local\Temp\x");
         let c = extract_command("a.tar.gz", work, v(), TRIPLE);
         for arg in &c.args {

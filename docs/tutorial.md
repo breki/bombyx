@@ -34,11 +34,12 @@ can no longer locate.
 workstation                     VM host
   bombyx  ──── ssh ────►    vagrant ──► agent VM
      │                                     │
-     └── pushes vagrant/ ──────────────────┘
+     └── writes Vagrantfile ───────────────┘
+         and bootstrap.sh          clones the repo itself
 
   the project repo:
-    bombyx.toml        which project, and where on the host
-    vagrant/           how the VM is built
+    bombyx.toml        the VM to build, and what to clone
+    vagrant/           the provisioning script the guest runs
 
   your own machine, outside any repo:
     config.toml        which VM host is yours
@@ -52,10 +53,11 @@ workstation                     VM host
   its VM lands somewhere holding none of them. It runs libvirt,
   Vagrant and the VMs.
 - **The project** is a directory in your own repo. It holds a
-  `bombyx.toml` naming the project, and a `vagrant/` directory
-  describing the VM. bombyx pushes that directory to the host on
-  every `up`, so the repo stays the source of truth and the host
-  only ever holds a copy.
+  `bombyx.toml` naming the project, the VM to build and the
+  repository to clone, and a `vagrant/` directory holding the
+  provisioning script. bombyx never sends that directory
+  anywhere: the guest clones the repository itself and runs the
+  script out of its own clone.
 - **Which host** is deliberately *not* in the project repo. It
   is personal, so it lives in your own `config.toml` -- Part 1
   sets that up.
@@ -71,13 +73,15 @@ packages and the first box download.
 
 | Where | What |
 |-------|------|
-| Workstation | A Rust toolchain, `git`, `ssh`, `scp`, `tar` |
+| Workstation | A Rust toolchain, `git`, `ssh`, `tar` |
 | VM host | A Linux machine with hardware virtualisation, reachable over SSH |
 | Both | Key-based SSH from the workstation to the host, no password |
 
-On Windows, `ssh` and `scp` come with the OpenSSH client that
-ships with Windows 11, and `tar` comes with either Windows or
-Git for Windows. You do not need WSL.
+On Windows, `ssh` comes with the OpenSSH client that ships with
+Windows 11, and `tar` comes with either Windows or Git for
+Windows. You do not need WSL. `tar` is only for
+`bombyx self-update`, which unpacks the release archive with
+it; no VM command runs it.
 
 A spare desktop or a home server makes the best VM host,
 because a separate machine is what puts your credentials out of
@@ -233,16 +237,16 @@ Host selfhost
     User igor
 ```
 
-Everything else is unchanged -- bombyx still pushes a tarball
-and still runs `vagrant` over SSH, just to a host that happens
-to be this one. Read **Before you start** above for what you
-give up.
+Everything else is unchanged -- bombyx still writes the
+generated files and runs `vagrant` over SSH, just to a host that
+happens to be this one. Read **Before you start** above for what
+you give up.
 
 Two requirements are easy to miss, because they are about the
 machine being a *host*, not about bombyx:
 
-- **The remote side must be POSIX.** bombyx sends
-  `mkdir -p`, `tar -xzf` and `rc=$?`, so the SSH login shell
+- **The remote side must be POSIX.** bombyx sends `mkdir -p`
+  and a `cat > file <<'EOF'` heredoc, so the SSH login shell
   has to be `bash` or `sh`. On a Linux workstation that is
   already true. On Windows, OpenSSH Server starts `cmd.exe`
   by default and those commands fail; you would have to set
@@ -280,10 +284,9 @@ The layout:
 
 ```
 myproject/                  your project repo
-  bombyx.toml           which VM, and where on the host
+  bombyx.toml           which VM, and what the guest clones
   .gitignore
-  vagrant/              pushed to the host on every `up`
-    Vagrantfile
+  vagrant/              the guest runs this from its own clone
     provision.sh
 ```
 
@@ -303,7 +306,6 @@ repo = "https://github.com/you/myproject"
 ref = "main"
 script = "vagrant/provision.sh"
 
-vagrant_dir = "vagrant"  # dir in this repo pushed to the host
 remote_root = "~/vms"    # root on the host for project dirs
 ```
 
@@ -313,8 +315,7 @@ so there is nothing sensible for bombyx to guess: a base image
 is a choice, and a repository bombyx invented would be cloned
 into the guest and run as root.
 
-`vagrant_dir` and `remote_root` are optional, shown with
-their defaults. There
+`remote_root` is optional, shown with its default. There
 is no `host` here: it went into your own `config.toml` back in
 Part 1, and bombyx refuses one in this file. This is the file
 you commit, so it should hold only what is true for anyone who
@@ -331,9 +332,10 @@ bombyx.local.toml
 vagrant/.vagrant/
 ```
 
-`vagrant/.vagrant/` holds the VM's identity **on the host**, and
-bombyx already excludes it from the push. Ignoring it locally
-stops a stale copy from ever entering the repo.
+`vagrant/.vagrant/` holds a VM's identity, written by `vagrant`
+if you ever run it in this directory yourself. bombyx never
+reads or sends it; ignoring it stops a stale copy from entering
+the repo and confusing the next reader.
 
 ### The Vagrantfile: bombyx writes it
 
@@ -350,19 +352,19 @@ reasoning.
 Two things the generated file does that are worth knowing:
 
 - **It disables the default `/vagrant` share.** Vagrant would
-  otherwise mount the pushed directory into the guest, which
-  puts your workstation's copy of the project back inside the
-  VM. On a host whose firewall drops guest-initiated traffic
-  that mount also *hangs* rather than failing clearly.
+  otherwise mount the VM host's copy of that directory into the
+  guest. There is no project code in it to leak now, but the
+  mount also *hangs* on a host whose firewall drops
+  guest-initiated traffic, rather than failing clearly.
 - **It forwards the VM-host identity.** `BOMBYX_VM_HOST` and
   `BOMBYX_VM_HOSTNAME` reach your provisioning script as
   environment variables, so it can record which machine the VM
   is running on. See "Telling the VM which host it runs on" in
   `README.md`.
 
-A `Vagrantfile` left in `vagrant/` is pushed and then
-overwritten, so editing it has no effect. `bombyx doctor` says
-so if it finds one.
+A `Vagrantfile` committed in `vagrant/` is read by nothing.
+bombyx does not send it, and the guest's own clone is not what
+Vagrant boots from. Delete it rather than maintaining it.
 
 The guest clones `[source]` itself and runs the script named
 there, which is the file the next section covers.
@@ -423,10 +425,10 @@ echo "provisioning done"
 Add whatever the agent needs on top -- a language toolchain, an
 agent CLI. Two rules worth keeping:
 
-- **No credentials in this file.** It is committed, and it is
-  pushed to a machine you are treating as expendable. Pass a
-  token in at the moment you need it instead, from inside
-  `bombyx shell`.
+- **No credentials in this file.** It is committed, and the
+  guest clones it into a machine you are treating as
+  expendable. Pass a token in at the moment you need it
+  instead, from inside `bombyx shell`.
 - **Everything idempotent.** See above; `provision` re-runs it.
 
 ## Part 4: the first boot
@@ -439,12 +441,8 @@ From the project directory:
 $ bombyx doctor
   local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
-  local   scp               ok    C:\Windows\System32\OpenSSH
-  local   Vagrantfile       ok
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
-  vmhost  tar               ok    /usr/bin/tar
-  vmhost  scp               ok    /usr/bin/scp
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/igor (will create /home/igor/vms/myproject)
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
@@ -454,30 +452,25 @@ all checks passed
 `doctor` changes nothing and runs every check rather than
 stopping at the first failure, so one run tells you everything
 that is wrong. Fix anything that is not `ok` before continuing:
-`up` creates a directory on the host and ships a tarball before
+`up` creates a directory on the host and writes two files before
 it runs `vagrant`, so a missing piece otherwise surfaces
 half-way through. `usage.md` explains how to read each line.
+(`tar` is checked for `bombyx self-update`, which unpacks the
+release archive with it; no VM command runs it.)
 
 ### Look at what `up` would do
 
 ```console
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
-cd "$TMP" && tar -czf .bombyx-push-51100-586438300.tar.gz -C "$PROJ\\vagrant" --exclude=./.vagrant --exclude=./.git .
-cd "$TMP" && scp .bombyx-push-51100-586438300.tar.gz vmhost:.bombyx-push-51100-586438300.tar.gz
-ssh vmhost "{ cd ~/'vms/myproject' && tar -xzf ~/'.bombyx-push-51100-586438300.tar.gz'; }; rc=\$?; rm -f ~/'.bombyx-push-51100-586438300.tar.gz'; exit \$rc"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (21 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (44 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (96 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
-Two long absolute paths are shortened above to fit the page:
-`$TMP` is a fresh temporary directory on your workstation, and
-`$PROJ` is the project directory. bombyx prints them in full.
-
-Seven commands: make the directory, archive `vagrant/`, copy the
-archive, extract and delete it, write the two files bombyx
-generates, boot.
+Four commands, and every one of them is an `ssh`: make the
+directory, write the two files bombyx generates, boot. bombyx
+runs nothing on your workstation.
 
 The two writes print as one line each. Each carries a whole
 file, and printing both in full would bury the plan they belong
@@ -551,9 +544,11 @@ bombyx provision
 ```
 
 `up` provisions a VM only when it first creates one. Every later
-`up` pushes your edited script to the host and then never runs
-it -- and reports success, which is what makes the gap easy to
-miss.
+`up` leaves the guest running the script it cloned when the VM
+was created -- and reports success, which is what makes the gap
+easy to miss. `provision` re-runs the bootstrap, which fetches
+your repository again and runs the script from the fresh clone,
+so commit the change first.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM instead of your project one:
@@ -584,12 +579,8 @@ fails, rather than making you wait on a dead host for each one:
 $ bombyx doctor
   local   tar               ok    bsdtar 3.8.4 in C:\Windows\system32
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
-  local   scp               ok    C:\Windows\System32\OpenSSH
-  local   Vagrantfile       ok
   vmhost  ssh               FAIL  ssh: Could not resolve hostname vmhost: No ...
   vmhost  login shell       skip  no ssh
-  vmhost  tar               skip  no ssh
-  vmhost  scp               skip  no ssh
   vmhost  vagrant           skip  no ssh
   vmhost  project dir       skip  no ssh
   vmhost  libvirt provider  skip  no ssh
@@ -640,6 +631,7 @@ failed run reads as a pass. Redirect to a file instead
 - [../README.md](../README.md) -- what bombyx is and the design
   behind it.
 - [usage.md](usage.md) -- the full command reference: how the
-  push works, what teardown removes, how to read `doctor`.
+  generated files are written, what teardown removes, how
+  to read `doctor`.
 - [vm-host-setup.md](vm-host-setup.md) -- the host in detail,
   including the network isolation rules and other distributions.

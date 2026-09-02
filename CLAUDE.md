@@ -553,11 +553,13 @@ Extends **Documentation style** to every comment in the code,
   protects a *primitive*, not a field name, so every
   value that reaches the same primitive needs it.
   `remote_root` reaches `rm -rf` and got a careful depth
-  and traversal guard; `vagrant_dir` reaches `tar -C`
+  and traversal guard; `vagrant_dir` reached `tar -C`
   and got none, so an absolute value made `bombyx up`
   archive `~/.ssh` and ship it to the host named in the
   same file. The dangerous-*looking* field had the
-  attention, and the one beside it did not.
+  attention, and the one beside it did not. (The push
+  is gone and `vagrant_dir` with it, so do not go
+  looking for the field. The rule is what survives.)
 - **After fixing a bug, grep the file for the same
   shape.** A bug class rarely appears once. A guard
   calling `swapon` without `sudo` -- invisible on the

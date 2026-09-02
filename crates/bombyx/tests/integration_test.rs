@@ -155,38 +155,32 @@ fn programs(lines: &[String]) -> Vec<&str> {
 }
 
 #[test]
-fn up_makes_the_dir_then_pushes_then_boots() {
+fn up_makes_the_dir_writes_the_files_then_boots() {
     // Order is the assertion: a `contains` check would pass
-    // even if the boot ran before the push.
+    // even if the boot ran before the writes.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
-    assert_eq!(
-        programs(&lines),
-        vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
-    );
+    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
-    assert!(lines[1].contains("--exclude=./.vagrant"));
-    assert!(lines[3].contains("tar -xzf"));
-    // The generated files land after the unpack, or the archive
-    // would replace them, and each prints as one elided line.
-    assert!(lines[4].contains("cat > ~/'vms/myproject/Vagrantfile'"));
-    assert!(lines[4].contains("lines elided"), "{}", lines[4]);
-    assert!(lines[5].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
+    // Each generated file prints as one elided line.
+    assert!(lines[1].contains("cat > ~/'vms/myproject/Vagrantfile'"));
+    assert!(lines[1].contains("lines elided"), "{}", lines[1]);
+    assert!(lines[2].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
     assert!(
-        lines[6].ends_with(&format!(
+        lines[3].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'up'\"",
             vm_env()
         )),
         "{}",
-        lines[6]
+        lines[3]
     );
 }
 
 #[test]
 fn up_keeps_the_tilde_expandable() {
     // A single-quoted `~` makes a directory literally named
-    // `~`, so the boot would run somewhere the archive is
-    // not.
+    // `~`, so the boot would run somewhere the generated
+    // Vagrantfile is not.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
     assert!(
@@ -196,28 +190,14 @@ fn up_keeps_the_tilde_expandable() {
 }
 
 #[test]
-fn up_does_not_use_recursive_scp() {
-    // `scp -r` into an existing dir nests it on every push.
-    let dir = project_dir();
-    bombyx_in(&dir)
-        .args(["--dry-run", "up"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("scp -r").not());
-}
-
-#[test]
-fn up_never_hands_scp_a_windows_drive_letter() {
-    // scp reads everything before the first colon as a host,
-    // so an absolute Windows temp path would target host `C`.
+fn up_runs_nothing_on_the_workstation() {
+    // Every step is an `ssh`. bombyx used to build a tar archive
+    // and `scp` it across, which is what made a Windows drive
+    // letter (`C:\...`) reach a program that reads everything
+    // before the first colon as a host name.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
-    let scp = lines.iter().find(|l| l.contains("scp ")).unwrap();
-    let args = scp.rsplit("&& ").next().unwrap();
-    assert!(
-        !args.contains(":\\"),
-        "scp must not receive a drive letter: {args}"
-    );
+    assert!(programs(&lines).iter().all(|p| *p == "ssh"), "{lines:?}");
 }
 
 #[test]
@@ -261,44 +241,38 @@ fn a_broken_local_config_is_reported() {
 }
 
 #[test]
-fn provision_pushes_then_runs_vagrant_provision() {
+fn provision_writes_the_files_then_runs_vagrant_provision() {
     // The gap this command closes: `up` ships an edited
     // provisioning script and `vagrant up` on a running VM
     // never executes it, so the push reports success while
     // nothing was applied.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "provision"]);
-    assert_eq!(
-        programs(&lines),
-        vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
-    );
+    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
-        lines[6].ends_with(&format!(
+        lines[3].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'provision'\"",
             vm_env()
         )),
         "{}",
-        lines[6]
+        lines[3]
     );
 }
 
 #[test]
-fn scratch_pushes_into_a_project_scoped_dir() {
+fn scratch_writes_into_a_project_scoped_dir() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "scratch", "pr-1234"]);
-    assert_eq!(
-        programs(&lines),
-        vec!["ssh", "tar", "scp", "ssh", "ssh", "ssh", "ssh"]
-    );
+    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
-        lines[6].ends_with(&format!(
+        lines[3].ends_with(&format!(
             "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up'\"",
             vm_env()
         )),
         "{}",
-        lines[6]
+        lines[3]
     );
 }
 
@@ -353,7 +327,7 @@ fn doctor_dry_run_lists_read_only_probes() {
     // One line per probe, and every probe accounted for. An
     // embedded newline in a script would split the dry run and,
     // worse, could smuggle a second command past a reader.
-    assert_eq!(lines.len(), 7, "{lines:?}");
+    assert_eq!(lines.len(), 5, "{lines:?}");
     for l in &lines {
         // Asserted per line rather than "some line has each
         // option": the loose form is satisfied by seven different
@@ -377,149 +351,6 @@ fn doctor_dry_run_lists_read_only_probes() {
     assert!(
         lines.iter().any(|l| l.contains("command -v 'vagrant'")),
         "{lines:?}"
-    );
-}
-
-#[test]
-fn the_push_archive_really_excludes_dot_vagrant_and_dot_git() {
-    // The exclusions are the reason a stale local `.vagrant`
-    // cannot overwrite the host's copy and orphan a running VM.
-    // Asserting the `--exclude` flags appear in the argv proves
-    // only that bombyx asked; `tar` implementations disagree
-    // about pattern matching, so this runs the real one and
-    // reads the archive back.
-    let project = TempDir::new().unwrap();
-    let vagrant_dir = project.path().join("vagrant");
-    std::fs::create_dir_all(vagrant_dir.join(".vagrant")).unwrap();
-    std::fs::create_dir_all(vagrant_dir.join(".git")).unwrap();
-    std::fs::write(vagrant_dir.join("Vagrantfile"), "# vm").unwrap();
-    std::fs::write(vagrant_dir.join(".vagrant/machine-id"), "x").unwrap();
-    std::fs::write(vagrant_dir.join(".git/HEAD"), "y").unwrap();
-
-    let work = TempDir::new().unwrap();
-    let archive = bombyx::remote::PushArchive::new(work.path(), "test");
-    let cfg_dir = TempDir::new().unwrap();
-    let cfg = load_cfg(cfg_dir.path());
-    let cmds = bombyx::plan::plan(
-        &bombyx::plan::Action::Up,
-        &cfg,
-        &vagrant_dir,
-        &archive,
-        bombyx::remote::Tty::NoPty,
-    );
-    let pack = cmds
-        .iter()
-        .find(|c| c.program == "tar")
-        .expect("up must pack an archive");
-
-    // Resolved the same way bombyx resolves it, so this exercises
-    // the `tar` a real push would use rather than whichever one
-    // the OS search happens to prefer.
-    let tar = bombyx::tool::resolve("tar").expect("tar must be on PATH");
-    let status = std::process::Command::new(&tar)
-        .args(&pack.args)
-        .current_dir(pack.dir.as_ref().unwrap())
-        .status()
-        .unwrap();
-    assert!(status.success(), "packing failed: {status}");
-
-    let listed = std::process::Command::new(&tar)
-        .args(["-tzf", &archive.name])
-        .current_dir(work.path())
-        .output()
-        .unwrap();
-    assert!(listed.status.success());
-    let names = String::from_utf8_lossy(&listed.stdout);
-    assert!(names.contains("Vagrantfile"), "{names}");
-    assert!(!names.contains(".vagrant"), "{names}");
-    assert!(!names.contains(".git"), "{names}");
-}
-
-/// The tag in the report row for `scope` and `name`.
-///
-/// Asserting on the row rather than on substrings of the whole
-/// report: `contains("Vagrantfile")` matches the name column,
-/// which is printed for a pass, a failure and a skip alike, and
-/// `contains("FAIL")` is satisfied by any other failing check. An
-/// earlier version of this test asserted both and passed whatever
-/// `vagrantfile_finding` returned.
-///
-/// The scope is part of the key because it has to be: `ssh` and
-/// `tar` each name both a local check and a host probe, so
-/// matching on the name alone silently answers about the local
-/// one.
-fn row_tag<'a>(
-    lines: &'a [String],
-    scope: &str,
-    name: &str,
-) -> Option<&'a str> {
-    lines.iter().find_map(|l| {
-        // `<scope>  <name>  <tag>  [detail]`, columns padded.
-        let rest = l.trim_start().strip_prefix(scope)?;
-        let rest = rest.strip_prefix(' ')?.trim_start();
-        // Guard against `tar` matching a `tar-x` row.
-        let after = rest.strip_prefix(name)?.strip_prefix(' ')?;
-        after.split_whitespace().next()
-    })
-}
-
-#[test]
-fn doctor_judges_the_local_vagrantfile_check_on_its_own() {
-    // The local checks are evaluated independently of the host,
-    // so this row is decided whether or not the VM host answers.
-    // Both cases are asserted, because only the pair rules out a
-    // check that always returns the same thing.
-    //
-    // This probe used to *fail* when the project had no
-    // Vagrantfile, which also caught a typo in `vagrant_dir`
-    // cheaply. bombyx generates the Vagrantfile now, so an
-    // absent one is ordinary and both cases pass -- what
-    // distinguishes them is the detail. Nothing catches that
-    // typo through the missing file. The probe now fails on
-    // the missing *directory* instead, which is the same typo
-    // caught one step earlier.
-    let dir = project_dir_with("project = \"myproject\"\n");
-    write_user_config(&dir, "host = \"nosuchhost.invalid\"\n");
-
-    let row = |out: &str| {
-        out.lines()
-            .find(|l| l.contains("local") && l.contains("Vagrantfile"))
-            .unwrap_or_default()
-            .to_owned()
-    };
-
-    // A `vagrant_dir` naming no directory is a typo, and this
-    // is the one state that still fails. It replaces the signal
-    // the old probe gave by failing on a missing Vagrantfile.
-    let absent = bombyx_in(&dir).args(["doctor"]).assert().failure();
-    let out = String::from_utf8(absent.get_output().stdout.clone()).unwrap();
-    let lines: Vec<String> = out.lines().map(str::to_owned).collect();
-    assert_eq!(
-        row_tag(&lines, "local", "Vagrantfile"),
-        Some("FAIL"),
-        "{out}"
-    );
-    assert!(row(&out).contains("check `vagrant_dir`"), "{out}");
-
-    std::fs::create_dir(dir.path().join("vagrant")).unwrap();
-    let generated = bombyx_in(&dir).args(["doctor"]).assert().failure();
-    let out = String::from_utf8(generated.get_output().stdout.clone()).unwrap();
-    let lines: Vec<String> = out.lines().map(str::to_owned).collect();
-    assert_eq!(row_tag(&lines, "local", "Vagrantfile"), Some("ok"), "{out}");
-    assert!(row(&out).contains("generated by bombyx"), "{out}");
-
-    std::fs::write(dir.path().join("vagrant/Vagrantfile"), "# vm").unwrap();
-    let present = bombyx_in(&dir).args(["doctor"]).assert().failure();
-    let out = String::from_utf8(present.get_output().stdout.clone()).unwrap();
-    let lines: Vec<String> = out.lines().map(str::to_owned).collect();
-    assert_eq!(row_tag(&lines, "local", "Vagrantfile"), Some("ok"), "{out}");
-    assert!(row(&out).contains("ignored"), "{out}");
-    // Still a failing run overall -- the host does not resolve --
-    // which is what makes the row assertion the load-bearing one.
-    assert_eq!(
-        row_tag(&lines, "nosuchhost.invalid", "ssh"),
-        Some("FAIL"),
-        "{out}"
     );
 }
 

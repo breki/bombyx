@@ -149,9 +149,7 @@ impl TryFrom<String> for RepoUrl {
 /// honest representation.
 ///
 /// (`std::os::unix` cannot stand in: those modules exist only
-/// when compiling *for* Unix. `vagrant_dir` is the field that
-/// really is a local path, and it does become a `PathBuf`,
-/// where it is used rather than here.)
+/// when compiling *for* Unix.)
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct ScriptPath(String);

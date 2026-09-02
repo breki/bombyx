@@ -13,15 +13,14 @@ of `vmhost` and a project named `myproject`.
 - [Commands](#commands)
 - [Checking a host with doctor](#checking-a-host-with-doctor)
 - [Seeing what would run: --dry-run](#seeing-what-would-run---dry-run)
-- [How the push works](#how-the-push-works)
 - [bombyx.toml is untrusted input](#bombyxtoml-is-untrusted-input)
 
 ## Commands
 
 ```bash
 bombyx doctor             # check the preconditions, change nothing
-bombyx up                 # push vagrant/, boot the VM
-bombyx provision          # push vagrant/, re-run provisioning
+bombyx up                 # write the generated files, boot the VM
+bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
@@ -49,15 +48,19 @@ so the same name in two projects does not collide.
 `provision` exists because `up` provisions a VM only when it
 first creates one. Every later `vagrant up` skips the
 provisioners -- whether the VM was halted or running -- so
-editing `vagrant/provision.sh` and running `up` again ships the
-new script to the host and never executes it. The push reports
-success, which is what makes the gap easy to miss.
+committing a change to your provisioning script and running
+`up` again leaves the guest running the version it cloned when
+it was created. `up` reports success, which is what makes the
+gap easy to miss.
 
-`provision` pushes the directory exactly as `up` does, then
-runs `vagrant provision` instead of `vagrant up`. The VM has to
-exist already: on one that was never booted, `provision`
-creates the remote directory and ships the archive before
-vagrant reports it has nothing to provision, so run `up` first.
+`provision` writes the generated files exactly as `up` does,
+then runs `vagrant provision` instead of `vagrant up`. That
+re-runs the bootstrap in the guest, which fetches `[source]`
+again at the ref you configured and runs the script from the
+fresh clone. The VM has to exist already: on one that was never
+booted, `provision` creates the remote directory and writes the
+files before vagrant reports it has nothing to provision, so run
+`up` first.
 It applies to the project VM only -- a scratch VM is
 disposable, so the answer there is `discard` followed by
 `scratch`.
@@ -89,11 +92,12 @@ check against reality.
 ### What teardown removes
 
 Both `destroy` and `discard` remove the VM's directory on the
-host after destroying the VM. Nothing in that directory is
-unique -- bombyx pushed it there, or `vagrant` generated it,
-and your repo holds the original. Teardown is re-runnable: a
-directory with no Vagrantfile is removed rather than treated as
-an error, so an interrupted push cannot leave one stranded.
+host after destroying the VM. Every file in that directory is
+reproducible: bombyx generated the Vagrantfile and the bootstrap
+script and writes them again on the next `up`, and `vagrant`
+generated the rest. Teardown is re-runnable -- a directory with
+no Vagrantfile is removed rather than treated as an error -- so
+an interrupted `up` cannot leave one stranded.
 
 `remote_root` must be an anchored path at least one directory
 deep, with no `.` or `..` segment. bombyx deletes the directory
@@ -103,19 +107,15 @@ when the config loads rather than at teardown.
 ## Checking a host with doctor
 
 Run `bombyx doctor` first on a new host. `up` creates a
-directory and ships a tarball before it runs `vagrant`, so
+directory and writes two files before it runs `vagrant`, so
 without it a missing piece is reported half-way through:
 
 ```console
 $ bombyx doctor
   local   tar               ok    tar 1.35 in C:\Program Files\Git\usr\bin
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
-  local   scp               ok    C:\Windows\System32\OpenSSH
-  local   Vagrantfile       ok
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
-  vmhost  tar               ok    /usr/bin/tar
-  vmhost  scp               ok    /usr/bin/scp
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/igor (will create /home/igor/vms/myproject)
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
@@ -134,6 +134,10 @@ skipped rather than each waiting on a dead host. Locally it does
 execute `tar` and `ssh` to read their versions, so it is not a
 no-op on your workstation.
 
+`tar` is checked only because `bombyx self-update` unpacks the
+release archive with it. No VM command runs `tar`, and none runs
+`scp` at all.
+
 The `vagrant` line is the one that earns the command: it asks
 the **non-interactive** shell, which is the one bombyx gets.
 Vagrant installed outside that `PATH` works when you log in and
@@ -149,14 +153,14 @@ anchored plugin name, because `vagrant plugin list` exits zero
 even with nothing installed.
 
 The local lines name the directory each tool came from. bombyx
-resolves `tar`, `ssh` and `scp` against `PATH` explicitly rather
+resolves `tar` and `ssh` against `PATH` explicitly rather
 than leaving it to the operating system, which on Windows
 searches the working directory first — and bombyx runs inside a
 repository whose contents arrive with whatever branch you
 checked out.
 
 Every command resolves what it needs the same way, all of it
-before running any step. So a missing `tar` stops `up` before it
+before running any step. So a missing `ssh` stops `up` before it
 has created the directory on the host, rather than after.
 
 See [vm-host-setup.md](vm-host-setup.md) for what to do about
@@ -165,17 +169,21 @@ the guide.
 
 ## Seeing what would run: `--dry-run`
 
-Every command accepts `--dry-run`, which prints the exact
-`ssh`/`scp` invocation instead of running it:
+Every command accepts `--dry-run`, which prints the exact `ssh`
+invocation instead of running it:
 
 ```console
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
-cd /tmp/.tmpAL8i && tar -czf .bombyx-push-4821-729551000.tar.gz -C /repo/vagrant --exclude=./.vagrant --exclude=./.git .
-cd /tmp/.tmpAL8i && scp .bombyx-push-4821-729551000.tar.gz vmhost:.bombyx-push-4821-729551000.tar.gz
-ssh vmhost "{ cd ~/'vms/myproject' && tar -xzf ~/'.bombyx-push-4821-729551000.tar.gz'; }; rc=\$?; rm -f ~/'.bombyx-push-4821-729551000.tar.gz'; exit \$rc"
+ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF'  [21 lines elided] "
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF'  [96 lines elided] "
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
+
+Each generated file prints as one line naming its heredoc and
+how many lines were dropped. Printing both in full would bury
+the four-step plan they belong to; the host receives the whole
+content regardless.
 
 The output is real shell: each argument is printed bare only
 when it is unambiguous, and quoted otherwise, so what you
@@ -191,14 +199,13 @@ wrong answer nobody questions. See
 [the README section](../README.md#telling-the-vm-which-host-it-runs-on)
 for what the two variables are for.
 
-## How the push works
+## How the generated files are written
 
-The push ships a tar archive rather than using `scp -r`,
-which copies *into* an existing destination and would nest
-the directory one level deeper on every push. Extracting a
-tar overwrites in place, so repeated pushes are idempotent.
-`rsync` would also work but is not present on a stock
-Windows workstation; `tar`, `scp` and `ssh` are.
+bombyx sends the Vagrantfile and the bootstrap script over the
+same SSH connection it uses for everything else, with a shell
+*heredoc*: `cat > <file> <<'BOMBYX_EOF'`, then the file's lines,
+then a line holding the delimiter alone. The remote shell reads
+everything up to that delimiter as data.
 
 Details that look fussy and are not:
 
@@ -207,30 +214,28 @@ Details that look fussy and are not:
   the obvious `'~/vms/myproject'` would create a directory
   literally named `~`. Quoting only the rest keeps the path
   injection-proof *and* expandable.
-- **The archive keeps a bare name** and `tar`/`scp` run in
-  its directory. `scp` reads everything before the first
-  colon as a host name, so handing it a Windows path
-  (`C:\Users\...`) would make it dial a host called `C`.
-- **`.vagrant/` is excluded from the archive.** It holds the
-  VM's identity on the host; shipping a local copy would
-  orphan the running VM. `.git/` is excluded because there is
-  no reason to ship it.
-- **Cleanup is unconditional** (`rc=$?; rm -f ...`), so a
-  failed extract does not leave a corrupt archive in the
-  directory `vagrant up` runs in.
+- **The delimiter is quoted** (`<<'BOMBYX_EOF'`, not
+  `<<BOMBYX_EOF`). An unquoted delimiter makes the shell expand
+  `$` and backticks inside the body, so a `$` in the generated
+  Vagrantfile would be replaced by the host shell before the
+  file was ever written.
+- **The delimiter grows if the payload contains it.** A file
+  holding a line equal to `BOMBYX_EOF` would end the heredoc
+  early and hand the rest to the shell as commands. bombyx
+  lengthens the delimiter until no payload line matches it,
+  which cannot fail and needs nothing from the caller.
 
-The tradeoff of extracting in place: a file deleted locally
-is not removed from the host. Run `vagrant destroy` and
-re-push if the remote tree needs pruning.
+Both files are written on every `up`, `provision` and
+`scratch`, so the host's copy cannot drift from what the
+configuration currently says.
 
 ## `bombyx.toml` is untrusted input
 
 `bombyx.toml` travels inside a repo, so it is treated as
 untrusted input. Every field is checked against an allowlist:
-`remote_root` must be an anchored path with no traversal,
-`vagrant_dir` must stay inside the project, and a scratch name
-must be a single path segment, so `../../etc` is refused rather
-than quoted.
+`remote_root` must be an anchored path with no traversal, and a
+scratch name must be a single path segment, so `../../etc` is
+refused rather than quoted.
 
 The field that used to matter most is no longer in the file at
 all. `host` is handed to `ssh` as its first argument, and `ssh`

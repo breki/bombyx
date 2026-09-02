@@ -1,9 +1,8 @@
-//! What a command *is*, and where the push archive lives.
+//! What a command *is*.
 //!
-//! Both are plain data. [`RemoteCommand`] carries a program, its
+//! [`RemoteCommand`] is plain data: it carries a program, its
 //! arguments and optionally a directory, and renders itself for a
-//! dry run; nothing here spawns anything. [`PushArchive`] records
-//! the one naming rule the push depends on.
+//! dry run. Nothing here spawns anything.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -20,8 +19,9 @@ pub struct RemoteCommand {
     pub args: Vec<String>,
     /// Directory to run the program in.
     ///
-    /// Used for `tar` and `scp` so they can be given a bare
-    /// archive file name -- see [`PushArchive`].
+    /// `bombyx self-update` sets it, so the commands that
+    /// unpack a release run in the download directory and can
+    /// be given bare file names.
     pub dir: Option<PathBuf>,
 }
 
@@ -65,58 +65,9 @@ impl fmt::Display for RemoteCommand {
     }
 }
 
-/// Where the transient push archive lives on each end.
-///
-/// The archive is written into `dir`, and `tar` and `scp` are
-/// both run *in* `dir` and given the bare `name`. That is
-/// deliberate: on Windows an absolute path starts with a
-/// drive letter (`C:\Users\...`), and `scp` reads everything
-/// before the first colon as a *host name*, so passing the
-/// absolute path would make it try to connect to a host
-/// called `C`.
-///
-/// On the VM host the archive lands in the login directory
-/// under the same bare name. Keeping the remote target free
-/// of directories and metacharacters avoids depending on
-/// whether a given `scp` build expands the remote path
-/// through a shell (pre-9.0, and `-O`) or over SFTP (9.0+),
-/// which quote incompatibly.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PushArchive {
-    /// Local directory holding the archive.
-    pub dir: PathBuf,
-    /// Archive file name, used unchanged on both ends.
-    pub name: String,
-}
-
-impl PushArchive {
-    /// Builds an archive descriptor in `dir`, named uniquely
-    /// for this run.
-    ///
-    /// `unique` distinguishes concurrent runs: two pushes
-    /// sharing one name would race, and one could ship a
-    /// different project's tree or delete the other's archive
-    /// mid-transfer.
-    #[must_use]
-    pub fn new(dir: &Path, unique: &str) -> Self {
-        Self {
-            dir: dir.to_path_buf(),
-            name: format!(".bombyx-push-{unique}.tar.gz"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn push_archive_name_is_unique_per_run() {
-        let a = PushArchive::new(Path::new("/work"), "1-2");
-        let b = PushArchive::new(Path::new("/work"), "3-4");
-        assert_ne!(a.name, b.name);
-        assert_eq!(a.name, ".bombyx-push-1-2.tar.gz");
-    }
-
     #[test]
     fn displays_a_plain_command_unquoted() {
         let c = RemoteCommand::new("scp", &["a.tgz", "vmhost:a.tgz"]);

