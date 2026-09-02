@@ -13,6 +13,7 @@ of `vmhost` and a project named `myproject`.
 - [Commands](#commands)
 - [Checking a host with doctor](#checking-a-host-with-doctor)
 - [Seeing what would run: --dry-run](#seeing-what-would-run---dry-run)
+- [How the generated files are written](#how-the-generated-files-are-written)
 - [bombyx.toml is untrusted input](#bombyxtoml-is-untrusted-input)
 
 ## Commands
@@ -175,8 +176,8 @@ invocation instead of running it:
 ```console
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
-ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF'  [21 lines elided] "
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF'  [96 lines elided] "
+ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (21 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (96 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 

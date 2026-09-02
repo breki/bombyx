@@ -1,6 +1,7 @@
 //! Resolving the external programs bombyx runs.
 //!
-//! bombyx shells out to `ssh`, `scp` and `tar` by name. Left to
+//! bombyx shells out to `ssh` by name, and `self-update` adds
+//! `curl` and `tar`. Left to
 //! the operating system, a bare name is looked up through a
 //! search order that on Windows includes the **current
 //! directory**. bombyx runs from a project repository, and

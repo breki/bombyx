@@ -2,7 +2,7 @@
 
 bombyx runs `vagrant` on a remote VM host over SSH, so an agent
 works inside a VM and the workstation stays clean. It composes
-`ssh`, `scp`, `tar` and `vagrant` and reimplements none of them.
+`ssh` and `vagrant` and reimplements neither.
 
 ## The three machines
 
@@ -27,7 +27,7 @@ flowchart LR
 
   repo --> cli
   cli -- ssh --> vg
-  cli -- "scp + heredoc" --> dir
+  cli -- "heredoc over ssh" --> dir
   vg -- creates --> guest
   git -- clone --> clone
   agent --> clone
@@ -52,8 +52,11 @@ workstation.
 The diagram shows today, not the target. The `project repo`
 box and the arrow leaving it are what the design is working to
 remove: the goal is that neither the workstation nor the VM
-host reads **any** file from the project's repo, `bombyx.toml`
-and `vagrant/` included. Both still do.
+host reads **any** file from the project's repo. The VM host
+already reads none -- the push that sent it `vagrant/` is gone.
+The workstation still reads `bombyx.toml` out of the working
+directory, so it still holds a checkout, and
+`project-config-off-repo` is the work that closes that.
 `docs/trust-boundary.md` has the reasoning and the remaining
 steps.
 
@@ -106,7 +109,7 @@ probe commands, `doctor` decides what their output means.
 | `config::source` | `[source]`, and the two checked types it holds |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
 | `vagrantfile` | rendering the Vagrantfile and the bootstrap |
-| `remote` | building `ssh`/`scp`/`tar` argv, quoting |
+| `remote` | building `ssh` argv, quoting |
 | `remote::write` | the heredoc that writes a generated file |
 | `doctor` | preconditions, and what a result means |
 | `update` | `self-update`: download, verify, swap |
@@ -126,7 +129,6 @@ classDiagram
   class Config {
     +String host
     +String project
-    +String vagrant_dir
     +String remote_root
   }
   class Vm {
@@ -210,10 +212,6 @@ classDiagram
     +Vec~String~ args
     +Option~PathBuf~ dir
   }
-  class PushArchive {
-    +PathBuf dir
-    +String name
-  }
   class Tty {
     <<enumeration>>
     Allocate
@@ -222,7 +220,6 @@ classDiagram
 
   Action --> ScratchName : Scratch and Discard carry one
   Action ..> RemoteCommand : plan() produces a list
-  PushArchive ..> RemoteCommand : supplies the tar and scp paths
   Tty ..> RemoteCommand : decides ssh -t
 ```
 
@@ -251,9 +248,6 @@ sequenceDiagram
   op->>cli: bombyx up
   cli->>cli: read bombyx.toml, validate
   cli->>host: mkdir -p the project dir
-  cli->>cli: tar -czf the archive from vagrant/
-  cli->>host: scp the archive
-  cli->>host: tar -xzf, then remove it
   cli->>host: cat > Vagrantfile (heredoc)
   cli->>host: cat > bootstrap.sh (heredoc)
   cli->>vg: vagrant up
@@ -264,10 +258,14 @@ sequenceDiagram
   guest-->>op: VM ready
 ```
 
-Two things matter about the order. The generated files land
-**after**
-the archive is unpacked, or the push would overwrite them. And
-`vagrant` runs last, because it reads the Vagrantfile.
+Two things matter about the order. The directory is created
+first, because the heredocs write into it. And `vagrant` runs
+last, because it reads the Vagrantfile that the heredocs just
+wrote.
+
+Every step is an `ssh`. bombyx runs no program on the
+workstation for a VM action, which is why the `cli` lifeline
+has no self-call.
 
 `provision` is the same sequence ending in `vagrant provision`,
 which exists because vagrant runs provisioners only when it
@@ -287,12 +285,11 @@ constructor while deserializing, so a bad value is refused
 before a `Config` exists, and the error identifies the line.
 
 The other four -- `box`, `ref`, `cpus` and `memory` -- are only
-*checked* after parsing. So are `host`, `project`,
-`vagrant_dir` and `remote_root`, which never reach the
-generated files but do reach `ssh` and `tar`. Eight values in
-all, spread across `Config::validate`, `vm::validate` and
-`source::validate`. **That is a gap, not a decision we would
-make again.**
+*checked* after parsing. So are `host`, `project` and
+`remote_root`, which never reach the generated files but do
+reach `ssh`. Seven values in all, spread across
+`Config::validate`, `vm::validate` and `source::validate`.
+**That is a gap, not a decision we would make again.**
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it.
@@ -322,14 +319,14 @@ that exists. Captured as `newtype-remaining-config-fields` in
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
-| `host` `project` `vagrant_dir` `remote_root` | leading `-` | the program each one reaches would treat it as an option. For `host` that is live — it is `ssh`'s first positional argument. For the other three it is a precaution: two are shell-quoted, and `vagrant_dir` is joined onto the working directory before `tar` sees it |
+| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. For `host` that is live — it is `ssh`'s first positional argument. For the other two it is a precaution, since both are shell-quoted before `ssh` carries them |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
-| `cpus` `memory` | zero | vagrant would refuse it on the VM host, after the push changed state |
+| `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
 The older fields have their own rules, in the same place.
-`project` must be one path segment, and `vagrant_dir` must stay
-inside the project.
+`project` must be one path segment, because it becomes one
+directory name on the VM host.
 
 `remote_root` has the strictest rules of the three, because
 bombyx runs `rm -rf` on a path derived from it. All of them live

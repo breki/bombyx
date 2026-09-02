@@ -1,6 +1,12 @@
 # project-config-off-repo
 
-**Status:** In progress
+**Status:** In progress -- chunk 1 landed 2026-09-02
+
+The **Problem** and **Context** sections below describe the
+state when this was captured, before chunk 1. The
+**Progress log** at the end says what has changed. Line numbers
+in this document are from the day it was written and the work it
+plans moves them; treat them as a hint, not an address.
 **Captured:** 2026-08-30
 **Started:** 2026-09-02
 
@@ -70,7 +76,8 @@ ranking, and `bombyx.toml` is refused a `host` key outright.
 
 ### The push is already dead weight
 
-`push_then` (`plan.rs:181`) ensures the remote directory
+`push_then` (`plan.rs:181`, renamed `write_then` by chunk 1)
+ensures the remote directory
 exists, unpacks the project's `vagrant/` into it, and *then*
 writes the generated Vagrantfile and bootstrap over the top.
 The generated Vagrantfile disables Vagrant's default
@@ -145,8 +152,9 @@ seven, `tar` and `scp` run on the workstation, so the count
 is of `RemoteCommand` values rather than of processes on the
 VM host.
 
-`docs/trust-boundary.md` gets its first statement made true,
-and `:45` corrected -- it claims that already.
+`docs/trust-boundary.md` gets the VM host's half of the first
+statement made true. The workstation keeps its checkout until
+chunk 2, so the statement as a whole is not reached here.
 
 This is the only chunk that changes what runs on the VM host.
 

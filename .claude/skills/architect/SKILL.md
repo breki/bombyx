@@ -21,12 +21,15 @@ description: Project overview and architecture guide for bombyx -- crate layout,
 
 Drives isolated AI-agent VMs on a remote libvirt host
 over SSH. The control plane is deliberately thin: bombyx
-pushes the project's Vagrant directory to the VM host and
-runs `vagrant` there, streaming output back.
+generates a Vagrantfile and a bootstrap script, writes them
+onto the VM host and runs `vagrant` there, streaming output
+back.
 
-The key architectural constraint: **the project repo is
-the source of truth, the host holds a cache.** Every `up`
-re-pushes, so the two cannot drift.
+The key architectural constraint: **the VM host holds no
+project code.** Both files are generated from `bombyx.toml`
+and rewritten on every boot, so the host cannot drift, and
+the guest clones the project itself once it is running. See
+`docs/trust-boundary.md`.
 
 ## Repository Layout
 
@@ -44,7 +47,7 @@ bombyx/
       src/
         lib.rs          # crate root, re-exports
         config.rs       # bombyx.toml parsing
-        remote.rs       # SSH/scp command building
+        remote.rs       # SSH command building
         bin/bombyx/
           main.rs       # CLI entry point (thin)
       tests/
@@ -64,8 +67,8 @@ bombyx/
 
 ### `config` -- project configuration
 
-Parses `bombyx.toml`: `project`, `vagrant_dir`,
-`remote_root` -- and *refuses* `host`, which belongs to the
+Parses `bombyx.toml`: `project`, `remote_root`, `[vm]` and
+`[source]` -- and *refuses* `host`, which belongs to the
 developer rather than the repo. `host` is resolved
 separately from `--host`, `BOMBYX_HOST`,
 `bombyx.local.toml` or the per-developer `config.toml`, in

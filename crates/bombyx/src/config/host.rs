@@ -207,7 +207,7 @@ where
     // Such a value arrives from a per-directory environment
     // (`direnv`, a `mise.toml` in a clone, a CI job) or a plain
     // typo, and the host it supplies decides where `up` boots a
-    // archive and where `destroy` runs `rm -rf`.
+    // VM and where `destroy` runs `rm -rf`.
     let set = |key: &str| {
         var(key)
             .filter(|v| is_anchored_dir(v))

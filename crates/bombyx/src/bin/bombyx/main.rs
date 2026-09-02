@@ -526,8 +526,13 @@ fn capture(cmd: &RemoteCommand) -> Result<String> {
         .with_context(|| format!("{} printed invalid UTF-8", cmd.program))
 }
 
-/// Returns a string distinguishing this run from any other
-/// pushing to the same host.
+/// Returns a string distinguishing this run from any other on
+/// this machine.
+///
+/// `self-update` is the only caller. It renames the running
+/// binary aside before writing the new one, and two updates
+/// started at the same moment must not choose the same
+/// rename-aside name -- see [`bombyx::update::swap`].
 fn run_id() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -652,10 +657,13 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     // Resolve every program before running any of them, through
     // `tool` -- never the working directory; see that module.
     //
-    // Up front, because resolving inside the loop would let `up`
-    // create the remote directory and only then discover that
-    // `tar` is missing: the change-state-then-fail behaviour the
-    // whole `doctor` command exists to prevent.
+    // Up front, because resolving inside the loop would let a
+    // plan change something and only then discover that its next
+    // program is missing: the change-state-then-fail behaviour
+    // the whole `doctor` command exists to prevent.
+    // `self-update` is where this bites, since its plan mixes
+    // `curl` and `tar`; a VM plan is `ssh` throughout, and a
+    // missing `ssh` stops it before the first step.
     let mut resolved: HashMap<&str, PathBuf> = HashMap::new();
     for cmd in commands {
         if let Entry::Vacant(slot) = resolved.entry(&cmd.program) {
@@ -699,9 +707,11 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// left here is process spawning.
 fn doctor_run(cfg: &Config) -> Ran {
     let mut report = Report::default();
-    // `tar` is here for `bombyx self-update`, which unpacks the
-    // release archive with it. No VM action runs `tar` any more.
-    report.add(local_tool("tar", Some("--version")));
+    // `ssh` is the only local program a VM command runs, so it is
+    // the only one checked here. `bombyx self-update` also needs
+    // `curl` and `tar`; those are its problem, and failing
+    // `doctor` over them would make a red report mean nothing
+    // about whether `up` works.
     report.add(local_tool("ssh", Some("-V")));
     report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
 
@@ -744,9 +754,11 @@ fn spawn_probe(p: &HostProbe) -> Outcome {
 /// `doctor::local_tool_finding`'s job, for the same reason
 /// `doctor_run` is thin.
 ///
-/// `version_arg` is per tool: `tar` answers `--version`, OpenSSH
-/// `ssh` answers `-V`, and `scp` answers neither -- asking it
-/// prints a usage message that would land in the report as noise.
+/// `version_arg` is per tool, and `None` means there is nothing
+/// worth asking for. OpenSSH `ssh` answers `-V`, and it is the
+/// only tool `doctor` checks; `None` exists for a tool that
+/// answers nothing useful, the way `scp` prints a usage message
+/// rather than a version.
 fn local_tool(name: &str, version_arg: Option<&str>) -> Finding {
     let resolved = bombyx::tool::resolve(name);
     let version = match (resolved.as_deref(), version_arg) {

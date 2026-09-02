@@ -1,7 +1,7 @@
 //! Building the commands that drive Vagrant on the VM host.
 //!
-//! Every operation is a plain `ssh`, `scp` or `tar`
-//! invocation. Nothing here runs a process: these functions
+//! Every operation is a plain `ssh` invocation. Nothing here
+//! runs a process: these functions
 //! return the argv to run, which keeps the interesting logic
 //! (quoting, paths, command composition) unit-testable
 //! without a VM host.
@@ -261,8 +261,9 @@ pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 ///
 /// The guard makes teardown idempotent. A bare
 /// `vagrant destroy -f` exits non-zero in a directory with no
-/// Vagrantfile, which an interrupted first push leaves behind,
-/// and that failure would stop the removal step that follows.
+/// Vagrantfile, and an `up` interrupted between the `mkdir` and
+/// the Vagrantfile write leaves exactly that behind. The failure
+/// would stop the removal step that follows.
 ///
 /// The command comes from the same private `vagrant_command`
 /// helper the other builders use, so it carries the same identity
@@ -311,7 +312,7 @@ pub fn destroy_vm_if_present(
 /// so every path derived from a loaded `Config` is already at
 /// least two real segments deep. Validating once at the layer
 /// that owns `remote_root` is what keeps the write path
-/// (`mkdir`, `tar -xzf`) and this removal path agreeing about
+/// (`mkdir`, then the heredocs) and this removal path agreeing about
 /// which roots are usable.
 ///
 /// The `debug_assert` catches a caller that builds a path some
@@ -628,7 +629,8 @@ mod tests {
 
     #[test]
     fn destroy_tolerates_a_directory_with_no_vagrantfile() {
-        // An interrupted first push leaves the directory made
+        // An `up` interrupted before the Vagrantfile write
+        // leaves the directory made
         // but empty. A bare `vagrant destroy -f` fails there,
         // and would stop the removal that follows.
         let c = destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty);

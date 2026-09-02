@@ -213,11 +213,11 @@ mod tests {
     #[test]
     fn disables_the_default_synced_folder() {
         // Vagrant mounts the Vagrantfile's directory at /vagrant
-        // unless told not to, and that directory is the copy of
-        // the project pushed from the workstation -- the copy
-        // this whole design exists to keep out of the guest. It
-        // also hangs on a host whose firewall refuses NFS from
-        // the guest bridge, which docs/vm-host-setup.md warns
+        // unless told not to. That directory is on the VM host
+        // and holds only what bombyx generated, so the mount
+        // leaks nothing -- but it hangs on a host whose firewall
+        // refuses NFS from the guest bridge, which
+        // docs/vm-host-setup.md warns
         // about.
         for provider in [Provider::Libvirt, Provider::Hyperv] {
             let out = render(&cfg_with(provider));

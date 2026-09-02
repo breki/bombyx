@@ -160,9 +160,10 @@ they require manual approval every time.**
 
 bombyx drives isolated AI-agent VMs on a remote libvirt
 host over SSH. It is the tooling half of the agent-VM
-isolation strategy: the project repo holds the Vagrantfile
-and is the source of truth, and bombyx pushes it to the VM
-host and runs `vagrant` there.
+isolation strategy: bombyx generates the Vagrantfile and a
+bootstrap script from `bombyx.toml`, writes them onto the VM
+host and runs `vagrant` there. The VM host holds no project
+code; the guest clones the project itself.
 
 - **Stack**: Rust CLI, no runtime services
 - **Target platforms**: Windows (dev workstation), Linux

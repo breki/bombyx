@@ -58,18 +58,19 @@ workstation                  vmhost (VM host)
 
 Two rules shape the design:
 
-1. **The guest is the only machine holding your code.**
-   bombyx sends the VM host two files, and it generates both
-   of them: a Vagrantfile from `[vm]` in `bombyx.toml`, and a
-   bootstrap script. Vagrant needs the Vagrantfile before the
-   VM exists, so it cannot come from inside the guest. Once
-   the VM is up, the guest clones the project itself from
-   `[source]`.
+1. **The VM host holds none of your code.** bombyx sends it
+   two files and generates both: a Vagrantfile from `[vm]` in
+   `bombyx.toml`, and a bootstrap script. Vagrant needs the
+   Vagrantfile before the VM exists, so it cannot come from
+   inside the guest. Once the VM is up, the guest clones the
+   project itself from `[source]`.
 
-   Your workstation still reads `bombyx.toml` out of the
-   project's directory, which is the last thing it reads from
-   the repo. The decision, the argument for it, and what it
-   costs are in
+   Your workstation is a different matter. You run bombyx from
+   inside a checkout, because `bombyx.toml` is read from the
+   working directory, so the machine this design exists to
+   protect still has the code on it. Closing that is the work
+   the decision record calls `project-config-off-repo`. The
+   argument, and what it costs, are in
    [trust-boundary.md](docs/trust-boundary.md).
 2. **Wrap, don't reimplement.** bombyx composes `ssh` and
    `vagrant`. If it breaks, `ssh vmhost` and `vagrant up` by
