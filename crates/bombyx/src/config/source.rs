@@ -298,8 +298,9 @@ fn check_script(value: &str) -> Result<(), FieldError> {
 /// `ref` is still a plain `String`, and that is a gap rather
 /// than a decision. A type would promise its checks *ran*,
 /// which is worth having whether or not the checks are
-/// interesting -- and `Source` has public fields, so this
-/// function is skippable and a constructor would not be. See
+/// interesting. `Source` has public fields and
+/// `Config::validate` is private, so a hand-built `Source`
+/// never reaches this function and cannot ask for it. See
 /// `newtype-remaining-config-fields` in `docs/todo.md`.
 pub(super) fn validate(source: &Source) -> Result<(), FieldError> {
     guards::check_renderable("ref", &source.git_ref)?;
@@ -403,7 +404,7 @@ mod tests {
 
     #[test]
     fn a_windows_style_script_path_is_caught_by_the_character_rule() {
-        // `check_script_path` says a backslash never reaches it,
+        // `check_script` says a backslash never reaches it,
         // because `check_renderable` runs first and refuses one
         // anywhere in the value. This is the case holding that
         // claim up: `\windows\x` looks like a path mistake and

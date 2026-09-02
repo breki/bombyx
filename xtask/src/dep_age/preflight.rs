@@ -26,7 +26,7 @@
 //! then run this). It cannot intercept a bare `cargo build`
 //! that resolves-and-compiles in one shot -- only cargo's
 //! in-resolver `-Zmin-publish-age` (nightly) does that
-//! automatically. See the supply-chain notes in `CLAUDE.md`.
+//! automatically. See `docs/developer/supply-chain.md`.
 //!
 //! Scope: Rust / crates.io, which is the whole dependency
 //! tree -- this is a Rust-only project.

@@ -275,42 +275,40 @@ first creates a machine.
 ## What config values are checked
 
 `bombyx.toml` travels inside a repo, so its values are treated
-as hostile input. Six reach the generated files.
+as hostile input. Six of them reach the generated files:
+`box`, `repo`, `ref`, `script`, `cpus` and `memory`.
 
-Two of the six are enforced by their type. `repo` is a
+Two of those six are enforced by their type. `repo` is a
 `RepoUrl` and `script` is a `ScriptPath`, each a newtype whose
 constructor holds the rules, so an invalid one cannot be built
 -- by a config file or by a library caller. serde runs the
 constructor while deserializing, so a bad value is refused
 before a `Config` exists, and the error identifies the line.
 
-`box`, `ref`, `cpus` and `memory` are checked by
-`Config::validate` after parsing. **That line is in the wrong
-place, and it is where the design is heading rather than where
-it is.**
+Everything else is only *checked*, by `Config::validate`,
+`vm::validate` and `source::validate` after parsing:
+`box`, `ref`, `cpus` and `memory`, plus `host`, `project`,
+`vagrant_dir` and `remote_root`. **That is a gap, not a
+decision we would make again.**
 
-The reason it was drawn there does not hold up. It went: a type
-is worth it when a value has a rule specific to itself, as
-`repo` and `script` do, and not when the rules are the generic
-ones any string field would need. But what a type promises is
-not that its rules are interesting. It promises that they
-*ran*. `Config`, `Vm` and `Source` all have public fields, so
-any code can build one by hand and reach the guest without
-`validate` ever being called -- and that is true of a field
-with dull rules exactly as much as of one with sharp rules.
+A type promises that its rules *ran*. A checking function
+promises only that they ran on the paths that call it.
+`Config`, `Vm` and `Source` all have public fields, so any
+code can build one by hand and reach the guest without
+`validate` ever being called -- and a field whose rules are
+dull is as exposed as one whose rules are sharp. `validate` is
+also private, so a library caller cannot even choose to call
+it.
 
-So six checked values are still bare: `host`, `project`,
-`vagrant_dir`, `remote_root`, `box` and `ref`. Three things
-keep that survivable for now. `render` escapes for Ruby
-whatever it is handed. `bootstrap.sh` passes `--` before the
-ref. And the loading path is the only way a `Config` is built
-today, so in practice `validate` does run.
+Three things keep that survivable meanwhile. `render` escapes
+for Ruby whatever it is handed. `bootstrap.sh` passes `--`
+before the ref. And the loading path is the only way a
+`Config` is built today, so in practice `validate` does run.
 
-`remote_root` is the one that should stop being a `String`
-first: it reaches `rm -rf`, it has six rules, and
-`config::root` already holds every one of them in a single
-function, so the constructor would wrap something that exists.
-Captured as `newtype-remaining-config-fields` in
+`remote_root` should stop being a `String` first: it reaches
+`rm -rf`, and `config::root` already holds all of its rules in
+a single function, so the constructor would wrap something
+that exists. Captured as `newtype-remaining-config-fields` in
 `docs/todo.md`.
 
 | Field | Refused | Because |

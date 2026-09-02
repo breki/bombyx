@@ -50,7 +50,9 @@ why. Leave "is this code right?" to the other two -- if you
 happen to notice a real bug, report it, but it is not your job
 and it is not what you are being asked for.
 
-Report every one of these you find:
+These six are a checklist of what to look for, not fields to
+emit -- the report format is further down. Report every one
+you find:
 
 1. **Terms used before they are explained.** A shell
    construct, a `git` internal, an attribute, an idiom the
@@ -100,9 +102,18 @@ For each finding:
    would have unstuck you. Suggest the content, not the
    wording.
 
-Do not duplicate what a security or quality reviewer would
-say. If you find nothing, say "No issues found." -- but still
-give the **What worked** section.
+You never see the other two reports, so you cannot check for
+overlap directly. Use this test instead, which you can apply
+alone: **file a finding only when the fix is a change to what
+the code says, not to what it does.** A real bug you happen to
+notice is worth reporting, but it is theirs, not yours.
+
+**A finding may name any file**, including one not on your
+list, as long as the confusion started in a file that is. Say
+where you went and what you found there.
+
+If you find nothing, say "No issues found." -- but still give
+the **What worked** section.
 
 Your final message is the report itself. It is consumed by the
 calling skill, not shown to a human directly, so return the

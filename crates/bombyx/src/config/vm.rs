@@ -96,9 +96,10 @@ pub struct Vm {
 ///
 /// `box` is checked here rather than wrapped in a type, and so
 /// are `cpus` and `memory`, whose only rule is a floor. All
-/// three are gaps rather than decisions: `Vm` has public
-/// fields, so this function is skippable, and a constructor
-/// would not be.
+/// three are gaps rather than decisions. `Vm` has public
+/// fields and `Config::validate` is private, so a hand-built
+/// `Vm` never reaches this function and has no way to ask for
+/// it. A constructor could not be gone around that way.
 ///
 /// What the weaker guarantee costs is argued once in
 /// `docs/architecture.md` under "What config values are

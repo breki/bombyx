@@ -501,20 +501,19 @@ Extends **Documentation style** to every comment in the code,
   hand and skip every check; a type cannot be skipped that
   way.
 
-  **"The rules are generic" is not a reason to leave a
-  value primitive.** What the type promises is not that the
-  rules are interesting, it is that they *ran*. A field
-  whose only rules are non-blank and no-leading-dash still
-  benefits, because the alternative is remembering to call
-  the checker.
+  Wire it up with `#[serde(try_from = "String")]` so a bad
+  value is refused while the config is being read, before
+  the struct exists, and the error names the offending
+  line. Without that attribute serde assigns the private
+  field directly and skips the constructor.
 
-  Reach for a primitive when the value genuinely has no
-  rule, when the type would be constructed and unwrapped in
-  the same breath with nothing in between, or when a
-  standard type already carries the meaning -- and say which
-  in a comment, because **the representation has to be
-  argued for**. `ScriptPath` is a checked `String` rather
-  than a `PathBuf` for a written-down reason: the path is
+  Three cases justify a primitive: the value has no rule at
+  all; the type would be built and unwrapped in the same
+  breath with nothing in between; a standard type already
+  carries the meaning. Say which one applies, in a comment.
+  **The representation has to be argued for.**
+  `ScriptPath` is a checked `String` rather than a
+  `PathBuf` for a written-down reason -- the path is
   resolved on the guest, and `PathBuf` answers for the
   machine bombyx was compiled for.
 - All public items must have doc comments
@@ -643,36 +642,6 @@ Committing and releasing are separate:
   manually at your own shell when you want the full gate on a
   work-in-progress.
 
-**Reviews run after the commit, and their fixes get their own
-commit.** The cycle is: commit, review, commit the fixes,
-review again. Never amend the commit under review, and never
-fold a fix into the commit that the review found it in.
-
-Three reasons this order is better than reviewing first.
-
-The reviewers get an immutable target. Reviewing a staged diff
-means reviewing something that changes while they read it --
-this repo has already had a reviewer report against a working
-tree that no longer compiled, because the fixes for its own
-earlier findings had landed underneath it.
-
-The history says what happened. A fix folded into the commit
-that needed it leaves no trace that anything was found, so the
-next reader cannot tell a reviewed commit from an unreviewed
-one. A separate commit naming the finding IDs is the record.
-
-And the fixes get reviewed. A fix is code, and code written
-under review pressure is exactly the code most likely to be
-wrong -- this repo has a `sed` range that deleted a brace, a
-reviewer suggestion that broke the doc gate, and a "fix" that
-would have deleted an agent's uncommitted work. Folding fixes
-into the reviewed commit is how those ship unexamined.
-
-**The cycle stops when a round produces nothing we choose to
-fix.** A round whose findings are all deferred, declined or
-already covered is the last one. Do not keep going for a clean
-sheet: reviewers will always find something, and the stopping
-rule is agreement on what matters, not an empty report.
 - **`/release`** is the sole version-bumper. It infers the
   bump from the accumulated `[Unreleased]` entries
   (`**BREAKING:**` or a non-empty `### Removed` -> major,
@@ -692,6 +661,40 @@ came from had `cargo xtask deploy` gating exactly that,
 and the prose describing it outlived the subsystem by
 several weeks.
 
+### Reviews run after the commit
+
+Reviews run after the commit, and their fixes get their own
+commit. The cycle is: commit, review, commit the fixes, review
+again. Never amend the commit under review, and never fold a
+fix into the commit that the review found it in.
+
+This order beats reviewing first for three reasons.
+
+The reviewers get an immutable target. Reviewing a staged diff
+means reviewing something that changes while they read it --
+this repo has already had a reviewer report against a working
+tree that no longer compiled, because the fixes for its own
+earlier findings had landed underneath it.
+
+The history says what happened. A fix folded into the commit
+that needed it leaves no trace that anything was found, so the
+next reader cannot tell a reviewed commit from an unreviewed
+one. A separate commit naming the finding IDs is the record.
+
+The fixes get reviewed too. A fix is code, and code written
+under review pressure is exactly the code most likely to be
+wrong -- this repo has a `sed` range that deleted a brace, a
+reviewer suggestion that broke the doc gate, and a "fix" that
+would have deleted an agent's uncommitted work. Folding fixes
+into the reviewed commit is how those ship unexamined.
+
+**Stop when we would not fix anything the round found** --
+every finding deferred, declined or already covered. Do not
+keep going for a clean sheet: reviewers always find something,
+and the stopping rule is agreement on what matters. After three
+rounds, hand what is left to the operator rather than starting
+a fourth.
+
 ## Definition of Done
 
 A task is done only when all of the following hold -- not
@@ -709,52 +712,55 @@ just when the code compiles:
    replaces the other.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
-`cargo xtask validate` checks:
+`cargo xtask validate` runs nine gates, **listed here in the
+order they execute** so the numbers match what the run prints:
 
-1. **Formatting**: auto-fixed in place by default; pass
+1. **Dependency cooldown** (`cargo xtask dep-age-check`) --
+   fails when a dependency added or bumped since `HEAD` was
+   published within the 14-day window; an unchanged
+   lockfile makes it a no-op
+2. **Formatting**: auto-fixed in place by default; pass
    `cargo xtask validate --check` for the read-only
    `cargo fmt --all -- --check` (use in CI or before
    partial staging, so an in-place rewrite does not sweep
    unrelated drift into the working tree)
-2. **No warnings**:
-   `cargo clippy --all-targets -- -D warnings`
-3. **Documentation builds and every doc link resolves**
-   (`cargo xtask doc`) -- see "Doc gate" below
-4. **All tests pass**: `cargo test`
-5. **Coverage >= 90%**
-6. **Code duplication <= 6%** (production code, tests
+3. **Code duplication <= 6%** (production code, tests
    excluded)
-7. **Security audit** (RUSTSEC; `cargo xtask audit`) --
-   a positive vulnerability fails; an unreachable advisory
-   DB degrades to a warning
-8. **Dependency cooldown** (`cargo xtask dep-age-check`) --
-   fails when a dependency added or bumped since `HEAD` was
-   published within the 14-day window; an unchanged
-   lockfile makes it a no-op
-9. **Licences, bans and sources** (`cargo xtask deny`) --
+4. **Licences, bans and sources** (`cargo xtask deny`) --
    runs offline against `deny.toml`; a licence outside the
    allow-list, a banned crate or a non-crates.io source fails,
    and a missing `cargo-deny` is an error rather than a warning
    because there is no network here to be down
+5. **No warnings**:
+   `cargo clippy --all-targets -- -D warnings`
+6. **Documentation builds and every doc link resolves**
+   (`cargo xtask doc`) -- see "Doc gate" below
+7. **All tests pass**: `cargo test`
+8. **Coverage >= 90%**
+9. **Security audit** (RUSTSEC; `cargo xtask audit`) --
+   a positive vulnerability fails; an unreachable advisory
+   DB degrades to a warning
 
-Gates 7, 8 and 9 are the supply-chain three, and
+**Dep-age, Deny and Audit are the supply-chain three**, and
 `docs/developer/supply-chain.md` explains each one: why `deny`
 runs offline and in CI while `audit` deliberately does not, and
 why `Validate OK` does not mean the dependencies were audited.
+Refer to them by name rather than by number -- a list and a run
+order that disagree is how the two documents drifted before.
 
-The dependency-cooldown gate runs **first** (it is a no-op
-on an unchanged lockfile, and fails fast on a within-cooldown
-dependency before anything compiles it); after it the gates
-run cheapest-first (Fmt, Duplication, Deny, Clippy, Doc) before the
-expensive dynamic gates (Tests, Coverage, then the network
-Audit), and a failed step prints the single command to
-re-run just that gate.
+Why that order: the cooldown gate is first because it is a
+no-op on an unchanged lockfile and fails fast on a
+within-cooldown dependency **before anything compiles it or
+runs its build script**. After it the cheap static gates run,
+then the expensive dynamic ones, and the network audit last. A
+failed step prints the single command to re-run just that gate.
 
 ### Doc gate: two rustdoc passes, not one
 
 `cargo xtask doc` runs rustdoc **twice** under
 `RUSTDOCFLAGS=-D warnings`: once normally, and once with
-`--document-private-items`. That is not belt-and-braces. A
+`--document-private-items`. That is not a redundant second
+pass. A
 broken doc link fails in one of two ways and neither pass
 catches both:
 
@@ -1019,7 +1025,7 @@ of the six guard commands does, why `deny` runs offline in CI
 while `audit` deliberately does not, why the licence file is
 over-inclusive on purpose, and what none of it covers.
 
-Two rules to hold without opening that file:
+Hold these two rules without opening that file:
 
 - **Do not adopt a dependency version published fewer than 14
   days ago without a stated justification.** That window is when
@@ -1035,3 +1041,13 @@ Two rules to hold without opening that file:
   advisory DB is a printed warning, so an offline machine is not
   blocked. The standalone `cargo xtask audit` errors on both,
   and that is the spelling a release uses.
+- **A lockfile-churning `cargo update` will fail the cooldown
+  gate on transitive crates**, often several at once. That is
+  intended: a bulk update is exactly when a freshly published
+  release slips in. Either wait the window out, bulk-approve
+  the versions you reviewed by listing them all in
+  `RUSTBASE_DEP_AGE_ALLOW`, or prefer
+  `cargo update -p <crate>` so the flagged set stays small
+  enough to read. This is the one that fires when you were not
+  expecting it, which is why it is here and not only in the
+  reference file.

@@ -4,7 +4,7 @@
 //! Hand-editing `CHANGELOG.md` is error-prone: the `[Unreleased]`
 //! block can hold `### Added` and `### Changed` dozens of lines
 //! apart, so it is easy to split a block with a duplicate
-//! heading (a documented footgun in `CLAUDE.md`). This command
+//! heading, a hazard `CLAUDE.md` documents. This command
 //! makes the placement mechanical and testable: it finds the
 //! right `### <kind>` heading under `[Unreleased]` (creating it
 //! in canonical order only if absent) and appends the bullet

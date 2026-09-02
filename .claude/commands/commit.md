@@ -17,13 +17,13 @@ gate.
 
 **Reviews run after the commit, not before it.** The order is:
 commit, review, commit the fixes, review again, stop when a
-round turns up nothing worth fixing. Never amend the commit a
+round finds nothing we would fix. Never amend the commit a
 review was against. `CLAUDE.md` under **Commits and releases**
 says why; `.claude/commands/code-reviewers.md` has the
 mechanics.
 
 That means a `/commit` invocation does not finish at the
-commit. Steps 9 and 10 are part of the same run.
+commit. Steps 9 through 11 are part of the same run.
 
 ## Instructions
 
@@ -132,13 +132,14 @@ commit. Steps 9 and 10 are part of the same run.
    it, so for any change to the commands bombyx emits, say
    plainly in the summary whether that check has been done.
 
-6. **Fix line endings** - After staging, check for CRLF
-   warnings. All text files must use LF line endings.
-
-7. **Stage files** - Add specific files by name (avoid
+6. **Stage files** - Add specific files by name (avoid
    `git add -A` or `git add .`). Never commit sensitive
    files (.env, credentials, etc.). Include diary and
    changelog if updated.
+
+7. **Fix line endings** - `git add` prints a CRLF warning
+   when it converts one, so check its output now that the
+   files are staged. All text files must use LF endings.
 
 8. **Commit** using this exact format (use HEREDOC):
 
@@ -155,23 +156,21 @@ EOF
 
 9. **Code review** -- **after the commit lands**, spawn the **three**
    dedicated reviewer agents **in parallel** (in a single
-   message with three Agent tool calls). They are read-only by
-   construction -- none has `Edit`/`Write`.
+   message with three Agent tool calls). The harness stops
+   them changing anything: none has `Edit` or `Write`, two
+   have no shell, and `red-team`'s shell is scoped to
+   read-only git subcommands.
 
-   **IMPORTANT:** Always run all three reviews when the
-   commit contains code changes: Rust (`.rs`, `.toml`),
-   frontend (`.svelte`, `.js`, `.ts`, `.css`), config
-   files (`playwright.config.ts`, `vite.config.js`,
-   `vitest.config.js`, etc.), or
-   deployment/infrastructure files (`.service`,
-   `Dockerfile`, `docker-compose.yml`, `.conf`,
-   `.nginx`, `.env.example`, etc.).
-   Never skip them -- even for "straightforward"
-   changes. The only exception is commits that contain
-   no code at all (docs-only markdown, `.md` files) -- and
-   there, still consider `fresh-reader` alone when the
-   commit rewrites prose a newcomer lands on (`README.md`,
-   anything under `docs/`).
+   **IMPORTANT:** Always run all three when the commit
+   contains code -- `.rs`, `.toml`, `.sh`, `.ps1`, a
+   template under `crates/bombyx/templates/`, or a
+   workflow under `.github/`. Never skip them, even for
+   "straightforward" changes. The only exception is a
+   commit with no code at all (`.md` only) -- and there,
+   still consider `fresh-reader` alone when the commit
+   rewrites prose a newcomer lands on (`README.md`,
+   anything under `docs/`). `code-reviewers.md` owns this
+   list; do not restate it elsewhere.
 
    Spawn **Red Team** (security & correctness,
    `subagent_type: red-team`), **Artisan** (code quality,
@@ -179,18 +178,19 @@ EOF
    (comprehension, `subagent_type: fresh-reader`) in the
    single parallel message, giving each a one-line
    description of what the change does, and the commit
-   range under review (`HEAD~1..HEAD` for the first
-   round). `red-team` runs `git show` itself; `artisan` has
+   range under review. That is `HEAD~1..HEAD` on every
+   round -- after step 10 the fix commit is `HEAD` -- plus
+   the SHA of the commit it fixed, named in the prompt so a
+   fix can be read against what it was fixing. `red-team` runs `git show` itself; `artisan` has
    no shell, so pass it the captured diff in its spawn
    prompt; `fresh-reader` gets the **list of changed file
    paths** and no diff, because it reads the finished files
    whole rather than what moved. The gating
    rules -- when to run, how to spawn, the diff-handoff rule
    (never `/tmp`; a `target/`-local file if one is truly
-   needed), and the six labeled-bullet reporting format -- live
-   in `.claude/commands/code-reviewers.md` (also used by
-   the only caller). The review criteria
-   live in the agent files under `.claude/agents/`.
+   needed) -- live in `.claude/commands/code-reviewers.md`.
+   The review criteria and each reviewer's report format live
+   in the agent files under `.claude/agents/`.
 
    **Cross-confirmed findings:**
    Before presenting findings, scan all three reviewers'
@@ -222,8 +222,8 @@ EOF
    **Truncated reviewer output:**
    Before presenting findings, scan each reviewer's
    reply for finding IDs that appear in its summary
-   or cross-references but whose full bodies (the
-   six labeled-bullet fields) are not present in the
+   or cross-references but whose full bodies (the fields
+   its agent file specifies) are not present in the
    returned text. Subagent replies are occasionally
    truncated and a summary line like "RT-001
    (permission globs), RT-002 (test robustness)" with
@@ -255,9 +255,8 @@ EOF
 
    The commit has already landed, so nothing here blocks
    shipping and there is no "Commit as-is" option to
-   offer. Present each escalated finding in full (ID,
-   Source, Category, Description, Impact, Suggested fix)
-   and ask whether to fix it now, defer it to the backlog,
+   offer. Present each escalated finding in full, in
+   whatever fields its reviewer emitted, and ask whether to fix it now, defer it to the backlog,
    or decline it; split across questions (max 4 options
    each) if needed. Still surface **every** finding --
    applied, escalated, deferred or declined -- in your
@@ -268,7 +267,7 @@ EOF
    `fresh-reader`'s **What worked** section is not a
    finding and needs no action. Do not act on it, and do
    not drop it either: carry it into the summary, so the
-   passages it named are known to be load-bearing the
+   passages it named are known to carry a reason the
    next time somebody trims comments.
 
    **Deferred findings backlog:**
@@ -306,22 +305,37 @@ EOF
     commit that needed it erases the fact that anything was
     found.
 
-    Write the fix commit like any other -- through this same
-    skill, with the diary and CHANGELOG steps if they apply
-    -- and name the finding IDs it resolves in the body,
+    **Use steps 1-8 of this skill only.** Do not invoke
+    `/commit` again: a nested run would reach its own steps
+    9, 10 and 11, so the reviewers would run twice on the
+    same SHA and `/retrospect` would fire mid-cycle. The
+    cycle is flat -- 9, 10, 9, 10 -- driven by this run.
+    Name the finding IDs the commit resolves in its body,
     with the reasoning for any you declined.
 
-    Then **run step 9 again** against the fix commit, giving
-    the reviewers the previous commit as context so a fix
-    can be judged against what it was fixing. A fix is code,
-    and code written under review pressure is the code most
-    likely to be wrong.
+    Then **go back to step 9** with the fix commit as the
+    range (`HEAD~1..HEAD` again) and the SHA it fixed named
+    in the prompt as context, so a fix can be read against
+    what it was fixing. A fix is code, and code written
+    under review pressure is the code most likely to be
+    wrong.
 
-    **Stop when a round produces nothing you choose to
-    fix.** All-deferred, all-declined or all-already-covered
-    is the last round. Do not chase an empty report:
-    reviewers will always find something, and the stopping
-    rule is agreement on what matters.
+    **Stop when you would not fix anything the round
+    found** -- every finding deferred, declined or already
+    covered. Do not chase an empty report: reviewers always
+    find something, and the stopping rule is agreement on
+    what matters. **After three rounds, stop and hand the
+    remaining findings to the user** rather than starting a
+    fourth; by then the disagreement is about judgement, not
+    defects.
+
+    **A round that only defers still makes a commit.** The
+    backlog files it wrote have to land somewhere, and this
+    is the terminal round, so there is no later commit to
+    carry them. Commit them alone, as `docs`. That commit
+    holds nothing but `.md` backlog entries, so it does not
+    start another round -- see the docs-only exception in
+    step 9.
 11. **Workflow retrospective** -- delegate to
     `/retrospect`, once the review cycle in steps 9 and 10
     has stopped. It critiques how the work was done, so it

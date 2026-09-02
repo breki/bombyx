@@ -4,21 +4,15 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-02
 
-**"Avoid primitive obsession" put an argument of mine in the
-wrong**
+**Primitive obsession: why `box`, `ref` and four `Config`
+fields should not stay `String`**
 
-The operator asked what the review round had taught me about
-their Rust preferences, and the honest answer was: less than it
-taught me about their prose standards. Their own Rust-related
-turns in that PR were four, and three were the same question --
-"doesn't Rust provide a type for this?" -- asked about `repo`,
-`script` and paths. They accepted a reasoned no as readily as a
-yes. Then they said it plainly: prefer strong types, avoid
-primitive obsession.
+The operator stated a standard: prefer strong types, avoid
+primitive obsession. It put an argument in the wrong that we
+had written and defended in three places.
 
-That rule exposed a bad argument I had written and defended in
-three places. `docs/architecture.md` and two doc comments said
-`box`, `ref` and the four `Config` fields stay `String` because
+`docs/architecture.md` and two doc comments said `box`, `ref`
+and the four `Config` fields stay `String` because
 "their rules are the generic ones any string field would need,
 so a type would promise nothing extra."
 

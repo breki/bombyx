@@ -31,14 +31,33 @@ unnecessary clones or allocations.
 **Module Size**: any source file over 500 lines that contains
 multiple structs/enums should be flagged for splitting.
 
+**Canon and documentation** (`.md`, `CLAUDE.md`,
+`.claude/**`): this project keeps its rules in prose, so a
+defect there is a real defect. Look for a cross-reference or
+step number left stale by a renumber or a move; an instruction
+a reader cannot apply without re-deriving the argument behind
+it; the same rule stated in two files, which will drift; a
+count that disagrees with the list it introduces; and prose
+against the **Voice** rules in `CLAUDE.md` -- read those
+first, and note that the recent additions are verbless
+count-led fragments, compressed possessive idioms, and verbs
+that garden-path as nouns.
+
 Only report real, actionable issues with specific line
 references. Do NOT duplicate clippy warnings or red team
 findings. If you find nothing, say "No issues found."
 
+Number every finding **AQ-1, AQ-2, ...** in the order you
+report them. The calling skill cites those IDs in the commit
+that fixes them, so a finding with no ID cannot be traced to
+its fix.
+
 For each finding, include:
-1. **What**: the specific issue with file:line ref
-2. **Why it matters**: impact on maintainability
-3. **Better approach**: specific code change
+1. **ID**: `AQ-<n>`
+2. **Category**: which of the categories above
+3. **What**: the specific issue with file:line ref
+4. **Why it matters**: impact on maintainability
+5. **Better approach**: specific code change
 
 Your final message is the report itself -- a plain-text list of
 findings (or "No issues found."). It is consumed by the calling

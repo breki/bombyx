@@ -1,20 +1,10 @@
 # Supply-chain hygiene
 
-Reference for the six `cargo xtask` commands that guard the
-dependency tree, and for the cooldown policy on adopting a new
-dependency version.
-
-**Consulted, not memorised.** Read this when adding or bumping a
-dependency, when a `validate` supply-chain gate fails, or when
-cutting a release. `CLAUDE.md` carries the always-on rules; the
-detail lives here so it does not sit in every session's context.
-
-The one rule worth knowing without opening this file: **do not
-adopt a dependency version published fewer than 14 days ago
-without a stated justification.** `cargo xtask validate`
-enforces it for changed dependencies. Everything below is how
-and why.
-
+**Consult this file; do not memorise it.** Read it when adding
+or bumping a dependency, when a `validate` supply-chain gate
+fails, or when cutting a release. `CLAUDE.md` states the rules
+that apply on every commit, including the 14-day cooldown; this
+file is the how and the why behind them.
 
 Six `cargo xtask` commands guard the dependency tree. Two of them
 are about **licences** rather than vulnerabilities, and the split
@@ -48,23 +38,23 @@ matters because the two hazards behave differently:
   downloaded.
 
   **The set is what goes into building the binary for one
-  target**, which took three restrictions: crates reachable from a
-  *distributed* workspace member (so not `xtask`'s tree), through
-  *normal* dependencies (so not `assert_cmd`, `predicates`,
-  `difflib`), resolved for the *one* platform named by `--target`
-  (so not `r-efi`). That is 50 crates on
-  `x86_64-pc-windows-msvc` against 87 before. Pass `--target` from
+  target**, which needs three restrictions: crates reachable from
+  a *distributed* workspace member (so not `xtask`'s tree),
+  through *normal* dependencies (so not `assert_cmd`,
+  `predicates`, `difflib`), resolved for the *one* platform named
+  by `--target` (so not `r-efi`). Those three cut the walk from
+  87 crates to 50 on `x86_64-pc-windows-msvc`. Pass `--target` from
   the release matrix, or the host triple is used -- and it fails
   rather than guessing one, because a guessed triple resolves
   another platform's set and still exits 0.
 
   **It says "goes into building", not "links", and that wording is
-  load-bearing.** Within those three restrictions the set is
+  deliberate.** Within those three restrictions the set is
   deliberately over-inclusive: proc-macro crates run at compile
   time and are not in the binary (8 of the 50, including the
-  `unicode-ident` whose `Unicode-3.0` used to be quoted as the
-  reason this file exists -- it reaches bombyx only through
-  `clap_derive`, `serde_derive` and `thiserror-impl`), and
+  `unicode-ident` whose `Unicode-3.0` is the obvious thing to
+  cite as the reason this file exists -- it reaches bombyx only
+  through `clap_derive`, `serde_derive` and `thiserror-impl`), and
   `resolve.nodes[].deps` reports an optional dependency the build
   never enables with the same `kind: null` as a real edge
   (`cargo tree -e normal` says 47 where the walk says 50). Pruning

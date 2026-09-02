@@ -113,10 +113,10 @@ particular:
 
 ## Phase 3 -- Finalise
 
-1. Run `cargo xtask validate`. All eight gates must
-   pass: dependency cooldown, fmt, duplication
-   <= 6%, clippy, doc links, tests, coverage >= 90%,
-   and the RUSTSEC audit.
+1. Run `cargo xtask validate`. All nine gates must
+   pass. `CLAUDE.md`'s **Definition of Done** lists them
+   in execution order; do not restate the list here, or
+   the two copies will disagree about how many there are.
 
 2. If the change affects developer workflow or skills,
    update the relevant files under `.claude/commands/`
@@ -160,6 +160,7 @@ particular:
    releases**. `/commit` spawns all three itself after the
    commit lands, and drives the fix-and-review-again cycle
    from there.
+
 ## Rules
 
 - Never skip the plan phase, even for a small change.

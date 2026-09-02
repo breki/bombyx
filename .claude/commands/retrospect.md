@@ -11,7 +11,7 @@ critique the diff -- the retrospective critiques the
 *way* the diff was produced.
 
 Invoke this skill either:
-- **Automatically** at the end of `/commit` step 10
+- **Automatically** at the end of `/commit` step 11
   (which delegates to this skill).
 - **Manually** at any time -- mid-session, after a
   failed attempt, before a hand-off -- when you want

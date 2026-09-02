@@ -1,7 +1,7 @@
 # Build and toolchain recipes
 
-Three recipes for configuring the build, each needed rarely and
-none of them a rule you follow on every commit. `CLAUDE.md`
+These three recipes configure the build. You need each one
+rarely, and none applies on a normal commit. `CLAUDE.md`
 carries the always-on standards; these are here so they do not
 sit in every session's context.
 
@@ -41,17 +41,14 @@ remain `unsafe`-forbidden. Document the scoped
 exception with a comment near the use site so reviewers
 can verify the unsafe block is genuinely necessary.
 
-
 ## Coverage exceptions for hardware-bound code
 
 The 90% coverage gate (see **Definition of Done** in
-`CLAUDE.md`) assumes
-every code path can run under `cargo llvm-cov` in CI.
-Real projects routinely have I/O paths that can't:
-audio playback, network calls against external
-services, native API calls (Win32, CoreAudio, ALSA),
-GPIO on embedded targets. The recipe for keeping the
-gate honest without weakening it:
+`CLAUDE.md`) assumes every code path can run under
+`cargo llvm-cov` in CI. Some cannot: audio playback, network
+calls against an external service, a native API call (Win32,
+CoreAudio, ALSA), GPIO on an embedded target. This recipe keeps
+the gate honest without weakening it.
 
 1. **Extract the hardware-bound code into a sibling
    submodule.** Given `foo.rs` that contains both
@@ -106,7 +103,6 @@ without contortions, do that instead. The submodule-
 plus-ignore-regex pattern is for cases where the
 indirection itself would obscure the code more than it
 reveals.
-
 
 ## Edition-2024 migration notes
 
