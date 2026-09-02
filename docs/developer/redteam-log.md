@@ -5,36 +5,6 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
-### rt-2026-09-02-documented-config-is-rejected
-
-**Category:** Documentation that does not work
-
-`README.md` and `docs/tutorial.md` both show a sample `bombyx.toml`
-with `remote_root` written *after* the `[source]` table. TOML binds a
-bare key to the table above it, so it parses as `source.remote_root`
-and the config is refused. Reproduced by copying the tutorial's block
-verbatim: "unknown field `remote_root`, expected one of `repo`,
-`ref`, `script`". `bombyx.toml.sample` is broken differently -- it
-still carries `vagrant_dir` and has no `[vm]` or `[source]` at all,
-so copying it fails to load too.
-
-The fix is to move `remote_root` above `[vm]` in both samples and
-rewrite the sample file. `CLAUDE.md` asks for a test using the
-document's own example, which would stop this recurring.
-
-### rt-2026-09-02-doctor-fails-on-hyperv-projects
-
-**Category:** A gating check that gates the wrong thing
-
-`doctor::host_probes` always adds the `libvirt provider` probe,
-whatever `[vm] provider` says. On a `provider = "hyperv"` project
-against a host without `vagrant-libvirt`, `doctor` prints a FAIL row
-and exits 1 while every VM command works.
-
-This is the same class as the `tar` row removed in 92c2e74, and the
-sentence added in 43e29ce -- "a red report always means `up` is in
-trouble" -- is false while this probe is unconditional.
-
 ### rt-2026-09-02-home-does-not-isolate-ssh-config
 
 **Category:** A comment asserting a property the platform does not give

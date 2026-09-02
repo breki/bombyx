@@ -7,7 +7,7 @@
 
 use super::text::{fail_reason, first_line, sanitize};
 use super::{Finding, Outcome, ProbeResult, Scope};
-use crate::config::Config;
+use crate::config::{Config, Provider};
 use crate::remote::{self, RemoteCommand};
 
 /// A check applied to a probe's stdout when a zero exit is not
@@ -72,7 +72,7 @@ impl HostProbe {
 /// a dead host teach nothing the first failure did not.
 #[must_use]
 pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
-    vec![
+    let mut probes = vec![
         HostProbe::plain("ssh", remote::probe::reachable(cfg)).gating(),
         HostProbe::plain("login shell", remote::probe::posix_shell(cfg))
             .with_verdict(posix_shell_verdict),
@@ -81,8 +81,20 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
             "project dir",
             remote::probe::dir_writable(cfg, &cfg.remote_project_dir()),
         ),
-        HostProbe::plain("libvirt provider", remote::probe::provider(cfg)),
-    ]
+    ];
+
+    // Only for a libvirt project. The probe greps
+    // `vagrant plugin list` for `vagrant-libvirt`; Hyper-V is
+    // built into Vagrant and has no plugin to find, so sending
+    // it to a Hyper-V project fails a host where every VM
+    // command works.
+    if cfg.vm.provider == Provider::Libvirt {
+        probes.push(HostProbe::plain(
+            "libvirt provider",
+            remote::probe::provider(cfg),
+        ));
+    }
+    probes
 }
 
 /// The commands `probes` would run, in order.
@@ -167,6 +179,32 @@ mod tests {
 
     fn cfg() -> Config {
         Config::for_tests()
+    }
+
+    /// A config naming `provider`, otherwise the shared one.
+    fn cfg_with_provider(provider: &str) -> Config {
+        let mut c = cfg();
+        c.vm.provider = match provider {
+            "hyperv" => Provider::Hyperv,
+            _ => Provider::Libvirt,
+        };
+        c
+    }
+
+    #[test]
+    fn the_libvirt_probe_is_only_sent_for_a_libvirt_project() {
+        // The probe greps `vagrant plugin list` for
+        // `vagrant-libvirt`. Hyper-V is built into Vagrant and
+        // has no such plugin, so on a Hyper-V project the row
+        // fails on a host where every VM command works -- and a
+        // preflight whose red rows do not predict `up` is one
+        // operators learn to ignore.
+        let names = |c: &Config| {
+            host_probes(c).iter().map(|p| p.name).collect::<Vec<_>>()
+        };
+        let row = "libvirt provider";
+        assert!(names(&cfg_with_provider("libvirt")).contains(&row));
+        assert!(!names(&cfg_with_provider("hyperv")).contains(&row));
     }
 
     fn ran(success: bool, stdout: &str, stderr: &str) -> ProbeResult {

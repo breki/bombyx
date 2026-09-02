@@ -91,14 +91,21 @@ enum VmCmd {
     /// Write the generated files on the VM host and boot the
     /// project VM
     Up,
-    /// Re-run provisioning in the guest
+    /// Write the generated files and re-run provisioning in
+    /// the guest
     ///
     /// Vagrant provisions only when it first creates a VM, so
-    /// every later `up` leaves the guest running the script it
-    /// cloned when it was created. This re-runs the bootstrap,
-    /// which fetches your repository again and runs the script
-    /// from the fresh clone. The VM must already exist: run
-    /// `up` first.
+    /// every later `up` leaves the guest on the commit it
+    /// checked out then. This re-runs the bootstrap, which
+    /// fetches your repository and checks out `ref` again in
+    /// the clone the guest already has.
+    ///
+    /// What that does to work in the guest: files git does not
+    /// track are left alone, and edits to tracked files are
+    /// overwritten by the checkout. Changing `source.repo`
+    /// removes the clone and starts over, which loses both.
+    ///
+    /// The VM must already exist: run `up` first.
     Provision,
     /// Halt the project VM
     Down,
