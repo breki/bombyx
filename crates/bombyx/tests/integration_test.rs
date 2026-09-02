@@ -393,10 +393,14 @@ fn doctor_dry_run_lists_read_only_probes() {
     // One line per probe, and every probe accounted for. An
     // embedded newline in a script would split the dry run and,
     // worse, could smuggle a second command past a reader.
+    //
+    // Five because the fixture is a libvirt project. A Hyper-V
+    // one sends four -- see
+    // `probes::tests::the_libvirt_probe_is_only_sent_for_a_libvirt_project`.
     assert_eq!(lines.len(), 5, "{lines:?}");
     for l in &lines {
         // Asserted per line rather than "some line has each
-        // option": the loose form is satisfied by seven different
+        // option": the loose form is satisfied by five different
         // lines each carrying one option. What each option
         // prevents is documented at `remote::probe::probe`.
         for opt in [
@@ -448,8 +452,9 @@ fn a_dangerous_remote_root_is_refused_at_load() {
         let dir = project_dir_with(&format!(
             "project = \"etc\"\nremote_root = {root:?}\n"
         ));
-        // A host has to be resolvable, or the run fails on the
-        // missing host before it ever validates `remote_root`.
+        // A host has to be configured, or the run fails with
+        // `no VM host configured` before it ever validates
+        // `remote_root`.
         write_user_config(&dir, "host = \"vmhost\"\n");
         bombyx_in(&dir)
             .args(["--dry-run", "up"])
@@ -512,17 +517,23 @@ fn a_host_cannot_smuggle_an_ssh_option() {
         .stderr(predicate::str::contains("must not start with"));
 }
 
-/// Every `bombyx.toml` this repository shows a reader must load.
+/// This repository shows a reader four sample configs. Each one
+/// must load.
 ///
-/// The three samples had `remote_root` written *after* the
+/// Three of them wrote `remote_root` after the
 /// `[source]` table. TOML binds a bare key to the table above
 /// it, so it parsed as `source.remote_root` and bombyx refused
 /// the file -- which is what a reader following the tutorial
 /// got on their first command.
 ///
-/// `CLAUDE.md` asks for a test using the document's own
-/// example, so this extracts the blocks rather than restating
-/// them. Restating them is how the two came to disagree.
+/// The fourth, in `llms.txt`, still named a config key that had
+/// been deleted.
+///
+/// `CLAUDE.md` asks for a test using the document's own example,
+/// so this extracts the blocks rather than restating them.
+/// Restating them is how the two came to disagree. Adding a
+/// fifth sample means adding it to the list below, which is the
+/// one thing this cannot derive.
 #[test]
 fn the_documented_sample_configs_load() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -530,23 +541,35 @@ fn the_documented_sample_configs_load() {
         .and_then(Path::parent)
         .expect("the crate sits two levels below the repo root");
 
-    // The fenced block starting at `project = ` in each doc,
-    // and the sample file whole.
+    // The whole fenced block, not the part from one key onwards.
+    // Anchoring on `project = ` would drop anything above it --
+    // and "keep bare keys above the tables" is what these
+    // samples now teach, so the lines most likely to move next
+    // are the ones an anchored search would stop seeing.
     let from_doc = |name: &str| {
         let text = std::fs::read_to_string(repo.join(name))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let start = text
+        let key = text
             .find("project = \"myproject\"")
             .unwrap_or_else(|| panic!("{name} shows no sample config"));
-        let end = text[start..]
+        let fence = text[..key]
+            .rfind("```")
+            .unwrap_or_else(|| panic!("{name}: sample is not in a fence"));
+        let body = &text[fence..];
+        let start = body
+            .find('\n')
+            .unwrap_or_else(|| panic!("{name}: fence has no body"))
+            + 1;
+        let end = body[start..]
             .find("```")
             .unwrap_or_else(|| panic!("{name}: unterminated code fence"));
-        text[start..start + end].to_owned()
+        body[start..start + end].to_owned()
     };
 
     let samples = [
         ("README.md", from_doc("README.md")),
         ("docs/tutorial.md", from_doc("docs/tutorial.md")),
+        ("llms.txt", from_doc("llms.txt")),
         (
             "bombyx.toml.sample",
             std::fs::read_to_string(repo.join("bombyx.toml.sample"))
@@ -557,9 +580,7 @@ fn the_documented_sample_configs_load() {
     ];
 
     for (name, source) in samples {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("bombyx.toml"), &source).unwrap();
-        std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+        let dir = project_dir_with(&source);
         write_user_config(&dir, "host = \"vmhost\"\n");
         let out = bombyx_in(&dir).args(["--dry-run", "status"]).output();
         let out = out.unwrap_or_else(|e| panic!("{name}: {e}"));

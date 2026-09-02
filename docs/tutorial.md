@@ -297,11 +297,11 @@ myproject/                  your project repo
 ```toml
 project = "myproject"    # VM and directory name on the host
 
-remote_root = "~/vms"    # root on the host for project dirs
+remote_root = "~/vms"    # optional; keep it above [vm]
 
 [vm]                     # required: the machine to build
 provider = "libvirt"
-box = "debian/bookworm64"
+box = "debian/bookworm64"   # see the chsh note in Part 3
 cpus = 4
 memory = 8192            # MiB; agents want room to build
 
@@ -309,7 +309,6 @@ memory = 8192            # MiB; agents want room to build
 repo = "https://github.com/you/myproject"
 ref = "main"
 script = "vagrant/provision.sh"
-
 ```
 
 `[vm]` and `[source]` are required and have no defaults. bombyx
@@ -549,8 +548,10 @@ bombyx provision
 `up` leaves the guest running the script it cloned when the VM
 was created -- and reports success, which is what makes the gap
 easy to miss. `provision` re-runs the bootstrap, which fetches
-your repository again and runs the script from the fresh clone,
-so commit the change first.
+your repository again and checks it out in the clone the guest
+already has, so commit the change first. That checkout is
+forced: it overwrites edits to tracked files, and an untracked
+file where the new commit adds one at the same path.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM instead of your project one:

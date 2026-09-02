@@ -117,14 +117,10 @@ Drop a `bombyx.toml` in the project you want a VM for:
 ```toml
 project = "myproject"    # VM + directory name on the host
 
-# Optional, shown with its default. It sits above `[vm]`
-# because a bare key after a table header belongs to that
-# table: written at the bottom it would parse as
-# `source.remote_root` and the file would be refused.
-remote_root = "~/vms"    # root on the host for project dirs
+remote_root = "~/vms"    # optional; keep it above [vm]
 
 [vm]                     # required: the machine to build
-provider = "libvirt"     # libvirt or hyperv
+provider = "libvirt"     # libvirt or hyperv; only libvirt tried
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192            # MiB

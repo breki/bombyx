@@ -2,7 +2,13 @@
 #
 # Copy this to `bombyx.toml` in the ROOT OF THE PROJECT you
 # want a VM for -- not here. Each project carries its own
-# config.
+# config. bombyx reads the file from the directory you run it
+# in and does not search upwards the way git and cargo do, so
+# run bombyx from that root.
+#
+# Paths in the comments below, such as docs/trust-boundary.md,
+# are in bombyx's own repository:
+# https://github.com/breki/bombyx
 #
 # THERE IS NO `host` KEY HERE, AND ONE IS REFUSED.
 # Which machine runs the VMs is a property of whoever is
@@ -13,13 +19,17 @@
 # host, e.g. ~/vms/myproject.
 project = "myproject"
 
+# Optional; `~/vms` if you leave it out.
+#
 # Root on the VM host under which project directories are
 # created. Scratch VMs land in
 # <remote_root>/scratch/<project>/<name>, so the same scratch
 # name in two projects cannot collide.
 #
-# Must be an anchored path (starting with `~` or `/`) at least
-# one directory deep, with no `.` or `..` segment. bombyx
+# Must start with `/` or `~/`, or be exactly `~`, and must name
+# at least 1 directory below that anchor, with no `.` or `..`
+# segment. (`~vms` is refused: the `~` has to be the whole
+# first segment.) bombyx
 # creates, writes into and -- on teardown -- deletes the
 # directory it derives from this value, so a root like `/`, `~`
 # or `~/.` is refused when the config loads.
@@ -33,17 +43,21 @@ remote_root = "~/vms"
 # after `[source]` it would parse as `source.remote_root` and
 # the whole file would be refused.
 
-# The machine to build. Required, and none of the four has a
-# default -- there is no defensible guess for a base image.
+# bombyx builds the machine from this table. All four keys are
+# required: bombyx cannot guess a base image, and any size it
+# picked would be wrong on either a laptop or a workstation.
 [vm]
+# Only libvirt has ever been exercised. The Hyper-V settings
+# were written from the provider's documentation, not from a run.
 provider = "libvirt"          # libvirt or hyperv
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192                 # MiB
 
-# What the guest clones once it is running. Required. bombyx
-# sends no project file anywhere: the VM fetches the repository
-# itself and runs `script` out of its own clone.
+# The guest clones this repository once it is running. All
+# three keys are required. bombyx sends no project file
+# anywhere: the VM fetches the repository itself and runs
+# `script` out of its own clone.
 #
 # A private repository needs a credential inside the guest, and
 # code in there can read it. See docs/trust-boundary.md.
@@ -51,7 +65,6 @@ memory = 8192                 # MiB
 repo = "https://github.com/you/myproject"
 ref = "main"
 script = "vagrant/provision.sh"   # path inside the clone
-
 
 # WHERE THE VM HOST GOES INSTEAD
 #
@@ -69,5 +82,6 @@ script = "vagrant/provision.sh"   # path inside the clone
 # Three other sources override that when you need them --
 # `--host`, `BOMBYX_HOST`, and a gitignored `bombyx.local.toml`
 # beside this file, which can also override any field above.
-# "Where bombyx looks for the host" in README.md gives the full
-# order; it is deliberately documented in one place.
+# "Where bombyx looks for the host" in bombyx's own README
+# gives the full order; it is deliberately documented in one
+# place.

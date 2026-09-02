@@ -100,10 +100,15 @@ enum VmCmd {
     /// fetches your repository and checks out `ref` again in
     /// the clone the guest already has.
     ///
-    /// What that does to work in the guest: files git does not
-    /// track are left alone, and edits to tracked files are
-    /// overwritten by the checkout. Changing `source.repo`
-    /// removes the clone and starts over, which loses both.
+    /// What that does to work in the guest, from
+    /// `bootstrap.sh`: the checkout is forced, so it overwrites
+    /// your edits to tracked files, and it overwrites an
+    /// untracked file too when the fetched commit adds one at
+    /// the same path. Untracked files survive only where the
+    /// commit has nothing at that path. Pointing `source.repo`
+    /// at a different repository removes the clone and starts
+    /// over, losing everything; rewriting the same URL with or
+    /// without a trailing `/` or `.git` does not.
     ///
     /// The VM must already exist: run `up` first.
     Provision,
@@ -729,6 +734,11 @@ fn doctor_run(cfg: &Config) -> Ran {
     // about whether `up` works.
     report.add(local_tool("ssh", Some("-V")));
     report.add_all(doctor::run_probes(&doctor::host_probes(cfg), spawn_probe));
+    // A provider bombyx cannot probe still gets a row, so the
+    // report does not quietly shrink for a Hyper-V project.
+    if let Some(f) = doctor::provider_finding(cfg) {
+        report.add(f);
+    }
 
     print_lines(&report.render(&cfg.host));
     if report.ok() { Ran::Ok } else { Ran::Failed(1) }

@@ -155,6 +155,12 @@ if [ -d "$CLONE_DIR/.git" ]; then
     # file the upstream repo deleted. The case that actually
     # mattered, a changed `repo`, is handled above by removing
     # the clone outright.
+    #
+    # This narrows the loss, it does not remove it. `--force`
+    # above still overwrites an untracked file when the fetched
+    # commit carries one at the same path: git only refuses that
+    # without `--force`. So an agent's `notes.md` survives until
+    # upstream adds a `notes.md`, and then it goes silently.
 else
     git clone --depth 1 --branch "$BOMBYX_REF" \
         -- "$BOMBYX_REPO" "$CLONE_DIR"
