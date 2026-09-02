@@ -86,11 +86,16 @@ plan, decisions, and outcome.
   repo is captured separately as `project-config-off-repo`, because it is a
   design question rather than a deletion. What is left here is the push: once
   nothing needs the pushed files, `vagrant_dir`, `Action::pushes` and the
-  `tar`/`scp` path all go, and `bombyx up` becomes three commands instead of
+  `tar`/`scp` path all go, and `bombyx up` becomes four commands instead of
   seven.
 
-  Ordering: `project-config-off-repo` comes first. The push cannot be removed
-  while `vagrant_dir` is still how bombyx is told where the project is.
+  Ordering: this comes first, before `project-config-off-repo`. The VM host
+  already receives an archive that no program there reads -- the generated
+  Vagrantfile disables the `/vagrant` share and names only bombyx's own
+  bootstrap script, so the unpacked files sit unread. `vagrant_dir` is the only config value naming a
+  location inside the checkout, and the push is its only consumer. Removing
+  the push first means the moved config never needs a path to a checkout.
+  GitHub issue #10; planned in `docs/issues/project-config-off-repo.md`.
 
 - **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
   Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
@@ -169,6 +174,14 @@ plan, decisions, and outcome.
   them in one function, so the constructor wraps something that exists. Not for
   the generate-vagrantfile PR: the config modules have been re-cut in four
   commits over two days and the review flagged the churn.
+
+- **project-selection-flag** -- `--project` names the project explicitly
+  Chunk 3 of the project-config-off-repo work; GitHub issue #18. Depends on
+  project-config-off-repo. Once a project's settings live in the operator's
+  registry, bombyx has to be told which project a command is about. `--project
+  <name>` becomes a required global argument for every VM subcommand. Inferring
+  it from the working directory git remote was rejected: naming the project
+  explicitly means bombyx reads nothing at all from the project directory.
 
 ## Done
 
