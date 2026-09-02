@@ -2,7 +2,6 @@
 
 Quality (Artisan) review findings. Newest first.
 
-
 ---
 
 ### aq-2026-09-02-commit-md-outgrown-shape
@@ -29,6 +28,10 @@ sitting that raised this. Moving the same file twice in one
 session is the churn the reviewers flagged elsewhere on this
 branch. Do it as its own change.
 
+Found by the Artisan review (AQ-8), 2026-09-02.
+
+---
+
 ### aq-2026-09-02-build-recipes-seams
 
 **Category:** Documentation consistency
@@ -47,15 +50,32 @@ that can't", "If a derived project needs", "The template ships
 on Rust edition 2024" -- and uses contractions the rest of
 `docs/` does not.
 
-Related: the file groups three recipes by what they are not
-("each needed rarely"). Two share a real theme, which is how to
-scope an exception to a quality gate without weakening it for
-production code. The edition-2024 section is not that; it is a
-one-time migration checklist, already done here, and it speaks
-to a downstream of the template. It probably belongs in
-`docs/developer/template-feedback.md`, or under an explicit
-appendix heading.
+Deferred because the re-wrap is a large mechanical diff, better
+kept away from a round of substantive fixes.
 
-Deferred: the grouping question wants a decision from the
-operator, and the re-wrap is a large mechanical diff better kept
-away from a round of substantive fixes.
+Found by the Artisan review (AQ-16), 2026-09-02. The
+edition-2024 placement question is split out below, because a
+later commit citing this slug could not otherwise say which of
+the three actions it did. Two actions remain here: re-wrap the
+body to 80 columns, and change the four template-voiced
+openers to speak to this project.
+
+---
+
+### aq-2026-09-02-build-recipes-edition-section-placement
+
+**Category:** Abstraction boundary between documents
+
+`docs/developer/build-recipes.md` groups three recipes. Two
+share a theme: how to scope an exception to a quality gate
+without weakening it for production code. The edition-2024
+section is not that. It is a one-time migration checklist, it
+is already done for bombyx, and it speaks to a project
+inheriting an older snapshot of the template rather than to
+anyone working here.
+
+It probably belongs in `docs/developer/template-feedback.md`,
+or under an explicit appendix heading in the same file.
+
+Deferred because it wants a decision from the operator rather
+than a fix. Found by the Artisan review (AQ-16), 2026-09-02.

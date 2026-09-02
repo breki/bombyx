@@ -24,7 +24,7 @@ you know which way it went.
 
 ## The boundary
 
-Two statements, and the second is stronger.
+There are two statements here, and the second is stronger.
 
 **The guest is the only machine that holds the project's source
 code.** Neither the workstation nor the VM host keeps a copy, a

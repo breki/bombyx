@@ -501,6 +501,13 @@ Extends **Documentation style** to every comment in the code,
   hand and skip every check; a type cannot be skipped that
   way.
 
+  **"The rules are generic" is not a reason to leave a
+  value primitive.** What a type promises is not that its
+  rules are interesting, it is that they *ran*. A rule as
+  dull as non-blank and no-leading-dash still earns a type,
+  because the alternative is remembering to call the
+  checker.
+
   Wire it up with `#[serde(try_from = "String")]` so a bad
   value is refused while the config is being read, before
   the struct exists, and the error names the offending
@@ -663,10 +670,10 @@ several weeks.
 
 ### Reviews run after the commit
 
-Reviews run after the commit, and their fixes get their own
-commit. The cycle is: commit, review, commit the fixes, review
-again. Never amend the commit under review, and never fold a
-fix into the commit that the review found it in.
+Their fixes get their own commit. The cycle is: commit,
+review, commit the fixes, review again. Never amend the commit
+under review, and never fold a fix into the commit that the
+review found it in.
 
 This order beats reviewing first for three reasons.
 
@@ -689,7 +696,7 @@ would have deleted an agent's uncommitted work. Folding fixes
 into the reviewed commit is how those ship unexamined.
 
 **Stop when we would not fix anything the round found** --
-every finding deferred, declined or already covered. Do not
+every finding deferred or declined. Do not
 keep going for a clean sheet: reviewers always find something,
 and the stopping rule is agreement on what matters. After three
 rounds, hand what is left to the operator rather than starting
@@ -735,8 +742,12 @@ order they execute** so the numbers match what the run prints:
    `cargo clippy --all-targets -- -D warnings`
 6. **Documentation builds and every doc link resolves**
    (`cargo xtask doc`) -- see "Doc gate" below
-7. **All tests pass**: `cargo test`
-8. **Coverage >= 90%**
+7. **`xtask`'s own tests pass** -- this step runs `-p xtask`
+   only, which is why the run prints `Test (xtask only)`
+8. **Coverage >= 90%** -- and this is where the *workspace*
+   tests run, under `llvm-cov --workspace --exclude xtask`.
+   Splitting them that way stops the same tests being
+   compiled and run twice
 9. **Security audit** (RUSTSEC; `cargo xtask audit`) --
    a positive vulnerability fails; an unreachable advisory
    DB degrades to a warning
@@ -760,9 +771,8 @@ failed step prints the single command to re-run just that gate.
 `cargo xtask doc` runs rustdoc **twice** under
 `RUSTDOCFLAGS=-D warnings`: once normally, and once with
 `--document-private-items`. That is not a redundant second
-pass. A
-broken doc link fails in one of two ways and neither pass
-catches both:
+pass: a broken doc link fails in one of two ways, and neither
+pass catches both.
 
 - A link **inside a private module** naming something not in
   scope. The public pass never renders a private module's docs,
@@ -1025,7 +1035,7 @@ of the six guard commands does, why `deny` runs offline in CI
 while `audit` deliberately does not, why the licence file is
 over-inclusive on purpose, and what none of it covers.
 
-Hold these two rules without opening that file:
+Hold these rules without opening that file:
 
 - **Do not adopt a dependency version published fewer than 14
   days ago without a stated justification.** That window is when

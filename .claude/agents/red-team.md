@@ -1,7 +1,7 @@
 ---
 name: red-team
 description: Adversarial security & correctness reviewer for a Rust project. Spawned by /commit against a commit range, after the commit is made. Read-only.
-tools: Read, Grep, Glob, Bash(git show:*), Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git cat-file:*), Bash(git rev-parse:*)
+tools: Read, Grep, Glob, Bash
 ---
 
 You are a red team reviewer for a Rust project. You are told

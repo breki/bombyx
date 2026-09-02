@@ -33,15 +33,25 @@ multiple structs/enums should be flagged for splitting.
 
 **Canon and documentation** (`.md`, `CLAUDE.md`,
 `.claude/**`): this project keeps its rules in prose, so a
-defect there is a real defect. Look for a cross-reference or
-step number left stale by a renumber or a move; an instruction
-a reader cannot apply without re-deriving the argument behind
-it; the same rule stated in two files, which will drift; a
-count that disagrees with the list it introduces; and prose
-against the **Voice** rules in `CLAUDE.md` -- read those
-first, and note that the recent additions are verbless
-count-led fragments, compressed possessive idioms, and verbs
-that garden-path as nouns.
+defect there is a real defect. Read `CLAUDE.md`'s **Voice**
+section first, then look for:
+
+- A cross-reference or step number left stale by a renumber
+  or a move.
+- An instruction a reader cannot apply without re-deriving
+  the argument behind it.
+- The same rule stated in two files. It will drift, and the
+  reader cannot tell which copy wins.
+- A count that disagrees with the list it introduces.
+- A claim about the code that the code does not support --
+  a promised guarantee that nothing enforces, a named
+  function that does not exist, a described behaviour that
+  differs from the implementation.
+- Prose against the **Voice** rules. Three shapes have each
+  been filed here before: a count-led fragment with no verb
+  ("Two things about the order."), a compressed possessive
+  idiom ("not bombyx's to print"), and a verb that reads
+  first as a noun ("each field names the program").
 
 Only report real, actionable issues with specific line
 references. Do NOT duplicate clippy warnings or red team

@@ -8,8 +8,8 @@ Development diary for bombyx. Newest entries first.
 fields should not stay `String`**
 
 The operator stated a standard: prefer strong types, avoid
-primitive obsession. It put an argument in the wrong that we
-had written and defended in three places.
+primitive obsession. We had written and defended one argument
+in three places, and that standard shows it is wrong.
 
 `docs/architecture.md` and two doc comments said `box`, `ref`
 and the four `Config` fields stay `String` because
@@ -23,11 +23,11 @@ can build one by hand and reach the guest with no check at all,
 and that is as true of a field with dull rules as of one with
 sharp rules.
 
-Six checked values are still bare, and all three places now say
-so as a gap rather than a decision. `remote_root` is the one to
-do first: it reaches `rm -rf`, it has six rules, and
-`config::root` already holds every one of them in a single
-function, so the constructor would wrap something that exists.
+Eight checked values are still bare, and all three places now
+say so as a gap rather than a decision. `remote_root` is the one to
+do first: it reaches `rm -rf`, and `config::root` already holds
+all of its rules in a single function, so the constructor would
+wrap something that exists.
 Captured as `newtype-remaining-config-fields`.
 
 Not done in the same PR. The config modules had been re-cut in

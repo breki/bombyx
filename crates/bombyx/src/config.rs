@@ -14,11 +14,18 @@
 //!
 //! Because `bombyx.toml` ships *inside a repo*, it is
 //! attacker-controlled data the moment you clone or check out
-//! someone else's branch. Every field is therefore validated
-//! against an explicit allowlist rather than trusted -- see
-//! `Config::validate`, which every constructor runs. Not a
-//! doc link: `validate` is private, and rustdoc rejects a
-//! public page pointing at a private item.
+//! someone else's branch. So every field is checked against an
+//! explicit allowlist rather than trusted.
+//!
+//! Two of them are checked by their *type* and cannot be built
+//! wrong at all: see [`RepoUrl`]. The rest are checked by
+//! `Config::validate`, which the loading path runs. `Config`
+//! has public fields, so a hand-built one skips that check.
+//! That is a gap rather than a decision, argued once in
+//! `docs/architecture.md` under "What config values are
+//! checked". (`validate` is named rather than linked because
+//! it is private, and rustdoc rejects a public page pointing
+//! at a private item.)
 //!
 //! # Where each rule lives
 //!

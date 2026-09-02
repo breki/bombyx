@@ -264,7 +264,8 @@ sequenceDiagram
   guest-->>op: VM ready
 ```
 
-Two things about the order. The generated files land **after**
+Two things matter about the order. The generated files land
+**after**
 the archive is unpacked, or the push would overwrite them. And
 `vagrant` runs last, because it reads the Vagrantfile.
 
@@ -285,11 +286,13 @@ constructor holds the rules, so an invalid one cannot be built
 constructor while deserializing, so a bad value is refused
 before a `Config` exists, and the error identifies the line.
 
-Everything else is only *checked*, by `Config::validate`,
-`vm::validate` and `source::validate` after parsing:
-`box`, `ref`, `cpus` and `memory`, plus `host`, `project`,
-`vagrant_dir` and `remote_root`. **That is a gap, not a
-decision we would make again.**
+The other four -- `box`, `ref`, `cpus` and `memory` -- are only
+*checked* after parsing. So are `host`, `project`,
+`vagrant_dir` and `remote_root`, which never reach the
+generated files but do reach `ssh` and `tar`. Eight values in
+all, spread across `Config::validate`, `vm::validate` and
+`source::validate`. **That is a gap, not a decision we would
+make again.**
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it.
@@ -387,8 +390,9 @@ another module is the one a new field gets added without.
 
 ## Quality gates
 
-`cargo xtask validate` runs nine, cheapest first: dependency
-cooldown, formatting, duplication, licences, clippy, doc links,
-tests, coverage, security audit. `CLAUDE.md` has the detail,
+`cargo xtask validate` runs nine. The dependency cooldown goes
+first so nothing compiles a too-new crate; after that they run
+cheapest first: formatting, duplication, licences, clippy, doc
+links, tests, coverage, security audit. `CLAUDE.md` has the detail,
 including why `audit` degrades to a warning inside `validate`
 and errors when run alone.

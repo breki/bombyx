@@ -1,6 +1,6 @@
 ---
 description: Commit current changes following project conventions
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git config:*), Bash(cargo xtask*), Read, Edit, Agent, AskUserQuestion, Skill(retrospect)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git config --get:*), Bash(cargo xtask*), Read, Edit, Agent, AskUserQuestion, Skill(retrospect)
 ---
 
 Commit the current changes following the project's git commit
@@ -156,21 +156,19 @@ EOF
 
 9. **Code review** -- **after the commit lands**, spawn the **three**
    dedicated reviewer agents **in parallel** (in a single
-   message with three Agent tool calls). The harness stops
-   them changing anything: none has `Edit` or `Write`, two
-   have no shell, and `red-team`'s shell is scoped to
-   read-only git subcommands.
+   message with three Agent tool calls). None has `Edit` or
+   `Write`, and `artisan` and `fresh-reader` have no shell.
+   `red-team` does have one and is only *asked* not to write
+   -- see `code-reviewers.md`, which explains why that is not
+   a harness guarantee.
 
-   **IMPORTANT:** Always run all three when the commit
-   contains code -- `.rs`, `.toml`, `.sh`, `.ps1`, a
-   template under `crates/bombyx/templates/`, or a
-   workflow under `.github/`. Never skip them, even for
-   "straightforward" changes. The only exception is a
-   commit with no code at all (`.md` only) -- and there,
-   still consider `fresh-reader` alone when the commit
-   rewrites prose a newcomer lands on (`README.md`,
-   anything under `docs/`). `code-reviewers.md` owns this
-   list; do not restate it elsewhere.
+   **IMPORTANT:** Never skip them, even for
+   "straightforward" changes. `code-reviewers.md` under
+   **When to run** holds the file list, the canon-and-
+   workflow case, and the two exceptions. Read it there;
+   this step keeps no copy, because two copies of a
+   trigger list drift and the reader cannot tell which
+   one wins.
 
    Spawn **Red Team** (security & correctness,
    `subagent_type: red-team`), **Artisan** (code quality,
@@ -178,10 +176,9 @@ EOF
    (comprehension, `subagent_type: fresh-reader`) in the
    single parallel message, giving each a one-line
    description of what the change does, and the commit
-   range under review. That is `HEAD~1..HEAD` on every
-   round -- after step 10 the fix commit is `HEAD` -- plus
-   the SHA of the commit it fixed, named in the prompt so a
-   fix can be read against what it was fixing. `red-team` runs `git show` itself; `artisan` has
+   range under review -- `code-reviewers.md` says how to work
+   that range out, and it is not always `HEAD~1..HEAD`.
+   `red-team` runs `git show` itself; `artisan` has
    no shell, so pass it the captured diff in its spawn
    prompt; `fresh-reader` gets the **list of changed file
    paths** and no diff, because it reads the finished files
@@ -256,13 +253,15 @@ EOF
    The commit has already landed, so nothing here blocks
    shipping and there is no "Commit as-is" option to
    offer. Present each escalated finding in full, in
-   whatever fields its reviewer emitted, and ask whether to fix it now, defer it to the backlog,
-   or decline it; split across questions (max 4 options
-   each) if needed. Still surface **every** finding --
+   whatever fields its reviewer emitted, and ask whether to
+   fix it now, defer it to the backlog, or decline it; split
+   across questions (max 4 options each) if needed. "Already
+   covered" is not a fourth option -- fold that case into
+   declined, and say what covers it. Still surface **every** finding --
    applied, escalated, deferred or declined -- in your
-   summary; never silently drop one. Cross-confirmed findings
-   (two or more reviewers, same root cause) are the
-   strongest signal -- note which ones agreed.
+   summary; never silently drop one. Cross-confirmed
+   findings (two or more reviewers, same root cause) are
+   the strongest signal -- note which ones agreed.
 
    `fresh-reader`'s **What worked** section is not a
    finding and needs no action. Do not act on it, and do
@@ -321,21 +320,34 @@ EOF
     wrong.
 
     **Stop when you would not fix anything the round
-    found** -- every finding deferred, declined or already
-    covered. Do not chase an empty report: reviewers always
-    find something, and the stopping rule is agreement on
-    what matters. **After three rounds, stop and hand the
-    remaining findings to the user** rather than starting a
-    fourth; by then the disagreement is about judgement, not
-    defects.
+    found** -- every finding deferred or declined. Do not
+    chase an empty report: reviewers always find something,
+    and the stopping rule is agreement on what matters.
+    **After three rounds, stop and hand the remaining
+    findings to the operator** rather than starting a
+    fourth; by then the disagreement is about judgement,
+    not defects.
 
     **A round that only defers still makes a commit.** The
     backlog files it wrote have to land somewhere, and this
     is the terminal round, so there is no later commit to
-    carry them. Commit them alone, as `docs`. That commit
-    holds nothing but `.md` backlog entries, so it does not
-    start another round -- see the docs-only exception in
-    step 9.
+    carry them. Commit them alone, as `docs`. **A commit
+    holding only backlog entries starts no round** -- its
+    content is the reviewers' own output, not prose anybody
+    reads to learn the project.
+
+    **Every other fix commit is reviewed, whatever its file
+    types.** The docs-only exception applies to the commit
+    that *starts* a cycle, never to a fix. A fix is code
+    written under review pressure even when it is prose, and
+    most fixes here are prose -- so exempting them would
+    quietly cancel the third reason the ordering exists.
+
+    **When the cap is reached, apply no more fixes.** Round
+    three reports; it does not fix. Hand what is left to the
+    operator, so the cycle never ends on a fix commit nobody
+    reviewed.
+
 11. **Workflow retrospective** -- delegate to
     `/retrospect`, once the review cycle in steps 9 and 10
     has stopped. It critiques how the work was done, so it

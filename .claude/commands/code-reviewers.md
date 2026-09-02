@@ -1,19 +1,33 @@
 # Code reviewers (gating rules)
 
 Three reviewers guard every code commit. Their personas live as
-first-class subagents in `.claude/agents/`, and the harness --
-not an instruction they could talk themselves out of -- is what
-keeps them from changing anything. None has `Edit` or `Write`.
-`artisan` and `fresh-reader` have no shell at all. `red-team`
-needs one to run `git show`, so its `Bash` grant is scoped to
-read-only git subcommands; an unscoped `Bash` would let a
-reviewer write files, which would make the guarantee a wish.
+first-class subagents in `.claude/agents/`.
+
+**Two of them cannot write; the third is asked not to.** None
+has `Edit` or `Write`. `artisan` and `fresh-reader` have no
+shell at all, so for those two "read-only" is a harness fact.
+`red-team` needs a shell to run `git show`, and **an agent's
+`tools:` field takes tool names, not permission rules** -- so
+`Bash` there is unscoped, and the only thing stopping it writing
+is the instruction in its own file.
+
+Do not write that it is read-only by construction. It was
+written that way once, on the strength of a
+`tools: ... Bash(git show:*)` line that looked like scoping and
+enforced nothing; the reviewer disproved it by creating a file
+and saying so. If you want it enforced, the place is a
+`permissions` block in settings, and the way to confirm it is a
+refused write -- not a line of frontmatter that parses.
+
+The practical consequence: `red-team` reads files a repo
+controls, so a prompt injected through one of them has a shell.
+That risk is accepted for now, and it is written down here
+rather than papered over.
 
 - **`red-team`** (`.claude/agents/red-team.md`) -- security &
-  correctness. Tools: `Read`, `Grep`, `Glob`, and a `Bash`
-  scoped to read-only git subcommands. It runs `git show` and
-  `git log` itself, so it needs the shell. Tell it which commit
-  range to review.
+  correctness. Tools: `Read`, `Grep`, `Glob`, `Bash`. It runs
+  `git show` and `git log` itself, so it needs the shell. Tell
+  it which commit range to review.
 - **`artisan`** (`.claude/agents/artisan.md`) -- code quality &
   craftsmanship beyond clippy. Tools: `Read, Grep, Glob` only --
   no shell, so it is read-only by construction. Pass the diff to
@@ -43,6 +57,14 @@ This file defines *which* reviewers run, *when*, and *how* to
 spawn them. The review criteria themselves live in the agent
 files above. `/commit` is the only caller.
 
+**An edit to an agent file takes effect on the next session,
+not this one.** Claude Code reads `.claude/agents/` at startup,
+so a round that just rewrote a reviewer's definition spawns the
+old one. Two consequences: a new agent cannot be used in the
+session that created it, and a round reviewing its own agent
+files is judging them with the previous version's brief. Say so
+in the summary when it applies.
+
 ## Reviews run after the commit
 
 The target is a **commit**, never the index. `/commit` commits
@@ -51,16 +73,24 @@ Fixes from a round land as their own commit, and the next round
 reviews that. The reasoning is in `CLAUDE.md` under **Commits
 and releases**; the operational consequences are:
 
-- Pass a **commit range**, not a staged diff. For a first round
-  that is `HEAD~1..HEAD` -- capture it once with
-  `git show HEAD` or `git diff HEAD~1..HEAD`.
+- Pass a **commit range**, not a staged diff. The range is
+  **the parent of the first commit this run made, up to
+  `HEAD`** -- work it out at step 9 rather than assuming
+  `HEAD~1..HEAD`, because one `/commit` run may land several
+  commits. `HEAD~1..HEAD` is the common case, not the rule.
+  Write it `<older>..<newer>` and check it with
+  `git rev-list --count` before putting it in a message: a
+  reversed range prints nothing and exits 0.
 - **Never amend the commit under review.** A reviewer holding
   a SHA must be able to trust it still means what it meant.
-- Give the reviewers the *previous* commit as context when the
-  round is reviewing a fix commit, so a fix can be judged
-  against what it was fixing.
+- On a fix round, say in the prompt that `HEAD~1` is the commit
+  being fixed, so a fix is read against what it was fixing.
+  **Do not hand a bare SHA to `artisan` or `fresh-reader`** --
+  neither has a shell, so a SHA is a string they cannot
+  resolve. Give `artisan` both diffs, and `fresh-reader` the
+  union of both commits' changed file paths.
 - **Stop when you would not fix anything the round found** --
-  every finding deferred, declined or already covered. Do not
+  every finding deferred or declined. Do not
   chase an empty report. After three rounds, hand what is left
   to the operator rather than starting a fourth.
 - The fix commit uses **steps 1-8 of `/commit` only**. A nested
@@ -69,23 +99,35 @@ and releases**; the operational consequences are:
   mid-cycle.
 - **A round that only defers still makes a commit**, carrying
   the backlog files alone. It is the terminal round, so no
-  later commit exists to hold them, and a `.md`-only commit
-  starts no new round.
+  later commit exists to hold them. That commit starts no new
+  round: `docs/developer/*-log.md` is exempt under **When to
+  run**, being the reviewers' own output rather than prose
+  anybody reads to learn the project.
 
 ## When to run
 
-Run **all three** reviewers whenever the commit contains code:
-`.rs`, `.toml`, `.sh`, `.ps1`, the Ruby and shell templates
-under `crates/bombyx/templates/`, or a workflow under
-`.github/`. That is the whole list. bombyx is CLI-only, so
-there is no frontend here and no `playwright.config.ts` --
-listing those extensions only sent a reader looking for a
-frontend that does not exist. Never skip the reviewers, even
-for "straightforward" changes. The only exception is a commit with
-no code at all (docs-only markdown / `.md` files) -- and even
-there, consider `fresh-reader` alone when the commit rewrites
-prose a newcomer will land on, such as `README.md` or anything
-under `docs/`.
+Three cases, and every commit is one of them.
+
+**Code.** `.rs`, `.toml`, `.sh`, `.ps1`, a template under
+`crates/bombyx/templates/`, or a workflow under `.github/`.
+That is the whole list; bombyx is CLI-only, so there is no
+frontend here and no `playwright.config.ts`. Run **all three**
+reviewers, and never skip them for a "straightforward" change.
+
+**Canon and workflow.** `CLAUDE.md` or anything under
+`.claude/**`. Run **all three** as well. This project keeps
+its rules in prose, so a stale step number or a rule nobody
+can follow is a real defect -- `artisan.md` has a category for
+exactly this, and the reviewers have found false claims in
+these files that no gate could catch.
+
+**Everything else** -- documentation and prose. Run
+`fresh-reader` alone, and only when the commit rewrites
+something a newcomer lands on: `README.md`, `docs/*.md`, a
+module doc. Two kinds of file are exempt even then, because
+their content is not prose anybody reads to learn the project:
+the reviewers' own backlogs (`docs/developer/*-log.md`) and
+the diary (`docs/developer/DIARY.md`).
 
 ## How to spawn
 

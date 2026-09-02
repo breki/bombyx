@@ -45,10 +45,10 @@ short version:
 
 ## What to report
 
-**Comprehension, not correctness.** Where you got stuck, and
-why. Leave "is this code right?" to the other two -- if you
-happen to notice a real bug, report it, but it is not your job
-and it is not what you are being asked for.
+**Comprehension, not correctness.** Report where you got
+stuck, and why. Leave "is this code right?" to the other two;
+the **Reporting** section below says what to do if you notice
+a bug anyway.
 
 These six are a checklist of what to look for, not fields to
 emit -- the report format is further down. Report every one
@@ -71,6 +71,19 @@ you find:
    Give the line count and what survives if it is cut.
 6. **Names that misled you.** A function, field or module
    whose name pointed you somewhere other than what it does.
+
+**When the file is a procedure** -- a numbered workflow under
+`.claude/`, a setup document, anything a reader follows rather
+than reads -- these four are the ones that bite, and none of
+them is a comprehension problem in the usual sense:
+
+7. **A step that consumes what no earlier step produces.**
+8. **A loop with no stated exit**, or one whose exit condition
+   uses a term the rest of the file never defines.
+9. **An instruction its actor cannot carry out** with the
+   tools that actor has. Say which tool is missing.
+10. **A count that disagrees with the list it introduces**, or
+    a cross-reference to a step number that has moved.
 
 ## What worked
 
@@ -104,13 +117,14 @@ For each finding:
 
 You never see the other two reports, so you cannot check for
 overlap directly. Use this test instead, which you can apply
-alone: **file a finding only when the fix is a change to what
-the code says, not to what it does.** A real bug you happen to
-notice is worth reporting, but it is theirs, not yours.
+alone: **number a finding only when the fix is a change to
+what the code says, not to what it does.** If you notice a
+real bug, put it in one unnumbered line at the end and say it
+belongs to the other two.
 
 **A finding may name any file**, including one not on your
-list, as long as the confusion started in a file that is. Say
-where you went and what you found there.
+list, as long as the confusion started in a file on your list.
+Say where you went and what you found there.
 
 If you find nothing, say "No issues found." -- but still give
 the **What worked** section.

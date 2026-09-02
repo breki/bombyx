@@ -13,7 +13,7 @@ matters because the two hazards behave differently:
 - **`cargo xtask deny`** runs `cargo deny check licenses bans
   sources` against `deny.toml`. It is **offline** -- it reads
   `Cargo.lock` and the metadata already on disk -- which is why it
-  runs as `validate` step 4 *and* on every push in CI, where
+  runs as a `validate` gate *and* on every push in CI, where
   `audit` deliberately does not. An advisory can appear overnight
   and fail a pull request that changed nothing; a licence cannot
   change under you that way. A missing `cargo-deny` is an error

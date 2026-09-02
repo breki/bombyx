@@ -99,7 +99,7 @@ pub struct Vm {
 /// three are gaps rather than decisions. `Vm` has public
 /// fields and `Config::validate` is private, so a hand-built
 /// `Vm` never reaches this function and has no way to ask for
-/// it. A constructor could not be gone around that way.
+/// it. A constructor cannot be bypassed that way.
 ///
 /// What the weaker guarantee costs is argued once in
 /// `docs/architecture.md` under "What config values are
