@@ -285,19 +285,33 @@ constructor while deserializing, so a bad value is refused
 before a `Config` exists, and the error identifies the line.
 
 `box`, `ref`, `cpus` and `memory` are checked by
-`Config::validate` after parsing. The line is not how many
-rules a field has -- `ref` has two, the same as `repo`. It is
-whether a rule is specific to the value. `RepoUrl` and
-`ScriptPath` each carry one that means something only for them,
-so the type name says what was checked; the other four carry
-guards any string field would need, and a wrapper would promise
-nothing extra.
+`Config::validate` after parsing. **That line is in the wrong
+place, and it is where the design is heading rather than where
+it is.**
 
-Those four are therefore checked rather than made unbuildable,
-which is a weaker guarantee, because `Vm` and `Source` have
-public fields. Two things keep it survivable: `render` escapes
-for Ruby whatever it is handed, and `bootstrap.sh` passes `--`
-before the ref so `git` will not read it as an option.
+The reason it was drawn there does not hold up. It went: a type
+is worth it when a value has a rule specific to itself, as
+`repo` and `script` do, and not when the rules are the generic
+ones any string field would need. But what a type promises is
+not that its rules are interesting. It promises that they
+*ran*. `Config`, `Vm` and `Source` all have public fields, so
+any code can build one by hand and reach the guest without
+`validate` ever being called -- and that is true of a field
+with dull rules exactly as much as of one with sharp rules.
+
+So six checked values are still bare: `host`, `project`,
+`vagrant_dir`, `remote_root`, `box` and `ref`. Three things
+keep that survivable for now. `render` escapes for Ruby
+whatever it is handed. `bootstrap.sh` passes `--` before the
+ref. And the loading path is the only way a `Config` is built
+today, so in practice `validate` does run.
+
+`remote_root` is the one that should stop being a `String`
+first: it reaches `rm -rf`, it has six rules, and
+`config::root` already holds every one of them in a single
+function, so the constructor would wrap something that exists.
+Captured as `newtype-remaining-config-fields` in
+`docs/todo.md`.
 
 | Field | Refused | Because |
 |-------|---------|---------|

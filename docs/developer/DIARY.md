@@ -2,6 +2,44 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-02
+
+**"Avoid primitive obsession" put an argument of mine in the
+wrong**
+
+The operator asked what the review round had taught me about
+their Rust preferences, and the honest answer was: less than it
+taught me about their prose standards. Their own Rust-related
+turns in that PR were four, and three were the same question --
+"doesn't Rust provide a type for this?" -- asked about `repo`,
+`script` and paths. They accepted a reasoned no as readily as a
+yes. Then they said it plainly: prefer strong types, avoid
+primitive obsession.
+
+That rule exposed a bad argument I had written and defended in
+three places. `docs/architecture.md` and two doc comments said
+`box`, `ref` and the four `Config` fields stay `String` because
+"their rules are the generic ones any string field would need,
+so a type would promise nothing extra."
+
+The mistake is in the last clause. What a type promises is not
+that its rules are interesting. It promises that they *ran*.
+`Config`, `Vm` and `Source` all have public fields, so any code
+can build one by hand and reach the guest with no check at all,
+and that is as true of a field with dull rules as of one with
+sharp rules.
+
+Six checked values are still bare, and all three places now say
+so as a gap rather than a decision. `remote_root` is the one to
+do first: it reaches `rm -rf`, it has six rules, and
+`config::root` already holds every one of them in a single
+function, so the constructor would wrap something that exists.
+Captured as `newtype-remaining-config-fields`.
+
+Not done in the same PR. The config modules had been re-cut in
+four commits over two days and the review had already flagged
+the churn.
+
 ### 2026-08-31
 
 **A review round where the comments were the defect**

@@ -295,9 +295,12 @@ fn check_script(value: &str) -> Result<(), FieldError> {
 /// are built, so one that exists at all is one that passed --
 /// there is nothing left here to check.
 ///
-/// `ref` is a plain `String` because its rules are the generic
-/// ones any string field would need, so a type wrapping it
-/// would promise nothing extra.
+/// `ref` is still a plain `String`, and that is a gap rather
+/// than a decision. A type would promise its checks *ran*,
+/// which is worth having whether or not the checks are
+/// interesting -- and `Source` has public fields, so this
+/// function is skippable and a constructor would not be. See
+/// `newtype-remaining-config-fields` in `docs/todo.md`.
 pub(super) fn validate(source: &Source) -> Result<(), FieldError> {
     guards::check_renderable("ref", &source.git_ref)?;
     guards::check_not_an_option("ref", &source.git_ref, "git")?;

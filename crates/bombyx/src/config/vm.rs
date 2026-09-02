@@ -94,15 +94,17 @@ pub struct Vm {
 
 /// Checks the `[vm]` values that types cannot.
 ///
-/// `box` is checked rather than wrapped in a type, because its
-/// rules are the generic ones any string field would need and a
-/// type would promise nothing extra. `cpus` and `memory` are
-/// numbers, so the only rule left is a floor.
+/// `box` is checked here rather than wrapped in a type, and so
+/// are `cpus` and `memory`, whose only rule is a floor. All
+/// three are gaps rather than decisions: `Vm` has public
+/// fields, so this function is skippable, and a constructor
+/// would not be.
 ///
-/// Where that line falls, and what the weaker guarantee costs,
-/// is argued once in `docs/architecture.md` under "What config
-/// values are checked". Two copies of an argument drift, so it
-/// is not repeated here.
+/// What the weaker guarantee costs is argued once in
+/// `docs/architecture.md` under "What config values are
+/// checked". Two copies of an argument drift, so it is not
+/// repeated here. The work is
+/// `newtype-remaining-config-fields` in `docs/todo.md`.
 pub(super) fn validate(vm: &Vm) -> Result<(), FieldError> {
     // `box` reaches the generated Vagrantfile, which is a Ruby
     // file, so it gets the Ruby-literal rules. It does not reach

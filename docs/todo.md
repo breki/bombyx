@@ -157,6 +157,19 @@ plan, decisions, and outcome.
   project-file-committed versus host-file-private. That framing does not
   survive.
 
+- **newtype-remaining-config-fields** -- types for the six checked fields
+  Six config values carry validation rules and are still bare `String` or `u32`:
+  `host`, `project`, `vagrant_dir`, `remote_root`, `box` and `ref`, plus
+  `cpus`/`memory` whose only rule is a floor. `RepoUrl`, `ScriptPath` and
+  `ScratchName` show the shape. `Config`, `Vm` and `Source` all have public
+  fields, so every one of those six can be set by hand with no check running.
+  The checks live in `Config::validate`, `vm::validate` and `source::validate`,
+  which only the loading path calls. `remote_root` is the one to do first: it
+  reaches `rm -rf`, it has six rules, and `config::root` already holds all of
+  them in one function, so the constructor wraps something that exists. Not for
+  the generate-vagrantfile PR: the config modules have been re-cut in four
+  commits over two days and the review flagged the churn.
+
 ## Done
 
 - [**generate-vagrantfile**](issues/generate-vagrantfile.md)

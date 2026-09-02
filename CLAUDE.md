@@ -485,6 +485,38 @@ Extends **Documentation style** to every comment in the code,
 - Error handling: `thiserror` for library errors,
   `anyhow` for CLI errors
 - Prefer `&str` over `String` in function signatures
+- **Prefer strong types. Avoid primitive obsession.** A
+  value with a rule attached gets a type that enforces the
+  rule, not a `String` with a checking function somewhere
+  else. The pattern is a newtype: a struct wrapping one
+  private field, buildable only through a constructor that
+  checks first, so holding one *is* the proof it passed and
+  the compiler carries that proof to every use site. See
+  `config::source::RepoUrl` for the shape.
+
+  A checking function is weaker in a way that is easy to
+  miss. It proves the value was checked on the paths that
+  call it, and nothing about the paths that do not.
+  `Config` has public fields, so any code can build one by
+  hand and skip every check; a type cannot be skipped that
+  way.
+
+  **"The rules are generic" is not a reason to leave a
+  value primitive.** What the type promises is not that the
+  rules are interesting, it is that they *ran*. A field
+  whose only rules are non-blank and no-leading-dash still
+  benefits, because the alternative is remembering to call
+  the checker.
+
+  Reach for a primitive when the value genuinely has no
+  rule, when the type would be constructed and unwrapped in
+  the same breath with nothing in between, or when a
+  standard type already carries the meaning -- and say which
+  in a comment, because **the representation has to be
+  argued for**. `ScriptPath` is a checked `String` rather
+  than a `PathBuf` for a written-down reason: the path is
+  resolved on the guest, and `PathBuf` answers for the
+  machine bombyx was compiled for.
 - All public items must have doc comments
 - Wrap markdown at 80 characters per line
 - Maximum code line width: 80 characters (`rustfmt.toml`)
