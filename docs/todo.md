@@ -26,9 +26,9 @@ plan, decisions, and outcome.
   with 'The snapshot name fresh-install was not found for the virtual machine
   default' and exit 1. The failure is clean and well surfaced -- verified live
   on frosti during first-real-run -- so this is a workflow gap rather than a
-  bug. README.md documents reset as 'restore the fresh-install snapshot' without
-  saying the operator must create it by hand first, which makes reset look like
-  a working command on a new project when it cannot be. Options: add a bombyx
+  bug. README.md and docs/tutorial.md both now say the snapshot has to be
+  taken by hand first, so what is left is the command itself. Options: add a
+  bombyx
   command that takes the snapshot (snapshot save fresh-install) so the reset
   cycle is self-contained, or document that taking it is a manual step after the
   first successful up. The first is more useful: the snapshot should be taken at
@@ -72,12 +72,17 @@ plan, decisions, and outcome.
   listening ports do not. There is currently no way to pick up mid-task after
   stopping a VM.
 
-- **minimal-vagrantfile** -- strip project logic to boot + bootstrap hook
-  Reduce the Vagrantfile to infrastructure only: provider, base box, CPUs,
-  memory, and a single generic bootstrap provisioner that calls into bombyx.
-  Everything project-specific moves out. A short Vagrantfile is also easier to
-  keep identical across Windows and Linux hosts, since provider-specific
-  features are what turn it into a nest of conditionals.
+- **minimal-vagrantfile** -- keep the generated file identical across hosts
+  The first half of this landed with `generate-vagrantfile`: `vagrantfile.rs`
+  renders infrastructure only -- box, provider block with cpus and memory, the
+  disabled synced folder, and one shell provisioner pointing at bootstrap.sh.
+  Nothing project-specific reaches it.
+
+  What is left is the parity claim. The renderer emits one provider block
+  chosen by `[vm] provider`, and only the libvirt spelling has ever been run.
+  Whether the Hyper-V block boots anything, and whether the two need to
+  diverge further than they do, is unanswered until somebody has a Windows VM
+  host. Related: `provider-configured-not-selected`.
 
 - **provision-lifecycle-hooks** -- named hooks replace one bash provision script
   Provisioning is currently one bash script run by Vagrant at VM creation.
@@ -166,8 +171,8 @@ plan, decisions, and outcome.
   and then fails. The comment above the resolution loop now says plainly that
   the loop does not cover self-update, so the code and the prose agree; closing
   the gap means resolving git, curl and tar before the first fetch. Worth fixing
-  in the same pass: git is the first program self-update runs, and some lists
-  of the tools it needs omit it.
+  in the same pass: git is the first program self-update runs, and it was
+  missing from the lists that name its tools.
 
 - **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
   Found by the red-team review of 58099a8 (RT-2), verified by reading

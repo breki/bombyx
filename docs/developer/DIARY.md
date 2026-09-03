@@ -2,6 +2,56 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-03
+
+**Four review rounds spent fighting our own test scaffolding**
+
+`crates/bombyx/tests/integration_test.rs` was rewritten in seven
+consecutive commits. The last four of those rewrote the same
+twenty lines, and each round's reviewers found defects in the
+code written to fix the previous round's defects there.
+
+The tests were three document scanners. They ran the binary,
+string-split its output, string-split a markdown file, and
+compared. One checked that the sample configs the docs show
+actually load. One checked the `(N lines elided)` numbers in the
+dry-run transcripts. One checked that a `doctor` transcript
+showing skip rows also shows the skip count.
+
+The file list went hardcoded, then `git ls-files`, then a
+directory walk -- each shape with a hole the next round found.
+The count assertion went `contains` to vector equality, which
+fixed one failure mode and created another. A helper returned
+`None` on failure, which hid a broken extraction; making it a
+hard failure then broke on a document that merely mentions the
+anchor in prose.
+
+The reviewers were right every time, and the fixes were right
+every time, and it never converged. What none of us said until
+round four is that rendered terminal output and hand-written
+markdown have no contract to test against, so every assertion
+was a fresh parser with fresh edge cases.
+
+They are deleted. 251 lines, about a quarter of the integration
+suite. Over four rounds they caught two defects: sample configs
+that could not load, which was real and user-facing, and a stale
+line count, which was cosmetic. The first was worth having. It
+did not need a scanner -- it needed somebody to copy the sample
+and run it, once, which is what the review round that found it
+actually did.
+
+The rule worth keeping: a test whose assertion side needs its
+own parser is testing the parser. bombyx is the parser for a
+config file, so "does this text load" was sound. Nothing is the
+parser for a `doctor` report, so "does this transcript look
+right" could not be.
+
+`CLAUDE.md` caps the review cycle at three rounds and says to
+hand what is left to the operator. We ran four. The cap is not
+about patience; it is the point where the round stops finding
+defects in the work and starts finding them in the previous
+round.
+
 ### 2026-09-02
 
 **The documented config never worked**

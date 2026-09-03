@@ -14,8 +14,6 @@ Cargo workspace, CLI only:
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `vagrantfile.rs` — renders the Vagrantfile, embeds the
     bootstrap script
-- `crates/bombyx/templates/bootstrap.sh` — the script the
-  guest runs, identical for every project
   - `plan.rs` — `Action` → ordered command list
   - `doctor.rs` — the check model; submodules own the rest
     - `doctor/probes.rs` — which probes run, reading a result
@@ -26,6 +24,9 @@ Cargo workspace, CLI only:
   - `tool.rs` — `PATH` lookup, never the working directory
   - `bin/bombyx/main.rs` — clap parsing, host-provenance
     reporting, process spawning, the self-update ordering
+  - `templates/bootstrap.sh` — the script the guest runs,
+    identical for every project (beside `src/`, not in it;
+    every other entry above is `src/`-relative)
 - `xtask` — build automation (not published)
 
 No web crate, no frontend, no E2E suite, no deploy
