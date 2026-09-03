@@ -9,6 +9,121 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-03-three-logs-named-as-two
+
+**Category:** Canon states a set incompletely
+
+`docs/developer/fresh-reader-log.md` exists and `/review` names
+all three backlogs. `.claude/commands/retrospect.md` and
+`xtask/src/sync.rs` have been corrected to name all three.
+Two files still name only two:
+`.claude/skills/architect/SKILL.md:67-68` and
+`.claude/commands/template-improve.md:75`.
+
+Deferred: both remaining files are outside the work under
+review, and neither states a rule -- `SKILL.md` draws a
+directory tree and `template-improve.md` lists where feedback
+goes.
+
+Found by the Fresh Reader review (FR-7), 2026-09-03. Narrowed
+2026-09-03 after `retrospect.md` and `sync.rs` were fixed.
+
+---
+
+### fr-2026-09-03-implement-md-stale-tool-grants
+
+**Category:** Command definition
+
+`.claude/commands/implement.md:3` grants
+`Bash(scripts/e2e.sh*)`, and `CLAUDE.md` states that
+`scripts/e2e.sh` does not exist -- `implement.md:96-98` says so
+itself. The same frontmatter grants `Skill(commit)` but not
+`Skill(review)`, while step 6 tells the actor to "Optionally run
+`/review`", so a reader cannot tell whether the command invokes
+it or hands off to the developer.
+
+Deferred: outside the diff of the commit under review.
+
+Found by the Fresh Reader review (FR-8, FR-9), 2026-09-03.
+
+---
+
+### fr-2026-09-03-gate-numbers-copied-out-of-xtask
+
+**Category:** A number owned by code, restated in prose
+
+Two figures live in `xtask` and are re-typed into canon, where
+they have drifted. `llms.txt:125` lists seven items for
+`validate` and `llms.txt:136` says it has nine steps; the two
+missing are the dependency cooldown and `deny`, and the cooldown
+is the gate `CLAUDE.md` says fires when you were not expecting
+it. Separately `xtask/src/coverage.rs:18` enforces
+`MODULE_THRESHOLD = 85.0`, which `CLAUDE.md` never mentions --
+it states only the 90% workspace floor, so whether a module at
+86% passes is answerable only from the source.
+
+Deferred: outside the diff of the commit under review.
+
+Found by the Fresh Reader review (FR-12, FR-13), 2026-09-03.
+
+---
+
+### fr-2026-09-03-retrospect-examples-name-absent-tools
+
+**Category:** An example that is itself the defect it illustrates
+
+`.claude/commands/retrospect.md:95-96` and `:179-185` illustrate
+a Cleanup finding -- "a skill/command referencing a tool, file
+or workflow that no longer exists" -- with the `web-dev` skill
+and `playwright.config.js`. Neither exists here, and `CLAUDE.md`
+states Playwright is not used. The live instance of that shape
+is `implement.md`'s `scripts/e2e.sh` grant, which would make the
+example real.
+
+Deferred: outside the diff of the commit under review.
+
+Found by the Fresh Reader review (FR-15), 2026-09-03.
+
+---
+
+### fr-2026-09-03-code-reviewers-does-not-say-what-it-is
+
+**Category:** A file whose kind is unclear from its content
+
+`.claude/commands/code-reviewers.md` has no frontmatter, unlike
+every sibling in that directory, so a reader cannot tell whether
+`/code-reviewers` is invokable or whether the file is reference
+material `/review` reads. It is in fact registered as a skill,
+which the file itself never says.
+
+Deferred: outside the diff of the commit under review.
+
+Found by the Fresh Reader review (FR-5), 2026-09-03.
+
+---
+
+### fr-2026-09-03-simplify-row-not-marked-global
+
+**Category:** Skills table does not distinguish global from project
+
+`CLAUDE.md`'s skills table lists `/simplify` with no in-repo
+definition: there is no `.claude/commands/simplify.md`, and
+`.claude/skills.json` declares only `architect`. Both `red-team`
+and the Fresh Reader read that as a dangling row and asked for
+its deletion. **They were wrong about the cause** -- `/simplify`
+is a live global skill, which neither reviewer could see from
+the repo. The real gap is that the table mixes project skills
+with global ones and never marks which is which, so a reader
+deciding how to harden work before a commit is offered a third
+option they cannot locate.
+
+Deferred: outside the diff of the commit under review.
+
+Found by the Fresh Reader review (FR-14) and the red team review
+(RT-12), 2026-09-03.
+
+---
+
 ### fr-2026-09-02-two-more-files-describe-the-push
 
 **Category:** Files no sweep opened

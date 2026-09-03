@@ -15,10 +15,10 @@ work-in-progress, run it manually at your own shell (outside
 this flow). `/release` runs it as the authoritative release
 gate.
 
-**`/commit` does no reviewing.** Reviewing is `/review`, a
-separate and independent process: it reviews uncommitted work,
-commits nothing, and nothing here requires it. Run it before
-`/commit` when you want the work hardened first, or not at all.
+**`/commit` does no reviewing.** Run `/review` beforehand when
+you want the work hardened first, or not at all. `CLAUDE.md`
+under **Reviewing is its own process** says why the two are
+separate.
 
 ## Instructions
 
@@ -27,7 +27,7 @@ commits nothing, and nothing here requires it. Run it before
    - `git diff` for unstaged changes
    - `git diff --cached` for staged changes
    - `git log --oneline -5` for recent commit style reference
-   - `git config user.email` to confirm an author identity
+   - `git config --get user.email` to confirm an author identity
      exists. It costs nothing when set, and when it is not,
      `git commit` fails at step 8 with the diary and the
      CHANGELOG already written. Cheaper to find here.
@@ -132,6 +132,18 @@ commits nothing, and nothing here requires it. Run it before
    files (.env, credentials, etc.). Include diary and
    changelog if updated.
 
+   A `/review` run before this one leaves two things
+   behind. Its edits to `docs/developer/*-log.md` are
+   part of the work, so stage them with it. It may also
+   have left intent-to-add index entries, which
+   `git status` shows as staged additions. An
+   intent-to-add entry holds no content, so `git commit`
+   skips it and staging by name cannot pick it up --
+   there is nothing here you must undo. If the developer
+   wants the index clean, tell them to run
+   `git reset -- <path>` themselves; this skill has no
+   `git reset` grant, deliberately.
+
 7. **Fix line endings** - `git add` prints a CRLF warning
    when it converts one, so check its output now that the
    files are staged. All text files must use LF endings.
@@ -150,24 +162,22 @@ EOF
 ```
 
 9. **Workflow retrospective** -- delegate to `/retrospect`.
-    It critiques how the work was done rather than the diff,
-    so it wants the whole run to look back on, and it runs
-    last so it cannot block shipping.
+   It critiques how the work was done rather than the diff,
+   so it wants the whole run to look back on, and it runs
+   last so it cannot block shipping.
 
-    The `/retrospect` skill owns the full set of
-    rules: the four buckets (Efficiency / Quality /
-    Speed / Cleanup), `[trivial]` vs `[propose]` tagging,
-    the offer to auto-apply trivial findings, and
-    the recursive-skip carve-out for workflow-only
-    diffs (`.claude/**` / `CLAUDE.md` only). See
-    `.claude/commands/retrospect.md` for the full
-    contract.
+   The `/retrospect` skill owns the full set of rules: the
+   four buckets (Efficiency / Quality / Speed / Cleanup),
+   `[trivial]` vs `[propose]` tagging, the offer to
+   auto-apply trivial findings, and the recursive-skip
+   carve-out for workflow-only diffs (`.claude/**` /
+   `CLAUDE.md` only). See `.claude/commands/retrospect.md`
+   for the full contract.
 
-    From here, simply invoke `/retrospect`. If the
-    committed work would trigger the recursive skip,
-    `/retrospect` no-ops silently. Otherwise it produces
-    the report inline.
-
+   From here, simply invoke `/retrospect`. If the committed
+   work would trigger the recursive skip, `/retrospect`
+   no-ops silently. Otherwise it produces the report
+   inline.
 
 ## Rules
 

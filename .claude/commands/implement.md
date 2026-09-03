@@ -145,7 +145,7 @@ particular:
 5. Verify the change manually -- actually run it,
    do not infer from a green suite. For a change to
    the commands bombyx emits, that means a real
-   push against a real VM host (Definition of Done
+   run against a real VM host (Definition of Done
    item 3); `--dry-run` only proves the argv. For a
    change to `xtask`, run the affected subcommands
    and check their real output, including a failure
@@ -155,10 +155,10 @@ particular:
 6. Optionally run `/review`, then commit with `/commit`.
 
    `/review` hardens the work while it is still
-   uncommitted, and `/commit` does no reviewing of its own.
-   Neither requires the other. For a change that touches
-   the commands bombyx emits, `/review` is worth the time:
-   its step 2 runs the thing rather than reading it.
+   uncommitted, and neither command requires the other. For
+   a change that touches the commands bombyx emits,
+   `/review` is worth the time: it runs the thing rather
+   than reading it.
 
 ## Rules
 

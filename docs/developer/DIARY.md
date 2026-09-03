@@ -4,6 +4,59 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-03
 
+**Three review rounds on `abee0a5`, and why they did not
+converge**
+
+We reviewed `abee0a5` over three rounds. The findings went 45,
+32, 31, and the flat tail is the shape `/review` says means a
+run has stopped converging. The rounds fixed real defects --
+all three reviewers independently found that the agent files
+still named `/commit` as a caller after it stopped reviewing --
+but rounds two and three kept finding defects in round one's
+own fixes.
+
+The cause is not that the fixes were careless, though some were
+ours to own: we consolidated four copies of one rule inside a
+round carrying twenty-five other edits, and the backlog entry
+we deleted in that same round had said to do it as its own
+change.
+
+Two structural reasons sit under that. The first is that
+collapsing duplicated prose is not a removal, it is a
+conversion: N copies become one owner and N-1 pointers, and a
+pointer can be misnamed, under-qualified, chained too deep, or
+self-refuting. One 4-to-1 consolidation in round one produced
+five findings in round two. The rule the reviewers enforce
+manufactures the next round's input.
+
+The second is that the finding count measures the wrong thing.
+We classified round three's 31 findings and 19 of them were
+mechanically checkable -- does this bold cross-reference
+resolve, does this backticked path exist, is this `git`
+subcommand in the skill's `allowed-tools`. Those recur because
+detection is probabilistic rather than because they are hard:
+the same defect class produced "`/commit` in three of three
+agent files", then "the calling skill in two of three", then a
+test asserting four of eight `NEVER_SYNC` entries. A grep is
+not lossy and no grep was running. The other 11 were phrasing
+and placement, and `review.md` already explains why those
+cannot terminate -- it says an assertion with no contract
+behind it should be deleted rather than parsed harder, a lesson
+we learned about tests that scan documents and never applied to
+reviewers that scan prose.
+
+So the count was flat while severity collapsed. Round one found
+a brief describing a caller that did not exist; round three
+found a paragraph called a section.
+
+`xtask/src/sync.rs` carried the one code defect of the run:
+`NEVER_SYNC` listed two reviewer backlogs and not the third, so
+`cargo xtask sync-candidates` would offer `fresh-reader-log.md`
+as a template sync candidate. It now matches
+`docs/developer/*-log.md` by shape, so a fourth reviewer
+persona needs no edit there, and `is_excluded` grew a `*`
+branch to support it.
+
 **Reviewing and committing are separate processes now**
 
 `/commit` used to commit and then run three reviewer agents,
