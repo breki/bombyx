@@ -19,6 +19,16 @@ reporting are here.
 
 Up to three rounds. Step 4 usually stops it sooner.
 
+**This file is frozen until a run against a real code diff has
+exercised it.** The stop rule was edited four times in two days
+and none of those edits was reviewed before it landed; the
+fourth added a stop condition that three reviewers then found
+to be a redundant restatement of step 3's fixing bar, phrased
+so that only a prose finding could satisfy it. Every run so far
+has been against prose. So take a finding about this file to a
+backlog rather than editing it, until there is a code review to
+measure it against.
+
 Three rounds is the cap because the findings stop dropping off.
 One branch ran five rounds and found 60, 42, 36, 37, 33. A
 converging process has no flat tail like that one; it had one
@@ -55,15 +65,8 @@ git diff --name-only --diff-filter=d HEAD -- . "$EXCL" > target/review-<n>.files
 files and an earlier round's snapshot stays readable when a
 later finding is about the fix for an earlier one.
 
-**At the end of step 3, write the findings beside the
-snapshot**, to `target/review-<n>.findings`: each finding's ID,
-the reviewer that raised it, and what was done with it. Step 3
-from round two on needs the earlier rounds' findings, and
-nothing else in this file produces them -- so without the file
-that check runs off the conversation, which is the thing the
-snapshot exists to avoid depending on. A compaction between
-rounds would otherwise destroy the only input to the one check
-that has ever detected non-convergence here.
+Step 3 writes a third file next to these two,
+`target/review-<n>.findings`.
 
 `git add -N` records a path in the index without its contents,
 which is what makes `git diff` report an untracked file at all.
@@ -135,9 +138,9 @@ message, and hand each one what its **Diff handoff** section
 says -- the snapshot path this round wrote, or the `.files`
 list. This file owns one more instruction:
 
-- **From round two, hand over the earlier rounds' findings and
-  what was done with each**, and ask outright: *is anything here
-  a defect in the fix for an earlier finding?* A reviewer shown
+- **From round two, hand over every earlier round's
+  `target/review-<n>.findings`**, and ask outright: *is anything
+  here a defect in the fix for an earlier finding?* A reviewer shown
   only the current state cannot see a loop. This is the only
   thing that has ever detected non-convergence here.
 
@@ -153,26 +156,33 @@ places. A round finds three, the fix corrects those three, and
 the next round finds the fourth. That is the largest single
 source of rounds that never end. So on a finding of the shape
 "X is wrong in F", find every place that says X before touching
-one. Above two, the fix is one authoritative statement and
-pointers to it.
+one.
 
-**Two copies is the threshold, and two kinds of copy do not
-count.** A one-line `description` in frontmatter and a row in a
-skills table are how a reader finds a command at all, so both
-may restate a rule freely. What counts is a copy that *states
-the rule* in prose. Fixing that threshold matters because
-without it a consolidation can always be filed as insufficient
-or as excessive, and a finding nobody can settle is a finding
-that comes back every round.
+**Two prose copies are allowed; a third is the defect.** What
+counts is a copy that states the rule. A copy whose job is
+helping a reader *find* the rule does not count -- a one-line
+`description` in frontmatter, a row in a skills table, a clap
+`///` help line -- though it must still agree with the rule it
+summarizes, and a summary that contradicts it is a false claim
+about the command. Above two, the repair is one authoritative
+statement and pointers to it -- but do not make that repair
+here. See the next paragraph.
 
-**Consolidating is its own change, with nothing else in it.**
+**A consolidation is escalated, never applied in the round.**
 Collapsing N copies to one owner does not remove prose, it
 converts it: N-1 pointers appear, and a pointer can name the
 wrong section, fail to name one, chain two deep, or explain
 that it is a pointer. One 4-to-1 consolidation done inside a
 round carrying twenty-five other edits produced five findings
-in the next round. So do the consolidation alone, and let it be
-reviewed alone.
+in the next round.
+
+This command commits nothing, so it has no change of its own to
+put a consolidation in, and every later round snapshots
+`git diff HEAD`, which is cumulative -- so a consolidation
+applied in round one is reviewed together with everything else
+the run touched. Name the copies, apply none of them, and hand
+the developer a consolidation to make as its own commit after
+the run. It is in the escalate list below for that reason.
 
 **Enumerate before you claim a set is done.** Read the list back
 and count it. Four defects in one round of this command's own
@@ -182,14 +192,20 @@ fixed in some of its members.
 **Do not fix everything.** Every edit is new text for the next
 round. Apply the mechanical ones directly -- a stale doc, a
 tightened regex, a renamed local -- and announce the set so the
-developer can interrupt. Fix what is wrong, false, or would
-mislead a reader into an error.
+developer can interrupt. Fix what is wrong or false, and what
+would make someone act on it wrongly -- a reader, the operator,
+or bombyx itself. That last one matters because most of what
+this loop guards is not prose: a config value interpolated into
+Ruby without quoting misleads no reader and still hands the VM
+host a command nobody wrote. Leave what would merely read
+better.
 
 **Escalate rather than apply** when a finding crosses one of
 these: large rework (over five files, over a hundred lines, or
 churn outside the diff); two findings conflicting; a genuine
 design tradeoff; a public-surface or breaking change; a new
-dependency; out of scope for the work in hand. Escalation
+dependency; a consolidation of three or more copies; out of
+scope for the work in hand. Escalation
 matters more here than on a landed commit, because the work is
 uncommitted and there is no boundary to revert a bad rework to.
 Present the finding in the fields its reviewer emitted and ask:
@@ -217,23 +233,33 @@ problem.
 **Read the artifact back before claiming a fix landed.** "The
 help now says Y" needs the grep that shows it.
 
+**Then write the round's findings to
+`target/review-<n>.findings`.** One line per finding: its ID,
+the reviewer, the category, the `file:line` it named, one
+sentence of what it said, and its disposition. On round three
+the disposition is "reported, not fixed" for all of them.
+
+Record the finding itself, not just its label. The consumer is
+the handover bullet above, and a reviewer handed `AQ-7 |
+artisan | fixed` cannot tell whether a new finding is a defect
+in that fix. Long sessions get their earlier messages
+summarised away, and the round-one findings go with them, so a
+file on disk survives where the conversation does not. Note
+that `target/` is not committed, so anything that must outlive
+the run goes in a backlog under **Log what you defer**.
+
 ### 4. Stop, or go again
 
 Stop when any holds:
 
-- **No finding in the round would make a reader act wrongly.**
-  This is the one to check first, and a falling count is not
-  it. Three rounds on one commit went 45, 32, 31 findings while
-  severity collapsed: round one found a reviewer brief naming a
-  caller that did not exist, and round three found a paragraph
-  called a section. Style and placement findings arrive in
-  proportion to how much prose there is, not to how wrong it
-  is, so their supply never runs out and the count never
-  reaches zero. Ask what a reader would *do* wrongly. When the
-  answer is nothing, stop, and report the rest without fixing
-  it.
 - **The round fixed nothing** -- every finding deferred or
-  declined.
+  declined. The canon rule, and usually the first to fire.
+  Step 3's fixing bar decides what counts, so this condition
+  needs no criterion of its own. Do not read a falling finding
+  count as progress either: findings about style and placement
+  arrive in proportion to how much prose the change contains,
+  not to how badly that prose misleads anyone, so the count
+  never reaches zero.
 - **Earlier fixes are breaking.** More than one defect in an
   earlier round's fix, or one landing in an area an earlier
   round already fixed. Go to **When it stops converging**. A

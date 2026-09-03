@@ -9,6 +9,56 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-03-no-reviewer-emits-the-severity-field
+
+**Category:** A judgement with no named source
+
+`/review`'s fixing bar asks what would make a reader, the
+operator or bombyx act wrongly. No reviewer emits that. `red-team`
+emits **Why it matters** and **Example trigger**, `artisan` emits
+**Why it matters: impact on maintainability**, and `fresh-reader`
+emits **Where it left me**. Impact on maintainability is not the
+same test, and "where it left me" states a question the reader
+could not answer, which is close but not it.
+
+So the caller with twenty findings in front of them has no
+statement of which field carries the answer, or whether they
+judge it themselves from the **What** field. `red-team`'s
+**Example trigger** is probably the closest thing to a severity
+statement in any of the three briefs, and nothing says so.
+
+Deferred: naming the field per reviewer touches all three agent
+briefs, and `/review` is frozen until a run against a real code
+diff has exercised the bar.
+
+Found by the Fresh Reader review (FR-4), 2026-09-03.
+
+---
+
+### fr-2026-09-03-artisan-500-line-rule-has-no-canon-counterpart
+
+**Category:** A reviewer rule the project may have outgrown
+
+`.claude/agents/artisan.md` says any source file over 500 lines
+containing multiple structs or enums should be flagged for
+splitting. `CLAUDE.md` **Coding Standards** states no such limit,
+and `CLAUDE.md` **Environment Constraints** describes
+`crates/bombyx/src/config.rs` as 1747 lines while advising how to
+read it, with no suggestion that its length is a defect.
+
+So a caller receiving "split `config.rs`" cannot tell whether it
+is a project rule or a default from the brief that the project
+has silently outgrown, and therefore whether to decline it every
+round.
+
+Deferred: either the limit belongs in `CLAUDE.md` with the brief
+pointing at it, or the brief should say the number is a prompt to
+look rather than a rule. Deciding that is not this run's work.
+
+Found by the Fresh Reader review (FR-9), 2026-09-03.
+
+---
+
 ### fr-2026-09-03-pointers-do-not-name-what-they-point-at
 
 **Category:** A cross-reference a reader cannot follow

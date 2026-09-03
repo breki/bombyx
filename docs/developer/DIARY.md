@@ -4,6 +4,60 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-03
 
+**The stop rule I added was wrong, and the reviewers said so**
+
+The entry below claims that a severity-based stop condition
+"would have ended the run a round earlier". Three reviewers then
+read `4c8dab3` and the claim does not survive. Correcting it
+here rather than editing the entry, because the diary is a
+record.
+
+The condition was redundant. Step 3 already said to fix what is
+wrong, false, or would mislead a reader into an error -- that is
+the severity test, in the file, at the step where fixing
+happens. The new condition restated it in step 4, one step
+downstream, which is the defect `/review` already writes down
+for the round-three rule: a rule about not fixing is no use
+after the fixing.
+
+It was also mis-scoped. The test read "would make a reader act
+wrongly", and most of what this loop guards is not prose. A
+config value interpolated into Ruby without quoting misleads no
+reader and still hands the VM host a command nobody wrote. On a
+literal read such a finding scored zero.
+
+Two worse problems. The commit deleted "the stopping rule is
+agreement on what matters" from `CLAUDE.md`, which removed the
+developer from the stop decision and left the condition
+certifiable by the actor who would otherwise have to keep
+working. And placing it first meant a round where earlier fixes
+were breaking would end as an ordinary stop, so the
+non-convergence diagnosis never ran -- and the findings cited as
+proof that severity collapsed were themselves pointer defects
+from a consolidation, which is the category that diagnosis
+exists to name.
+
+The evidence was wrong too. `d1908d6`, made from the same
+round-three findings two hours earlier, records 18 of them still
+live, among them two code defects and a false claim in two
+reviewer briefs. That is not a collapse to nothing, and applying
+the rule at round two would have discarded them.
+
+So the condition is reverted, "agreement on what matters" is
+back, and step 3's existing bar now names the three actors who
+could act wrongly: a reader, the operator, or bombyx. The other
+three changes from `4c8dab3` stay, with the defects the
+reviewers found in them repaired -- the findings file writes
+where it acts and records the finding rather than its label, the
+copy threshold states its number in the rule that owns it, and a
+consolidation is escalated instead of applied, because `/review`
+commits nothing and has no change of its own to put one in.
+
+`/review` is frozen until a run against a real code diff has
+exercised it. The stop rule was edited four times in two days
+and none of those edits was reviewed before landing. This one
+was, which is the only reason any of the above is known.
+
 **Three changes to `/review` so a round can actually finish**
 
 The review loop had a stopping rule that could not fire, a
