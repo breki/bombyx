@@ -41,11 +41,12 @@ section first, then look for:
   or a move.
 - An instruction a reader cannot apply without re-deriving
   the argument behind it.
-- The same rule stated in prose in more than two places. It
-  will drift, and the reader cannot tell which copy wins. A
-  one-line `description` in frontmatter and a row in a skills
-  table are not copies for this purpose -- they are how a
-  reader finds a command.
+- One rule stated in prose in three or more places. It will
+  drift, and the reader cannot tell which copy wins. A copy
+  whose job is helping a reader find the rule does not count
+  toward that -- a frontmatter `description`, a skills-table
+  row, a clap `///` line -- but it must still agree with the
+  rule, and one that contradicts it is its own finding.
 - A count that disagrees with the list it introduces.
 - A claim about the code that the code does not support --
   a promised guarantee that nothing enforces, a named

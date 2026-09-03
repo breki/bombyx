@@ -5,6 +5,28 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-03-round-three-findings-have-no-durable-home
+
+**Category:** A disposition with nowhere to go
+
+Round three reports and fixes nothing, and `/review` logs only
+deferred findings. So a round-three finding is neither fixed nor
+deferred, and no rule writes it anywhere that outlives the run:
+`target/review-<n>.findings` is the only record and `target/` is
+not committed. Commit `d1908d6` exists because of exactly this
+-- round three's findings lived only in the session and had to be
+back-filled into 14 backlog entries by hand afterwards.
+
+Deferred: the fix is either to log a round-three finding the way
+a deferred one is logged, or to say that round three's report is
+the developer's to act on before committing. That is a decision
+about who owns the last round, and `/review` is frozen until a
+run against a real code diff has exercised it.
+
+Found by the red team review (RT-2), 2026-09-03.
+
+---
+
 ### rt-2026-09-03-todo-md-unclassified-for-never-sync
 
 **Category:** An incomplete set
