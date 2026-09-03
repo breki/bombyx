@@ -200,6 +200,17 @@ plan, decisions, and outcome.
   failure rather than a wrong VM. Only making Hyper-V actually work needs a
   Windows VM host, and Provider::Hyperv is documented as never exercised.
 
+- **validate-resume-from-step** -- let validate resume at the gate that failed
+  `cargo xtask validate` prints `-> iterate with: cargo xtask <cmd>` on a
+  failure, and CLAUDE.md records that ignoring that hint four times in one
+  sitting is what prompted the rule to re-run the step rather than the pipeline.
+  It happened again while canon-check was being built: three full ten-gate runs,
+  roughly 15s each, where fmt, clippy and a test had each failed alone.
+  Re-running one gate is a different command from re-running the pipeline, which
+  is the friction. A `--from <step>` flag would make the resume as cheap to type
+  as the restart, and the step names already exist in `validate.rs`'s step list.
+  Raised by the workflow retrospective, 2026-09-03.
+
 ## Done
 
 - [**remote-clone-project-source**](issues/project-config-off-repo.md)

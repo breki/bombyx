@@ -273,6 +273,16 @@ for tools that are not present:
   real run against the VM host.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
+- **Do not grep canon prose for a phrase.** Every markdown
+  file here wraps at 80 columns, so a phrase you remember as
+  one line is usually two, and `grep` sees neither. A search
+  for `keeps its ID` returned nothing while the text said
+  "keeps its\nID", and a false claim was reported as fixed on
+  the strength of that empty result. The same wrap broke a
+  check inside `cargo xtask canon-check`, which now matches
+  against the text with every whitespace run collapsed. Search
+  for one distinctive word, or flatten first:
+  `tr '\n' ' ' < FILE | grep -o 'the phrase'`.
 - **Read a large file in pieces.** Over roughly 500 lines,
   `grep -n` for the item you want and then `sed -n` the range
   around it. Reading `crates/bombyx/src/config.rs` (1747
