@@ -1,13 +1,13 @@
 //! Checks the claims canon prose makes about this repository.
 //!
-//! Three review rounds on one commit produced 108 findings, and
-//! 19 of the last round's 31 were decidable by a command: does
-//! this cross-reference resolve, does this path exist, is this
-//! `git` subcommand in the skill's `allowed-tools`. Those
-//! recurred round after round because a reader catches most of
-//! them and not all, while the same few defect classes kept
-//! producing instances. A check that runs every time is not
-//! lossy that way, so those findings stop reaching a reviewer.
+//! Some of what a canon review looks for is decidable by a
+//! command: does this cross-reference resolve, does this path
+//! exist, is this `git` subcommand in the skill's
+//! `allowed-tools`. A reader catches most instances of such a
+//! defect and never all of them, and the few classes involved
+//! keep producing new instances, so the same findings come back
+//! every review. A check that runs every time is not lossy that
+//! way, and those findings stop reaching a reviewer at all.
 //!
 //! Everything here reads files and compares strings. It decides
 //! nothing about phrasing, and it must stay that way: a check
