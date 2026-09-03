@@ -334,8 +334,7 @@ bombyx runs `rm -rf` on a path derived from it. All of them live
 in `config::root`, blank and leading-dash included, so a second
 caller cannot pick up half the set.
 
-It must start with `/` or `~/` and name at least one directory
-below that anchor, so a bare `~` fails the second half. A bare
+It must start with `/` or `~/`. A bare
 `~name` is refused even though it looks anchored: to a shell
 that means another user's home directory, and
 `quote_remote_path` leaves the tilde outside the quotes only for

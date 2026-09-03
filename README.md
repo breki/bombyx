@@ -114,24 +114,21 @@ reason. The project file describes the *project*, and it is
 committed. Which machine runs the VMs is yours, so you
 configure it once, outside any repo.
 
-Drop a `bombyx.toml` in the project you want a VM for:
+Copy [bombyx.toml.sample](bombyx.toml.sample) to `bombyx.toml`
+in the project you want a VM for, and edit it. That file is the
+one place a full example lives, and a test loads it as shipped,
+so it cannot drift from what bombyx accepts.
 
-```toml
-project = "myproject"    # VM + directory name on the host
+What it holds:
 
-remote_root = "~/vms"    # optional; keep it above [vm]
+| Key | |
+|-----|---|
+| `project` | required; the VM's name and its directory on the host |
+| `[vm]` | required; `provider`, `box`, `cpus`, `memory`, no defaults |
+| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones |
+| `remote_root` | optional, `~/vms`; must sit above `[vm]` |
 
-[vm]                     # required: the machine to build
-provider = "libvirt"     # use libvirt; see docs/todo.md for hyperv
-box = "generic/ubuntu2204"
-cpus = 4
-memory = 8192            # MiB
-
-[source]                 # required: what the guest clones
-repo = "https://github.com/you/myproject"
-ref = "main"
-script = "vagrant/provision.sh"   # run from the clone
-```
+There is no `host` key, and one there is refused -- see below.
 
 **bombyx writes the Vagrantfile; the project does not.** It is
 generated from `[vm]` and written on the VM host on every `up`,

@@ -7,7 +7,7 @@
 //! Four things live here and nowhere else: argument parsing, the
 //! config-precedence reporting on stderr, spawning processes, and
 //! the ordering of the `self-update` sequence. `self_update` is the
-//! largest of them. Do not call this file thin.
+//! largest of them.
 //!
 //! It sits outside the coverage gate (`src/bin/`), so anything that
 //! stays here ships untested. That is the standing reason to put
@@ -160,9 +160,7 @@ fn main() -> ExitCode {
             // this platform" message embeds a newline and so does
             // any anyhow chain -- and it runs after arbitrary
             // children, `ssh` probes included. A multi-line message
-            // is exactly the shape worth protecting, which is
-            // why this arm renders through `eprint_lines`
-            // rather than `eprintln!`.
+            // is exactly the shape worth protecting.
             eprint_lines(&format!("bombyx: {err:#}\n"));
             ExitCode::FAILURE
         }

@@ -48,9 +48,9 @@ fn project_dir() -> TempDir {
 /// A `Config` for `myproject` on `vmhost`, built the way the
 /// binary builds one.
 ///
-/// Through `Config::load` against a real file, not a shortcut past
-/// it: `Config::parse` used to be public with no production caller,
-/// so these tests were exercising a path nothing shipped.
+/// Through `Config::load` against a real file, not a shortcut
+/// past it. A test that reaches a narrower entry point than the
+/// binary uses is testing a path nothing ships.
 fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     let path = dir.join("bombyx.toml");
     std::fs::write(&path, completed("project = \"myproject\"\n")).unwrap();
@@ -513,6 +513,35 @@ fn a_host_cannot_smuggle_an_ssh_option() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("must not start with"));
+}
+
+/// `bombyx.toml.sample` loads, exactly as it is shipped.
+///
+/// It is the file the header tells a reader to copy, and it has
+/// been broken twice: once with `remote_root` written after
+/// `[source]`, which TOML binds to that table so the whole file
+/// is refused, and once still naming the deleted `vagrant_dir`.
+/// Both times the reader's first command failed.
+///
+/// `include_str!` rather than a path lookup, so moving the file
+/// is a compile error rather than a test that quietly stops
+/// checking anything. No directory walk and no fence parsing:
+/// the sample is one named file, and it is the only one --
+/// `README.md`, `docs/tutorial.md` and `llms.txt` point at it
+/// instead of restating it, so there is nothing else to drift.
+#[test]
+fn the_sample_config_loads_as_shipped() {
+    let sample = include_str!("../../../bombyx.toml.sample");
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("bombyx.toml"), sample).unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+    write_user_config(&dir, "host = \"vmhost\"\n");
+
+    bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("vagrant 'status'"));
 }
 
 #[test]

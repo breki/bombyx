@@ -12,19 +12,27 @@ can no longer locate.
 
 > **What this was checked against.**
 >
-> The workstation steps and every piece of bombyx output quoted
-> below were run on Windows 11 with bombyx 0.4.1 in August 2026,
-> including the two failure cases in **When something goes
-> wrong**.
+> The workstation steps were run on Windows 11 in August 2026,
+> against bombyx 0.4.1, including the two failure cases in
+> **When something goes wrong**.
+>
+> **The transcripts in Parts 3 and 4 are not from that run
+> (unverified).** They show behaviour that is unreleased at the
+> time of writing -- bombyx generating the Vagrantfile, `up` as
+> four `ssh` commands, `doctor` without the `tar` and `scp`
+> rows -- none of which 0.4.1 could produce. They are written
+> from the code rather than captured from a machine, and none
+> of it has run against a real VM host. Treat your own first
+> `bombyx up` as the real test.
 >
 > The VM host steps are a summary of
 > [vm-host-setup.md](vm-host-setup.md), which records what it
 > was verified against; follow that page for the detail.
 >
-> The sample `Vagrantfile` and `provision.sh` in Part 3 are
-> *(unverified)* as written here -- they are assembled from a
-> working setup rather than copied from one, so treat the first
-> `bombyx up` as the real test. The comments explain what each
+> The sample `provision.sh` in Part 3 is *(unverified)* as
+> written here -- it is assembled from a working setup rather
+> than copied from one. bombyx writes the Vagrantfile itself, so
+> Part 3 has none to sample. The comments explain what each
 > setting is for, so a failure should be diagnosable rather than
 > mysterious.
 
@@ -73,15 +81,15 @@ packages and the first box download.
 
 | Where | What |
 |-------|------|
-| Workstation | A Rust toolchain, `git`, `ssh`, `tar` |
+| Workstation | A Rust toolchain, `git`, `ssh`, `curl`, `tar` |
 | VM host | A Linux machine with hardware virtualisation, reachable over SSH |
 | Both | Key-based SSH from the workstation to the host, no password |
 
 On Windows, `ssh` comes with the OpenSSH client that ships with
 Windows 11, and `tar` comes with either Windows or Git for
-Windows. You do not need WSL. `tar` is only for
-`bombyx self-update`, which unpacks the release archive with
-it; no VM command runs it.
+Windows. You do not need WSL. `curl` and `tar` are only for
+`bombyx self-update`, which fetches and unpacks the release
+archive with them; no VM command runs either.
 
 A spare desktop or a home server makes the best VM host,
 because a separate machine is what puts your credentials out of
@@ -116,7 +124,7 @@ Check it landed:
 
 ```console
 $ bombyx --version
-bombyx 0.4.1
+bombyx 0.4.1        # whatever you installed
 ```
 
 ### Give the VM host an SSH alias
@@ -257,7 +265,9 @@ machine being a *host*, not about bombyx:
 - **libvirt has to run there.** That means a Linux
   workstation. A Windows machine cannot be its own libvirt
   host: the options are a Linux VM or WSL2 distro with
-  nested virtualization acting as the host, or Hyper-V.
+  nested virtualization acting as the host -- see
+  [vm-host-wsl2.md](vm-host-wsl2.md), which is verified end to
+  end -- or Hyper-V.
   bombyx accepts two provider values, `libvirt` and `hyperv`,
   and refuses anything else -- VirtualBox is not one of them.
   Hyper-V comes with two caveats of its own: its provider
@@ -265,7 +275,7 @@ machine being a *host*, not about bombyx:
   have, and bombyx does not yet tell vagrant which provider
   to use, so setting `hyperv` today gets you whatever the
   host chooses. See `provider-configured-not-selected` in
-  `docs/todo.md`.
+  [todo.md](todo.md).
 
 ### Optional: keep the VM from reaching your home network
 
@@ -314,27 +324,25 @@ myproject/                  your project repo
 
 ### `bombyx.toml`
 
-```toml
-project = "myproject"    # VM and directory name on the host
+Copy `bombyx.toml.sample` from bombyx's own repository into your
+project as `bombyx.toml`. Its comments explain every key, and a
+test loads that file as shipped, so it cannot drift from what
+bombyx accepts -- which is worth something, because it has been
+unloadable twice.
 
-remote_root = "~/vms"    # optional; keep it above [vm] --
-                         # a bare key belongs to the table
-                         # above it, so below [vm] this
-                         # parses as vm.remote_root and the
-                         # whole file is refused
+Then change four values:
 
-[vm]                     # required: the machine to build
-provider = "libvirt"     # hyperv is written but not selected
-box = "debian/bookworm64"   # the chsh line in provision.sh
-                            # below explains this choice
-cpus = 4
-memory = 8192            # MiB; agents want room to build
+| Key | This tutorial uses |
+|-----|--------------------|
+| `project` | `myproject` -- names the VM and its directory on the host |
+| `vm.box` | `debian/bookworm64`; `provision.sh` runs `chsh` because of it |
+| `source.repo` | the URL you push this repository to |
+| `source.ref` | the branch you push, `main` here |
 
-[source]                 # required: what the guest clones
-repo = "https://github.com/you/myproject"
-ref = "main"
-script = "vagrant/provision.sh"
-```
+Leave `provider = "libvirt"`, leave `remote_root` where the
+sample puts it -- above `[vm]`, because a bare key belongs to
+the table header above it, and below `[vm]` this one would
+parse as `vm.remote_root` and the whole file would be refused.
 
 `[vm]` and `[source]` are required and have no defaults. bombyx
 builds the VM from the first and the guest clones the second,
@@ -373,7 +381,8 @@ and `scratch`, together with a small bootstrap script.
 This is not a convenience. Vagrant reads the Vagrantfile before
 the VM exists, so a project-supplied one has to sit on a machine
 outside the guest -- and keeping project code off those machines
-is the whole point. `docs/trust-boundary.md` records the
+is the whole point. [trust-boundary.md](trust-boundary.md)
+records the
 reasoning.
 
 Two things the generated file does that are worth knowing:
@@ -387,7 +396,7 @@ Two things the generated file does that are worth knowing:
   `BOMBYX_VM_HOSTNAME` reach your provisioning script as
   environment variables, so it can record which machine the VM
   is running on. See "Telling the VM which host it runs on" in
-  `README.md`.
+  [../README.md](../README.md).
 
 A `Vagrantfile` committed in `vagrant/` is read by nothing.
 bombyx does not send it, and the guest's own clone is not what
@@ -433,7 +442,7 @@ fi
 sudo swapon --all
 
 # Record which machine this VM is running on. (Unverified -- see
-# the note under the Vagrantfile above.) Nothing inside the
+# the *(unverified)* note in the header.) Nothing inside the
 # guest can work that out: `hostname` here answers `myproject`,
 # and the guest's DMI describes the emulated machine (`QEMU`),
 # not the host -- there is nothing to read at any privilege
@@ -466,6 +475,19 @@ does not read your working copy -- it clones `source.repo` at
 these files are on the branch `ref` names, `bombyx up` boots a
 machine that fails inside the guest.
 
+This assumes the project is already a git repository with a
+remote. If it is not, make an empty repository on the host of
+your choice first, then:
+
+```bash
+git init
+git branch -M main
+git remote add origin https://github.com/you/myproject
+```
+
+Set `source.repo` to that same URL -- the guest clones what
+`repo` names, not whatever `origin` happens to be. Then:
+
 ```bash
 git add bombyx.toml .gitignore vagrant/provision.sh
 git commit -m "add the bombyx VM definition"
@@ -484,7 +506,7 @@ From the project directory:
 
 ```console
 $ bombyx doctor
-  local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
+  local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
   vmhost  vagrant           ok    /usr/bin/vagrant

@@ -441,7 +441,14 @@ re-deriving a style.
   inserted "before the extension" while the code
   replaced the extension outright, and only review
   caught it. Add the doc's own example to the test
-  table, and the two cannot disagree for long.
+  table, copied in by hand as a literal. A test that
+  goes and *finds* the example in the document at run
+  time is a document scanner; **Ask before testing
+  something that is not the program** under
+  **Test-Driven Development** says why those did not
+  work here. Better still, keep one copy of the
+  example and have the documents point at it, which is
+  what `bombyx.toml.sample` is.
 - **Say what you have not verified.** Mark untested steps
   *(unverified)* inline, and give environment-dependent
   documents a header naming what they were checked against
@@ -631,40 +638,52 @@ unnecessary red step is low; the cost of skipping a
 real red step (and shipping a test that always
 passed) is high.
 
-**Ask before testing a new area, especially an
-auxiliary one.** TDD says how to write a test once we
-have decided to write it. It does not decide that the
-test should exist. For a new area -- a new kind of
-check, a new thing to assert about, anything that is
-not the code a user runs -- use `AskUserQuestion`
-first, and say what the test would cover and what it
-would cost to keep.
+**Ask before testing something that is not the
+program.** The rules above say how to write a test
+once we have decided it should exist. They do not
+decide that. When the *subject under test* is a
+repository document, a rendered transcript, a file
+layout or a build artifact -- rather than a function
+bombyx runs -- call `AskUserQuestion` before writing
+it. Put the choice in the lead prose and the file
+names in the option descriptions, which is what
+**Collaboration** asks of every question.
 
-Three document-scanning tests were written under this
-discipline and deleted four review rounds later. They
-ran bombyx, split its output on string literals, split
-a markdown file the same way, and compared: the
-`(N lines elided)` numbers in the dry-run transcripts
-had to match, and a `doctor` transcript showing skips
-had to show the count. Nobody asked for them. Each
-round the reviewers found real defects in them, each
-fix was right, and it never converged, because
-rendered terminal output and hand-written prose have
-no contract to assert against. 251 lines, a quarter of
-the integration suite, for two defects -- one of which
-a reviewer had already found by copying the sample and
-running it.
+**This does not touch ordinary tests.** A function in
+`crates/bombyx/src`, a helper in `xtask`, a new
+`Action` variant: those follow the red/green rules
+above and Definition of Done item 1, with no question
+asked. Developer tooling is not the trigger; the
+subject is.
+
+We wrote three such tests and deleted them four review
+rounds later. They ran bombyx, split its output on
+string literals, split a markdown file the same way,
+and compared. One checked that the config samples in
+the documents load. One checked the `(N lines elided)`
+counts in the dry-run transcripts. One checked that a
+`doctor` transcript showing skip rows also shows the
+skip count. Nobody asked for any of them. Each round
+the reviewers found real defects in them, each fix was
+right, and it never converged, because rendered
+terminal output and hand-written prose offer no
+contract to assert against. The three came to 251
+lines, a quarter of the integration suite, and caught
+two defects.
 
 The tell is on the assertion side. **A test whose
 assertions need their own parser is testing the
-parser.** bombyx parses a config file, so "does this
-sample load" had something to hold on to. Nothing
-parses a `doctor` report, so "does this transcript
-look right" could not.
+parser.** bombyx contains the parser for a config
+file, so "does this sample load" had a contract behind
+it. No parser exists for a rendered `doctor` report,
+so "does this transcript look right" could not have
+one. That is why the sample-config check survives, as
+one `include_str!` of `bombyx.toml.sample` with no
+document scanning in it, and the other two do not.
 
-Auxiliary code is where this bites, because it is
-where nobody is waiting for the test and nobody
-notices the cost. Ask.
+Auxiliary code is where this costs the most, because
+nobody is waiting for the test and nobody notices what
+it costs to keep. Ask.
 
 **Input guards: enumerate the family first.** When
 adding a check that rejects bad input, write the test

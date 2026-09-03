@@ -70,6 +70,10 @@ and this project adheres to
   next provision. The help previously said the script runs from a "fresh
   clone", which reads as losing everything, and then that untracked files
   survive, which reads as a guarantee.
+- bombyx.toml.sample is the only full config example. README.md,
+  docs/tutorial.md and llms.txt named its keys and pointed at it instead of
+  restating it, so the four copies can no longer disagree -- all four were
+  unloadable at once a week ago. A test loads the sample as shipped.
 
 ### Fixed
 
@@ -81,19 +85,15 @@ and this project adheres to
   TOML binds a bare key to the table above it, so it parsed as
   source.remote_root and every command failed while reading the file. The sample
   file also still carried the removed vagrant_dir key and had no [vm] or
-  [source] table. An integration test now loads the first sample config in every
-  reader-facing document, extracted from them rather than restated.
+  [source] table.
 - `bombyx doctor` no longer sends the `vagrant-libvirt` probe to a project
   whose provider is `hyperv`. Hyper-V ships inside Vagrant and has no plugin to
   find, so the row reported a missing plugin that project never needed. Such a
   project now gets a `provider` row reading `skip`, because bombyx has never
   driven a Hyper-V host and has no probe to write for one -- an absent row
   would read as a check that passed.
-- The llms.txt sample config could not be loaded either: it still named the
-  removed vagrant_dir key and had no [vm] or [source] table. It is now covered
-  by the same test as the other three, which extracts the whole fenced block
-  rather than the part from one key onwards, so a bad key written above project
-  is caught too.
+- The `llms.txt` sample config could not be loaded either: it still named the
+  removed `vagrant_dir` key and had no `[vm]` or `[source]` table.
 - bombyx doctor counts skipped checks in its closing line. A report whose only
   non-pass was a skip ended with "all checks passed", which is the reading the
   skip row exists to prevent.
@@ -125,11 +125,7 @@ and this project adheres to
   functions. doctor::host_findings composes them and is the supported entry
   point; making the two pub(crate) is what stops a caller assembling a report
   with no provider row.
-- Three integration tests that scanned the repository documents and parsed
-  rendered CLI output to check the numbers and transcripts quoted in them. They
-  caught two real defects over four review rounds and produced nine findings of
-  their own, because each one re-implemented a parser against output with no
-  stable contract.
+
 
 ## [0.4.1] - 2026-08-18
 

@@ -14,8 +14,8 @@
 //! The lookup itself is [`which`]'s job. Getting it right means
 //! honouring executable permission bits, `PATHEXT` ordering,
 //! quoted `PATH` entries, and continuing past a candidate that
-//! matches by name but cannot be executed -- all of which a
-//! hand-written search got wrong here before.
+//! matches by name but cannot be executed. A hand-written
+//! search gets at least one of those wrong.
 //!
 //! What is left is the one decision that is bombyx's own, and it
 //! is a subtraction: **the working directory is never searched.**
@@ -27,7 +27,8 @@
 //!    `/`, `\` or `:` is not a search -- and `:` matters as much
 //!    as the slashes, because `C:tar` is the Windows
 //!    *drive-relative* spelling of "in the current directory of
-//!    drive C". A guard listing only the slashes let it through.
+//!    drive C". A guard listing only `/` and `\` does not
+//!    catch it.
 //! 2. **An unsearchable `PATH` stops the lookup.** When no entry
 //!    survives the absolute filter, the joined result is an empty
 //!    string -- and `std::env::split_paths("")` yields one
