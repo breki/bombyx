@@ -4,6 +4,31 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-03
 
+**`/short` answers in forty words**
+
+`/short` restates the reply above it, and `/short <instruction>`
+carries out an instruction instead. Either way the answer fits
+in what a reader gets through in ten seconds.
+
+The budget is written down as forty words rather than as "be
+brief", because ten seconds of silent reading comes to about
+that and because a word count is a criterion a reader can
+check. Today's review rounds spent three passes on findings
+whose criterion nobody could settle, so a number was the
+cheaper thing to write.
+
+Two rules in the file matter more than the budget. Compression
+never launders bad news: a reply reporting a failing test or an
+unverified claim keeps that when it shrinks, because "nine gates
+pass, coverage could not run" cut down to "gates pass" is a
+false statement rather than a short one. And the first form
+re-derives nothing -- the reply above is the whole input, so no
+command gets re-run to confirm it.
+
+The file carries no `allowed-tools` line on purpose: the first
+form needs no tools, and the second needs whatever its
+instruction turns out to need.
+
 **The stop rule I added was wrong, and the reviewers said so**
 
 The entry below claims that a severity-based stop condition
