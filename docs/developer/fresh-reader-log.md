@@ -9,6 +9,157 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-03-pointers-do-not-name-what-they-point-at
+
+**Category:** A cross-reference a reader cannot follow
+
+Two defects in the pointer network that replaced the duplicated
+rules. `/review` step 1 says "`CLAUDE.md` gives the reason a
+live tree is not one" without naming the section, while three
+other pointers in the same file do name theirs -- so a reader
+greps a 1000-line file for a heading they have to guess. And
+six references call **Diff handoff** a section, `/review`
+saying "what its **Diff handoff** section says", when the
+target is an inline bold paragraph inside **How to spawn**. A
+reader scans the headings, finds none, and concludes the
+pointer is stale.
+
+`cargo xtask canon-check` catches a bold reference that names
+no heading at all. It cannot catch one that resolves to a
+paragraph rather than a heading, or one that names no section
+when it should.
+
+Deferred: promoting **Diff handoff** to a heading and
+qualifying the `CLAUDE.md` pointer is a sweep of this surface.
+
+Found by the Fresh Reader review (FR-1, FR-11), 2026-09-03.
+
+---
+
+### fr-2026-09-03-count-the-note-has-no-destination
+
+**Category:** A mechanic with no definition
+
+`/review` says that a single isolated defect in an earlier
+round's fix is not the breaking-fixes case: "fix it, note it,
+and count the note against the next round." Where the note goes
+and what the count decides are both unstated. Three readings
+are available: an item in the run's report, a backlog entry
+(but a fixed finding gets no entry, and this one was fixed), or
+a tally that trips the "more than one defect in an earlier
+round's fix" condition when the next round adds to it. The
+third is probably meant, and only a guess gets you there.
+
+Deferred: naming the destination is one clause, but it changes
+what a stop condition counts, so it wants deciding rather than
+guessing.
+
+Found by the Fresh Reader review (FR-3), 2026-09-03.
+
+---
+
+### fr-2026-09-03-retrospect-writes-a-backlog-without-its-format
+
+**Category:** An instruction that omits what the actor needs
+
+`.claude/commands/retrospect.md` tells the actor to append a
+real reviewer finding to the backlog for that reviewer, naming
+all three files. It does not say what an entry looks like:
+newest-first, immediately after the `---`, the
+`<rt|aq|fr>-<date>-<slug>` ID, then a `**Category:**` line and
+a description. That rule is in `/review` under **Log what you
+defer**, and the same file already points there for the
+logged-versus-fixed rule -- so the omission at the write site
+is the odd one. Reading the existing entries is a workable
+fallback, but the ID's date is not derivable from them with
+confidence.
+
+Deferred: one pointer, in a file outside the work under review.
+
+Found by the Fresh Reader review (FR-4), 2026-09-03.
+
+---
+
+### fr-2026-09-03-sync-module-doc-narrates-the-past
+
+**Category:** A comment that describes the behaviour it replaced
+
+`xtask/src/sync.rs`'s module doc reads "`/template-sync` is
+*already* SHA-delta based, but *it surfaced* template-internal
+bookkeeping files ... as sync candidates. Those grow on every
+commit, so *they became* pure review noise." A reader cannot
+tell whether the noisy behaviour is live somewhere or is the
+state this command replaced, and "already" implies a contrast
+with knowledge they do not have. `CLAUDE.md` under **Code
+comments** rules this out by name. The present-tense reason
+survives the cut: bookkeeping files change on every commit and
+each project owns its own, so an upstream change to one is
+never worth pulling, and this command drops them before the LLM
+sees the list.
+
+Deferred: outside the work under review.
+
+Found by the Fresh Reader review (FR-8), 2026-09-03.
+
+---
+
+### fr-2026-09-03-diff-filter-case-mechanism-unstated
+
+**Category:** A mechanism the comment leans on without stating
+
+`/review` explains its snapshot commands carefully, and stops
+one clause short on this one: "`--diff-filter=d` drops deleted
+paths, which `fresh-reader` can only fail to open." Uppercase
+`D` *selects* deleted paths; a lowercase filter letter inverts
+the selection. The comment states the effect and hides the
+mechanism, so a reader adding another filter letter cannot
+predict which case to use. `CLAUDE.md` asks for the mechanism
+before the conclusion.
+
+Deferred: one clause, in the loop prose `/review` now says to
+sweep as its own change.
+
+Found by the Fresh Reader review (FR-9), 2026-09-03.
+
+---
+
+### fr-2026-09-03-least-read-edit-reads-as-a-ranking
+
+**Category:** Voice
+
+`/review`'s re-snapshot paragraph ends "Otherwise they judge
+the pre-fix version of the least-read edit in the run." The
+superlative over "edits in the run" sends the reader looking
+for a ranking of edits by how often they were read. The point
+is simpler: a fix made during step 2 is the one edit no
+reviewer has seen, so it is exactly the one they must be shown.
+
+Deferred: phrasing, in prose written during the review that
+raised it.
+
+Found by the Fresh Reader review (FR-10), 2026-09-03.
+
+---
+
+### fr-2026-09-03-step-two-spawn-prohibition-unscoped
+
+**Category:** An instruction that collides with a later step
+
+`/review` step 2 says a workflow file should be walked "against
+the current tree without spawning anything", and step 3 of the
+same round spawns three agents. A reader cannot tell whether
+the prohibition is scoped to step 2's walk-through -- do not
+exercise the workflow by spawning the agents it describes -- or
+is a claim about the round. The sentence after it, about agent
+edits taking effect next session, suggests the former without
+saying it.
+
+Deferred: scoping it is one clause, in the loop prose.
+
+Found by the Fresh Reader review (FR-13), 2026-09-03.
+
+---
+
 ### fr-2026-09-03-three-logs-named-as-two
 
 **Category:** Canon states a set incompletely
