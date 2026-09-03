@@ -18,8 +18,9 @@ agent works inside it.
   - [Per-project overrides](#per-project-overrides)
 - [Use](#use)
 - [Updating bombyx](#updating-bombyx)
+  - [A version number is the only thing
+    compared](#a-version-number-is-the-only-thing-compared)
   - [Why the binary is renamed](#why-the-binary-is-renamed)
-  - [A version number is the only thing compared](#a-version-number-is-the-only-thing-compared)
 - [Telling the VM which host it runs on](#telling-the-vm-which-host-it-runs-on)
 - [Development](#development)
 - [Status](#status)
@@ -330,8 +331,9 @@ version's assets, which needs a re-pushed tag to reach.
 It finds the newest release tag with `git ls-remote --tags`,
 downloads that release's archive for your platform with `curl`,
 checks it against the release's `SHA256SUMS`, and only then
-extracts the binary over the installed one. `curl` and `tar` are
-the only extra requirements, and no Rust toolchain is involved.
+extracts the binary over the installed one. `git`, `curl` and
+`tar` are the extra requirements, and no Rust toolchain is
+involved.
 
 **Verification fails closed.** A missing `SHA256SUMS`, no entry
 for your platform's archive, or a digest that does not match all

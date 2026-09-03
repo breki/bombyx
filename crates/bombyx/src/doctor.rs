@@ -45,7 +45,6 @@ mod text;
 pub use local::local_tool_finding;
 pub use probes::{
     HostProbe, Verdict, classify, host_findings, host_probes, probe_commands,
-    provider_finding, run_probes,
 };
 pub use readonly::mutating_token;
 pub use report::Report;

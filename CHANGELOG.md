@@ -62,8 +62,8 @@ and this project adheres to
 - The message refusing a shallow `remote_root` says what the rule requires: at
   least one directory below `/` or `~`. It said "at least 1 directory deep",
   which reads as a constraint on the wrong thing.
-- The help for `bombyx provision` says what a re-provision costs work inside
-  the guest.
+- The help for `bombyx provision` says what a re-provision destroys inside the
+  guest.
   The checkout is forced, so it overwrites edits to tracked files, and an
   untracked file too when the fetched commit adds one at the same path. It also
   detaches HEAD, so a commit made in the guest lands on no branch after the
@@ -81,8 +81,8 @@ and this project adheres to
   TOML binds a bare key to the table above it, so it parsed as
   source.remote_root and every command failed while reading the file. The sample
   file also still carried the removed vagrant_dir key and had no [vm] or
-  [source] table. An integration test now loads every sample the repository
-  shows, extracted from the documents rather than restated.
+  [source] table. An integration test now loads the first sample config in every
+  reader-facing document, extracted from them rather than restated.
 - `bombyx doctor` no longer sends the `vagrant-libvirt` probe to a project
   whose provider is `hyperv`. Hyper-V ships inside Vagrant and has no plugin to
   find, so the row reported a missing plugin that project never needed. Such a
@@ -97,6 +97,13 @@ and this project adheres to
 - bombyx doctor counts skipped checks in its closing line. A report whose only
   non-pass was a skip ended with "all checks passed", which is the reading the
   skip row exists to prevent.
+- The tutorial told readers an empty directory would do for trying bombyx out.
+  The guest clones source.repo over the network, so a project that was never
+  pushed fails at clone time inside the VM. It also offered VirtualBox as a
+  provider, which the config refuses: bombyx accepts libvirt and hyperv.
+- bombyx self-update needs git as well as curl and tar -- it finds the newest
+  release tag with git ls-remote. The clap help and README listed only two of
+  the three.
 
 ### Removed
 

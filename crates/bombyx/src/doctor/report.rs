@@ -80,7 +80,8 @@ impl Report {
         self.failures() == 0
     }
 
-    /// The closing line: what failed, and what was not checked.
+    /// Builds the closing line: how many checks failed, and how
+    /// many bombyx did not run.
     ///
     /// Skips are counted as well as failures. A skip is not
     /// evidence of a problem, so it does not make the report
@@ -101,10 +102,10 @@ impl Report {
             1 => "1 check failed".to_owned(),
             n => format!("{n} checks failed"),
         };
-        match skipped {
-            0 => head,
-            1 => format!("{head}, 1 skipped"),
-            n => format!("{head}, {n} skipped"),
+        if skipped == 0 {
+            head
+        } else {
+            format!("{head}, {skipped} skipped")
         }
     }
 

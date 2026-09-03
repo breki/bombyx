@@ -67,7 +67,8 @@ survives only where the commit has nothing at that path. There
 is deliberately no `git clean`: in an agent VM the untracked
 files are the agent's work.
 
-**Committing inside the guest does not protect it either.** A
+**Committing inside the guest does not save the agent's work
+either.** A
 forced checkout of `FETCH_HEAD` detaches HEAD, so a commit the
 agent makes afterwards sits on no branch, and the next
 `provision` moves HEAD away from it. `git log` stops showing it
@@ -124,9 +125,9 @@ an interrupted `up` cannot leave one stranded.
 
 `remote_root` must start with `/` or `~/`, and must name at
 least 1 directory below that anchor, with no `.` or `..`
-segment. So `/`, `~`, `~/` and `~/.` are all refused. bombyx deletes the directory it derives
-from it, so a root of `/`, `~` or `~/.` is refused when the
-config loads rather than at teardown.
+segment. So `/`, `~`, `~/` and `~/.` are all refused. bombyx
+deletes the directory it derives from this value, which is why
+the check runs when the config loads rather than at teardown.
 
 ## Checking a host with doctor
 

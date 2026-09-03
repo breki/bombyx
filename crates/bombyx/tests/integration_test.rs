@@ -517,7 +517,8 @@ fn a_host_cannot_smuggle_an_ssh_option() {
         .stderr(predicate::str::contains("must not start with"));
 }
 
-/// The elided-line counts the documents quote are the real ones.
+/// The elided-line counts the documents quote are the real ones,
+/// against the right files.
 ///
 /// `docs/usage.md` and `docs/tutorial.md` print a `--dry-run`
 /// transcript, and each generated file shows as one line naming
@@ -525,6 +526,11 @@ fn a_host_cannot_smuggle_an_ssh_option() {
 /// went stale inside the very commit that measured them: six
 /// comment lines were added to `bootstrap.sh` afterwards, and
 /// 247 became 253 with nothing to notice.
+///
+/// Asserted as a set, not as containment. Containment cannot
+/// see a stale number sitting beside a fresh one, and it cannot
+/// see the two counts swapped between the two files -- both of
+/// which are how a hand-copied transcript goes wrong next.
 ///
 /// A number copied into prose is a claim about the code, and
 /// `CLAUDE.md` asks for a test using the document's own example.
@@ -535,25 +541,39 @@ fn the_documented_elided_counts_are_real() {
         .and_then(Path::parent)
         .expect("the crate sits two levels below the repo root");
 
-    let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "up"]);
-    let counts: Vec<&str> = lines
+    // `<file>' <<'BOMBYX_EOF' (N lines elided)` per generated
+    // file, so the pair is what gets compared rather than the
+    // number alone.
+    let lines = dry_run(&project_dir(), &["--dry-run", "up"]);
+    let printed: Vec<String> = lines
         .iter()
-        .filter_map(|l| l.split_once('(').and_then(|(_, r)| r.split_once(')')))
-        .map(|(n, _)| n)
-        .filter(|n| n.ends_with(" lines elided"))
+        .filter_map(|l| {
+            let (head, rest) = l.split_once(" <<'BOMBYX_EOF' (")?;
+            let count = rest.split_once(')')?.0;
+            let file = head.rsplit('/').next()?.trim_end_matches('\'');
+            count
+                .ends_with(" lines elided")
+                .then(|| format!("{file}: {count}"))
+        })
         .collect();
-    assert_eq!(counts.len(), 2, "up must write two files: {lines:?}");
+    assert_eq!(printed.len(), 2, "up must write two files: {lines:?}");
 
     for name in ["docs/usage.md", "docs/tutorial.md"] {
         let text = std::fs::read_to_string(repo.join(name))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        for count in &counts {
-            assert!(
-                text.contains(count),
-                "{name} does not show \"{count}\"; bombyx prints it"
-            );
-        }
+        let shown: Vec<String> = text
+            .lines()
+            .filter_map(|l| {
+                let (head, rest) = l.split_once(" <<'BOMBYX_EOF' (")?;
+                let count = rest.split_once(')')?.0;
+                let file = head.rsplit('/').next()?.trim_end_matches('\'');
+                Some(format!("{file}: {count}"))
+            })
+            .collect();
+        assert_eq!(
+            shown, printed,
+            "{name} quotes counts bombyx does not print"
+        );
     }
 }
 
@@ -586,13 +606,23 @@ fn the_documented_sample_configs_load() {
     // `.sample` is loaded whole, and the prose files contribute
     // whichever fenced block holds the anchor key.
     let mut samples: Vec<(String, String)> = Vec::new();
-    for name in tracked_docs(repo) {
+    for name in reader_facing_docs(repo) {
         let text = std::fs::read_to_string(repo.join(&name))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         if name.ends_with(".sample") {
             samples.push((name, text));
-        } else if let Some(block) = fenced_sample(&text) {
-            samples.push((name, block));
+            continue;
+        }
+        match fenced_sample(&text) {
+            Some(block) => samples.push((name, block)),
+            // Silence here is how the hand-kept list failed
+            // before, one level down: a document that shows a
+            // sample and yields none is a broken extraction, not
+            // a document without one.
+            None => assert!(
+                !text.contains(ANCHOR),
+                "{name} shows a sample this test could not extract"
+            ),
         }
     }
 
@@ -630,22 +660,88 @@ fn the_documented_sample_configs_load() {
     }
 }
 
-/// The repository files that may carry a sample config.
+/// A `doctor` transcript showing skips must show the count.
 ///
-/// `git ls-files` rather than a directory walk, so a stray copy
-/// in `target/` or an editor backup cannot join the set.
-fn tracked_docs(repo: &Path) -> Vec<String> {
-    let out = std::process::Command::new("git")
-        .args(["ls-files", "*.md", "*.txt", "*.sample"])
-        .current_dir(repo)
-        .output()
-        .expect("git ls-files must run");
-    assert!(out.status.success(), "git ls-files failed");
-    String::from_utf8(out.stdout)
-        .expect("git output must be utf-8")
-        .lines()
-        .map(str::to_owned)
-        .collect()
+/// `Report::summary` appends ", N skipped" because a report
+/// that hides skips tells the operator bombyx checked something
+/// it did not. A transcript that ends with a bare "N check(s)
+/// failed" above skip rows teaches the opposite, and that is
+/// what `docs/tutorial.md` did for one commit after the summary
+/// changed.
+///
+/// This does not re-derive the numbers -- the rows in a document
+/// are illustrative and need not match any real host. It
+/// asserts only the shape: skips above, skips named below.
+#[test]
+fn documented_doctor_transcripts_count_their_skips() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("the crate sits two levels below the repo root");
+
+    for name in reader_facing_docs(repo) {
+        let text = std::fs::read_to_string(repo.join(&name))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut skips = 0usize;
+        for line in text.lines() {
+            if line.contains("  skip  ") {
+                skips += 1;
+            } else if line.starts_with("all checks passed")
+                || (line.contains("check failed") && !line.starts_with('-'))
+            {
+                assert_eq!(
+                    line.contains("skipped"),
+                    skips > 0,
+                    "{name}: summary \"{line}\" disagrees with \
+                     {skips} skip rows above it"
+                );
+                skips = 0;
+            }
+        }
+    }
+}
+
+/// The line every sample config starts from.
+const ANCHOR: &str = "project = \"myproject\"";
+
+/// The reader-facing files that may carry a sample config.
+///
+/// Scanned rather than listed, because a hand-kept list is what
+/// let `llms.txt` sit broken while its three siblings were
+/// fixed.
+///
+/// The scan stops at the reader-facing set. `docs/developer/`
+/// and `docs/issues/` exist to *record* broken configurations --
+/// the diary entry about the `remote_root` ordering bug quotes
+/// one -- and a test that fails on a historical record would be
+/// fixed by editing history.
+///
+/// A directory walk rather than `git ls-files`: a document
+/// written but not yet staged is exactly the one nobody has
+/// added to any list, and it is the case the scan exists for.
+fn reader_facing_docs(repo: &Path) -> Vec<String> {
+    let mut out = vec!["README.md".to_owned(), "llms.txt".to_owned()];
+    for entry in std::fs::read_dir(repo).expect("the repo must be readable") {
+        let name = entry.expect("a readable entry").file_name();
+        let name = name.to_string_lossy();
+        if name.ends_with(".sample") {
+            out.push(name.into_owned());
+        }
+    }
+    for entry in
+        std::fs::read_dir(repo.join("docs")).expect("docs/ must be readable")
+    {
+        let entry = entry.expect("a readable entry");
+        if entry.file_type().is_ok_and(|t| t.is_file()) {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".md") {
+                out.push(format!("docs/{name}"));
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// The fenced block holding the sample config, if the text has
@@ -657,7 +753,7 @@ fn tracked_docs(repo: &Path) -> Vec<String> {
 /// teach -- so the lines most likely to move next are the ones
 /// an anchored search would stop seeing.
 fn fenced_sample(text: &str) -> Option<String> {
-    let key = text.find("project = \"myproject\"")?;
+    let key = text.find(ANCHOR)?;
     let fence = text[..key].rfind("```")?;
     let body = &text[fence..];
     let start = body.find('\n')? + 1;
@@ -667,7 +763,7 @@ fn fenced_sample(text: &str) -> Option<String> {
     // earlier block when the key appears in prose first, which
     // yields the text between two blocks. Then the sample was
     // never checked and the failure names the wrong cause.
-    block.contains("project = \"myproject\"").then_some(block)
+    block.contains(ANCHOR).then_some(block)
 }
 
 #[test]

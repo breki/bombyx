@@ -26,16 +26,15 @@ project = "myproject"
 # <remote_root>/scratch/<project>/<name>, so the same scratch
 # name in two projects cannot collide.
 #
-# Two rules. The value must be anchored: it starts with `/` or
-# `~/`. And it must name at least 1 directory below that
-# anchor, with no `.` or `..` segment. So `/`, `~`, `~/` and
-# `~/.` are all refused, and so is `~vms` -- the `~` has to be
-# a whole segment, not a prefix.
+# The value must be anchored: it starts with `/` or `~/`. It
+# must also name at least 1 directory below that anchor, with
+# no `.` or `..` segment. So `/`, `~`, `~/` and `~/.` are all
+# refused, and so is `~vms` -- the `~` has to be a whole
+# segment, not a prefix.
 #
-# bombyx
-# creates, writes into and -- on teardown -- deletes the
-# directory it derives from this value, so a root like `/`, `~`
-# or `~/.` is refused when the config loads.
+# bombyx creates, writes into and -- on teardown -- deletes the
+# directory it derives from this value, which is why the check
+# runs when the config loads rather than at teardown.
 #
 # A leading `~` is expanded by the remote shell; anywhere else
 # it is rejected, as are shell metacharacters.
@@ -54,7 +53,8 @@ remote_root = "~/vms"
 # to use -- it only writes the settings block -- so `hyperv`
 # configures a provider that vagrant will not select, and on a
 # libvirt host you get a libvirt VM at vagrant's default size
-# instead. Tracked as `provider-configured-not-selected`.
+# instead. See `provider-configured-not-selected` in
+# bombyx's own docs/todo.md.
 provider = "libvirt"          # libvirt or hyperv
 box = "generic/ubuntu2204"
 cpus = 4

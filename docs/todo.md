@@ -166,8 +166,8 @@ plan, decisions, and outcome.
   and then fails. The comment above the resolution loop now says plainly that
   the loop does not cover self-update, so the code and the prose agree; closing
   the gap means resolving git, curl and tar before the first fetch. Worth fixing
-  in the same pass: git is the first program self-update runs, and it is missing
-  from every list of the tools it needs, including the clap help.
+  in the same pass: git is the first program self-update runs, and some lists
+  of the tools it needs omit it.
 
 - **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
   Found by the red-team review of 58099a8 (RT-2), verified by reading
@@ -190,7 +190,8 @@ plan, decisions, and outcome.
 
   Two halves, and only one is blocked. Passing the provider to vagrant is
   verifiable on the libvirt host we already use: `vagrant up --provider hyperv`
-  on a Linux host refuses instead of substituting, which is the point -- a loud
+  on a Linux host should refuse instead of substituting *(unverified -- run it
+  once on frosti and record the output here)*, which is the point -- a loud
   failure rather than a wrong VM. Only making Hyper-V actually work needs a
   Windows VM host, and Provider::Hyperv is documented as never exercised.
 

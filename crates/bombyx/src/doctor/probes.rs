@@ -38,9 +38,10 @@ pub struct HostProbe {
 impl HostProbe {
     /// A probe whose exit status is the whole verdict.
     ///
-    /// The plain shape is the default so the two probes that are
-    /// *not* plain have to say so at their definition, where a
-    /// reader looking at the list can see it.
+    /// Every probe starts here. The two that need more chain
+    /// `.gating()` or `.with_verdict()` on at their definition,
+    /// where a reader scanning the list can see it -- there is
+    /// no second constructor to look for.
     #[must_use]
     pub fn plain(name: &'static str, command: RemoteCommand) -> Self {
         Self {
@@ -116,7 +117,7 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
 /// this part of their configuration is unverified rather than
 /// approved.
 #[must_use]
-pub fn provider_finding(cfg: &Config) -> Option<Finding> {
+pub(crate) fn provider_finding(cfg: &Config) -> Option<Finding> {
     // Every variant named, so adding a provider is a compile
     // error here rather than a row that silently stops printing.
     match cfg.vm.provider {
@@ -141,11 +142,12 @@ pub fn probe_commands(probes: &[HostProbe]) -> Vec<RemoteCommand> {
 
 /// Every host finding for `cfg`, in report order.
 ///
-/// The probes plus the rows no probe can produce. Callers get
-/// this rather than composing [`host_probes`], [`run_probes`]
-/// and [`provider_finding`] themselves, because a caller that
+/// This runs the probes and appends the rows no probe can
+/// produce. Callers get
+/// this rather than composing [`host_probes`], `run_probes`
+/// and `provider_finding` themselves, because a caller that
 /// forgot the last one would build a report with no provider
-/// row at all -- which is the state [`provider_finding`] exists
+/// row at all -- which is the state `provider_finding` exists
 /// to prevent. Composing it here means there is one order and
 /// one set, and `bombyx doctor` is not the only thing that can
 /// get them right.
@@ -204,7 +206,7 @@ pub fn classify(result: &ProbeResult, verdict: Option<Verdict>) -> Outcome {
 /// gate itself. Hardcoding the reason meant renaming the gating
 /// probe left the report explaining the skip in terms of a
 /// column that no longer existed.
-pub fn run_probes<F>(probes: &[HostProbe], mut run: F) -> Vec<Finding>
+pub(crate) fn run_probes<F>(probes: &[HostProbe], mut run: F) -> Vec<Finding>
 where
     F: FnMut(&HostProbe) -> Outcome,
 {

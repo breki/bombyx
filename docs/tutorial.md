@@ -257,10 +257,15 @@ machine being a *host*, not about bombyx:
 - **libvirt has to run there.** That means a Linux
   workstation. A Windows machine cannot be its own libvirt
   host: the options are a Linux VM or WSL2 distro with
-  nested virtualization acting as the host, or a different
-  Vagrant provider (Hyper-V, VirtualBox) with the caveat
-  that Hyper-V's provider needs an elevated shell, which an
-  SSH session does not have.
+  nested virtualization acting as the host, or Hyper-V.
+  bombyx accepts two provider values, `libvirt` and `hyperv`,
+  and refuses anything else -- VirtualBox is not one of them.
+  Hyper-V comes with two caveats of its own: its provider
+  needs an elevated shell, which an SSH session does not
+  have, and bombyx does not yet tell vagrant which provider
+  to use, so setting `hyperv` today gets you whatever the
+  host chooses. See `provider-configured-not-selected` in
+  `docs/todo.md`.
 
 ### Optional: keep the VM from reaching your home network
 
@@ -279,8 +284,15 @@ it.
 ## Part 3: the sample project
 
 This part is done on the workstation, inside whatever repo you
-want a VM for. If you are only trying bombyx out, an empty
-directory works just as well.
+want a VM for.
+
+**It has to be a real repository, pushed somewhere the guest can
+reach.** bombyx sends no project file anywhere: the VM clones
+`source.repo` at `source.ref` itself and runs `source.script`
+out of that clone. A local directory that was never pushed
+leaves the guest failing at clone time, which is late and
+confusing. If you are only trying bombyx out, make an empty
+public repository first and point `repo` at it.
 
 The layout:
 
@@ -300,7 +312,7 @@ project = "myproject"    # VM and directory name on the host
 remote_root = "~/vms"    # optional; keep it above [vm]
 
 [vm]                     # required: the machine to build
-provider = "libvirt"
+provider = "libvirt"     # hyperv is written but not selected
 box = "debian/bookworm64"   # the chsh line in provision.sh
                             # below explains this choice
 cpus = 4
@@ -590,7 +602,7 @@ $ bombyx doctor
   vmhost  vagrant           skip  no ssh
   vmhost  project dir       skip  no ssh
   vmhost  libvirt provider  skip  no ssh
-1 check failed
+1 check failed, 4 skipped
 ```
 
 That is what a missing or misspelled `Host` entry in

@@ -13,15 +13,15 @@
 # Coverage and duplication are intentionally skipped:
 # coverage alone adds ~15s per invocation on a small
 # codebase, and the Stop hook fires often enough during
-# interactive work that the cost compounds. Full
-# `cargo xtask validate` still runs from /commit and
-# is available manually for explicit pre-flight checks.
+# interactive work that the cost compounds. The full
+# `cargo xtask validate` is available manually, and
+# /release runs it as the release gate.
 #
-# fmt-check is included (~0.2s) because /commit only
-# runs full validate for version-bumping commits;
-# chore / docs / refactor / test commits skip validate
-# entirely, so a fmt drift can otherwise slip through
-# both interactive gates and land in CI as a fmt-check
+# fmt-check is included (~0.2s) because /commit never
+# runs validate at all -- see "Commits and releases" in
+# CLAUDE.md for why -- so a fmt drift can otherwise slip
+# through both interactive gates and land in CI as a
+# fmt-check
 # failure (see commit 9d7b3ff for a worked example).
 #
 # Exit codes:
