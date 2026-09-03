@@ -5,6 +5,20 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-03-review-has-no-allowed-tools
+
+**Category:** Command definition
+
+`.claude/commands/review.md` declares only `description`, while
+`commit.md` declares an `allowed-tools` list. `/review` needs
+`Bash`, `Agent`, `Edit` and `AskUserQuestion`, and a reader
+cannot tell whether the omission means unrestricted or means it
+inherits the session's permissions. Deferred because the right
+scoping is a decision about the whole command set, not about
+this file: `check.md` scopes to a single `cargo xtask` pattern,
+and nothing states what the convention is for a command that
+edits files and spawns agents.
+
 ### rt-2026-09-02-home-does-not-isolate-ssh-config
 
 **Category:** A comment asserting a property the platform does not give

@@ -163,7 +163,8 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 | `/check` | Type-check all targets, running none |
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline |
-| `/commit` | Commit with diary, CHANGELOG, code reviews |
+| `/commit` | Commit with diary and CHANGELOG (no reviewing) |
+| `/review` | Review uncommitted work; commits nothing |
 | `/release` | Cut a SemVer release |
 | `/retrospect` | Workflow retrospective |
 | `/todo` | Capture a work item into `docs/todo.md` |

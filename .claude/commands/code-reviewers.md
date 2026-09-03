@@ -27,7 +27,7 @@ rather than papered over.
 - **`red-team`** (`.claude/agents/red-team.md`) -- security &
   correctness. Tools: `Read`, `Grep`, `Glob`, `Bash`. It runs
   `git show` and `git log` itself, so it needs the shell. Tell
-  it which commit range to review.
+  it which snapshot file to review.
 - **`artisan`** (`.claude/agents/artisan.md`) -- code quality &
   craftsmanship beyond clippy. Tools: `Read, Grep, Glob` only --
   no shell, so it is read-only by construction. Pass the diff to
@@ -55,7 +55,8 @@ cannot tell a comment that carries a reason from padding.
 
 This file defines *which* reviewers run, *when*, and *how* to
 spawn them. The review criteria themselves live in the agent
-files above. `/commit` is the only caller.
+files above. `/review` is the only caller: `/commit` does no
+reviewing, and the two are independent processes.
 
 **An edit to an agent file takes effect on the next session,
 not this one.** Claude Code reads `.claude/agents/` at startup,
@@ -65,48 +66,27 @@ session that created it, and a round reviewing its own agent
 files is judging them with the previous version's brief. Say so
 in the summary when it applies.
 
-## Reviews run after the commit
+## The target a round reviews
 
-The target is a **commit**, never the index. `/commit` commits
-first, then spawns the reviewers against what it just made.
-Fixes from a round land as their own commit, and the next round
-reviews that. The reasoning is in `CLAUDE.md` under **Commits
-and releases**; the operational consequences are:
+A **snapshot** of the working diff, written to a file under
+`target/`. Never the index, and never the live tree: a named
+file does not move while the reviewers read it, and this repo
+has already had a reviewer report against a tree that no longer
+compiled because fixes had landed underneath it.
 
-- Pass a **commit range**, not a staged diff. The range is
-  **the parent of the first commit this run made, up to
-  `HEAD`** -- work it out at step 9 rather than assuming
-  `HEAD~1..HEAD`, because one `/commit` run may land several
-  commits. `HEAD~1..HEAD` is the common case, not the rule.
-  Write it `<older>..<newer>` and check it with
-  `git rev-list --count` before putting it in a message: a
-  reversed range prints nothing and exits 0.
-- **Never amend the commit under review.** A reviewer holding
-  a SHA must be able to trust it still means what it meant.
-- On a fix round, say in the prompt that `HEAD~1` is the commit
-  being fixed, so a fix is read against what it was fixing.
-  **Do not hand a bare SHA to `artisan` or `fresh-reader`** --
-  neither has a shell, so a SHA is a string they cannot
-  resolve. Give `artisan` both diffs, and `fresh-reader` the
-  union of both commits' changed file paths.
-- **Stop when you would not fix anything the round found** --
-  every finding deferred or declined. Do not
-  chase an empty report. After three rounds, hand what is left
-  to the operator rather than starting a fourth.
-- The fix commit uses **steps 1-8 of `/commit` only**. A nested
-  `/commit` would run its own steps 9-11, so the reviewers
-  would fire twice on one SHA and `/retrospect` would run
-  mid-cycle.
-- **A round that only defers still makes a commit**, carrying
-  the backlog files alone. It is the terminal round, so no
-  later commit exists to hold them. That commit starts no new
-  round: `docs/developer/*-log.md` is exempt under **When to
-  run**, being the reviewers' own output rather than prose
-  anybody reads to learn the project.
+- Pass the **snapshot path** to `red-team` and `artisan`, and
+  tell them the tree may have moved since. Pass `fresh-reader`
+  the changed-file list, and let it read those files as they
+  stand.
+- On a later round, hand over the earlier rounds' findings in
+  the prompt.
+- **Never commit, amend or push.** `/review` owns the rest of
+  its loop; see that file.
 
 ## When to run
 
-Three cases, and every commit is one of them.
+Three cases, and every change under review is one of them.
+Judge the change as a whole, not file by file.
 
 **Code.** `.rs`, `.toml`, `.sh`, `.ps1`, a template under
 `crates/bombyx/templates/`, or a workflow under `.github/`.
@@ -141,9 +121,8 @@ call per reviewer -- so they run concurrently:
 Give each spawn:
 
 1. A one-line description of what the change does.
-2. The commit range under review. For `artisan`, the captured
-   diff as well (it has no shell); `red-team` runs `git show`
-   itself. For `fresh-reader`, the **list of changed file
+2. The snapshot path from step 1 of `/review`. `artisan` has
+   no shell, so tell it the path is a file to read. For `fresh-reader`, the **list of changed file
    paths** and nothing else -- it reads the files whole, and
    handing it a diff defeats the point of the persona.
 3. Nothing about the report format. Each agent file states its
@@ -152,13 +131,12 @@ Give each spawn:
    approach, and `fresh-reader` emits `FR-<n>` with **Where it
    left me**, which is the field the other two cannot produce.
    Asking for a shape the agent file does not specify is how a
-   report comes back without the IDs the fix commit needs to
-   cite.
+   report comes back without the IDs `/review` needs to cite
+   when it reports what it fixed.
 
-**Diff handoff.** `red-team` reads the diff itself via
-`git show`. `artisan` has no shell, so it is handed the diff --
-inline when it is small, or as a git-ignored path under
-`target/` when it is large. Tell it which one it got; it cannot
+**Diff handoff.** Both `red-team` and `artisan` are handed the
+snapshot path from step 1 of `/review`. `artisan` has no shell,
+so say plainly that the path names a file to read; it cannot
 work that out for itself. **Never `/tmp`**: under Git Bash on
 Windows that resolves outside the workspace, where the operator
 cannot see it.

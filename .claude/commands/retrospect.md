@@ -5,13 +5,12 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Grep
 
 Reflect on the *process* of the work just completed
 (or in progress) and surface concrete improvements
-to how the session was run. This complements code
-reviews (Red Team / Artisan in `/commit`) which
-critique the diff -- the retrospective critiques the
-*way* the diff was produced.
+to how the session was run. This complements the code
+reviews `/review` runs, which critique the diff -- the
+retrospective critiques the *way* the diff was produced.
 
 Invoke this skill either:
-- **Automatically** at the end of `/commit` step 11
+- **Automatically** at the end of `/commit` step 9
   (which delegates to this skill).
 - **Manually** at any time -- mid-session, after a
   failed attempt, before a hand-off -- when you want

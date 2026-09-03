@@ -4,6 +4,39 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-03
 
+**Reviewing and committing are separate processes now**
+
+`/commit` used to commit and then run three reviewer agents,
+fix what they found in a second commit, review that, and repeat.
+Reviewing is now `/review`, an independent command that reviews
+uncommitted work and commits nothing. Neither calls the other,
+and nothing requires a review.
+
+The reason to split them is what the old arrangement cost. A
+save-point should be cheap, and it was not: every `/commit`
+became a multi-round session, fixes needed their own commits,
+the reviewers fired again on each, and there was no way to
+record a checkpoint without inviting the whole cycle. On this
+branch that produced eleven commits for one change, seven of
+them named after review rounds.
+
+`CLAUDE.md` argued the old order in three parts, and two of them
+were about fix commits: the history shows what was found, and
+the fixes get reviewed too. Both dissolve when there are no fix
+commits. The third survives and `/review` still depends on it --
+the reviewers need a target that does not move while they read,
+which is why `/review` writes the working diff to a file and
+points them at that rather than at the tree.
+
+`/commit` went from 398 lines to 196. `code-reviewers.md` lost
+its caller split and the commit-range machinery. `/review` grew,
+because the backlog format, the escalation thresholds and the
+last-round rule all lived in `/commit` step 9 and 10 and had
+nowhere else to go.
+
+Definition of Done says nothing about `/review`, at the
+operator's direction. Reviewing is a tool now, not a gate.
+
 **Four review rounds spent fighting our own test scaffolding**
 
 `crates/bombyx/tests/integration_test.rs` was rewritten in seven
