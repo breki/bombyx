@@ -4,29 +4,38 @@ description: Review and fix uncommitted work over up to three rounds, committing
 
 Review the working tree and fix what the reviewers find.
 **This command never commits.** It leaves the tree edited and
-reports what happened. The developer decides when the work
-becomes a commit, and `/commit` does no reviewing of its own --
-these are independent processes, and nothing requires this one.
+reports what happened, and the developer decides when the work
+becomes a commit. Nothing requires this command; `CLAUDE.md`
+under **Reviewing is its own process** says why.
 
 It takes no arguments and always reviews the whole tree against
 `HEAD`.
 
-`code-reviewers.md` owns which reviewers run and how to spawn
-them. Everything else about a review round is here: `/commit`
-does no reviewing, and the two are independent.
+`code-reviewers.md` owns which reviewers run, how to spawn them
+and what each one is handed. The loop, the fixing rules and the
+reporting are here.
 
 ## The loop
 
-Up to three rounds, the cap in `CLAUDE.md` under **Reviewing is
-its own process**. Step 4 usually stops it sooner.
+Up to three rounds. Step 4 usually stops it sooner.
 
-The cap is bounded because rounds decay and then stop decaying:
-one branch ran five, and the findings went 60, 42, 36, 37, 33.
-A converging process has no flat tail. That one had one because
-each round's fixes were making the next round's findings.
+Three rounds is the cap because the findings stop dropping off.
+One branch ran five rounds and found 60, 42, 36, 37, 33. A
+converging process has no flat tail like that one; it had one
+because each round's fixes were making the next round's
+findings.
 
 Every round repeats steps 1, 3 and 4. Step 2 runs in full once,
 and afterwards only for artifacts a fix has touched.
+
+Step 2 normally records a failure and leaves the fixing to step
+3. Some failures cannot be recorded without a fix first -- a
+sample config that will not load, a quoted command with a typo
+in it. **If you fix anything during step 2, write the snapshot
+again before spawning anyone.** Overwrite the same `<n>`: the
+round has one snapshot, and it has to match the text the
+reviewers read. Otherwise they judge the pre-fix version of the
+least-read edit in the run.
 
 ### 1. Snapshot
 
@@ -42,6 +51,10 @@ git diff HEAD -- . "$EXCL"                        > target/review-<n>.diff
 git diff --name-only --diff-filter=d HEAD -- . "$EXCL" > target/review-<n>.files
 ```
 
+`<n>` is the round number, so each round leaves its own pair of
+files and an earlier round's snapshot stays readable when a
+later finding is about the fix for an earlier one.
+
 `git add -N` records a path in the index without its contents,
 which is what makes `git diff` report an untracked file at all.
 Name the paths; `git add -N .` sweeps in every untracked file,
@@ -55,9 +68,20 @@ in they would hand each round the previous round's own report
 to find defects in. `--diff-filter=d` drops deleted paths, which
 `fresh-reader` can only fail to open.
 
-The index keeps the intent-to-add entries. Report that.
+The index keeps the intent-to-add entries. Report that, and
+report the undo with it: `git reset -- <the paths added with
+-N>`. Until then any `git commit -a` commits those paths, even
+the ones the round concluded should not ship. `/commit` stages
+by name, so it will not sweep them, which is why they can sit
+in the index unnoticed.
 
 ### 2. Run it before anyone reads it
+
+An **artifact** here is one runnable thing the change produced
+or touched: a build, a sample config, a quoted command, a
+document somebody can follow. Label each one on its own. A
+change touching `plan.rs` and `docs/vm-host-setup.md` has two
+artifacts, not one.
 
 Reading cannot find "this step assumes a remote no earlier step
 created". Six rounds of reading `docs/tutorial.md` each found
@@ -89,19 +113,28 @@ pipeline leaves the gates behind it *could not run*.
 
 ### 3. Review, then fix
 
-Spawn the reviewers **When to run** selects, in one parallel
-message, per `code-reviewers.md`. Two things differ:
+**On round three, report the findings and apply nothing.**
+Otherwise the run ends on edits nobody read, in a tree with no
+commit behind them. The rule lives here rather than in step 4
+because this is where the fixing happens, and a rule about not
+fixing is no use one step downstream of it.
 
-- **The target is the snapshot.** `red-team` and `artisan` get
-  its path, and are told the tree may have moved since.
-  `fresh-reader` gets the `.files` list and reads those files as
-  they stand now -- that persona judges the finished file, so do
-  not point it at the snapshot.
+`code-reviewers.md` under **When to run** specifies which
+reviewers this change needs. Spawn those in one parallel
+message, and hand each one what its **Diff handoff** section
+says -- the snapshot path this round wrote, or the `.files`
+list. This file owns one more instruction:
+
 - **From round two, hand over the earlier rounds' findings and
   what was done with each**, and ask outright: *is anything here
   a defect in the fix for an earlier finding?* A reviewer shown
   only the current state cannot see a loop. This is the only
   thing that has ever detected non-convergence here.
+
+Check the replies before acting on them --
+`code-reviewers.md` under **Reading the reports back** covers
+a truncated reply and the test for two reviewers reaching one
+defect.
 
 Then fix:
 
@@ -135,9 +168,7 @@ Present the finding in the fields its reviewer emitted and ask:
 fix it now, defer it, decline it, or leave it and let the
 developer decide before committing. Surface every finding in
 the report -- applied, escalated, deferred or declined -- and
-never drop one silently. A finding two reviewers reached
-independently is the strongest signal there is; say which
-those were.
+never drop one silently.
 
 **Log what you defer.** A fixed finding gets no entry; only a
 deferred one, in `docs/developer/redteam-log.md`,
@@ -145,8 +176,14 @@ deferred one, in `docs/developer/redteam-log.md`,
 are newest-first, with new entries right after the `---`. The ID
 is `<rt|aq|fr>-<YYYY-MM-DD>-<kebab-slug>`, so there is no
 counter to keep and the ID greps. Each entry is that heading, a
-`**Category:**` line, and a short description. When ten or more
-sit open in one backlog, say so: the backlog has become the
+`**Category:**` line, and a short description.
+
+**Closing one is the other half of the rule.** When a round
+acts on or reverses a logged item, name its ID and either
+delete the entry or annotate it "superseded by ...". Without
+that, the backlog fills with items somebody already fixed, and
+the alarm below stops meaning anything. When ten or more sit
+open in one backlog, say so: the backlog has become the
 problem.
 
 **Read the artifact back before claiming a fix landed.** "The
@@ -163,9 +200,8 @@ Stop when any holds:
   round already fixed. Go to **When it stops converging**. A
   single isolated defect in a fix is not that: fix it, note it,
   and count the note against the next round.
-- **Three rounds are done.** The third round reports and does
-  not fix. Otherwise the run ends on edits nobody read, in a
-  tree with no commit behind them.
+- **Three rounds are done.** Step 3 says what the third round
+  does instead of fixing, and why.
 
 ## When it stops converging
 
@@ -204,9 +240,14 @@ Per round: findings raised, fixed, logged, escalated. Every
 step-2 artifact with its label and, where it failed, what
 failed. Each non-converging area in the shape above. Then what
 the run left behind, because the developer's next commit sees
-all of it: the edited files, the backlog files written this run,
-and the intent-to-add entries from step 1. Nothing was
-committed.
+all of it: the edited files, the backlog files written this
+run, and the intent-to-add entries from **Snapshot**. Nothing
+was committed.
+
+`fresh-reader`'s **What worked** section is not a finding and
+needs no action. Do not drop it either: carry it into the
+report, so the passages it named are known to carry a reason
+the next time somebody trims comments.
 
 ## Rules
 

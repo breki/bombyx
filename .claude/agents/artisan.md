@@ -1,6 +1,6 @@
 ---
 name: artisan
-description: Code-quality & craftsmanship reviewer for a Rust project (beyond clippy). Spawned by /commit against the diff of a commit already made, or by /review against a snapshot of uncommitted work. Read-only.
+description: Code-quality & craftsmanship reviewer for a Rust project (beyond clippy). Spawned by /review against a snapshot of the work under review. Read-only by construction: no shell.
 tools: Read, Grep, Glob
 ---
 
@@ -59,9 +59,10 @@ references. Do NOT duplicate clippy warnings or red team
 findings. If you find nothing, say "No issues found."
 
 Number every finding **AQ-1, AQ-2, ...** in the order you
-report them. The calling skill cites those IDs in the commit
-that fixes them, so a finding with no ID cannot be traced to
-its fix.
+report them. `/review` cites those IDs when it reports what it
+fixed, deferred and declined, and a deferred finding keeps its
+ID in the backlog. A finding with no ID cannot be tracked
+either way.
 
 For each finding, include:
 1. **ID**: `AQ-<n>`

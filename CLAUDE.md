@@ -709,8 +709,8 @@ Committing and releasing are separate:
 
 - **`/commit`** is a save-point. It updates the diary and the
   `CHANGELOG.md` `[Unreleased]` block and commits. It does
-  **no reviewing** -- that is `/review`, which is independent
-  and which nothing requires. It does **not** bump the version,
+  **no reviewing** -- see **Reviewing is its own process**
+  below. It does **not** bump the version,
   touch `Cargo.lock`, or run `cargo xtask validate` --
   multiple commits land between releases, and forcing each one
   to make a SemVer decision turns the version field into
@@ -745,29 +745,29 @@ other. Nothing requires a review: reach for `/review` when you
 want work hardened before it becomes a commit, and skip it when
 you do not.
 
-That split is deliberate. Reviewing after the commit was tried,
-and the cost was that every `/commit` became a multi-round
-session -- fixes needing their own commits, the reviewers firing
-again on each, and no way to commit a save-point without
-inviting all of it. A save-point should be cheap.
+That split is deliberate. We tried running the reviews inside
+`/commit`, and it cost us this: every `/commit` became a
+multi-round session -- fixes needing their own commits, the
+reviewers firing again on each, and no way to commit a
+save-point without inviting all of it. A save-point should be
+cheap. `git log 6055f93` is the arrangement we backed out of.
 
-What the earlier arrangement got right, and `/review` keeps:
-**the reviewers get an immutable target.** Reviewing a live
-working tree means reviewing something that changes while they
-read it, and this repo has already had a reviewer report against
-a tree that no longer compiled, because fixes for its own
-earlier findings had landed underneath it. `/review` writes a
-snapshot of the working diff to a file and points the reviewers
-at that.
+The earlier arrangement got one thing right, and `/review`
+keeps it: **the reviewers get an immutable target.** Reviewing
+a live working tree means reviewing something that changes
+while they read it, and this repo has already had a reviewer
+report against a tree that no longer compiled, because fixes
+for its own earlier findings had landed underneath it. That is
+the reason; `/review` under **Snapshot** holds how it does it,
+and is the only place that should.
 
 **Stop when we would not fix anything the round found** -- every
 finding deferred or declined. Do not keep going for a clean
 sheet: reviewers always find something, and the stopping rule is
-agreement on what matters. Three rounds is the cap, and the
-third reports rather than fixing, so a run never ends on edits
-nobody read. `/review` holds the rest of the loop, including
-what to do when an area stops converging.
-
+agreement on what matters. That is the reason a run stops, and
+the reason is what this file keeps. `/review` under **Stop, or
+go again** lists the conditions themselves, the three-round cap
+among them.
 
 ## Definition of Done
 

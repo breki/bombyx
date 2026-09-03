@@ -5,6 +5,34 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-03-commit-message-cites-unrecorded-id
+
+**Category:** An ID that does not grep
+
+`abee0a5`'s message says the `implement.md` change "resolves
+rt-2026-09-03-implement-pre-launch-step-unclaimed and removes it
+from the backlog". That ID exists in no revision:
+`git log --oneline -S"implement-pre-launch" --all` is empty and
+`grep -rn` over `docs/` and `.claude/` finds nothing. The same
+commit added 14 lines to `docs/developer/redteam-log.md` and
+deleted none, so nothing was removed from any backlog.
+
+The date-slug scheme exists so that an ID greps and `git log -S`
+finds both the finding and its resolution. Here the resolution
+half cites an ID with no record, so a reader cannot tell whether
+an entry was removed, never written, or is still open somewhere
+they have not looked.
+
+Deferred rather than fixed: the claim is in a landed commit
+message, and `/review` never amends. Either write the finding
+into this file and delete it in one later commit, so both halves
+grep, or correct the record in the commit that next touches
+`implement.md`.
+
+Found by the red team review (RT-5), 2026-09-03.
+
+---
+
 ### rt-2026-09-03-review-has-no-allowed-tools
 
 **Category:** Command definition

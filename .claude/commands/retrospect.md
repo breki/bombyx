@@ -6,12 +6,12 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Grep
 Reflect on the *process* of the work just completed
 (or in progress) and surface concrete improvements
 to how the session was run. This complements the code
-reviews `/review` runs, which critique the diff -- the
-retrospective critiques the *way* the diff was produced.
+reviews that `/review` spawns; they critique the diff, and
+the retrospective critiques the *way* the diff was produced.
 
 Invoke this skill either:
-- **Automatically** at the end of `/commit` step 9
-  (which delegates to this skill).
+- **Automatically** by `/commit`'s **Workflow retrospective**
+  step, which delegates to this skill.
 - **Manually** at any time -- mid-session, after a
   failed attempt, before a hand-off -- when you want
   a process-level reflection that is not tied to a
@@ -73,8 +73,10 @@ on.
      applying a template change).
    - Undocumented decision -- chose between two
      approaches without recording why.
-   - Did not capture a finding the reviewers raised
-     into the long-lived RT/AQ logs.
+   - Did not log a finding a review round deferred.
+     `/review` under **Log what you defer** owns that
+     rule: a fixed finding gets no entry, a deferred
+     one goes to the backlog for its reviewer.
 
 3. **Speed** -- wall-time delays caused by ordering.
    Examples:
@@ -204,10 +206,11 @@ End the report with one of:
 discarded unless the user asks to escalate them. The
 escalation paths:
 
-- **Real RT/AQ finding:** append to
-  `docs/developer/redteam-log.md` or
-  `artisan-log.md` (only when the finding describes
-  a defect in shipped code, not a process gap).
+- **Real reviewer finding:** append to the backlog
+  for that reviewer -- `docs/developer/redteam-log.md`,
+  `artisan-log.md` or `fresh-reader-log.md` (only when
+  the finding describes a defect in shipped code, not a
+  process gap).
 - **TODO item:** capture via `/todo <text>` for a
   follow-up implementation pass.
 - **Doc edit:** small process rule changes (e.g. "add
@@ -229,9 +232,8 @@ findings anywhere. The transcript is the record.
   they cannot act on.
 - Cite turn numbers or tool names when possible so
   the user can verify.
-- Do not duplicate Red Team / Artisan findings.
-  Those critique the code; this critiques the
-  process.
+- Do not duplicate the reviewers' findings. Those
+  critique the code; this critiques the process.
 - Cap output at ~15 lines of finding text. Beyond
   that, prioritise the highest-impact items.
 - One retrospective per session is usually enough.

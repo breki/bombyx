@@ -15,8 +15,10 @@ use std::process::Command;
 use crate::helpers::{BACKFEED_LEDGER_REL, FEEDBACK_REL, workspace_root};
 
 /// Template-internal paths that must never appear as sync
-/// candidates. A trailing `/` marks a directory prefix; every
-/// other entry is an exact path. These files are bookkeeping
+/// candidates. A trailing `/` marks a directory prefix, a
+/// single `*` matches any run of characters between the text
+/// on either side of it, and every other entry is an exact
+/// path. These files are bookkeeping
 /// that each project owns independently, so an upstream change
 /// to them is never something a downstream should pull.
 const NEVER_SYNC: &[&str] = &[
@@ -24,17 +26,28 @@ const NEVER_SYNC: &[&str] = &[
     FEEDBACK_REL,
     BACKFEED_LEDGER_REL,
     "docs/developer/DIARY.md",
-    "docs/developer/redteam-log.md",
-    "docs/developer/artisan-log.md",
+    "docs/developer/*-log.md",
     "docs/issues/",
 ];
 
-/// True when `path` is in the never-sync set (exact match, or
-/// under a directory-prefix entry).
+/// True when `path` is in the never-sync set: an exact match, a
+/// path under a directory-prefix entry, or a match for an entry
+/// containing `*`.
+///
+/// The `*` case splits the entry on the star and requires
+/// `path` to start with the text before it and end with the
+/// text after it. The length check is what stops the two halves
+/// overlapping, so `docs/developer/*-log.md` does not match
+/// `docs/developer/-log.md` by reusing the same characters
+/// twice.
 fn is_excluded(path: &str) -> bool {
     NEVER_SYNC.iter().any(|pat| {
         if pat.ends_with('/') {
             path.starts_with(pat)
+        } else if let Some((head, tail)) = pat.split_once('*') {
+            path.len() > head.len() + tail.len()
+                && path.starts_with(head)
+                && path.ends_with(tail)
         } else {
             path == *pat
         }
@@ -198,6 +211,30 @@ pub fn sync_candidates(last_synced: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each entry in `NEVER_SYNC` must exclude itself. Naming
+    /// the entries one at a time cannot catch a member left
+    /// out of the set, so this walks the set instead.
+    #[test]
+    fn every_never_sync_entry_excludes_itself() {
+        for pat in NEVER_SYNC {
+            assert!(is_excluded(pat), "{pat} does not exclude itself");
+        }
+    }
+
+    /// A reviewer backlog is matched by shape, not by name, so
+    /// a persona added later needs no edit here. Asserting a
+    /// name that does not exist yet is the point.
+    #[test]
+    fn any_reviewer_backlog_is_excluded() {
+        assert!(is_excluded("docs/developer/redteam-log.md"));
+        assert!(is_excluded("docs/developer/artisan-log.md"));
+        assert!(is_excluded("docs/developer/fresh-reader-log.md"));
+        assert!(is_excluded("docs/developer/simplify-log.md"));
+        // The shape is `<name>-log.md` under that directory.
+        assert!(!is_excluded("docs/developer/log.md"));
+        assert!(!is_excluded("docs/other/a-log.md"));
+    }
 
     #[test]
     fn is_excluded_matches_exact_and_prefix() {
