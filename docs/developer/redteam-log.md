@@ -5,6 +5,47 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-03-todo-md-unclassified-for-never-sync
+
+**Category:** An incomplete set
+
+`xtask/src/sync.rs`'s `NEVER_SYNC` now matches the reviewer
+backlogs by shape and lists the diary, the changelog, the
+feedback file, the backfeed ledger and `docs/issues/`.
+`docs/todo.md` is not in it, and `cargo xtask todo` writes that
+file per project, so it is the same kind of record as the rest.
+Whether upstream rustbase accumulates its own `docs/todo.md`
+was not checked -- there is no `template` remote configured
+here, so confirm with `git ls-tree <upstream>:docs` before
+deciding.
+
+Deferred: adding it changes what a `/template-sync` run offers,
+which is a decision about the workflow rather than a defect in
+the set.
+
+Found by the red team review (RT-3), 2026-09-03.
+
+---
+
+### rt-2026-09-03-sync-status-column-narrower-than-a-rename
+
+**Category:** Output formatting
+
+`xtask/src/sync.rs` formats the candidate table's status column
+as `{:<3}`. A rename status is four characters, `R100`, which
+the test at the bottom of that file asserts. Rust's width is a
+minimum rather than a limit, so nothing is truncated -- the row
+simply runs one column wide and the table misaligns from that
+row on. `{:<4}` fixes it.
+
+Deferred: cosmetic, and it only shows on a diff containing a
+renamed file.
+
+Raised by the Fresh Reader review as a correctness matter for
+the other two reviewers, 2026-09-03.
+
+---
+
 ### rt-2026-09-03-commit-message-cites-unrecorded-id
 
 **Category:** An ID that does not grep
