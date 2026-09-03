@@ -34,7 +34,11 @@ pub enum Action {
     /// overwrites edits to tracked files and any untracked file
     /// the fetched commit adds at the same path. It also
     /// detaches HEAD, so a commit made in the guest ends up on
-    /// no branch after the next provision.
+    /// no branch after the next provision. Changing
+    /// `source.repo` to a different repository removes the
+    /// clone outright, which loses everything -- see
+    /// `crates/bombyx/templates/bootstrap.sh`, which decides
+    /// that and explains how loosely it compares the URLs.
     ///
     /// Requires a machine that already exists: `vagrant
     /// provision` has nothing to provision on a VM that was

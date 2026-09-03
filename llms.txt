@@ -14,8 +14,8 @@ Cargo workspace, CLI only:
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `vagrantfile.rs` — renders the Vagrantfile, embeds the
     bootstrap script
-  - `templates/bootstrap.sh` — the script the guest runs,
-    identical for every project
+- `crates/bombyx/templates/bootstrap.sh` — the script the
+  guest runs, identical for every project
   - `plan.rs` — `Action` → ordered command list
   - `doctor.rs` — the check model; submodules own the rest
     - `doctor/probes.rs` — which probes run, reading a result
@@ -79,7 +79,8 @@ remote_root = "~/vms"    # optional; keep it above the tables,
                          # a bare key after `[source]` binds to it
 
 [vm]                     # required, no defaults
-provider = "libvirt"     # libvirt or hyperv; only libvirt exercised
+provider = "libvirt"     # hyperv is written but not selected;
+                         # see docs/todo.md
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192            # MiB

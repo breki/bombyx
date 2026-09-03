@@ -4,16 +4,17 @@
 //! list, then run it. The mapping from a subcommand to its commands
 //! lives in `bombyx::plan`, where it is covered by tests.
 //!
-//! It used to say "thin by design", and that is worth not claiming.
-//! Four things genuinely live here and nowhere else: argument
-//! parsing, the config-precedence reporting on stderr, spawning
-//! processes, and the ordering of the `self-update` sequence -- and
-//! this file is outside the coverage gate (`src/bin/`), so anything
-//! that stays is untested. That is the reason to keep moving
-//! decisions out of it, most recently the wording of the update
-//! decision (`update::Decision::outcome`) and the post-extraction
-//! re-check (`update::asset::confirm_unchanged`). `self_update` is
-//! still the largest thing here.
+//! Four things live here and nowhere else: argument parsing, the
+//! config-precedence reporting on stderr, spawning processes, and
+//! the ordering of the `self-update` sequence. `self_update` is the
+//! largest of them. Do not call this file thin.
+//!
+//! It sits outside the coverage gate (`src/bin/`), so anything that
+//! stays here ships untested. That is the standing reason to put
+//! each new decision in the library instead: the wording of an
+//! update outcome belongs in `update::Decision::outcome` and a
+//! post-extraction re-check in `update::asset::confirm_unchanged`,
+//! because both are decisions and neither needs a process.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -66,7 +67,7 @@ enum Cmd {
     /// replacing the binary. Refuses rather than installing
     /// anything it cannot verify, never installs a pre-release,
     /// and never downgrades a local build that is newer than any
-    /// release. Needs `curl` and `tar`.
+    /// release. Needs `git`, `curl` and `tar`.
     SelfUpdate,
 
     // Everything else. Flattened, so the *invocation* surface is
@@ -76,10 +77,10 @@ enum Cmd {
     // variant contributes its subcommands at its own position.
     // The type says what the code relies on: `self-update` is the
     // one subcommand that is not about a VM and does not read a
-    // config. `action_of` used to carry a `Cmd::SelfUpdate =>
-    // bail!("internal error")` arm kept unreachable by a
-    // `matches!` four hundred lines away, and the next
-    // config-less subcommand would have added a second one.
+    // config. Splitting the two means `action_of` is total over
+    // `VmCmd`, so a second config-less subcommand is a compile
+    // error rather than an unreachable bail arm held in place by
+    // a `matches!` somewhere else in the file.
     #[command(flatten)]
     Vm(VmCmd),
 }
@@ -159,8 +160,8 @@ fn main() -> ExitCode {
             // this platform" message embeds a newline and so does
             // any anyhow chain -- and it runs after arbitrary
             // children, `ssh` probes included. A multi-line message
-            // is exactly the shape worth protecting, and it was the
-            // one left out of the first cut of this fix.
+            // is exactly the shape worth protecting, which is why
+            // every exit path goes through `eprint_lines`.
             eprint_lines(&format!("bombyx: {err:#}\n"));
             ExitCode::FAILURE
         }
@@ -418,9 +419,9 @@ fn newer_release(
 ) -> Result<Option<update::Version>> {
     let tags = capture(list)?;
     let decision = update::decide(current, update::newest_release(&tags));
-    // The three sentences live in the library, with the decision they
-    // describe. They used to be written here, where the coverage gate
-    // does not reach and no test asserted which version each names.
+    // The three sentences live in the library, with the decision
+    // they describe, so a test can assert which version each one
+    // names. Written here they would sit outside the coverage gate.
     match decision.outcome() {
         update::Outcome::Install(latest) => Ok(Some(latest)),
         update::Outcome::Nothing(why) => {
@@ -438,11 +439,11 @@ fn newer_release(
 /// downloaded rather than after.
 ///
 /// None of the failures here claim to know *why* the fetch
-/// failed. An earlier version answered a non-zero `curl` with
-/// "this release predates checksummed releases", which is one
-/// cause among DNS failure, a proxy, a 403 and a dropped
-/// connection -- so on a network that merely blocked the file,
-/// bombyx confidently advised abandoning verification.
+/// failed. A non-zero `curl` covers DNS failure, a proxy, a 403
+/// and a dropped connection alike, so a message naming one of
+/// them -- "this release predates checksummed releases", say --
+/// would tell an operator on a merely blocked network to abandon
+/// verification.
 fn fetch_verified(
     plan: &asset::UpdatePlan,
     latest: update::Version,
@@ -566,10 +567,10 @@ fn run_id() -> String {
 /// validating any user-supplied VM name.
 ///
 /// Total over [`VmCmd`], which is the point of that type existing.
-/// It used to take `Cmd` and carry a `Cmd::SelfUpdate =>
-/// bail!("internal error: ...")` arm, unreachable only because of a
-/// `matches!` four hundred lines away -- an invariant maintained by
-/// a comment instead of by the types.
+/// Taking `Cmd` would need an arm for `SelfUpdate`, which reads no
+/// config and has no `Action` -- an arm reachable only if some
+/// `matches!` elsewhere in the file stopped agreeing with it. The
+/// types hold that invariant instead.
 fn action_of(cmd: &VmCmd, cfg: &Config) -> Result<Action> {
     Ok(match cmd {
         VmCmd::Up => Action::Up,
@@ -736,7 +737,7 @@ fn doctor_run(cfg: &Config) -> Ran {
     let mut report = Report::default();
     // `ssh` is the only local program a VM command runs, so it is
     // the only one checked here. `bombyx self-update` also needs
-    // `curl` and `tar`; those are its problem, and failing
+    // `git`, `curl` and `tar`; those are its problem, and failing
     // `doctor` over them would make a red report mean nothing
     // about whether `up` works.
     report.add(local_tool("ssh", Some("-V")));
