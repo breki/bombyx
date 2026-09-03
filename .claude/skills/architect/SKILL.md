@@ -115,7 +115,7 @@ Not published. `validate`, `test`, `clippy`, `fmt`,
 | Unsafe code | Forbidden (`#[forbid(unsafe_code)]`) |
 | Advisories | RUSTSEC clean |
 
-`cargo xtask validate` runs nine gates; the six above are
+`cargo xtask validate` runs every gate; the six above are
 the ones worth memorising, and `CLAUDE.md` under
 **Definition of Done** lists all nine in execution order.
 

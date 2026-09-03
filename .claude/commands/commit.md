@@ -1,6 +1,6 @@
 ---
 description: Commit current changes following project conventions (no reviewing; that is /review)
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git config --get:*), Bash(cargo xtask*), Read, Edit, AskUserQuestion, Skill(retrospect)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git config --get:*), Bash(git tag --list:*), Bash(cargo xtask*), Read, Edit, AskUserQuestion, Skill(retrospect)
 ---
 
 Commit the current changes following the project's git commit
@@ -92,7 +92,7 @@ separate.
      never-shipped behaviour produces exactly the
      spurious major bump it is meant to prevent.
 
-     The check is: `git tag` (no tags at all means
+     The check is: `git tag --list` (no tags at all means
      nothing has ever been released), and when tags do
      exist, `git log <latest-tag>..HEAD` or the
      `[Unreleased]` block -- behaviour introduced since

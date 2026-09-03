@@ -122,7 +122,7 @@ to a top-level directory is refused when the config loads.
 ## Build Commands
 
 ```
-cargo xtask validate          # fmt + clippy + doc + tests + coverage + dupes + audit
+cargo xtask validate          # the umbrella gate; see CLAUDE.md for the steps
 cargo xtask check             # type-check all targets, run none
 cargo xtask test [filter]     # tests only
 cargo xtask clippy            # lint only
@@ -133,7 +133,8 @@ cargo xtask dupes             # duplication check (<=6%)
 cargo xtask audit             # RUSTSEC advisories
 ```
 
-`cargo xtask validate` is the canonical gate (9 steps);
+`cargo xtask validate` is the canonical gate (`CLAUDE.md`
+under Definition of Done lists the steps in run order);
 `/release` runs it as the release gate; `/commit` does not run
 it at all. A Claude Code Stop hook
 (`.claude/hooks/stop-check.sh`) runs a faster subset -- fmt,

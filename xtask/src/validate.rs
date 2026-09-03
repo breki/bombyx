@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crate::audit;
+use crate::canon;
 use crate::clippy_cmd;
 use crate::coverage;
 use crate::dep_age;
@@ -88,6 +89,9 @@ fn steps(check: bool) -> Vec<Step> {
         step("Dep-age", "dep-age-check", run_dep_age),
         // Cheap static gates first ...
         step("Fmt", "fmt", move || run_fmt(check)),
+        // Reads markdown only, so it needs no compilation and
+        // sits ahead of every gate that does.
+        step("Canon", "canon-check", run_canon),
         step("Duplication", "dupes", run_duplication),
         step("Deny", "deny", run_deny),
         step("Clippy", "clippy", run_clippy),
@@ -247,6 +251,10 @@ fn run_coverage() -> Result<String, String> {
 }
 
 /// Duplication step -- returns detail string.
+fn run_canon() -> Result<String, String> {
+    canon::canon_check_detail()
+}
+
 fn run_duplication() -> Result<String, String> {
     let r = dupes::dupes_check()?;
     if let Some(err) = r.error {
@@ -302,6 +310,7 @@ mod tests {
             vec![
                 "Dep-age",
                 "Fmt",
+                "Canon",
                 "Duplication",
                 "Deny",
                 "Clippy",

@@ -4,6 +4,46 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-03
 
+**`canon-check`: the decidable half of a canon review is now a
+gate**
+
+`cargo xtask canon-check` reads the markdown in `.claude/`,
+`CLAUDE.md` and `llms.txt` and fails on five kinds of claim the
+tree does not support. It runs as validate gate 3, ahead of
+every gate that needs a compiler, because it only reads files.
+
+The reason it exists is in the entry above: 19 of the last
+review round's 31 findings were decidable by a command, and
+they recurred because a reader catches most of them and never
+all. On its first run against the tree it found a defect nine
+reviewer reports had missed -- `/commit` told the agent to run
+`git tag` and granted no `git tag`, so the skill would stall on
+a permission prompt while working out a version bump. The
+instruction is now `git tag --list` with a matching narrow
+grant, the way `10bc64c` narrowed `git config` to `--get`.
+
+Two carve-outs are worth knowing, because both looked like
+defects at first. A `git` command inside a double-quoted span
+is a line the skill prints for the operator rather than one it
+runs. And a file that says in prose it has ``no `git <sub>`
+grant`` has declared the omission deliberate, which is how
+`/commit` keeps telling the developer to run `git reset`
+without the skill acquiring that power. Placeholder paths such
+as `docs/issues/<slug>.md` are skipped for the same reason a
+glob is: they describe a shape, not a file.
+
+The check decides nothing about phrasing, and it must stay that
+way. `/review` already says an assertion with no stable answer
+should be deleted rather than parsed harder, and that is the
+line between what belongs here and what belongs to a reviewer.
+
+Adding a tenth gate meant the count moved, and it was written
+in four places. `CLAUDE.md` under Definition of Done now owns
+the enumerated list, and `llms.txt`, the architect skill and
+`/implement` no longer state a number at all. A test in
+`validate.rs` already asserted the documented gate order and
+caught the insertion, which is the guard working as intended.
+
 **Three review rounds on `abee0a5`, and why they did not
 converge**
 
