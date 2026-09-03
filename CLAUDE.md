@@ -924,6 +924,7 @@ a fresh empty `[Unreleased]` above it.
 | `/update-deps` | Upgrade third-party deps to the newest versions outside the 14-day cooldown |
 | `/simplify` | Review changed code for quality |
 | `/architect` | Project overview and architecture guide |
+| `/short` | Restate the reply above, or answer an instruction, in under 40 words |
 | `/html-report` | Produce a self-contained local HTML report from the in-repo template (never a cloud Artifact) |
 | `/template-improve` | Log feedback for the rustbase template |
 | `/template-sync` | Sync upstream template changes |
