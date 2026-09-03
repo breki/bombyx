@@ -121,6 +121,15 @@ and this project adheres to
   needs `git`, `curl` and `tar`, and `doctor` deliberately says nothing about
   them. On a machine without `tar`, `doctor` used to exit 1 while every VM
   command worked.
+- **BREAKING:** The doctor::run_probes and doctor::provider_finding library
+  functions. doctor::host_findings composes them and is the supported entry
+  point; making the two pub(crate) is what stops a caller assembling a report
+  with no provider row.
+- Three integration tests that scanned the repository documents and parsed
+  rendered CLI output to check the numbers and transcripts quoted in them. They
+  caught two real defects over four review rounds and produced nine findings of
+  their own, because each one re-implemented a parser against output with no
+  stable contract.
 
 ## [0.4.1] - 2026-08-18
 

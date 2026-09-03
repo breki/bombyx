@@ -160,8 +160,9 @@ fn main() -> ExitCode {
             // this platform" message embeds a newline and so does
             // any anyhow chain -- and it runs after arbitrary
             // children, `ssh` probes included. A multi-line message
-            // is exactly the shape worth protecting, which is why
-            // every exit path goes through `eprint_lines`.
+            // is exactly the shape worth protecting, which is
+            // why this arm renders through `eprint_lines`
+            // rather than `eprintln!`.
             eprint_lines(&format!("bombyx: {err:#}\n"));
             ExitCode::FAILURE
         }

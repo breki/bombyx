@@ -144,13 +144,12 @@ pub fn probe_commands(probes: &[HostProbe]) -> Vec<RemoteCommand> {
 ///
 /// This runs the probes and appends the rows no probe can
 /// produce. Callers get
-/// this rather than composing [`host_probes`], `run_probes`
-/// and `provider_finding` themselves, because a caller that
-/// forgot the last one would build a report with no provider
-/// row at all -- which is the state `provider_finding` exists
-/// to prevent. Composing it here means there is one order and
-/// one set, and `bombyx doctor` is not the only thing that can
-/// get them right.
+/// this rather than composing the pieces themselves:
+/// `run_probes` and `provider_finding` are `pub(crate)`, so
+/// this is the only composition a caller outside the crate can
+/// reach. A report with no provider row is the state
+/// `provider_finding` exists to prevent, and the visibility is
+/// what stops a caller reaching it.
 ///
 /// `run` carries out one probe. It is a parameter so this stays
 /// free of process spawning; the binary passes the real one and

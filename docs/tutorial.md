@@ -13,7 +13,7 @@ can no longer locate.
 > **What this was checked against.**
 >
 > The workstation steps and every piece of bombyx output quoted
-> below were run on Windows 11 with bombyx 0.1.0 in August 2026,
+> below were run on Windows 11 with bombyx 0.4.1 in August 2026,
 > including the two failure cases in **When something goes
 > wrong**.
 >
@@ -116,7 +116,7 @@ Check it landed:
 
 ```console
 $ bombyx --version
-bombyx 0.1.0
+bombyx 0.4.1
 ```
 
 ### Give the VM host an SSH alias
@@ -190,8 +190,8 @@ override it when you need them, highest first:
 | 2 | `BOMBYX_HOST=other` | a shell, CI, or an agent |
 | 3 | `bombyx.local.toml` | one project only; gitignore it |
 
-If none of the four names a host, bombyx stops and lists them
-rather than guessing.
+If none of these three and no `config.toml` names a host,
+bombyx stops and lists them rather than guessing.
 
 ## Part 2: the VM host
 
@@ -289,10 +289,18 @@ want a VM for.
 **It has to be a real repository, pushed somewhere the guest can
 reach.** bombyx sends no project file anywhere: the VM clones
 `source.repo` at `source.ref` itself and runs `source.script`
-out of that clone. A local directory that was never pushed
-leaves the guest failing at clone time, which is late and
-confusing. If you are only trying bombyx out, make an empty
-public repository first and point `repo` at it.
+out of that clone. A directory that was never pushed leaves the
+guest failing at clone time, which is late and confusing.
+
+So an empty repository will not do either. By the end of this
+part the repository has to hold `vagrant/provision.sh`, on the
+branch you name in `ref`, pushed. Part 3 writes that file and
+ends with the step that pushes it.
+
+The guest clones with no credential of its own, so this tutorial
+uses a public repository. A private one needs a credential
+inside the VM, and code in the VM can read it -- see
+[trust-boundary.md](trust-boundary.md) for what that costs.
 
 The layout:
 
@@ -309,7 +317,11 @@ myproject/                  your project repo
 ```toml
 project = "myproject"    # VM and directory name on the host
 
-remote_root = "~/vms"    # optional; keep it above [vm]
+remote_root = "~/vms"    # optional; keep it above [vm] --
+                         # a bare key belongs to the table
+                         # above it, so below [vm] this
+                         # parses as vm.remote_root and the
+                         # whole file is refused
 
 [vm]                     # required: the machine to build
 provider = "libvirt"     # hyperv is written but not selected
@@ -445,6 +457,24 @@ agent CLI. Two rules worth keeping:
   expendable. Pass a token in at the moment you need it
   instead, from inside `bombyx shell`.
 - **Everything idempotent.** See above; `provision` re-runs it.
+
+### Push it, or the guest has nothing to clone
+
+This is the step the rest of the tutorial depends on. The VM
+does not read your working copy -- it clones `source.repo` at
+`source.ref` and runs `source.script` from that clone. Until
+these files are on the branch `ref` names, `bombyx up` boots a
+machine that fails inside the guest.
+
+```bash
+git add bombyx.toml .gitignore vagrant/provision.sh
+git commit -m "add the bombyx VM definition"
+git push origin main          # the branch named in source.ref
+```
+
+`bombyx.toml` itself is not read from the repository -- bombyx
+reads it from your working directory -- but committing it is
+how the next person gets the same VM.
 
 ## Part 4: the first boot
 
