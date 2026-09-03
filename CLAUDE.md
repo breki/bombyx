@@ -762,13 +762,16 @@ for its own earlier findings had landed underneath it. That is
 the reason; `/review` under **Snapshot** holds how it does it,
 and is the only place that should.
 
-**Stop when we would not fix anything the round found** -- every
-finding deferred or declined. Do not keep going for a clean
-sheet: reviewers always find something, and the stopping rule is
-agreement on what matters. That is the reason a run stops, and
-the reason is what this file keeps. `/review` under **Stop, or
-go again** lists the conditions themselves, the three-round cap
-among them.
+**Stop when nothing the round found would make a reader act
+wrongly.** Do not keep going for a clean sheet, and do not read
+a falling finding count as progress. Reviewers always find
+something, because style and placement findings arrive in
+proportion to how much prose there is rather than to how wrong
+it is. Three rounds on one commit went 45, 32, 31 findings
+while what those findings would cost a reader collapsed to
+nothing. Severity is the thing to watch; the count is not.
+`/review` under **Stop, or go again** lists the conditions
+themselves, the three-round cap among them.
 
 ## Definition of Done
 

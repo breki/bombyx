@@ -51,9 +51,19 @@ git diff HEAD -- . "$EXCL"                        > target/review-<n>.diff
 git diff --name-only --diff-filter=d HEAD -- . "$EXCL" > target/review-<n>.files
 ```
 
-`<n>` is the round number, so each round leaves its own pair of
+`<n>` is the round number, so each round leaves its own set of
 files and an earlier round's snapshot stays readable when a
 later finding is about the fix for an earlier one.
+
+**At the end of step 3, write the findings beside the
+snapshot**, to `target/review-<n>.findings`: each finding's ID,
+the reviewer that raised it, and what was done with it. Step 3
+from round two on needs the earlier rounds' findings, and
+nothing else in this file produces them -- so without the file
+that check runs off the conversation, which is the thing the
+snapshot exists to avoid depending on. A compaction between
+rounds would otherwise destroy the only input to the one check
+that has ever detected non-convergence here.
 
 `git add -N` records a path in the index without its contents,
 which is what makes `git diff` report an untracked file at all.
@@ -146,6 +156,24 @@ source of rounds that never end. So on a finding of the shape
 one. Above two, the fix is one authoritative statement and
 pointers to it.
 
+**Two copies is the threshold, and two kinds of copy do not
+count.** A one-line `description` in frontmatter and a row in a
+skills table are how a reader finds a command at all, so both
+may restate a rule freely. What counts is a copy that *states
+the rule* in prose. Fixing that threshold matters because
+without it a consolidation can always be filed as insufficient
+or as excessive, and a finding nobody can settle is a finding
+that comes back every round.
+
+**Consolidating is its own change, with nothing else in it.**
+Collapsing N copies to one owner does not remove prose, it
+converts it: N-1 pointers appear, and a pointer can name the
+wrong section, fail to name one, chain two deep, or explain
+that it is a pointer. One 4-to-1 consolidation done inside a
+round carrying twenty-five other edits produced five findings
+in the next round. So do the consolidation alone, and let it be
+reviewed alone.
+
 **Enumerate before you claim a set is done.** Read the list back
 and count it. Four defects in one round of this command's own
 review were a stated count that did not match its list, or a set
@@ -193,8 +221,19 @@ help now says Y" needs the grep that shows it.
 
 Stop when any holds:
 
+- **No finding in the round would make a reader act wrongly.**
+  This is the one to check first, and a falling count is not
+  it. Three rounds on one commit went 45, 32, 31 findings while
+  severity collapsed: round one found a reviewer brief naming a
+  caller that did not exist, and round three found a paragraph
+  called a section. Style and placement findings arrive in
+  proportion to how much prose there is, not to how wrong it
+  is, so their supply never runs out and the count never
+  reaches zero. Ask what a reader would *do* wrongly. When the
+  answer is nothing, stop, and report the rest without fixing
+  it.
 - **The round fixed nothing** -- every finding deferred or
-  declined. The canon rule, and usually the first to fire.
+  declined.
 - **Earlier fixes are breaking.** More than one defect in an
   earlier round's fix, or one landing in an area an earlier
   round already fixed. Go to **When it stops converging**. A

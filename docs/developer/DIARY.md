@@ -4,6 +4,49 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-03
 
+**Three changes to `/review` so a round can actually finish**
+
+The review loop had a stopping rule that could not fire, a
+consolidation rule that manufactured its own next round, and a
+handover that depended on the conversation surviving. All three
+came out of the rounds on `abee0a5`.
+
+`/review` used to stop when a round fixed nothing, and treated
+a falling finding count as evidence of progress. It is not:
+style and placement findings arrive in proportion to how much
+prose there is, not to how wrong it is, so the supply never
+runs out. The rounds went 45, 32, 31 while severity collapsed
+from "this brief names a caller that does not exist" to "this
+paragraph is called a section". The rule now asks whether any
+finding would make a reader act wrongly, and that question
+would have ended the run a round earlier.
+
+The duplication rule said to consolidate above two copies,
+while `artisan.md` listed a rule stated in two files as a
+defect. With the threshold unsettled, any consolidation could
+be filed as insufficient or excessive, so the finding came back
+every round. Both files now say the same thing, and both name
+the exception: a frontmatter `description` and a skills-table
+row are how a reader finds a command, not copies of a rule.
+
+Consolidating is now its own change with nothing else in it.
+Collapsing N copies converts prose rather than removing it --
+N-1 pointers appear, and a pointer can name the wrong section,
+fail to name one, chain two deep, or explain that it is a
+pointer. We did one 4-to-1 collapse inside a round carrying
+twenty-five other edits and the next round filed five findings
+against it. A backlog entry had said to do it as its own change
+and we deleted that entry in the same round we ignored it.
+
+Step 1 wrote the diff and the file list and nothing wrote the
+findings, while step 3 from round two on needs the earlier
+rounds' findings and their dispositions. In practice that ran
+off the transcript, which is exactly what the snapshot exists
+to avoid depending on -- a compaction between rounds would have
+destroyed the only input to the one check that has ever caught
+non-convergence here. Each round now writes
+`target/review-<n>.findings` beside its snapshot.
+
 **`canon-check`: the decidable half of a canon review is now a
 gate**
 
