@@ -1,5 +1,6 @@
 mod audit;
 mod backfeed;
+mod canon;
 mod changelog;
 mod check;
 mod clean_cache;
@@ -48,7 +49,8 @@ enum XCommand {
         #[arg(long)]
         ignored: bool,
     },
-    /// Run fmt + clippy + doc + tests + coverage + duplication
+    /// Run every quality gate in order (see `CLAUDE.md`
+    /// under Definition of Done)
     Validate {
         /// Check formatting read-only (`fmt --check`)
         /// instead of auto-fixing it in place. Use in CI
@@ -62,6 +64,9 @@ enum XCommand {
     Coverage,
     /// Run code duplication check (requires code-dupes)
     Dupes,
+    /// Check the claims canon prose makes about this repo:
+    /// cross-references, paths, `git` grants, width, backlog IDs
+    CanonCheck,
     /// Security-advisory audit (RUSTSEC); requires
     /// cargo-audit
     Audit,
@@ -190,6 +195,7 @@ fn main() {
         XCommand::Fmt => fmt_cmd::fmt(),
         XCommand::Coverage => coverage::coverage(),
         XCommand::Dupes => dupes::dupes(),
+        XCommand::CanonCheck => canon::canon_check(),
         XCommand::Audit => audit::audit(),
         XCommand::Deny => deny::deny(),
         XCommand::Licenses {

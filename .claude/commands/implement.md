@@ -113,7 +113,7 @@ particular:
 
 ## Phase 3 -- Finalise
 
-1. Run `cargo xtask validate`. All nine gates must
+1. Run `cargo xtask validate`. Every gate must
    pass. `CLAUDE.md`'s **Definition of Done** lists them
    in execution order; do not restate the list here, or
    the two copies will disagree about how many there are.

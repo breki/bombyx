@@ -186,13 +186,14 @@ removed. `/template-sync` will default those paths to
 
 ```bash
 cargo xtask check             # type-check all targets, run none
-cargo xtask validate          # fmt + clippy + doc + tests + coverage
+cargo xtask validate          # every gate, in run order
 cargo xtask test [filter]     # tests only
 cargo xtask test --ignored    # run #[ignore]-tagged tests
 cargo xtask clippy            # lint only
 cargo xtask doc               # doc build + doc-link check
 cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
+cargo xtask canon-check       # canon prose claims vs the tree
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
 cargo xtask deny              # licence/bans/sources gate (cargo-deny, offline)
@@ -785,7 +786,7 @@ just when the code compiles:
    does not replace reading your own diff either way.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
-`cargo xtask validate` runs nine gates, **listed here in the
+`cargo xtask validate` runs ten gates, **listed here in the
 order they execute** so the numbers match what the run prints:
 
 1. **Dependency cooldown** (`cargo xtask dep-age-check`) --
@@ -797,24 +798,34 @@ order they execute** so the numbers match what the run prints:
    `cargo fmt --all -- --check` (use in CI or before
    partial staging, so an in-place rewrite does not sweep
    unrelated drift into the working tree)
-3. **Code duplication <= 6%** (production code, tests
+3. **Canon claims** (`cargo xtask canon-check`) -- reads the
+   markdown in `.claude/`, `CLAUDE.md` and `llms.txt`, and
+   fails on five kinds of claim the tree does not support: a
+   bold cross-reference introduced by the word "under" that
+   names no heading anywhere in canon, a backticked repo path
+   that does not exist, a command file telling the agent to
+   run a `git` subcommand its own `allowed-tools` does not
+   grant, prose past 80 columns, and a cited backlog ID that
+   is in no backlog. It reads markdown only, so it needs no
+   compilation and runs before every gate that does
+4. **Code duplication <= 6%** (production code, tests
    excluded)
-4. **Licences, bans and sources** (`cargo xtask deny`) --
+5. **Licences, bans and sources** (`cargo xtask deny`) --
    runs offline against `deny.toml`; a licence outside the
    allow-list, a banned crate or a non-crates.io source fails,
    and a missing `cargo-deny` is an error rather than a warning
    because there is no network here to be down
-5. **No warnings**:
+6. **No warnings**:
    `cargo clippy --all-targets -- -D warnings`
-6. **Documentation builds and every doc link resolves**
+7. **Documentation builds and every doc link resolves**
    (`cargo xtask doc`) -- see "Doc gate" below
-7. **`xtask`'s own tests pass** -- this step runs `-p xtask`
+8. **`xtask`'s own tests pass** -- this step runs `-p xtask`
    only, which is why the run prints `Test (xtask only)`
-8. **Coverage >= 90%** -- and this is where the *workspace*
+9. **Coverage >= 90%** -- and this is where the *workspace*
    tests run, under `llvm-cov --workspace --exclude xtask`.
    Splitting them that way stops the same tests being
    compiled and run twice
-9. **Security audit** (RUSTSEC; `cargo xtask audit`) --
+10. **Security audit** (RUSTSEC; `cargo xtask audit`) --
    a positive vulnerability fails; an unreachable advisory
    DB degrades to a warning
 
