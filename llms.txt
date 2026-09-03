@@ -7,7 +7,8 @@
 
 Cargo workspace, CLI only:
 
-- `crates/bombyx` — core library and CLI binary
+- `crates/bombyx` — core library and CLI binary (paths below
+  are `src/`-relative unless written in full)
   - `config.rs` — `bombyx.toml` parsing, validation, paths
   - `name.rs` — validated `ScratchName` (one path segment)
   - `remote.rs` — ssh command construction (pure)
@@ -24,9 +25,8 @@ Cargo workspace, CLI only:
   - `tool.rs` — `PATH` lookup, never the working directory
   - `bin/bombyx/main.rs` — clap parsing, host-provenance
     reporting, process spawning, the self-update ordering
-  - `templates/bootstrap.sh` — the script the guest runs,
-    identical for every project (beside `src/`, not in it;
-    every other entry above is `src/`-relative)
+  - `crates/bombyx/templates/bootstrap.sh` — the script the
+    guest runs, identical for every project
 - `xtask` — build automation (not published)
 
 No web crate, no frontend, no E2E suite, no deploy
@@ -74,23 +74,17 @@ running it).
 `bombyx.toml` in the project root. Committed, and carries
 **no `host`** -- one there is an error, not a warning:
 
-```toml
-project = "myproject"    # required
-remote_root = "~/vms"    # optional; keep it above the tables,
-                         # a bare key after `[source]` binds to it
+`bombyx.toml.sample` in the repository root is the only full
+example, and a test loads it as shipped. Keys:
 
-[vm]                     # required, no defaults
-provider = "libvirt"     # hyperv is written but not selected;
-                         # see docs/todo.md
-box = "generic/ubuntu2204"
-cpus = 4
-memory = 8192            # MiB
-
-[source]                 # required: what the guest clones
-repo = "https://github.com/you/myproject"
-ref = "main"
-script = "vagrant/provision.sh"   # path inside the clone
-```
+- `project` — required; VM name and directory on the host
+- `[vm]` — required, no defaults: `provider`, `box`, `cpus`,
+  `memory`. Use `libvirt`; `hyperv` is written but bombyx does
+  not tell vagrant to select it (`docs/todo.md`)
+- `[source]` — required: `repo`, `ref`, `script`, what the
+  guest clones and runs
+- `remote_root` — optional, `~/vms`. Must sit above the tables:
+  a bare key after `[source]` binds to that table
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a
@@ -140,8 +134,10 @@ cargo xtask audit             # RUSTSEC advisories
 ```
 
 `cargo xtask validate` is the canonical gate (9 steps);
-`/release` runs it as the release gate and the Stop hook runs
-a subset; `/commit` does not run it at all. Never use raw
+`/release` runs it as the release gate; `/commit` does not run
+it at all. A Claude Code Stop hook
+(`.claude/hooks/stop-check.sh`) runs a faster subset -- fmt,
+clippy, doc, test -- skipping coverage and duplication. Never use raw
 `cargo test` / `cargo clippy`.
 
 ## Conventions
