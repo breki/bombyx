@@ -708,8 +708,9 @@ one direct bookkeeping commit for the version bump.)
 Committing and releasing are separate:
 
 - **`/commit`** is a save-point. It updates the diary and the
-  `CHANGELOG.md` `[Unreleased]` block, commits, and **then**
-  runs the code reviewers. It does **not** bump the version,
+  `CHANGELOG.md` `[Unreleased]` block and commits. It does
+  **no reviewing** -- that is `/review`, which is independent
+  and which nothing requires. It does **not** bump the version,
   touch `Cargo.lock`, or run `cargo xtask validate` --
   multiple commits land between releases, and forcing each one
   to make a SemVer decision turns the version field into
@@ -737,39 +738,36 @@ came from had `cargo xtask deploy` gating exactly that,
 and the prose describing it outlived the subsystem by
 several weeks.
 
-### Reviews run after the commit
+### Reviewing is its own process
 
-Their fixes get their own commit. The cycle is: commit,
-review, commit the fixes, review again. Never amend the commit
-under review, and never fold a fix into the commit that the
-review found it in.
+`/review` reviews, `/commit` commits, and neither calls the
+other. Nothing requires a review: reach for `/review` when you
+want work hardened before it becomes a commit, and skip it when
+you do not.
 
-This order beats reviewing first for three reasons.
+That split is deliberate. Reviewing after the commit was tried,
+and the cost was that every `/commit` became a multi-round
+session -- fixes needing their own commits, the reviewers firing
+again on each, and no way to commit a save-point without
+inviting all of it. A save-point should be cheap.
 
-The reviewers get an immutable target. Reviewing a staged diff
-means reviewing something that changes while they read it --
-this repo has already had a reviewer report against a working
-tree that no longer compiled, because the fixes for its own
-earlier findings had landed underneath it.
+What the earlier arrangement got right, and `/review` keeps:
+**the reviewers get an immutable target.** Reviewing a live
+working tree means reviewing something that changes while they
+read it, and this repo has already had a reviewer report against
+a tree that no longer compiled, because fixes for its own
+earlier findings had landed underneath it. `/review` writes a
+snapshot of the working diff to a file and points the reviewers
+at that.
 
-The history says what happened. A fix folded into the commit
-that needed it leaves no trace that anything was found, so the
-next reader cannot tell a reviewed commit from an unreviewed
-one. A separate commit naming the finding IDs is the record.
+**Stop when we would not fix anything the round found** -- every
+finding deferred or declined. Do not keep going for a clean
+sheet: reviewers always find something, and the stopping rule is
+agreement on what matters. Three rounds is the cap, and the
+third reports rather than fixing, so a run never ends on edits
+nobody read. `/review` holds the rest of the loop, including
+what to do when an area stops converging.
 
-The fixes get reviewed too. A fix is code, and code written
-under review pressure is exactly the code most likely to be
-wrong -- this repo has a `sed` range that deleted a brace, a
-reviewer suggestion that broke the doc gate, and a "fix" that
-would have deleted an agent's uncommitted work. Folding fixes
-into the reviewed commit is how those ship unexamined.
-
-**Stop when we would not fix anything the round found** --
-every finding deferred or declined. Do not
-keep going for a clean sheet: reviewers always find something,
-and the stopping rule is agreement on what matters. After three
-rounds, hand what is left to the operator rather than starting
-a fourth.
 
 ## Definition of Done
 
@@ -782,10 +780,9 @@ just when the code compiles:
    changes the commands bombyx emits. `--dry-run` proves
    the argv; it does not prove the remote side accepts it.
    "tests pass" is not "the command works".
-4. **Self-review the diff** before committing. This is
-   your own read, and it stays *before* the commit -- the
-   three reviewer agents run after it, and neither
-   replaces the other.
+4. **Self-review the diff** before committing. This is your
+   own read. `/review` is available and is not required; it
+   does not replace reading your own diff either way.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
 `cargo xtask validate` runs nine gates, **listed here in the
@@ -894,7 +891,8 @@ a fresh empty `[Unreleased]` above it.
 | `/check` | Type-check all targets, incl. tests; runs none |
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline with stepwise progress |
-| `/commit` | Save-point commit with diary, CHANGELOG, and code review (no version bump) |
+| `/review` | Review and fix uncommitted work, committing nothing; independent of `/commit` |
+| `/commit` | Save-point commit with diary and CHANGELOG (no reviewing, no version bump) |
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |
 | `/rundown` | Grouped one-line rundown of the session's work, ending with the decisions and actions left for the operator. Reports only -- changes nothing |

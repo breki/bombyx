@@ -152,14 +152,13 @@ particular:
    path where one exists. Report plainly what was
    exercised and what was not.
 
-6. Commit with `/commit`.
+6. Optionally run `/review`, then commit with `/commit`.
 
-   **Do not pre-launch the code reviewers here.** They
-   review a *commit*, and there is not one yet -- the
-   reasoning is in `CLAUDE.md` under **Commits and
-   releases**. `/commit` spawns all three itself after the
-   commit lands, and drives the fix-and-review-again cycle
-   from there.
+   `/review` hardens the work while it is still
+   uncommitted, and `/commit` does no reviewing of its own.
+   Neither requires the other. For a change that touches
+   the commands bombyx emits, `/review` is worth the time:
+   its step 2 runs the thing rather than reading it.
 
 ## Rules
 
