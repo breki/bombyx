@@ -631,6 +631,41 @@ unnecessary red step is low; the cost of skipping a
 real red step (and shipping a test that always
 passed) is high.
 
+**Ask before testing a new area, especially an
+auxiliary one.** TDD says how to write a test once we
+have decided to write it. It does not decide that the
+test should exist. For a new area -- a new kind of
+check, a new thing to assert about, anything that is
+not the code a user runs -- use `AskUserQuestion`
+first, and say what the test would cover and what it
+would cost to keep.
+
+Three document-scanning tests were written under this
+discipline and deleted four review rounds later. They
+ran bombyx, split its output on string literals, split
+a markdown file the same way, and compared: the
+`(N lines elided)` numbers in the dry-run transcripts
+had to match, and a `doctor` transcript showing skips
+had to show the count. Nobody asked for them. Each
+round the reviewers found real defects in them, each
+fix was right, and it never converged, because
+rendered terminal output and hand-written prose have
+no contract to assert against. 251 lines, a quarter of
+the integration suite, for two defects -- one of which
+a reviewer had already found by copying the sample and
+running it.
+
+The tell is on the assertion side. **A test whose
+assertions need their own parser is testing the
+parser.** bombyx parses a config file, so "does this
+sample load" had something to hold on to. Nothing
+parses a `doctor` report, so "does this transcript
+look right" could not.
+
+Auxiliary code is where this bites, because it is
+where nobody is waiting for the test and nobody
+notices the cost. Ask.
+
 **Input guards: enumerate the family first.** When
 adding a check that rejects bad input, write the test
 table before the check, listing the whole family the
