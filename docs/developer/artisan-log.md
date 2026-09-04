@@ -4,6 +4,22 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-04-config-rs-is-mostly-its-own-test-module
+
+**Category:** Module size
+
+`crates/bombyx/src/config.rs` is 1371 lines. Its production half
+is under 500; the rest is one `mod tests`. `CLAUDE.md` records
+that reading this file whole once overflowed a session, and the
+rule the size gate targets is about the production code, which
+is not over budget. So the fix is to move the tests out with
+`#[cfg(test)] #[path = "config/tests.rs"] mod tests;` rather
+than to split the module.
+
+Deferred: unrelated to the change that surfaced it (#23, the
+overlay removal). Also tracked as `config-tests-own-file` in
+`docs/todo.md`.
+
 ### aq-2026-09-04-canon-check-surface-is-pub-for-nobody
 
 **Category:** Abstraction Boundaries / API Design

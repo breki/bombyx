@@ -5,6 +5,36 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-04-config-home-env-chooses-the-host-in-silence
+
+**Category:** A redirect on the path `destroy` uses, with no
+provenance line
+
+`BOMBYX_CONFIG_HOME` decides which directory `config.toml` is
+read from. `config_dir_from` in `crates/bombyx/src/config/host.rs`
+requires only that the value be an anchored path, so `/tmp/pwn`
+passes. A per-directory environment tool reads its settings from
+inside the clone -- `direnv` on an `.envrc`, `mise`, a CI job
+definition -- so a repository can supply that variable. The
+winning origin is then `HostOrigin::UserFile`, which `main.rs`
+deliberately does not announce, so bombyx runs against a host
+the operator never configured and prints nothing.
+
+Demonstrated during the `/review2` on #23: the variable pointed
+at a directory holding `host = "attacker-box"` produced
+`ssh attacker-box ...` with a clean stderr. `destroy` is the one
+command that still shows it, in the `host:directory` line it
+asks the operator to confirm.
+
+Candidate fix: print the provenance line for `UserFile` too
+whenever `CONFIG_DIR_ENV` supplied the directory. That changes
+what bombyx prints, so it needs a failing test first.
+
+Deferred: the prose asserting the opposite was corrected in the
+same change; the code was not. Also tracked as
+`config-home-env-provenance` in `docs/todo.md`, because it is
+work somebody will pick up rather than only a record.
+
 ### rt-2026-09-04-provenance-line-names-the-default-filename
 
 **Category:** Misleading provenance on the path `destroy` uses
