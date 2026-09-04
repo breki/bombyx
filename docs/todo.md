@@ -190,8 +190,10 @@ plan, decisions, and outcome.
   question, undecided.
 
 - **config-tests-own-file** -- config.rs tests into config/tests.rs
-  config.rs is 1371 lines; its production half is under 500, so the ~880-line
-  `mod tests` is what makes the file unreadable in one pass. CLAUDE.md records
+  config.rs runs to well over 1300 lines and its production half is under 500,
+  so `mod tests` is most of the file and what makes it unreadable in one pass.
+  No exact figure here: it moves every commit and a stale one costs a reader a
+  check. CLAUDE.md records
   that reading it whole overflowed a session. Move it with `#[cfg(test)] #[path
   = "config/tests.rs"] mod tests;`. Raised by artisan during the /review2 on #23
   and kept out of that change as unrelated scope.
@@ -203,10 +205,16 @@ plan, decisions, and outcome.
   and prints nothing. Demonstrated live during the /review2 on #23: an anchored
   value such as /tmp/pwn passes is_anchored_dir, and a per-directory environment
   tool (direnv reading an .envrc in a clone, mise, a CI job) can set it.
-  Candidate fix: print the provenance line for UserFile too whenever
-  CONFIG_DIR_ENV supplied the directory, which needs a failing test first.
+  Candidate fix, in two halves. Print the provenance line for UserFile too
+  whenever CONFIG_DIR_ENV supplied the directory, which needs a failing test
+  first. And pass the registry path into HostOrigin::describe from main.rs, so
+  the line names the file bombyx read rather than the bare config.toml -- the
+  printing half alone leaves every config.toml origin still rendering a
+  directoryless literal, which is the same gap one step later.
   Raised as red-team finding RT-1; the prose claiming otherwise was corrected in
-  that change, the code was not.
+  that change, the code was not. The second half was added during the /review2
+  on #25, where a doc comment cited this item as the work that gives the notice
+  the path and the item did not yet say so.
 
 - **add-issue-flag-unused** -- todo add --issue has no caller
   The flag renders a pending entry as a link to issues/<slug>.md, derived rather

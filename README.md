@@ -190,6 +190,16 @@ Three sources, first match wins:
 If none of them names a host, bombyx stops and lists all three
 rather than guessing.
 
+**A fourth source is half-built and does nothing yet.** A
+`[projects.<name>]` table in your `config.toml` accepts a `host`
+key of its own, meant for the one project you keep on a
+different machine, and it is ranked between row 2 and row 3.
+No command reaches it, because none of them names a project
+yet -- so bombyx accepts the key, ignores it, and uses row 3.
+Do not write it expecting an effect. `project-selection-flag`
+in `docs/todo.md` is the work that connects it, and this table
+grows a fourth row when it lands.
+
 **This section is the authoritative list** -- the sample config
 and `llms.txt` point here rather than repeating it, so there is
 one place to correct when it changes.
@@ -247,9 +257,9 @@ you to confirm.
 
 There is no way yet to give one project a host of its own
 permanently -- `--host` covers a single run, and nothing
-records the choice. `docs/issues/project-config-off-repo.md`
-plans one: a per-project entry in the `config.toml` you
-already own.
+records the choice. The half-built fourth source under "Where
+bombyx looks for the host" above is what will, once a command
+names a project.
 
 The host is checked wherever it came from. A value starting
 with `-` is refused rather than handed to `ssh` as an option,

@@ -9,9 +9,10 @@
 //! **The VM host is not part of it.** Which machine runs the
 //! VMs is a property of the developer, not of the project --
 //! each person has their own hardware on their own network --
-//! so `host` comes from a per-developer file, the environment
-//! or `--host`, and is refused in `bombyx.toml`. See
-//! [`HostSources`] for the order they are consulted in.
+//! so `host` comes from `--host`, the environment or a
+//! per-developer file that can carry two of them, and is
+//! refused in `bombyx.toml`. See [`HostSources`] for the four
+//! sources and the order they are consulted in.
 //!
 //! Because `bombyx.toml` ships *inside a repo*, it is
 //! attacker-controlled data the moment you clone or check out
@@ -86,15 +87,14 @@ pub use host::{
     CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, user_config_dir,
 };
 pub(crate) use host::{
-    HostProblem, host_place, host_problem, is_anchored_dir, resolve_host,
+    HostProblem, host_place, host_problem, is_anchored_dir, registry_path,
+    resolve_host,
 };
 pub use registry::{Project, Registry, USER_CONFIG_FILE};
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
 
-use read::{
-    MAX_CONFIG_BYTES, Symlinks, from_toml, path_display, read_optional,
-};
+use read::{MAX_CONFIG_BYTES, Symlinks, from_toml, read_optional};
 pub(crate) use root::path_segments;
 
 /// Default root on the VM host under which project
@@ -172,7 +172,7 @@ impl ProjectFile {
     /// forbidden to carry one: that file travels inside a
     /// repository bombyx does not trust, and the value reaches
     /// `ssh` as a bare argument. [`Config::load`] ranks it
-    /// across three sources; the test-only `Config::parse` takes
+    /// across four sources; the test-only `Config::parse` takes
     /// it from its caller.
     fn into_config(self, host: String) -> Config {
         Config {
@@ -312,19 +312,12 @@ impl Config {
         // carrying the bad value rather than the project file.
         if let Some(problem) = host_problem(&host) {
             return Err(ConfigError::InvalidHost {
-                // Only the file source names a path. `--host`
-                // and the variable are already their own best
-                // description, and `Display for HostOrigin`
-                // gives it.
-                origin: match origin {
-                    HostOrigin::UserFile => {
-                        sources.user_config_dir.map_or_else(
-                            || origin.to_string(),
-                            |d| path_display(&registry::path(d)),
-                        )
-                    }
-                    HostOrigin::Flag | HostOrigin::Env => origin.to_string(),
-                },
+                // `describe` holds the wording for every
+                // source. The path is passed because an operator
+                // sent to fix the value has to find the file;
+                // `--host` and the variable ignore it and name
+                // themselves.
+                origin: origin.describe(registry_path(sources).as_deref()),
                 reason: match problem {
                     HostProblem::Empty => "must not be empty".to_owned(),
                     HostProblem::Invalid(reason) => reason,
@@ -351,10 +344,12 @@ impl Config {
     /// A cloned repo cannot supply that value, because `host` is
     /// refused in `bombyx.toml` (see
     /// [`ConfigError::HostInProjectFile`]). The check covers the
-    /// three sources that can: `--host`, [`HOST_ENV`], and a
-    /// per-developer `config.toml`. A mistake or a careless
-    /// script fills any of those in. The other fields *are*
-    /// repo-supplied, so their rules carry the full weight.
+    /// four sources that can: `--host`, [`HOST_ENV`], and two
+    /// keys in a per-developer `config.toml` -- one project's
+    /// own `host`, and the file-wide one. A mistake or a
+    /// careless script fills any of those in. The other fields
+    /// *are* repo-supplied, so their rules carry the full
+    /// weight.
     fn validate(&self) -> Result<(), ConfigError> {
         // The host rule lives in `host_problem`, so this and the
         // source-naming check in `load` cannot disagree.
@@ -594,6 +589,42 @@ mod tests {
         .unwrap();
     }
 
+    /// Writes a per-developer config naming `host` file-wide,
+    /// plus an entry for `myproject`.
+    ///
+    /// `project_host` is the entry's own `host`, and `None`
+    /// writes an entry with no `host` line at all -- which is
+    /// what most entries look like, and what the fall-back tests
+    /// need.
+    ///
+    /// The entry carries the `[vm]` and `[source]` tables
+    /// because a `[projects.<name>]` table without them does not
+    /// parse, and a file that does not parse would fail these
+    /// tests for a reason that has nothing to do with ranking.
+    /// They come from [`REQUIRED_TABLES`], renamed into the
+    /// project's namespace, so a field added to `Vm` or `Source`
+    /// does not break a test about precedence.
+    fn write_user_file_with_project(
+        dir: &Path,
+        host: &str,
+        project_host: Option<&str>,
+    ) {
+        let tables = REQUIRED_TABLES
+            .replace("[vm]", "[projects.myproject.vm]")
+            .replace("[source]", "[projects.myproject.source]");
+        let entry_host = project_host
+            .map_or_else(String::new, |h| format!("host = {h:?}\n"));
+        std::fs::write(
+            dir.join(USER_CONFIG_FILE),
+            format!(
+                "host = {host:?}\n\n\
+                 [projects.myproject]\n\
+                 {entry_host}{tables}"
+            ),
+        )
+        .unwrap();
+    }
+
     /// Sources whose only entry is the per-developer directory.
     fn user_sources(dir: &Path) -> HostSources<'_> {
         HostSources {
@@ -668,16 +699,21 @@ mod tests {
     }
 
     #[test]
-    fn host_precedence_runs_flag_env_user_file() {
-        // All three sources present at once, then removed one at
+    fn host_precedence_runs_flag_env_project_entry_user_file() {
+        // All four sources present at once, then removed one at
         // a time. Testing each in isolation would pass with any
         // ordering at all.
         let (dir, base) = project_dir(&minimal());
-        write_user_file(dir.path(), "from-user-file");
+        write_user_file_with_project(
+            dir.path(),
+            "from-user-file",
+            Some("from-project"),
+        );
 
         let all = HostSources {
             flag: Some("from-flag"),
             env: Some("from-env"),
+            project: Some("myproject"),
             ..user_sources(dir.path())
         };
         assert_eq!(load(&base, &all).unwrap().host, "from-flag");
@@ -689,7 +725,49 @@ mod tests {
             env: None,
             ..no_flag
         };
-        assert_eq!(load(&base, &no_env).unwrap().host, "from-user-file");
+        assert_eq!(load(&base, &no_env).unwrap().host, "from-project");
+
+        // Naming no project drops that source and leaves the
+        // file-wide host, which is what every command does until
+        // `--project` exists.
+        let no_project = HostSources {
+            project: None,
+            ..no_env
+        };
+        assert_eq!(load(&base, &no_project).unwrap().host, "from-user-file");
+    }
+
+    #[test]
+    fn an_entry_with_no_host_of_its_own_falls_back_to_the_file() {
+        // The key is optional. A project that does not name a
+        // host has to reach the file-wide one rather than
+        // reporting that no source names a host at all.
+        let (dir, base) = project_dir(&minimal());
+        write_user_file_with_project(dir.path(), "from-user-file", None);
+
+        let sources = HostSources {
+            project: Some("myproject"),
+            ..user_sources(dir.path())
+        };
+        assert_eq!(load(&base, &sources).unwrap().host, "from-user-file");
+    }
+
+    #[test]
+    fn a_project_with_no_entry_falls_back_to_the_file() {
+        // Asking which host a project prefers is not asking for
+        // its entry, so a name with no table is not an error
+        // here. `Registry::project` is what reports that, once.
+        let (dir, base) = project_dir(&minimal());
+        write_user_file_with_project(
+            dir.path(),
+            "from-user-file",
+            Some("from-project"),
+        );
+        let sources = HostSources {
+            project: Some("nosuchproject"),
+            ..user_sources(dir.path())
+        };
+        assert_eq!(load(&base, &sources).unwrap().host, "from-user-file");
     }
 
     #[test]
@@ -718,6 +796,61 @@ mod tests {
             ..env
         };
         assert_eq!(origin_of(&flag), HostOrigin::Flag);
+    }
+
+    #[test]
+    fn load_reports_a_project_entry_as_the_source() {
+        // The origin carries the project name because a
+        // project's host and the file-wide host come out of the
+        // same file: `config.toml` alone does not say which of
+        // the two won, and `destroy` runs `rm -rf` on the
+        // winner.
+        let (dir, base) = project_dir(&minimal());
+        write_user_file_with_project(
+            dir.path(),
+            "from-user-file",
+            Some("from-project"),
+        );
+        let sources = HostSources {
+            project: Some("myproject"),
+            ..user_sources(dir.path())
+        };
+        let (cfg, origin) = Config::load(&base, &sources).unwrap();
+        assert_eq!(cfg.host, "from-project");
+        assert_eq!(
+            origin,
+            HostOrigin::ProjectEntry(
+                crate::name::ProjectName::parse("myproject").unwrap()
+            )
+        );
+        // The notice is built from `Display`, so it has to name
+        // both the entry and the file the operator edits.
+        let text = origin.to_string();
+        assert!(text.contains("myproject"), "{text}");
+        assert!(text.contains(USER_CONFIG_FILE), "{text}");
+    }
+
+    #[test]
+    fn an_invalid_host_in_an_entry_names_that_entry() {
+        // A bad host is reported against the source that
+        // supplied it, and for this source the useful answer is
+        // which table to edit, not just which file.
+        let (dir, base) = project_dir(&minimal());
+        write_user_file_with_project(
+            dir.path(),
+            "good-host",
+            Some("-oProxyCommand=x"),
+        );
+        let sources = HostSources {
+            project: Some("myproject"),
+            ..user_sources(dir.path())
+        };
+        let err = load(&base, &sources).unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
+        assert!(text.contains("myproject"), "{text}");
+        assert!(text.contains(USER_CONFIG_FILE), "{text}");
+        assert!(!text.contains("bombyx.toml"), "{text}");
     }
 
     #[test]
@@ -816,7 +949,7 @@ mod tests {
         let sources = HostSources {
             flag: Some("mine"),
             user_config_dir: Some(dir.path()),
-            env: None,
+            ..HostSources::default()
         };
         assert_eq!(load(&base, &sources).unwrap().host, "mine");
     }

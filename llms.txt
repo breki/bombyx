@@ -95,13 +95,19 @@ resolved from `--host`, `BOMBYX_HOST` and a per-developer
 host" in `README.md` for the authoritative list, and
 `resolve_host` in `config.rs` for the code.
 
-`Config::load` returns an error naming all three when no source
-supplies a host. It takes a `HostSources` carrying the flag, the
-env value and the config dir, and returns the winning
-`HostOrigin`, so precedence is unit-testable without mutating
-the process environment and the binary reports the winner
-rather than re-deriving it; the binary is the only thing that
-reads `std::env`. A config dir from the environment must be an
+`resolve_host` ranks a fourth source the CLI cannot reach: a
+`host` key inside a `[projects.<name>]` table, between
+`BOMBYX_HOST` and the file-wide `host`. `HostSources.project` is
+`None` on every path today, so the key never wins. The README
+section above says the same and is where the count is kept.
+
+`Config::load` returns an error naming all three places when no
+source supplies a host. It takes a `HostSources` carrying the
+flag, the env value, the project name and the config dir, and
+returns the winning `HostOrigin`, so precedence is unit-testable
+without mutating the process environment and the binary reports
+the winner rather than re-deriving it; the binary is the only
+thing that reads `std::env`. A config dir from the environment must be an
 anchored path -- a relative one would resolve against the
 working directory and take the host out of the repo.
 
@@ -111,9 +117,10 @@ about files and not about everything a repository can reach. A
 per-directory environment tool (`direnv`, `mise`, a CI job)
 reads its settings from inside the clone, and a
 `BOMBYX_CONFIG_HOME` set that way redirects bombyx to another
-`config.toml` without printing a provenance line. There is no
-per-project host: `--host` covers one run, and
-`docs/issues/project-config-off-repo.md` plans a recorded one.
+`config.toml` without printing a provenance line. The
+per-project `host` key described above does not close this: no
+command reaches it yet, so `--host` still covers one run and
+nothing else records the choice.
 
 `remote_root` must be anchored (`/` or `~/`)
 and name at least one directory below that anchor. bombyx

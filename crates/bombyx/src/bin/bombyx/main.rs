@@ -276,6 +276,11 @@ fn run() -> Result<Ran> {
     let sources = bombyx::config::HostSources {
         flag: cli.host.as_deref(),
         env: env_host.as_deref(),
+        // No project is named until `--project` exists, so the
+        // per-project `host` key is skipped and the file-wide
+        // one applies. `project-selection-flag` in
+        // `docs/todo.md` is the work that fills this in.
+        project: None,
         user_config_dir: user_dir.as_deref(),
     };
 
@@ -295,13 +300,17 @@ fn run() -> Result<Ran> {
 
     // Say which source the host came from, using the winner
     // the library reports rather than re-testing the sources
-    // here. Re-deriving it duplicated the precedence rule in the
-    // one place no library test could reach, so a change to the
-    // ranking would have left this line naming the old winner --
-    // and `destroy` runs `rm -rf` on whichever host really won.
+    // here. Re-deriving it would put a second copy of the
+    // precedence rule where no library test reaches, so a
+    // change to the ranking would leave this line naming the
+    // wrong winner -- and `destroy` runs `rm -rf` on whichever
+    // host really won.
     //
-    // Printed unless it came from a `config.toml`, which is the
-    // ordinary case and would be noise on every command.
+    // Silent only for the *file-wide* `host`, which is the
+    // ordinary case and would be noise on every command. A
+    // project's own `host` key sits in the same `config.toml`
+    // and is printed, because the two keys share a file and the
+    // line has to say which of them won.
     //
     // That exemption has a cost worth knowing at this line.
     // `BOMBYX_CONFIG_HOME` decides *which* config directory gets

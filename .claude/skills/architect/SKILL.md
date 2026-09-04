@@ -75,9 +75,13 @@ bombyx/
 Parses `bombyx.toml`: `project`, `remote_root`, `[vm]` and
 `[source]` -- and *refuses* `host`, which belongs to the
 developer rather than the repo. `host` is resolved
-separately from `--host`, `BOMBYX_HOST` or the
-per-developer `config.toml`, in that order
-(`HostSources`). Typed errors via `thiserror`.
+separately from `--host`, `BOMBYX_HOST`, the named
+project's own `host` key in the per-developer
+`config.toml`, and that file's own `host`, in that order
+(`HostSources`). The third of those is accepted by the
+parser and reached by no command yet, because nothing
+names a project until `project-selection-flag` lands.
+Typed errors via `thiserror`.
 Computes remote paths (`remote_project_dir`,
 `remote_scratch_dir`).
 

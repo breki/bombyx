@@ -160,16 +160,19 @@ classDiagram
   }
   class Project {
     +String remote_root
+    +Option~String~ host
   }
   class HostSources {
     +Option~str~ flag
     +Option~str~ env
+    +Option~str~ project
     +Option~Path~ user_config_dir
   }
   class HostOrigin {
     <<enumeration>>
     Flag
     Env
+    ProjectEntry
     UserFile
   }
 
@@ -192,10 +195,17 @@ rather than a project.
 `Registry` and `Project` are a second pair of config types, and
 they parse the operator's own `config.toml` rather than
 `bombyx.toml`: a top-level `host`, and one `[projects.<name>]`
-table per project carrying `remote_root`, `[vm]` and `[source]`.
-`config::host` reads the `host` key out of that file today.
-bombyx does not load a project table yet: the work that builds a
-`Config` from one is `registry-config-load` in `docs/todo.md`.
+table per project carrying `remote_root`, `[vm]`, `[source]` and
+an optional `host` of its own. `config::host` reads both host
+keys out of that file, and ranks the project's above the
+top-level one, so an operator who keeps one project on a
+different machine writes it in that project's table. bombyx does
+not load a project table yet, and two steps stand between here
+and its doing so: `registry-config-load` in `docs/todo.md`
+builds a `Config` from an entry, and `project-selection-flag`
+adds the `--project` argument that first supplies a name. The
+per-project `host` key waits on the second of those, because
+nothing names a project until it lands.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -306,8 +316,10 @@ reach `ssh`. Seven values in all, spread across
 **That is a gap, not a decision we would make again.**
 
 `Project`, the registry's per-project entry, carries the same
-values less `host` and `project`, and `Project::validate` calls
-the same checkers.
+values less `project`. Its `host` is optional where `Config`'s
+is required, and it reaches `ssh` the same way, so
+`Project::validate` runs `host_problem` on it alongside the
+other checkers `Config::validate` calls.
 
 Three values in an entry are checked while the file parses: the
 project name, because it is the table key and a `ProjectName`;

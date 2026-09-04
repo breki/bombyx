@@ -2,14 +2,17 @@
 //!
 //! The host is the one setting that is deliberately **not** in the
 //! project file: it belongs to whoever drives bombyx, not to the
-//! repo. So it has three possible sources with a ranking between
+//! repo. So it has four possible sources with a ranking between
 //! them, a charset rule and a provenance answer -- a
 //! self-contained subject, which is why it is a module of its own
 //! rather than part of parsing `bombyx.toml`.
 //!
-//! The lowest-ranked source is a file, and `super::registry` is
-//! what reads it. This module asks that module for the file and
-//! takes the `host` key out of it.
+//! The two lowest-ranked sources are keys in one file, and
+//! `super::registry` is what reads it. This module asks that
+//! module for the file, then for the named project's own `host`
+//! and the file-wide one, in that order. An operator writes
+//! `host` inside a project's table when that project runs on a
+//! different machine.
 //!
 //! What is wrong with a host value is decided in one place,
 //! [`host_problem`], and reported two ways: as a *field* problem
@@ -23,6 +26,7 @@ use std::path::{Path, PathBuf};
 use super::error::FieldError;
 use super::registry::{self, USER_CONFIG_FILE};
 use super::{ConfigError, guards};
+use crate::name::ProjectName;
 
 /// Characters allowed in an SSH destination.
 ///
@@ -56,6 +60,20 @@ pub struct HostSources<'a> {
 
     /// The [`HOST_ENV`] environment variable.
     pub env: Option<&'a str>,
+
+    /// Which project's entry to consult, when the caller knows.
+    ///
+    /// The entry lives in the same file as the file-wide `host`
+    /// and outranks it, so one project can run on a machine of
+    /// its own. `None` skips that source entirely, which is what
+    /// every command does until `--project` exists.
+    ///
+    /// A `&str` rather than a [`ProjectName`]: a name of any
+    /// shape simply matches no table key, and the caller is not
+    /// asking for the entry, so there is nothing here to refuse.
+    /// `super::registry::Registry::project` is what checks a
+    /// requested name, once, when the entry itself is wanted.
+    pub project: Option<&'a str>,
 
     /// Directory holding [`USER_CONFIG_FILE`], usually from
     /// [`user_config_dir`].
@@ -224,28 +242,82 @@ where
 /// copy of the precedence rule below, in code no library test can
 /// reach -- so reordering the sources here would leave its
 /// message naming the wrong one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostOrigin {
     /// The `--host` flag.
     Flag,
     /// The [`HOST_ENV`] environment variable.
     Env,
-    /// The per-developer [`USER_CONFIG_FILE`].
+    /// One project's entry in the per-developer
+    /// [`USER_CONFIG_FILE`].
+    ///
+    /// It carries the project name because the entry and the
+    /// file-wide `host` sit in the same file: naming the file
+    /// alone would leave the operator to work out which of the
+    /// two won, and `destroy` runs `rm -rf` on the winner. The
+    /// name is the map key as the file spells it, so it is the
+    /// table heading to go and edit.
+    ///
+    /// Carrying it is why [`HostOrigin`] is not `Copy`.
+    ProjectEntry(ProjectName),
+    /// The file-wide `host` in the per-developer
+    /// [`USER_CONFIG_FILE`].
     UserFile,
+}
+
+impl HostOrigin {
+    /// Names this source, in the words both callers print.
+    ///
+    /// `path` is the registry file when the caller knows where
+    /// it is, and the bare file name stands in otherwise.
+    /// `super::Config::load` passes it, because an operator sent
+    /// to fix a bad value has to find the file.
+    ///
+    /// The startup notice passes `None` and so prints the bare
+    /// name, which is a gap rather than a decision: the
+    /// directory comes from `BOMBYX_CONFIG_HOME`, `APPDATA`,
+    /// `XDG_CONFIG_HOME` or `HOME`, and a per-directory
+    /// environment tool can redirect the first of those from
+    /// inside a clone -- so `config.toml` alone does not say
+    /// whose file won. `config-home-env-provenance` in
+    /// `docs/todo.md` tracks it, and covers two halves: printing
+    /// the line for a file-wide `host` at all, and passing the
+    /// path in here. Doing only the first leaves this rendering
+    /// a directoryless literal.
+    ///
+    /// One function rather than two, so the notice and the error
+    /// cannot come to describe the same source differently. The
+    /// wording for a project entry names its table, and that
+    /// spelling existing twice is how the two drift apart.
+    pub(crate) fn describe(&self, path: Option<&Path>) -> String {
+        let file = path.map_or_else(
+            || USER_CONFIG_FILE.to_owned(),
+            super::read::path_display,
+        );
+        let file = file.as_str();
+        match self {
+            Self::Flag => "--host".to_owned(),
+            Self::Env => HOST_ENV.to_owned(),
+            Self::ProjectEntry(name) => {
+                format!("[projects.{name}].host in {file}")
+            }
+            Self::UserFile => file.to_owned(),
+        }
+    }
 }
 
 impl std::fmt::Display for HostOrigin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            Self::Flag => "--host",
-            Self::Env => HOST_ENV,
-            Self::UserFile => USER_CONFIG_FILE,
-        };
-        f.write_str(name)
+        f.write_str(&self.describe(None))
     }
 }
 
 /// Finds the VM host, highest-precedence source first.
+///
+/// Four sources, in order: `--host`, [`HOST_ENV`], the named
+/// project's own `host` key, and the file-wide `host`. The last
+/// two share one file, and the entry wins so that one project
+/// can run on a machine of its own.
 ///
 /// The per-developer file is read *last* and only if it is
 /// needed, so `--host` works on a machine whose file is absent
@@ -265,15 +337,38 @@ pub(crate) fn resolve_host(
     if let Some(host) = sources.env.filter(|v| !v.trim().is_empty()) {
         return Ok((host.to_owned(), HostOrigin::Env));
     }
+    // The file is read once and both of its sources are taken
+    // from that one copy. Reading it twice would let a file
+    // edited between the two reads supply a project host and a
+    // file-wide host that never coexisted.
     if let Some(dir) = sources.user_config_dir
-        && let Some(host) = registry::Registry::read(dir)?
-            .and_then(|file| file.host().map(str::to_owned))
+        && let Some(registry) = registry::Registry::read(dir)?
     {
-        return Ok((host, HostOrigin::UserFile));
+        if let Some(name) = sources.project
+            && let Some((key, host)) = registry.project_host(name)
+        {
+            return Ok((
+                host.to_owned(),
+                HostOrigin::ProjectEntry(key.clone()),
+            ));
+        }
+        if let Some(host) = registry.host() {
+            return Ok((host.to_owned(), HostOrigin::UserFile));
+        }
     }
     Err(ConfigError::HostMissing {
         place: host_place(sources),
     })
+}
+
+/// Where the registry file is, when the environment says.
+///
+/// `None` when it names no config directory, which is a machine
+/// with nothing concrete to point a message at. Both messages
+/// about the file go through this one function, so neither can
+/// name a path the other would not.
+pub(crate) fn registry_path(sources: &HostSources) -> Option<PathBuf> {
+    sources.user_config_dir.map(registry::path)
 }
 
 /// Names the one file that can carry a host, for an error
@@ -282,10 +377,10 @@ pub(crate) fn resolve_host(
 /// It is a path the operator can act on, so it is printed in
 /// full rather than described.
 pub(crate) fn host_place(sources: &HostSources) -> String {
-    match sources.user_config_dir.map(registry::path) {
-        Some(user) => user.display().to_string(),
+    registry_path(sources).map_or_else(
         // No home directory in the environment, so there is
         // nothing concrete to point at.
-        None => format!("a {USER_CONFIG_FILE} in your config directory"),
-    }
+        || format!("a {USER_CONFIG_FILE} in your config directory"),
+        |path| super::read::path_display(&path),
+    )
 }

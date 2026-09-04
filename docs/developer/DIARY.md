@@ -4,6 +4,124 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**Three reviewers on the per-project host: one unguarded value,
+and two claims in the commit message that were not true**
+
+`/review2` on #25, run after the commit rather than before it.
+Four reading rounds, 32 findings, 28 fixed, one logged, three
+declined. Stage 2 stopped on the converging rule rather than a
+clean sheet: two of its round-1 fixes carried a defect of their
+own, both of them ours.
+
+Two findings were defects in shipped code and both concern one
+value. `host` reaches `ssh` as its first positional argument and
+`ssh` honours no `--` separator, so a leading `-` is read as an
+option. `Registry::project` hands out an entry and its own test
+says holding one is proof the values passed -- and `host` was in
+neither the type-checked group nor the list `Project::validate`
+runs. `Project::validate` now calls `host_problem`. Beside it,
+`Registry::project_host` was `pub`, so the unchecked value was
+exported past the one place that checks it; it is `pub(crate)`
+now. Its sibling `Registry::host` has the same shape, is
+pre-existing from step 3, and went to the red-team backlog
+rather than into this change.
+
+Both guard arms are tested, and each was proven by breaking the
+arm rather than by reading it. The empty case had no test at
+all, which is what `CLAUDE.md` under **Test-Driven Development**
+asks for under "enumerate the family first" -- the family, not
+the case that prompted the work.
+
+Two corrections are to the record and both are ours. Dropping
+`Copy` from `HostOrigin` cost nothing at the call sites: `!=`
+autoborrows both operands, so `main.rs` compiles unchanged. We
+wrote that it cost two one-line changes, rewrote `main.rs` to
+`matches!` on the strength of it, and put the claim in the plan
+document, the diary, the commit message and the pull request.
+red-team checked it against `rustc`. The rewrite is reverted and
+the commit message is the one copy that cannot be fixed, so the
+plan document says so.
+
+The second is `docs/architecture.md`. It is the inventory a
+reader consults to answer which fields reach `ssh` unchecked,
+and it said `Project` carries the same values "less `host`". It
+was in no snapshot because we never touched it, while every
+earlier step of this series updated it in the same commit as the
+code.
+
+The rest was drift between files that state the same rule. Four
+documents and three module headers disagreed about how many
+sources supply the VM host, `llms.txt` was made to say four one
+sentence before pointing at a README that says three and calls
+itself authoritative, and a doc comment cited a backlog item as
+the work that closes a gap the item does not mention. red-team
+named the cause twice without being asked: `resolve_host` has
+been rewritten in five commits in two days, and the cost lands
+on a different file each round. The README now carries the
+half-built fourth source in full -- ranked, parsed, reached by
+no command, do not write it expecting an effect -- and everyone
+else points there.
+
+**A project may keep to its own machine, and the flag that did
+that is now scheduled for deletion**
+
+Step 4 of seven in project-config-off-repo (#25). A
+`[projects.<name>]` table gains an optional `host`, ranked above
+the file-wide one, so one project can run on a machine of its
+own. That is the one thing `bombyx.local.toml` did that nothing
+else could, and it returns as a key in the file the operator
+already owns.
+
+The issue asked for the key and nothing else. The operator asked
+for more: tie the host to the project and delete `--host`,
+`BOMBYX_HOST` and the file-wide `host` outright, because a
+one-off flag can point `destroy`'s `rm -rf` at a machine the
+project never named. Two of those three answers held and one did
+not. The deletions cannot land here: the binary still loads
+`bombyx.toml`, that file is refused a `host` key outright, and so
+the flag, the variable and the file-wide key are the only three
+sources bombyx has -- removing them now leaves the tool unable to
+find a host at all until steps 5 and 6 land. They go in step 6,
+where `bombyx.toml` dies and every setting comes from the
+registry, and #18 carries them. The file-wide `host` survives as
+a default a project entry overrides, because requiring the key in
+every entry writes one machine name once per project and renaming
+the machine then means editing every one.
+
+`HostOrigin` stopped being `Copy`. The notice saying which host
+is in force exists because `destroy` runs `rm -rf` on the winner,
+and a project's host and the file-wide host now come out of the
+same file -- so "from config.toml" no longer says which of the
+two won. The variant carries the project name, and the name is
+the map key as the file spells it, taken from `get_key_value`
+rather than re-parsed, because the lookup has already proved it
+legal. Dropping `Copy` cost nothing at the call sites -- `!=`
+autoborrows both operands, so `main.rs` compiles unchanged. The
+commit message says two call sites changed, and red-team checked
+that against `rustc` and found it false.
+
+Self-review caught the defect the reviewers would have. The
+wording for the new source existed twice, in `Display` and again
+in the error path in `Config::load`, which is the drift that
+`host_problem` was written to prevent for the host *rules*. Both
+now call one `HostOrigin::describe`, which takes the registry's
+path when the caller knows it.
+
+`Registry::project_host` runs no checks, the way `Registry::host`
+runs none, and it also skips `Project::validate`. An entry whose
+`cpus` is zero still supplies its host: refusing would quietly
+demote that project to the file-wide host and boot its VM on the
+wrong machine, and the broken value is reported anyway the moment
+anything asks for the entry itself.
+
+Eight tests, plus a row in the table that asserts a looked-up
+entry has had its values checked. The ranking was proven by
+inverting it in `resolve_host` and watching three of them fail,
+one of which was the error naming the wrong table. Nothing in
+the binary reads the key yet -- `project` is `None` until
+`--project` exists -- so a dry run still emits the file-wide
+host and the argv is unchanged.
+
 **Three reviewers on the registry table: three guard gaps, and
 nine comments claiming more than the code did**
 
