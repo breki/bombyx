@@ -177,9 +177,6 @@ plan, decisions, and outcome.
   as the restart, and the step names already exist in `validate.rs`'s step list.
   Raised by the workflow retrospective, 2026-09-03.
 
-- **registry-projects-table** -- config.toml gains a projects table
-  Step 3 of 7; GitHub issue #24. Pure addition, tests the only caller.
-
 - **registry-project-host** -- an optional host key per project
   Step 4 of 7; GitHub issue #25. Depends on registry-projects-table, and
   restores what overlay-drop-host-source removes. Pure addition.
@@ -233,6 +230,10 @@ plan, decisions, and outcome.
   the body across. Found while using the fixed tool for the first time.
 
 ## Done
+
+- [**registry-projects-table**](issues/project-config-off-repo.md)
+  -- config.toml gains a projects table
+  (2026-09-04)
 
 - **todo-done-link** -- todo done writes a link that need not resolve
   (2026-09-04)
