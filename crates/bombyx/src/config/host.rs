@@ -268,10 +268,16 @@ impl std::fmt::Display for HostOrigin {
 /// `local` is the overlay's path, named only in the
 /// no-host-anywhere error.
 ///
-/// Takes the overlay by `&mut` and *removes* the host it finds,
-/// so the value is consumed where it is ranked and no later
-/// reader can find it still sitting there and use it a second
-/// time.
+/// Takes the overlay by `&mut` and *removes* the host it finds.
+///
+/// `Config::load` never reads the overlay again, and this
+/// function is `pub(crate)`, so no code outside bombyx can
+/// reach it either. The `&mut` therefore protects nothing
+/// today. It stays because step 2 of the plan in
+/// `docs/issues/project-config-off-repo.md` (#23) deletes
+/// `bombyx.local.toml` and this branch with it, so narrowing
+/// the parameter to `&Overlay` first is work that step throws
+/// away.
 ///
 /// The per-developer file is read *last* and only if it is
 /// needed, so `--host` works on a machine whose file is absent

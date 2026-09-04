@@ -292,6 +292,23 @@ sources can still be wrong: a gitignored `bombyx.local.toml`,
 your `config.toml`, `BOMBYX_HOST`, or a mistyped `--host`. It
 guards the argv, not one particular file.
 
-`bombyx.local.toml` carries a host and nothing else, so the
-charset check is the whole of what that file has to pass. Every
-other value comes from `bombyx.toml` and is validated there.
+`bombyx.local.toml` carries a host, so the charset check
+applies to it exactly as it applies to `--host` and
+`BOMBYX_HOST`. Every other value comes from `bombyx.toml` and
+is validated there.
+
+That file is worth one more paragraph, because it is the
+residual exposure in this path. It sits inside the project
+directory, only convention keeps it out of git, and it outranks
+your own `config.toml`. So a repository that commits one
+redirects every `ssh` bombyx runs, `destroy` included, to a
+machine of its choosing -- which is the attack `host` was
+removed from `bombyx.toml` to prevent. bombyx does not refuse
+such a file. What it does is print a line on stderr saying the
+host came from a `bombyx.local.toml`, so the redirection is
+visible rather than silent. That line names the default
+filename rather than the derived one, so under
+`--config staging.toml` it says `bombyx.local.toml` while
+`staging.local.toml` is the file that supplied the host.
+`docs/developer/redteam-log.md` tracks it as
+`rt-2026-09-04-provenance-line-names-the-default-filename`.

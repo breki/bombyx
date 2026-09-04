@@ -4,6 +4,82 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-04-required-tables-fixture-has-three-homes
+
+**Category:** One rule with no single home
+
+`crates/bombyx/src/config.rs` defines the required `[vm]` and
+`[source]` fields three times: `REQUIRED_TABLES` near the top,
+a byte-identical `required_tables()` in the test module, and
+`TABLE_FIELDS`, added by the round-1 fix for AQ-5 and RT-8.
+`crates/bombyx/tests/integration_test.rs` holds a fourth in the
+other crate. `TABLE_FIELDS` also diverged on a value:
+`repo = "https://example.invalid/p.git"` against
+`.../myproject.git` in the other three.
+
+`REQUIRED_TABLES`'s own doc comment says "Every test that needs
+them reads this one constant. Writing the eleven lines out per
+test module would mean editing each module to add a required
+field." That claim was already false before this branch --
+`required_tables()` is its twin -- and the round-1 fix made it
+falser.
+
+Raised by AQ-21 and FR-1 independently, both pointing at the
+same contradiction: a constant claiming to be the only copy,
+with two more beside it. Fresh-reader's report is the useful
+statement of the cost: it wanted to add a required `[source]`
+field and could not tell which definition to edit, or whether
+editing one would leave a test silently green.
+
+The repair is one home and derivations from it -- most likely
+`TABLE_FIELDS` as the source, with `required_tables()` built
+from it -- and a corrected doc comment, since the guarantee is
+"a failure names the omitted field *provided* `TABLE_FIELDS`
+lists every required field".
+
+Deferred by the operator to its own commit after this branch
+lands: `/review` under **Review, then fix** says a
+consolidation converts N copies into N-1 pointers and wants its
+own reviewed change, and this one crosses a crate boundary.
+
+### aq-2026-09-04-host-only-rule-in-five-prose-copies
+
+**Category:** One rule with no single home
+
+"`bombyx.local.toml` accepts `host` and nothing else" is stated
+as prose in five places, and none says which one wins:
+`README.md` under **A different machine for one project**,
+`docs/tutorial.md` in the `bombyx.toml` walkthrough,
+`docs/usage.md` in the untrusted-input section, `llms.txt`, and
+`bombyx.toml.sample`. The doc comment on `Overlay` in
+`crates/bombyx/src/config.rs` is a sixth, in code.
+
+`README.md` already claims authority, but only for the
+four-source host list: "**This section is the authoritative
+list** -- the sample config and `llms.txt` point here rather
+than repeating it". Both of those files restate the order
+inline anyway, and `docs/tutorial.md` gives a third table with
+a different shape -- four ranked rows against three-plus-one.
+So the authority sentence is itself contradicted by two of the
+files it names.
+
+The drift the rule predicts has already happened: this round
+fixed `docs/usage.md` for saying the charset check was all that
+file must pass, while `README.md` said an unknown key is
+refused.
+
+The repair is one authoritative statement and pointers to it --
+extend `README.md`'s authority sentence to cover the host-only
+rule, reduce the tutorial and the sample to pointers, and
+either make `llms.txt` point without restating or drop the
+"not repeated" clause and accept it as a finding aid.
+
+Not applied in the round that found it: `/review` under
+**Review, then fix** says a consolidation converts prose into
+N-1 pointers rather than removing it, and a pointer can name
+the wrong section or chain two deep. It wants its own commit,
+reviewed on its own. Raised by AQ-9 and FR-14 independently.
+
 ### aq-2026-09-03-finding-ids-do-not-persist-into-a-backlog
 
 **Category:** A false claim in a reviewer's own brief

@@ -162,19 +162,22 @@ pub(super) fn read_optional(
     Ok(Some(source))
 }
 
-/// Where the overlay for `path` lives, if it can have one.
+/// Where the per-project host file for `path` lives, if it can
+/// have one.
 ///
-/// Beside the file it overrides, named `<stem>.local.toml`: the
-/// original extension is *replaced*, not preserved, so
+/// That file is `bombyx.local.toml`, which this crate's type
+/// calls `Overlay`. It sits beside the config it belongs to,
+/// named `<stem>.local.toml`:
+/// the original extension is *replaced*, not preserved, so
 /// `staging.toml` and `staging.yaml` would share
 /// `staging.local.toml`. Deriving it from the argument rather
 /// than fixing one name is what makes `--config staging.toml`
-/// look for `staging.local.toml`, so the override is always
-/// discoverable from the file it overrides.
+/// look for `staging.local.toml`, so the host file is always
+/// discoverable from whichever config file `--config` names.
 ///
 /// `None` when `path` has no file name at all -- `..`, or a
-/// bare directory. Returning a path there would put the overlay
-/// *beside* the directory rather than in it, which is a
+/// bare directory. Returning a path there would put the host
+/// file *beside* the directory rather than in it, which is a
 /// surprise nobody asked for.
 #[must_use]
 pub fn local_config_path(path: &Path) -> Option<PathBuf> {
@@ -204,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn the_overlay_sits_beside_the_file_it_overrides() {
+    fn the_host_file_sits_beside_the_config_it_is_named_after() {
         // The extension is *replaced*, not kept, so `staging.toml`
         // and `staging.yaml` would both look for
         // `staging.local.toml`. That is deliberate -- see the

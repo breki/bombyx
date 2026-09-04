@@ -5,6 +5,110 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-04-provenance-line-names-the-default-filename
+
+**Category:** Misleading provenance on the path `destroy` uses
+
+`HostOrigin::Overlay` renders as the fixed literal
+`bombyx.local.toml` in `crates/bombyx/src/config/host.rs`. That
+Display value is now the only thing bombyx prints about the
+file, because the `<local> overrides <config>` notice is gone.
+Under `--config staging.toml` the host comes from
+`staging.local.toml` and the line says `bombyx.local.toml`,
+naming a file that supplied nothing and need not exist.
+Verified against the built binary. `Config::load` already
+resolves the real path for its `InvalidHost` error, so the
+machinery exists; the fix is to return that path alongside
+`HostOrigin`. `destroy` runs `rm -rf` on the host this line
+reports, and `README.md` under **A different machine for one
+project** rests its guarantee on it. `docs/usage.md` and `README.md`
+both carry a marker naming this ID.
+
+Deferred by the operator: step 2 of the config move
+(`overlay-drop-host-source`, #23) deletes `bombyx.local.toml`
+and this branch with it.
+
+This does not block
+`rt-2026-09-04-overlay-and-local-config-path-are-pub`, though
+an earlier version of this entry said it did. The fix above
+returns the path from `Config::load`, so `main.rs` never calls
+`local_config_path` -- and after step 1 it calls nothing in
+that module, so the narrowing is free to go ahead. Only the
+alternative fix, resolving the path in `main.rs`, would need
+`local_config_path` to stay `pub`.
+
+### rt-2026-09-04-a-malformed-overlay-defeats-the-host-flag
+
+**Category:** The documented escape hatch stops working
+
+`Config::load` in `crates/bombyx/src/config.rs` reads and
+parses `bombyx.local.toml` before `resolve_host` runs, and any
+problem with it is fatal. So `--host explicit` fails on a file
+whose only contribution was already outranked. The same doc
+comment states the opposite principle two paragraphs up for the
+per-developer file: it is read only when nothing else supplied
+a host, "so `--host` still works on a machine whose
+per-developer file is missing or broken". The eager read was
+justified while the overlay carried project fields that were
+needed regardless, and step 1 removed them.
+
+Verified against the built binary: with `remote_root` in the
+overlay, `bombyx --config staging.toml --host explicit
+--dry-run status` exits 1. Anyone upgrading with an existing
+overlay carrying a project field loses every command until they
+edit that file by hand.
+
+The fix is to read the overlay lazily, behind the flag and
+environment checks. The tradeoff is that a corrupt overlay then
+goes unreported whenever a higher-precedence source won.
+
+Deferred by the operator: step 2 (#23) deletes the file and the
+branch.
+
+### rt-2026-09-04-overlay-and-local-config-path-are-pub
+
+**Category:** Public surface nothing public consumes
+
+`Overlay` is `pub` with a `pub host` field, and
+`crates/bombyx/src/config.rs` re-exports
+`read::local_config_path`. Both were public because
+`Config::with_overlay` and the deleted "overrides" notice used
+them; neither exists now. `resolve_host` is `pub(crate)` and
+`Config::load` builds the `Overlay` internally, so no public
+API accepts, returns or hands out one. `Overlay`'s `Default`
+derive lost its last caller with the test that used
+`..Overlay::default()`.
+
+Narrowing both to `pub(crate)` is a breaking library change and
+would stop `Config::load`'s doc comment linking them, since
+rustdoc refuses a public page pointing at a private item.
+
+Nothing blocks this. Step 2 (#23) makes it moot if that lands
+first, which is the likely outcome.
+
+### rt-2026-09-04-a-committed-overlay-redirects-every-ssh
+
+**Category:** Residual exposure in the config path
+
+`bombyx.local.toml` sits inside the project directory, only
+convention keeps it out of git, and it outranks the operator's
+own `config.toml`. A repository that commits one redirects
+every `ssh` bombyx runs, `destroy` included, to a machine of
+its choosing. That is the attack `host` was removed from
+`bombyx.toml` to prevent, and removing it from that file did
+not close this route.
+
+bombyx does not refuse such a file. Its only mitigation is the
+provenance line, which
+`rt-2026-09-04-provenance-line-names-the-default-filename`
+shows can name the wrong file. `docs/usage.md` now states the
+exposure rather than implying it is closed.
+
+Candidate fixes: refuse an overlay that `git` tracks, or
+require the file outside the checkout. Step 2 (#23) deletes the
+file, which closes this too -- so the value here is the record
+of why the file must not come back.
+
 ### rt-2026-09-03-round-three-findings-have-no-durable-home
 
 **Category:** A disposition with nowhere to go

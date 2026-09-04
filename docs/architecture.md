@@ -180,6 +180,11 @@ classDiagram
   HostSources ..> HostOrigin : reports which won
 ```
 
+`Overlay` is the optional `bombyx.local.toml` beside the
+project file. It carries a VM host and nothing else, and it is
+the third of four host sources -- behind `--host` and
+`BOMBYX_HOST`, ahead of the per-developer `config.toml`.
+
 `Config` is what bombyx runs with. `host` is the one field never
 read from `bombyx.toml`, because a VM host belongs to a person
 rather than a project.

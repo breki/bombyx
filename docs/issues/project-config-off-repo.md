@@ -1,9 +1,14 @@
 # project-config-off-repo
 
-**Status:** In progress -- chunk 1 landed 2026-09-02
+**Status:** In progress -- chunk 1 landed 2026-09-02, step 1 of
+7 landed 2026-09-04
 
-The **Problem** and **Context** sections below describe the
-state when this was captured, before chunk 1. The
+**Problem**, **Context** and **Open questions** below describe
+the state when this was captured, before chunk 1. **Plan**
+still reads as three chunks, and the **Progress log** re-split
+chunks 2 and 3 into seven steps, which is the live plan --
+`Plan`'s step-2 list is kept current as steps land, so it is
+the one section below that is not frozen. The
 **Progress log** at the end says what has changed. Line numbers
 in this document are from the day it was written and the work it
 plans moves them; treat them as a hint, not an address.
@@ -165,11 +170,10 @@ The registry gains a `[projects.<name>]` table per project,
 carrying `remote_root`, `[vm]`, `[source]` and an optional
 `host`.
 
-Delete `ProjectFile`, `Overlay`, `read::local_config_path`,
-`Config::with_overlay` and `HostOrigin::Overlay`.
-`main.rs:278` calls `local_config_path` outside
-`Config::load`, to print the "overrides" notice, and that
-call site goes with it. `Config::load` stops taking a path to
+Delete `ProjectFile`, `Overlay`, `read::local_config_path`
+and `HostOrigin::Overlay`. Step 1 already removed
+`Config::with_overlay` and the call site that printed the
+"overrides" notice. `Config::load` stops taking a path to
 a project file and takes a project name instead. Host ranking
 becomes flag, environment, the project's `host`, the
 top-level `host`.
@@ -325,9 +329,10 @@ not met. frosti was unreachable from this session.
 
 ### 2026-09-04 -- step 1 landed
 
-`Overlay` now carries `host` and nothing else. Gone with the
-four project fields: `Config::with_overlay`, the `replace`
-helper, and `into_config`'s overlay parameter. `HostSources`,
+`Overlay` now carries `host` and nothing else. Three more
+things went with the four project fields:
+`Config::with_overlay`, the `replace` helper, and
+`into_config`'s overlay parameter. `HostSources`,
 `resolve_host` and the four-source ranking are unchanged, so
 `bombyx.local.toml` still supplies a host for one project and
 step 2 (#23) is what deletes the file.
@@ -385,7 +390,9 @@ Seven steps, each a commit that compiles and passes
 7. `destroy-confirmation-shape` (#27) -- what `destroy`'s
    positional becomes
 
-Steps 1 and 2 are pure removals needing no design. Steps 3 to 5
+Step 2 is a pure removal needing no design. Step 1 was a
+removal plus one deliberate behaviour change, the deleted
+"overrides" notice, recorded under **Decisions**. Steps 3 to 5
 are pure additions whose only caller is their own tests, so
 nothing can regress. Step 6 switches the tool over and carries
 every document. Step 7 settles a design question that would

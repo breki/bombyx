@@ -9,6 +9,54 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-04-open-questions-count-does-not-match-its-list
+
+**Category:** A count that disagrees with the list under it
+
+`docs/issues/project-config-off-repo.md`'s progress log says
+"Two of the three **Open questions** above are now answered",
+and what follows answers one: `remote_root` stays per-project.
+The other two sentences say `destroy`'s positional is step 7
+and still open, and that the `.git/config` question stays
+parked. A reader cannot tell which second question was meant,
+or whether an answer was decided and never written down.
+
+Predates this branch -- the text came in with commit 03f7528,
+the seven-step re-split -- so it is logged rather than fixed
+here. Either say "One of the three", or, if assigning
+`destroy`'s positional to step 7 counts as closing that
+question, say so in those words.
+
+### fr-2026-09-04-config-parse-doc-narrates-its-own-past
+
+**Category:** Comment tells the history instead of the rule
+
+`Config::parse`'s doc comment in `crates/bombyx/src/config.rs`
+spends four sentences on a visibility change and a test
+migration -- "It was `pub` and had no production caller ...
+which now build a temp fixture and call `load`" -- before
+reaching the fact a reader needs, which is that `parse` takes
+the host directly and so skips the four-source ranking `load`
+performs. `CLAUDE.md` under **Do not narrate the past** rules
+this out. Deferred as pre-existing text outside the change that
+found it.
+
+### fr-2026-09-04-two-documents-narrate-the-codes-past
+
+**Category:** Comment tells the history instead of the rule
+
+Three passages describe a version the reader may think they are
+running. `README.md`: "**bombyx does that for you now.** This
+used to be the project's job, and the README told you to write
+the `env:` block into your own `Vagrantfile`" -- from which a
+reader cannot tell whether an `env:` block of their own is
+harmful, useless or required. `README.md` again: "so a repo
+shipping `host = "-oProxyCommand=..."` used to be able to run
+code on your workstation". `docs/usage.md`: "`host` in
+`bombyx.toml` is now an error". Each reads the same without the
+history. Deferred as pre-existing prose outside the change that
+found it.
+
 ### fr-2026-09-03-no-reviewer-emits-the-severity-field
 
 **Category:** A judgement with no named source

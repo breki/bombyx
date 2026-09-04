@@ -221,8 +221,9 @@ it.
 
 ### A different machine for one project
 
-Your `config.toml` names the VM host you use for everything.
-When one repository has to run somewhere else, name that
+Your `config.toml` specifies the VM host you use for
+everything. When one repository has to run somewhere else,
+name that
 machine in a `bombyx.local.toml` beside its project file, and
 gitignore the file:
 
@@ -247,6 +248,12 @@ case and not worth a line on every command. So the host that
 `destroy` would run `rm -rf` on is visible without reasoning
 about precedence, and an empty or absent `bombyx.local.toml`
 prints nothing, because it changed nothing.
+
+One gap in that line: it always prints the name
+`bombyx.local.toml`, so under `--config staging.toml` it says
+that while `staging.local.toml` is the file that supplied the
+host. `docs/developer/redteam-log.md` tracks it as
+`rt-2026-09-04-provenance-line-names-the-default-filename`.
 
 The host is checked wherever it came from. A value starting
 with `-` is refused rather than handed to `ssh` as an option,
