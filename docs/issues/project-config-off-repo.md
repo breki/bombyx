@@ -10,12 +10,13 @@ plans moves them; treat them as a hint, not an address.
 **Captured:** 2026-08-30
 **Started:** 2026-09-02
 
-This document plans three items in `docs/todo.md`, not one:
-`remote-clone-project-source` (GitHub #10),
-`project-config-off-repo` (#16) and `project-selection-flag`
-(#18), in that order. It is filed under the middle slug
-because that is where the design work sits; the other two are
-a deletion and a command-line change.
+This document plans the whole move out of the repository. It
+began as three items and is now eight: chunk 1 landed as
+`remote-clone-project-source` (GitHub #10), and chunks 2 and 3
+were re-split into seven steps on 2026-09-04. The **Re-split**
+entry in the progress log lists them and says why. It is filed
+under the middle slug because that is where the design work
+sits.
 
 ## Problem
 
@@ -294,3 +295,51 @@ direct unit tests.
 **Not verified against a real VM host.** This chunk changes
 what executes there, so Definition of Done item 3 applies and is
 not met. frosti was unreachable from this session.
+
+### 2026-09-04 -- chunks 2 and 3 re-split into seven steps
+
+Two findings. Chunks 2 and 3 could not land separately: chunk 2
+changes `Config::load` to take a project name, and chunk 3 is
+what adds `--project` to supply one, so between them nothing
+selects a project. Landing chunk 2 alone would need an interim
+selector that chunk 3 then deletes.
+
+And the split was on the wrong axis. Of the 52 references in
+`config.rs` to the types this work removes, 41 are the overlay
+and 11 are `ProjectFile`. The overlay carries the bulk, and the
+plan bundled it into chunk 2 because the *reason* to delete it
+depends on the move -- once the base file is the operator's own
+private file, an overlay over a file only its owner can edit
+buys nothing. The *work* does not depend on the move at all.
+
+Seven steps, each a commit that compiles and passes
+`cargo xtask validate`:
+
+1. `overlay-drop-project-overrides` (#22) -- the overlay stops
+   overriding project fields
+2. `overlay-drop-host-source` (#23) -- delete
+   `bombyx.local.toml` entirely
+3. `registry-projects-table` (#24) -- `config.toml` gains a
+   `[projects.<name>]` table
+4. `registry-project-host` (#25) -- an optional `host` key per
+   project
+5. `registry-config-load` (#26) -- load a `Config` from the
+   registry by project name
+6. `project-selection-flag` (#18) -- `--project`, and the
+   deletion of the project file
+7. `destroy-confirmation-shape` (#27) -- what `destroy`'s
+   positional becomes
+
+Steps 1 and 2 are pure removals needing no design. Steps 3 to 5
+are pure additions whose only caller is their own tests, so
+nothing can regress. Step 6 switches the tool over and carries
+every document. Step 7 settles a design question that would
+otherwise sit inside step 6.
+
+Two of the three **Open questions** above are now answered.
+`remote_root` stays per-project rather than becoming a top-level
+default with an override, because one place to look for a value
+beats two. `destroy`'s positional is step 7 and still open. The
+`.git/config` question stays parked, as the plan always had it.
+
+#16 is closed as split rather than done.
