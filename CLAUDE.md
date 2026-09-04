@@ -147,6 +147,34 @@ In practice:
   document earns its length. So the words spent there are
   plain and unadorned, not fewer. Cutting an explanation a
   reader needs is not terseness.
+- **End every chat reply with a forty-word summary.** Close
+  the reply with one or two sentences under forty words,
+  wrapped in `[short]` and `[/short]` tags on their own
+  lines, so a later text processor can extract the summary
+  without parsing the reply around it. This is the one
+  exception to **Say it once** above, and it exists because
+  the operator reads the summary first and the body only
+  when the summary tells them to. `.claude/commands/short.md`
+  holds how to compress: keep the outcome and whatever they
+  do next, and cut the evidence before the reasoning. A
+  failure stays a failure -- "nine gates pass, coverage could
+  not run" never shortens to "gates pass". Write the summary
+  from the reply above it and re-derive nothing. It applies
+  to chat replies only, not to commit messages, documents or
+  code comments.
+- **Write the summary to be read aloud.** A speech
+  synthesizer reads it out, and it strips every backticked
+  span before speaking, so a path or a command inside the
+  summary is deleted rather than pronounced. Nothing may
+  depend on one. Say "the config file" and let the body
+  carry `~/.claude/settings.json`. The same goes for a
+  commit hash, a line number and a version string: `1c5360e`
+  read aloud is noise. Prefer whole words to symbols --
+  "about" over `~`, "to" over `->`, "and" over `&`. Keep
+  each sentence short and end it with a full stop, because
+  the synthesizer splits on those and glues everything
+  before the next one into a single breath. Bold and italics
+  vanish too, so emphasis has to be in the word choice.
 
 ## Working directory
 
