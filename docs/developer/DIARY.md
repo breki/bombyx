@@ -4,6 +4,50 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**`/issue` was wrong in ten places by the end of the day**
+
+We wrote the command in the morning and found it wrong by
+lunchtime. The step ordering came straight from mutrack, where
+the review protocol lives inside the commit command and the
+reviewers read a landed `HEAD`. Here `/review` snapshots
+`git diff HEAD`, so running it after the commit hands the
+reviewers an empty diff, and they would report a clean sheet on
+a change nobody had read. Found by following the command on
+#22, not by reading it.
+
+The reviewers then found nine more, and the pattern in them is
+worth keeping. Three were the ordering fix leaving residue: the
+step-8 paragraph about a round after the PR reintroduced the
+same empty-diff defect, the header asserted that a review
+always happens while step 8 said the operator decides, and step
+10 still told the reader not to hold the PR back until the
+rounds finish, which now happens before any commit exists.
+One fix, three places that had to move with it.
+
+Two more were the frontmatter, which is executable rather than
+documentation. `allowed-tools` never granted `Skill(todo)`
+while two steps told the agent to use `/todo`, and step 1 told
+it to re-measure a stale count "with the command that produces
+them" while granting no `wc` or `grep`. `canon-check` cannot
+catch either: its fourth check reads `git` subcommands only.
+This is the defect the command's own step 5 warns about, in the
+command that warns about it.
+
+The rest were the file saying one thing three times, or telling
+the reader to do something no step arranged. The ordering rule
+was in the preamble, in step 8 and in the Rules list. Nothing
+merged the PR, yet step 12 waited on a merge before closing the
+issue -- and nothing moved the item in `docs/todo.md` to
+`## Done` either, which is why completing #22 by hand left that
+entry pending. Step 12 now says both are the operator's and
+that the report has to name them.
+
+The command shipped on `main` with all of this in it, because
+the fixes and the config change it was written against ended up
+on one branch and the reviewers spent 17 of 58 findings on
+prose that had nothing to do with the config. Splitting it out
+is what this branch is.
+
 **`/issue` works a GitHub issue end to end**
 
 Ported from the mutrack project, where the same command was
