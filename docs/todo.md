@@ -223,6 +223,13 @@ plan, decisions, and outcome.
   canon-check does not catch it, because it checks backticked paths and this is
   a markdown link. Either `done` should take the link target, or mirror `add`'s
   `--issue` flag and write a plain bold slug without one.
+  Correcting the link by hand has a second failure mode, found on
+  canon-xref-wrapped-bold: `raw_slug` in `xtask/src/todo.rs` needs `" -- "`
+  immediately after the closing `**`, so an entry whose summary starts on the
+  next line parses as nothing. `todo list --done` then skips the item and
+  `check_slug_free` reports its slug as unused, so `todo add` will make a
+  duplicate. Whichever fix `done` gets, no operator should be hand-writing
+  these entries.
 
 ## Done
 
