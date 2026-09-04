@@ -190,10 +190,6 @@ plan, decisions, and outcome.
   as the restart, and the step names already exist in `validate.rs`'s step list.
   Raised by the workflow retrospective, 2026-09-03.
 
-- **overlay-drop-host-source** -- delete bombyx.local.toml entirely
-  Step 2 of 7; GitHub issue #23. Depends on overlay-drop-project-overrides.
-  Pure removal.
-
 - **registry-projects-table** -- config.toml gains a projects table
   Step 3 of 7; GitHub issue #24. Pure addition, tests the only caller.
 
@@ -251,6 +247,10 @@ plan, decisions, and outcome.
   that change, the code was not.
 
 ## Done
+
+- [**overlay-drop-host-source**](issues/project-config-off-repo.md)
+  -- delete bombyx.local.toml entirely
+  (2026-09-04)
 
 - **canon-xref-wrapped-bold** -- canon-check reads paragraphs
   (2026-09-04)
