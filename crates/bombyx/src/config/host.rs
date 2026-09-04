@@ -3,9 +3,13 @@
 //! The host is the one setting that is deliberately **not** in the
 //! project file: it belongs to whoever drives bombyx, not to the
 //! repo. So it has three possible sources with a ranking between
-//! them, a charset rule, a per-developer file, and a provenance
-//! answer -- a self-contained subject, which is why it is a module
-//! of its own rather than part of parsing `bombyx.toml`.
+//! them, a charset rule and a provenance answer -- a
+//! self-contained subject, which is why it is a module of its own
+//! rather than part of parsing `bombyx.toml`.
+//!
+//! The lowest-ranked source is a file, and `super::registry` is
+//! what reads it. This module asks that module for the file and
+//! takes the `host` key out of it.
 //!
 //! What is wrong with a host value is decided in one place,
 //! [`host_problem`], and reported two ways: as a *field* problem
@@ -16,10 +20,9 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-
 use super::error::FieldError;
-use super::{ConfigError, Symlinks, from_toml, guards, read_optional};
+use super::registry::{self, USER_CONFIG_FILE};
+use super::{ConfigError, guards};
 
 /// Characters allowed in an SSH destination.
 ///
@@ -28,10 +31,6 @@ use super::{ConfigError, Symlinks, from_toml, guards, read_optional};
 pub(crate) fn is_host_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@')
 }
-
-/// File name of the per-developer configuration, inside the
-/// directory [`user_config_dir`] returns.
-pub const USER_CONFIG_FILE: &str = "config.toml";
 
 /// Environment variable naming the VM host directly.
 pub const HOST_ENV: &str = "BOMBYX_HOST";
@@ -43,17 +42,6 @@ pub const HOST_ENV: &str = "BOMBYX_HOST";
 /// apart -- can point bombyx at a directory of its own instead
 /// of the real one.
 pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
-
-/// The per-developer configuration file.
-///
-/// Carries only `host`. `deny_unknown_fields` refuses every
-/// other key, so a setting meant for `bombyx.toml` and typed
-/// here is reported rather than ignored.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct UserFile {
-    host: Option<String>,
-}
 
 /// Where a VM host name may come from, highest precedence
 /// first.
@@ -277,14 +265,11 @@ pub(crate) fn resolve_host(
     if let Some(host) = sources.env.filter(|v| !v.trim().is_empty()) {
         return Ok((host.to_owned(), HostOrigin::Env));
     }
-    if let Some(dir) = sources.user_config_dir {
-        let path = dir.join(USER_CONFIG_FILE);
-        if let Some(source) = read_optional(&path, Symlinks::Follow)? {
-            let file: UserFile = from_toml(&source, &path)?;
-            if let Some(host) = file.host {
-                return Ok((host, HostOrigin::UserFile));
-            }
-        }
+    if let Some(dir) = sources.user_config_dir
+        && let Some(host) = registry::Registry::read(dir)?
+            .and_then(|file| file.host().map(str::to_owned))
+    {
+        return Ok((host, HostOrigin::UserFile));
     }
     Err(ConfigError::HostMissing {
         place: host_place(sources),
@@ -297,7 +282,7 @@ pub(crate) fn resolve_host(
 /// It is a path the operator can act on, so it is printed in
 /// full rather than described.
 pub(crate) fn host_place(sources: &HostSources) -> String {
-    match sources.user_config_dir.map(|d| d.join(USER_CONFIG_FILE)) {
+    match sources.user_config_dir.map(registry::path) {
         Some(user) => user.display().to_string(),
         // No home directory in the environment, so there is
         // nothing concrete to point at.

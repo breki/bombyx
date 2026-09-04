@@ -7,10 +7,12 @@
 //! attacker-controlled input rather than a typo risk.
 //!
 //! Every rule is enforced in one function, called from
-//! `Config::validate`, so every command agrees on which roots
-//! are usable. Gating only the removal would leave `up` free to
-//! extract a tarball into `/etc` while teardown refused to touch
-//! it.
+//! `Config::validate` for a `bombyx.toml` and from
+//! `Project::validate` for a registry entry, so a `remote_root`
+//! from either file gets the same rules and every command
+//! agrees on which roots are usable. Gating only the removal
+//! would leave `up` free to write into `/etc` while teardown
+//! refused to touch it.
 
 use super::error::FieldError;
 use super::guards;
@@ -57,10 +59,11 @@ fn invalid(reason: impl Into<String>) -> FieldError {
 /// # Errors
 ///
 /// Returns [`FieldError::Empty`] when the value is blank, and
-/// [`FieldError::Invalid`] naming `remote_root` when
-/// the value holds a character outside the allowed set, does not
-/// start with `~` or `/`, contains a `.` or `..` segment, is not
-/// deep enough, or spells `~` anywhere but first.
+/// [`FieldError::Invalid`] naming `remote_root` when the value
+/// starts with `-` and so would read as an option to `ssh`,
+/// holds a character outside the allowed set, does not start
+/// with `~` or `/`, contains a `.` or `..` segment, is not deep
+/// enough, or spells `~` anywhere but first.
 pub(super) fn check(value: &str) -> Result<(), FieldError> {
     // The blank and leading-dash rules are here rather than at
     // the call site, so this module really does own every rule

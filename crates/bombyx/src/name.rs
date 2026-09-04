@@ -9,14 +9,26 @@
 //! `'../../../../etc'` is still `/etc`.
 //!
 //! So the safe shape is enforced by parsing rather than left
-//! to each call site: [`ScratchName`] cannot be constructed
-//! from a value that is not a single, benign path segment.
+//! to each call site: neither [`ScratchName`] nor
+//! [`ProjectName`] can be constructed from a value that is not
+//! a single, benign path segment.
+//!
+//! [`check_segment`] holds every rule, and both types call it,
+//! so the two share their rules by construction rather than by
+//! being kept in step. What differs is where the value comes
+//! from: a scratch name is typed on the command line, and a
+//! project name is a table key in the operator's registry file.
+//! They are separate types so a function taking one cannot be
+//! handed the other. [`ProjectName`] carries the extra impls a
+//! map key needs -- serde, ordering, and `Borrow<str>` for
+//! lookups -- and [`ScratchName`] needs none of them.
 
 use std::fmt;
 
+use serde::Deserialize;
 use thiserror::Error;
 
-/// Longest accepted scratch name.
+/// Longest accepted name.
 pub const MAX_NAME_LEN: usize = 64;
 
 /// Why a user-supplied name was rejected.
@@ -56,13 +68,22 @@ fn is_segment_char(c: char) -> bool {
 /// Returns `Ok` when `value` is safe to use as exactly one
 /// path segment on the VM host.
 ///
-/// Shared by [`ScratchName`] and the `project` config field,
-/// which both end up as a single directory name on the host.
+/// Every rule for such a name is here, length included, and
+/// four callers share it: [`ScratchName`], [`ProjectName`], the
+/// `project` field of `super::config::Config`, and the registry
+/// lookup, which checks the name it was asked for before
+/// reporting that no table carries it. Each of those ends up as
+/// a single directory name on the host, so a rule one of them
+/// applied alone would let the same name through one path and
+/// refuse it on another.
 ///
 /// # Errors
 ///
 /// Returns [`NameError`] describing the first rule broken.
 pub fn check_segment(value: &str) -> Result<(), NameError> {
+    if value.len() > MAX_NAME_LEN {
+        return Err(NameError::TooLong(value.len()));
+    }
     let Some(first) = value.chars().next() else {
         return Err(NameError::Empty);
     };
@@ -75,10 +96,83 @@ pub fn check_segment(value: &str) -> Result<(), NameError> {
     Ok(())
 }
 
+/// A validated project name.
+///
+/// Holding one is proof that the value passed
+/// [`check_segment`]: a single path segment, with no traversal,
+/// no separator, no leading dash, not empty and not over
+/// [`MAX_NAME_LEN`]. It is the key of a `[projects.<name>]`
+/// table in the
+/// operator's registry, and bombyx joins it onto `remote_root`
+/// to build the directory it creates on the VM host with
+/// `mkdir` and deletes with `rm -rf`.
+///
+/// A type rather than a checking function because the value
+/// arrives as a map key. Nothing calls a checker on a key while
+/// serde is building the map, so a checker would have to run
+/// afterwards, in every place a registry is built -- and the
+/// place somebody forgets is the one that matters.
+///
+/// `#[serde(try_from = "String")]` is what makes the check run
+/// during parsing. Without it serde assigns the private field
+/// directly and [`ProjectName::parse`] never runs.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(try_from = "String")]
+pub struct ProjectName(String);
+
+impl ProjectName {
+    /// Validates `raw` as a project name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NameError`] when `raw` is empty, longer than
+    /// [`MAX_NAME_LEN`], does not start with a letter or digit,
+    /// or contains anything outside `[A-Za-z0-9._-]`.
+    pub fn parse(raw: &str) -> Result<Self, NameError> {
+        check_segment(raw)?;
+        Ok(Self(raw.to_owned()))
+    }
+
+    /// Returns the validated name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ProjectName {
+    type Error = NameError;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::parse(&raw)
+    }
+}
+
+impl std::borrow::Borrow<str> for ProjectName {
+    /// Lets a `BTreeMap<ProjectName, _>` be looked up by `&str`.
+    ///
+    /// `BTreeMap::get` takes a `&Q` where the key type borrows
+    /// as `Q`, so without this a lookup would have to build a
+    /// whole `ProjectName` -- and building one runs the check,
+    /// which would turn "no such project" into "invalid name"
+    /// for anybody who typed one wrong.
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ProjectName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A validated name for an ephemeral (`scratch`) VM.
 ///
-/// Holding one is proof that the value is a single path
-/// segment with no traversal and no shell metacharacters.
+/// Holding one is proof that the value passed
+/// [`check_segment`]: a single path segment, with no traversal,
+/// no separator, no leading dash, not empty and not over
+/// [`MAX_NAME_LEN`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScratchName(String);
 
@@ -92,9 +186,6 @@ impl ScratchName {
     /// digit, or contains anything outside
     /// `[A-Za-z0-9._-]`.
     pub fn parse(raw: &str) -> Result<Self, NameError> {
-        if raw.len() > MAX_NAME_LEN {
-            return Err(NameError::TooLong(raw.len()));
-        }
         check_segment(raw)?;
         Ok(Self(raw.to_owned()))
     }
@@ -115,6 +206,25 @@ impl fmt::Display for ScratchName {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_project_name_is_one_path_segment_or_nothing() {
+        assert_eq!(
+            ProjectName::parse("myproject").unwrap().as_str(),
+            "myproject"
+        );
+        assert_eq!(
+            ProjectName::parse("my.proj_1-x").unwrap().to_string(),
+            "my.proj_1-x"
+        );
+        for bad in ["", ".", "..", "-x", "a/b", "a\\b", "a b"] {
+            assert!(ProjectName::parse(bad).is_err(), "{bad:?} was accepted");
+        }
+        assert!(matches!(
+            ProjectName::parse(&"a".repeat(MAX_NAME_LEN + 1)),
+            Err(NameError::TooLong(_))
+        ));
+    }
 
     #[test]
     fn accepts_a_typical_name() {

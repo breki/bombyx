@@ -4,10 +4,12 @@
 //! The module has two error types, and they are separate for a
 //! reason.
 //!
-//! [`ConfigError`] belongs to *loading* a config: the file was
-//! missing, unreadable, not TOML, carried a forbidden key, or
-//! named no VM host. It has ten variants, and most of them are
-//! about a file.
+//! [`ConfigError`] belongs to *loading* a config. The project
+//! file was missing, unreadable, not TOML, or carried a
+//! forbidden key. No source at all named a VM host -- not the
+//! flag, not the environment, not the registry. Or the registry
+//! has no table for the project asked for. Most of the eleven
+//! variants are about a file.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a
@@ -26,8 +28,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::MAX_CONFIG_BYTES;
 use super::host::HOST_ENV;
+use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
 
 /// A single configuration value broke its own rule.
 ///
@@ -183,6 +185,33 @@ pub enum ConfigError {
     HostMissing {
         /// The file that would supply one.
         place: String,
+    },
+
+    /// The registry has no table for the named project.
+    ///
+    /// bombyx never edits the registry for the operator, so the
+    /// message names the file and the tables the entry needs.
+    /// Guessing a repository address and a provisioning script
+    /// would boot a VM the operator did not describe.
+    ///
+    /// The tables, not every key inside them. `[vm]` and
+    /// `[source]` require seven keys between them, and listing
+    /// all seven turns a one-line error into a config sample.
+    /// Once the tables exist the parser names each missing key
+    /// in turn, which is the same information delivered where
+    /// the operator is already editing.
+    #[error(
+        "no `[projects.{name}]` in {} -- add that table with \
+         `[projects.{name}.vm]` and `[projects.{name}.source]`, \
+         and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
+         where this project belongs",
+        .path.display()
+    )]
+    ProjectNotFound {
+        /// Project name that was looked up.
+        name: String,
+        /// The registry file that has no table for it.
+        path: PathBuf,
     },
 
     /// The winning source supplied an unusable host.
