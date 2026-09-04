@@ -74,6 +74,10 @@ and this project adheres to
   docs/tutorial.md and llms.txt named its keys and pointed at it instead of
   restating it, so the four copies can no longer disagree -- all four were
   unloadable at once a week ago. A test loads the sample as shipped.
+- **BREAKING:** The `place` field on `ConfigError::HostMissing` and
+  `ConfigError::HostInProjectFile` was named `places`. Only one file can carry a
+  VM host now, so the plural named something that no longer exists; a caller
+  matching on either variant by field name must rename it.
 
 ### Fixed
 
@@ -129,14 +133,21 @@ and this project adheres to
   can no longer name a VM host for one project. A leftover one is inert: it is
   never opened, its contents cannot win and cannot fail to parse, and bombyx
   says nothing about it. Move its `host` line into your own `config.toml`, or
-  pass `--host` for a single run. The VM host now comes from `--host`,
-  `BOMBYX_HOST` or `config.toml`, and every one of those sits outside the
-  checkout -- no file in a project directory can name the machine `destroy`
-  runs `rm -rf` on.
-- **BREAKING:** The `Overlay` and `local_config_path` library items, and the
-  `Config::with_overlay` method. `Config::load` takes the host from
-  `HostSources` alone; a downstream that read project values through an overlay
-  has no replacement and should read them from the project file.
+  pass `--host` for a single run, and then **delete the file** -- it is no
+  longer gitignored, so a `git add -A` would commit the host name it holds. The
+  VM host now comes from `--host`, `BOMBYX_HOST` or `config.toml`, and bombyx
+  opens no file inside the project directory to find one. That is a rule about
+  files: `BOMBYX_CONFIG_HOME` still chooses which config directory is read, and
+  a per-directory environment tool can set it from inside a clone.
+- **BREAKING:** The `bombyx: bombyx.local.toml overrides bombyx.toml` line on
+  stderr is gone with the file. Anything grepping bombyx's stderr for
+  `overrides` stops matching.
+- **BREAKING:** The `Overlay` and `local_config_path` library items, the
+  `HostOrigin::Overlay` enum variant, and the `Config::with_overlay` method.
+  `HostOrigin` is not `#[non_exhaustive]`, so a downstream `match` over it must
+  drop the arm. `Config::load` takes the host from `HostSources` alone; a
+  downstream that read project values through an overlay has no replacement and
+  should read them from the project file.
 
 
 ## [0.4.1] - 2026-08-18

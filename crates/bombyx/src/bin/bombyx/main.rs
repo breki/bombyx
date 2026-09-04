@@ -269,8 +269,8 @@ fn run() -> Result<Ran> {
 
     // The VM host is not in the project file: it belongs to
     // whoever is driving bombyx, not to the repo. Highest
-    // precedence first -- flag, environment, then the two files
-    // `Config::load` reads.
+    // precedence first -- flag, environment, then the
+    // per-developer `config.toml` that `Config::load` reads.
     let env_host = std::env::var(bombyx::config::HOST_ENV).ok();
     let user_dir = bombyx::config::user_config_dir();
     let sources = bombyx::config::HostSources {
@@ -282,8 +282,8 @@ fn run() -> Result<Ran> {
     // The `loading <file>` context is added only for errors that
     // are really about that file. A host error is not: the host
     // cannot come from the project config at all, so prefixing
-    // `loading bombyx.toml:` told the operator to edit the one
-    // file that must not carry a host.
+    // `loading bombyx.toml:` would send the operator to edit the
+    // one file that must not carry a host.
     let (cfg, host_origin) =
         Config::load(&cli.config, &sources).map_err(|err| match err {
             e @ (bombyx::config::ConfigError::HostMissing { .. }
@@ -300,11 +300,15 @@ fn run() -> Result<Ran> {
     // ranking would have left this line naming the old winner --
     // and `destroy` runs `rm -rf` on whichever host really won.
     //
-    // Printed unless it came from the per-developer file, which
-    // is the ordinary case and would be noise on every command.
-    // What is left is `--host` and the environment variable, and
-    // both are worth naming: each one redirects this run to a
-    // machine the operator's own config does not point at.
+    // Printed unless it came from a `config.toml`, which is the
+    // ordinary case and would be noise on every command.
+    //
+    // That exemption has a cost worth knowing at this line.
+    // `BOMBYX_CONFIG_HOME` decides *which* config directory gets
+    // read, and a per-directory environment tool can set it from
+    // inside a clone -- so staying quiet here also hides a
+    // redirect the operator did not choose. `docs/todo.md`
+    // tracks it as `config-home-env-provenance`.
     if host_origin != HostOrigin::UserFile {
         eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }

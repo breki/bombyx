@@ -2,8 +2,8 @@
 //! went wrong with it.
 //!
 //! Everything here is about the *file*: whether the path may be
-//! a symlink, how large a file may be, where the overlay lives,
-//! and how a TOML error is summarised. What the values inside
+//! a symlink, how large a file may be, and how a TOML error is
+//! summarised. What the values inside
 //! the file must look like is `super::guards` and the field
 //! modules beside it.
 
@@ -79,8 +79,8 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
 /// a policy choice instead of a flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Symlinks {
-    /// Judge the path as itself: a symlink is refused. For files
-    /// beside the project config, whose path a repo influences.
+    /// Judge the path as itself: a symlink is refused. For the
+    /// project config, which arrives inside a clone.
     Refuse,
     /// Follow the link, still requiring a regular file at the
     /// end. For the operator's own dotfile.
@@ -101,10 +101,16 @@ pub(super) enum Symlinks {
 /// `symlinks` decides how the path itself is judged, and the two
 /// answers are not arbitrary:
 ///
-/// - [`Symlinks::Refuse`] for `bombyx.toml` and the overlay
-///   beside it. That path is *derived* and a repo can commit a
-///   symlink there; pointed at `~/.ssh/id_ed25519` it would make
-///   the TOML parse error echo a line of the key to stderr.
+/// - [`Symlinks::Refuse`] for `bombyx.toml`. That file sits
+///   inside the clone, so a repository can commit a symlink at
+///   its name and choose which file bombyx opens -- a private
+///   key, say. What such a file's contents would do to the
+///   error message is already handled: `toml_summary` above
+///   keeps the position and the reason and never puts a source
+///   line in the message. So this is the second of two
+///   independent precautions, and it is the stronger one,
+///   because a file that is never opened cannot leak through
+///   an error path somebody adds later.
 /// - [`Symlinks::Follow`] for the per-developer `config.toml`.
 ///   Nothing in a clone can create or retarget a file in the
 ///   operator's own config directory, so the refusal buys nothing

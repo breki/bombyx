@@ -190,15 +190,16 @@ Set-Content "$env:APPDATA\bombyx\config.toml" 'host = "vmhost"'
 ```
 
 That covers every project on this machine. Two other sources
-override it when you need them, highest first:
+override it when you need them. All three, highest first:
 
-| | Source | Use |
-|-|--------|-----|
+| Rank | Source | Use |
+|------|--------|-----|
 | 1 | `--host other` | one run against another machine |
 | 2 | `BOMBYX_HOST=other` | a shell, CI, or an agent |
+| 3 | your `config.toml` | every project -- the one you just wrote |
 
-If neither of those and no `config.toml` names a host, bombyx
-stops and lists all three rather than guessing.
+If none of the three names a host, bombyx stops and lists them
+rather than guessing.
 
 ## Part 2: the VM host
 

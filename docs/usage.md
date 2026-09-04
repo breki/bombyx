@@ -292,8 +292,10 @@ sources can still be wrong: your `config.toml`, `BOMBYX_HOST`,
 or a mistyped `--host`. It guards the argv, not one particular
 file.
 
-Every one of those three sits outside the checkout. That is the
-property the design turns on, and it is worth stating on its
-own: bombyx opens no file inside the project directory to find
-a host, so a repository cannot name the machine your `destroy`
-runs `rm -rf` on. It can only fail to run.
+Every one of those three sits outside the checkout, and that is
+the property the design turns on: bombyx opens no file inside
+the project directory to find a host. That is a rule about
+files rather than about everything a repository can reach, and
+"Which host a command is about to use" in `../README.md`
+explains what it does and does not promise. Read it before you
+rely on the distinction.

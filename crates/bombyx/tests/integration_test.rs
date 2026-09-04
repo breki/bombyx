@@ -202,30 +202,54 @@ fn up_runs_nothing_on_the_workstation() {
 }
 
 #[test]
-fn a_stray_local_config_is_not_read() {
+fn a_stray_bombyx_local_toml_is_not_read() {
     // bombyx no longer opens `bombyx.local.toml`, so a leftover
-    // one is an ordinary unread file. Both halves matter. The
-    // host it names must lose to the per-developer config, and
+    // one is an ordinary unread file. Three things must hold.
+    // The host it names must lose to the per-developer config;
     // contents that are not TOML at all must not become an
-    // error -- a parse failure would prove bombyx had opened
-    // the file after all.
+    // error, because a parse failure would prove bombyx had
+    // opened the file; and bombyx must not name the file on
+    // stderr, which `README.md` and `CHANGELOG.md` both promise.
     for contents in ["host = \"my-vmhost\"\n", "host = "] {
         let dir = project_dir();
         std::fs::write(dir.path().join("bombyx.local.toml"), contents).unwrap();
 
-        let lines = dry_run(&dir, &["--dry-run", "status"]);
-        assert!(lines[0].starts_with("ssh vmhost "), "{}", lines[0]);
+        let out = bombyx_in(&dir)
+            .args(["--dry-run", "status"])
+            .assert()
+            .success();
+        let stdout =
+            String::from_utf8(out.get_output().stdout.clone()).unwrap();
+        let stderr =
+            String::from_utf8(out.get_output().stderr.clone()).unwrap();
+        assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
+        assert!(!stderr.contains("bombyx.local.toml"), "{stderr}");
     }
 }
 
 #[test]
-fn a_missing_local_config_is_not_mentioned() {
-    // The ordinary case, kept as its own test so the pair above
+fn the_user_config_host_reaches_the_ssh_command_in_silence() {
+    // The ordinary case, kept as its own test so the one above
     // cannot pass merely because bombyx stopped running.
+    //
+    // The silence is asserted, not incidental. `README.md` tells
+    // the operator that no provenance line means the host came
+    // from their own `config.toml`, and that a line means
+    // something overrode it. Both halves of that promise need a
+    // test: the other tests here assert that a line appears for
+    // `--host` and for the variable, and a `contains` check
+    // still passes when bombyx prints the line on every command.
+    // Then the line is noise and the rule is false.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "status"]);
-    assert!(lines[0].starts_with("ssh vmhost "), "{}", lines[0]);
-    assert!(lines[0].contains("~/'vms/myproject'"), "{}", lines[0]);
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
+    assert!(stdout.contains("~/'vms/myproject'"), "{stdout}");
+    assert!(!stderr.contains("bombyx: host "), "{stderr}");
 }
 
 #[test]
@@ -572,31 +596,25 @@ fn no_host_anywhere_names_every_way_to_set_one() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("no VM host configured"))
+        .stderr(predicate::str::contains(USER_CONFIG_FILE))
         .stderr(predicate::str::contains("--host"))
         .stderr(predicate::str::contains("BOMBYX_HOST"));
 }
 
 #[test]
-fn the_host_flag_outranks_the_user_config() {
-    // The per-developer file names a host, and the flag still
-    // wins.
-    let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "--host", "from-flag", "status"]);
-    assert!(lines[0].starts_with("ssh from-flag "), "{}", lines[0]);
-}
-
-#[test]
-fn a_flag_host_says_where_the_host_came_from() {
+fn the_host_flag_outranks_the_user_config_and_says_so() {
     // The per-developer file names a host, the flag beats it,
     // and the provenance line has to say so. `destroy` runs
     // `rm -rf` on the winning host, so a line naming the source
     // that lost would point the operator at the wrong machine.
     let dir = project_dir();
-    bombyx_in(&dir)
+    let out = bombyx_in(&dir)
         .args(["--dry-run", "--host", "from-flag", "status"])
         .assert()
         .success()
         .stderr(predicate::str::contains("host from-flag from --host"));
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.starts_with("ssh from-flag "), "{stdout}");
 }
 
 #[test]
@@ -626,9 +644,11 @@ fn the_host_env_var_outranks_the_user_config() {
     // The provenance line is asserted here too. An exported
     // `BOMBYX_HOST` redirects every `ssh` bombyx runs, `destroy`
     // included, and what bombyx offers against that is one line
-    // on stderr naming the variable. Deleting the `if` in
-    // `main.rs` has to turn a test red, and the flag test above
-    // covers only the other half.
+    // on stderr naming the variable. Removing that print has to
+    // turn a test red, and the flag test above covers only the
+    // other half. The `if` guarding it is covered separately, by
+    // the silence assertion in
+    // `the_user_config_host_reaches_the_ssh_command_in_silence`.
     let dir = project_dir();
     let out = bombyx_in(&dir)
         .env(HOST_ENV, "from-env")

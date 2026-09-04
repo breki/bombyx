@@ -170,13 +170,13 @@ The registry gains a `[projects.<name>]` table per project,
 carrying `remote_root`, `[vm]`, `[source]` and an optional
 `host`.
 
-Delete `ProjectFile`, `Overlay`, `read::local_config_path`
-and `HostOrigin::Overlay`. Step 1 already removed
-`Config::with_overlay` and the call site that printed the
-"overrides" notice. `Config::load` stops taking a path to
-a project file and takes a project name instead. Host ranking
-becomes flag, environment, the project's `host`, the
-top-level `host`.
+Delete `ProjectFile`. Step 1 removed `Config::with_overlay`
+and the call site that printed the "overrides" notice, and
+step 2 removed `Overlay`, `read::local_config_path` and
+`HostOrigin::Overlay`, so `ProjectFile` is the last of the
+list. `Config::load` stops taking a path to a project file and
+takes a project name instead. Host ranking becomes flag,
+environment, the project's `host`, the top-level `host`.
 
 ### 3. Select the project explicitly
 
@@ -360,9 +360,10 @@ in `config/host.rs` justified themselves by naming
 
 `bombyx.local.toml` is gone. `Overlay`, `local_config_path`,
 `HostOrigin::Overlay` and the overlay branch of `resolve_host`
-are all deleted, and `resolve_host` and `host_places` each lost
-the two parameters that carried the file. Host ranking is now
-`--host`, `BOMBYX_HOST`, `config.toml`.
+are all deleted. `resolve_host` lost the two parameters that
+carried the file, and `host_places` lost the one it carried and
+is now `host_place`. Host ranking is now `--host`,
+`BOMBYX_HOST`, `config.toml`.
 
 Every source that can name a VM host now sits outside the
 checkout. That is what closes the exposure

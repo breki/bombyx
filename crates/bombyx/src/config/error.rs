@@ -120,11 +120,13 @@ pub enum ConfigError {
     /// 1 | -----BEGIN OPENSSH PRIVATE KEY-----
     /// ```
     ///
-    /// Reproduced against the built binary. `bombyx.toml` can be a
-    /// symlink -- the overlay path refuses one, the base path does
-    /// not, and nobody inspects a config after a clone -- so a
-    /// hostile repo could aim it at `~/.ssh/id_ed25519` and have a
-    /// line of it echoed.
+    /// Reproduced against the built binary. Two routes put a
+    /// file bombyx should not quote in front of the parser.
+    /// `bombyx.toml` arrives inside a clone and nobody reads it
+    /// before running bombyx. And `--config` takes any path at
+    /// all, so a mistyped or pasted `--config ~/.ssh/id_ed25519`
+    /// hands the parser a private key. Neither needs a symlink,
+    /// which is refused separately.
     ///
     /// So `summary` keeps the position and the reason and drops
     /// the quoted line. That is enough to correct a malformed
@@ -163,24 +165,24 @@ pub enum ConfigError {
     #[error(
         "`host` is not allowed in {}: it names one developer's \
          machine, and this file is committed. Move that line to \
-         {places}",
+         {place}",
         .path.display()
     )]
     HostInProjectFile {
         /// The project file carrying the key.
         path: PathBuf,
         /// Where the value belongs instead.
-        places: String,
+        place: String,
     },
 
     /// No source supplied a VM host.
     #[error(
-        "no VM host configured -- set it in {places}, pass \
+        "no VM host configured -- set it in {place}, pass \
          --host, or set {HOST_ENV}"
     )]
     HostMissing {
-        /// The files that would supply one.
-        places: String,
+        /// The file that would supply one.
+        place: String,
     },
 
     /// The winning source supplied an unusable host.

@@ -231,6 +231,25 @@ plan, decisions, and outcome.
   duplicate. Whichever fix `done` gets, no operator should be hand-writing
   these entries.
 
+- **config-tests-own-file** -- config.rs tests into config/tests.rs
+  config.rs is 1371 lines; its production half is under 500, so the ~880-line
+  `mod tests` is what makes the file unreadable in one pass. CLAUDE.md records
+  that reading it whole overflowed a session. Move it with `#[cfg(test)] #[path
+  = "config/tests.rs"] mod tests;`. Raised by artisan during the /review2 on #23
+  and kept out of that change as unrelated scope.
+
+- **config-home-env-provenance** -- say when the environment picked the config
+  A repo-set BOMBYX_CONFIG_HOME redirects bombyx to another config.toml, and the
+  winning origin is then HostOrigin::UserFile, which main.rs deliberately stays
+  silent about -- so bombyx runs against a host the operator never configured
+  and prints nothing. Demonstrated live during the /review2 on #23: an anchored
+  value such as /tmp/pwn passes is_anchored_dir, and a per-directory environment
+  tool (direnv reading an .envrc in a clone, mise, a CI job) can set it.
+  Candidate fix: print the provenance line for UserFile too whenever
+  CONFIG_DIR_ENV supplied the directory, which needs a failing test first.
+  Raised as red-team finding RT-1; the prose claiming otherwise was corrected in
+  that change, the code was not.
+
 ## Done
 
 - **canon-xref-wrapped-bold** -- canon-check reads paragraphs

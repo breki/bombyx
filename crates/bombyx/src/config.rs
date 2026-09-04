@@ -84,7 +84,7 @@ pub use host::{
     user_config_dir,
 };
 pub(crate) use host::{
-    HostProblem, host_places, host_problem, is_anchored_dir, resolve_host,
+    HostProblem, host_place, host_problem, is_anchored_dir, resolve_host,
 };
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
@@ -198,7 +198,7 @@ fn reject_host_key(
     }
     Err(ConfigError::HostInProjectFile {
         path: path.to_path_buf(),
-        places: host_places(sources),
+        place: host_place(sources),
     })
 }
 
@@ -207,14 +207,9 @@ impl Config {
     ///
     /// `path` is used only for error messages.
     ///
-    /// **Test-only.** It was `pub` and had no production caller:
-    /// everything real goes through [`Config::load`], and the only
-    /// users were `for_tests` and two integration tests, which now
-    /// build a temp fixture and call `load` -- exercising the
-    /// production path instead of a shortcut past it. That also
-    /// removes the reason its message was worse than `load`'s: it
-    /// passes `HostSources::default()`, so a refused `host` key
-    /// could not name the per-developer file.
+    /// **Test-only.** Production code calls [`Config::load`].
+    /// This function passes `HostSources::default()`, so a
+    /// refused `host` key could not name the per-developer file.
     ///
     /// The remaining hazard is that `source` and `host` are adjacent
     /// `&str`, so `parse(host, path, source)` compiles. A `Host`
@@ -313,14 +308,17 @@ impl Config {
         // carrying the bad value rather than the project file.
         if let Some(problem) = host_problem(&host) {
             return Err(ConfigError::InvalidHost {
+                // Only the file source names a path. `--host`
+                // and the variable are already their own best
+                // description, and `Display for HostOrigin`
+                // gives it.
                 origin: match origin {
-                    HostOrigin::UserFile => sources
-                        .user_config_dir
-                        .map(|d| d.join(USER_CONFIG_FILE))
-                        .map_or_else(
+                    HostOrigin::UserFile => {
+                        sources.user_config_dir.map_or_else(
                             || origin.to_string(),
-                            |p| path_display(&p),
-                        ),
+                            |d| path_display(&d.join(USER_CONFIG_FILE)),
+                        )
+                    }
                     HostOrigin::Flag | HostOrigin::Env => origin.to_string(),
                 },
                 reason: match problem {
@@ -349,9 +347,9 @@ impl Config {
     /// A cloned repo cannot supply that value, because `host` is
     /// refused in `bombyx.toml` (see
     /// [`ConfigError::HostInProjectFile`]). The check covers the
-    /// two sources that can: a per-developer `config.toml`, and
-    /// `--host` / [`HOST_ENV`]. A mistake or a careless script
-    /// fills either of those in. The other fields *are*
+    /// three sources that can: `--host`, [`HOST_ENV`], and a
+    /// per-developer `config.toml`. A mistake or a careless
+    /// script fills any of those in. The other fields *are*
     /// repo-supplied, so their rules carry the full weight.
     fn validate(&self) -> Result<(), ConfigError> {
         // The host rule lives in `host_problem`, so this and the
@@ -856,7 +854,7 @@ mod tests {
         // The charset check protects the argv, not the repo: every
         // source that can still supply a host reaches `ssh` as
         // its first argument, and a mistake fills any of them
-        // in. The file sources are covered by
+        // in. The file source is covered by
         // `an_invalid_host_names_the_source_that_supplied_it`;
         // this is the environment, which no file check reaches.
         let (dir, base) = project_dir(&minimal());

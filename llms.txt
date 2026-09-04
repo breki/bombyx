@@ -91,12 +91,12 @@ person has their own hardware on their own network, so a
 committed value is wrong for everyone but its author -- and
 `destroy` runs `rm -rf` on whatever host is in force. It is
 resolved from `--host`, `BOMBYX_HOST` and a per-developer
-`config.toml`, in that order; see "Where
-bombyx looks for the host" in `README.md` for the authoritative
-list, and `resolve_host` in `config.rs` for the code.
+`config.toml`, in that order; see "Where bombyx looks for the
+host" in `README.md` for the authoritative list, and
+`resolve_host` in `config.rs` for the code.
 
-None of them set is an error naming every source.
-`Config::load` takes a `HostSources` carrying the flag, the
+`Config::load` returns an error naming all three when no source
+supplies a host. It takes a `HostSources` carrying the flag, the
 env value and the config dir, and returns the winning
 `HostOrigin`, so precedence is unit-testable without mutating
 the process environment and the binary reports the winner
@@ -105,9 +105,14 @@ reads `std::env`. A config dir from the environment must be an
 anchored path -- a relative one would resolve against the
 working directory and take the host out of the repo.
 
-Every host source sits outside the checkout, so no file in the
-project directory can name the machine `destroy` runs `rm -rf`
-on. There is no per-project host; `--host` covers one run, and
+Every host source sits outside the checkout: bombyx opens no
+file in the project directory to find a host. That is a rule
+about files and not about everything a repository can reach. A
+per-directory environment tool (`direnv`, `mise`, a CI job)
+reads its settings from inside the clone, and a
+`BOMBYX_CONFIG_HOME` set that way redirects bombyx to another
+`config.toml` without printing a provenance line. There is no
+per-project host: `--host` covers one run, and
 `docs/issues/project-config-off-repo.md` plans a recorded one.
 
 `remote_root` must be anchored (`/` or `~/`)

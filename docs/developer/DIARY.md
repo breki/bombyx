@@ -4,6 +4,62 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**Three reviewers in sequence, and the worst finding was a
+security claim we had written**
+
+`/review2` on the overlay removal, run after the commit rather
+than before it, so the reviewers read `HEAD~1..HEAD` instead of
+an empty tree. 32 findings, 30 fixed, two sent to the backlog
+and one declined.
+
+The one worth remembering: the change's own prose said "bombyx
+opens no file inside the project directory to find a host, so a
+repository cannot name the machine your `destroy` runs `rm -rf`
+on." The first clause is true and the inference is not.
+`BOMBYX_CONFIG_HOME` decides which config directory bombyx
+reads, `is_anchored_dir` only requires the value to be
+anchored, and a per-directory environment tool -- `direnv` on an
+`.envrc` in a clone, `mise`, a CI job -- sets it from inside the
+checkout. The resulting origin is `UserFile`, which is exactly
+the case bombyx stays silent about, so the redirect prints
+nothing. Pointing the variable at a directory holding
+`host = "attacker-box"` produced `ssh attacker-box` with a clean
+stderr. `host.rs` had described this route in its own comment
+for weeks; we wrote the contradicting sentence anyway. The prose
+is corrected in four files and the code half is
+`config-home-env-provenance` in the backlog.
+
+Six findings came from one mechanical slip. The removal sweep
+ran `grep -n 'Overlay\|...'`, case-sensitive, where the rule in
+`CLAUDE.md` says `grep -rni`. Lowercase "overlay" was invisible,
+so four stale comments survived in files the commit never
+touched, plus a module table row and a doc claiming the project
+config path does *not* refuse a symlink when it does.
+
+Two tests were asserting less than their names promised.
+`no_host_anywhere_names_every_way_to_set_one` checked two of the
+three sources, missing the one this change could break. Worse,
+the silence rule -- no provenance line means the host came from
+a `config.toml` -- had no test at all: defeating the condition
+on the print, rather than the print itself, left all thirty
+green. Both now fail when broken, each watched to do so.
+
+`fresh-reader` settled a question `red-team` had raised and
+neither could answer by reading. `read.rs` justified refusing a
+symlinked `bombyx.toml` by saying the parse error would echo a
+line of the key, and `toml_summary` has not put a source line in
+a message for some time. A `--config` pointed at a private-key-
+shaped file prints `line 1, column 12: key with no value` and
+nothing else. The refusal still earns its place, for a different
+reason now written down: it is the precaution that stops the
+file being opened at all, so a later change to the error path
+cannot undo it.
+
+Stage 2's stop rule fired for the first time since it was
+written. No behaviour defect was found and fixed -- every fix
+was a document, a record or a test -- so the stage ended after
+one round instead of running to the three-round cap.
+
 **bombyx.local.toml is gone, and with it the last host source
 inside the checkout**
 
@@ -21,7 +77,8 @@ close here, and each carries a closing line in
 What went: the `Overlay` type, `local_config_path`,
 `HostOrigin::Overlay`, the overlay branch of `resolve_host`,
 and the two parameters that carried the file through
-`resolve_host` and `host_places`. Host ranking is now
+`resolve_host`. `host_places` lost the one parameter it
+carried, and is now `host_place`. Host ranking is now
 `--host`, `BOMBYX_HOST`, `config.toml` -- three sources, every
 one of them outside the checkout.
 
