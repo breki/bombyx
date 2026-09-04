@@ -155,6 +155,12 @@ classDiagram
     Libvirt
     Hyperv
   }
+  class Registry {
+    +Option~String~ host
+  }
+  class Project {
+    +String remote_root
+  }
   class HostSources {
     +Option~str~ flag
     +Option~str~ env
@@ -169,6 +175,9 @@ classDiagram
 
   Config *-- Vm : vm
   Config *-- Source : source
+  Registry *-- Project : projects
+  Project *-- Vm : vm
+  Project *-- Source : source
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
@@ -185,9 +194,8 @@ they parse the operator's own `config.toml` rather than
 `bombyx.toml`: a top-level `host`, and one `[projects.<name>]`
 table per project carrying `remote_root`, `[vm]` and `[source]`.
 `config::host` reads the `host` key out of that file today.
-Nothing reads a project table yet -- the work that makes bombyx
-load a `Config` from one is `registry-config-load` in
-`docs/todo.md`.
+bombyx does not load a project table yet: the work that builds a
+`Config` from one is `registry-config-load` in `docs/todo.md`.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -297,10 +305,23 @@ reach `ssh`. Seven values in all, spread across
 `Config::validate`, `vm::validate` and `source::validate`.
 **That is a gap, not a decision we would make again.**
 
+`Project`, the registry's per-project entry, carries the same
+values less `host` and `project`, and `Project::validate` calls
+the same checkers.
+
+Three values in an entry are checked while the file parses: the
+project name, because it is the table key and a `ProjectName`;
+`repo` and `script`, because their types refuse a bad value.
+Everything else is checked when `Registry::project` hands the
+entry out, so a rule broken in one project's table is reported
+when that project is asked for. A table that does not *parse* is
+not like that: the whole file fails, whichever project it
+belongs to.
+
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it.
-`Config`, `Vm` and `Source` all have public fields, so any
-code can build one by hand and reach the guest without
+`Config`, `Vm`, `Source` and `Project` all have public fields,
+so any code can build one by hand and reach the guest without
 `validate` ever being called -- and a field whose rules are
 dull is as exposed as one whose rules are sharp. `validate` is
 also private, so a library caller cannot even choose to call

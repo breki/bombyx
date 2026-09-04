@@ -4,11 +4,12 @@
 //! The module has two error types, and they are separate for a
 //! reason.
 //!
-//! [`ConfigError`] belongs to *loading* a config: the file was
-//! missing, unreadable, not TOML, carried a forbidden key, or
-//! named no VM host, or has no entry for the project asked
-//! for. It has eleven variants, and most of them are about a
-//! file.
+//! [`ConfigError`] belongs to *loading* a config. The project
+//! file was missing, unreadable, not TOML, or carried a
+//! forbidden key. No source at all named a VM host -- not the
+//! flag, not the environment, not the registry. Or the registry
+//! has no table for the project asked for. Most of the eleven
+//! variants are about a file.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a
@@ -188,10 +189,17 @@ pub enum ConfigError {
 
     /// The registry has no table for the named project.
     ///
-    /// bombyx writes nothing on the operator's behalf, so the
-    /// message names the file and every key the entry needs.
+    /// bombyx never edits the registry for the operator, so the
+    /// message names the file and the tables the entry needs.
     /// Guessing a repository address and a provisioning script
     /// would boot a VM the operator did not describe.
+    ///
+    /// The tables, not every key inside them. `[vm]` and
+    /// `[source]` require seven keys between them, and listing
+    /// all seven turns a one-line error into a config sample.
+    /// Once the tables exist the parser names each missing key
+    /// in turn, which is the same information delivered where
+    /// the operator is already editing.
     #[error(
         "no `[projects.{name}]` in {} -- add that table with \
          `[projects.{name}.vm]` and `[projects.{name}.source]`, \

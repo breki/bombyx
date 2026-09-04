@@ -1,17 +1,22 @@
 # project-config-off-repo
 
 **Status:** In progress -- chunk 1 landed 2026-09-02, steps 1
-and 2 of 7 landed 2026-09-04
+to 3 of 7 landed 2026-09-04
 
-**Problem**, **Context** and **Open questions** below describe
-the state when this was captured, before chunk 1. **Plan**
-still reads as three chunks, and the **Progress log** re-split
-chunks 2 and 3 into seven steps, which is the live plan --
-`Plan`'s step-2 list is kept current as steps land, so it is
-the one section below that is not frozen. The
-**Progress log** at the end says what has changed. Line numbers
-in this document are from the day it was written and the work it
-plans moves them; treat them as a hint, not an address.
+This document uses two words for two things. **Chunks** are the
+original three, and **Plan** below still describes them. **Steps**
+are the seven that chunks 2 and 3 were re-split into, and they
+are what the work actually follows. The seven are listed under
+**2026-09-04 -- chunks 2 and 3 re-split into seven steps** in
+the **Progress log**, and that list is the live plan.
+
+**Problem**, **Context** and **Open questions** describe the
+state when this was captured, before chunk 1, and are frozen.
+**Plan** is frozen too, except that its chunk-2 section is kept
+current as steps land. The **Progress log** at the end says what
+has changed. Line numbers in this document are from the day it
+was written and the work it plans moves them; treat them as a
+hint, not an address.
 **Captured:** 2026-08-30
 **Started:** 2026-09-02
 
@@ -167,8 +172,9 @@ This is the only chunk that changes what runs on the VM host.
 ### 2. Move the project settings into the registry
 
 The registry gains a `[projects.<name>]` table per project,
-carrying `remote_root`, `[vm]`, `[source]` and an optional
-`host`.
+carrying `remote_root`, `[vm]` and `[source]`. The optional
+`host` key is step 4's work, not step 3's, so an entry written
+after step 3 has no `host` in it.
 
 Delete `ProjectFile`. Step 1 removed `Config::with_overlay`
 and the call site that printed the "overrides" notice, and
@@ -409,6 +415,38 @@ which host is selected, not the shape of any command bombyx
 emits, and the selection is fully visible in `--dry-run`. The
 VM host was unreachable from this session in any case: its host
 key is not known here.
+
+### 2026-09-04 -- step 3 landed
+
+The registry parses `[projects.<name>]` tables.
+`crates/bombyx/src/config/registry.rs` is new and owns the file:
+`RegistryFile` parses it, `Project` is one entry, `Registry` is
+the parsed file plus the path it came from, and
+`Registry::project` looks an entry up and validates it. A
+missing entry is `ConfigError::ProjectNotFound`, whose message
+names the file and the tables the entry needs. bombyx does not
+load a project table yet -- the tests are the only caller.
+
+`UserFile` moved out of `config/host.rs` and became the new
+module's business, because `deny_unknown_fields` on it meant the
+first `[projects.x]` table made every bombyx command fail. That
+was the first failing test. `host.rs` now ranks `--host`,
+`BOMBYX_HOST` and the file, and asks the registry to read it.
+
+Two guards came out of the reviews rather than the plan. The
+table key is a `ProjectName`, a new newtype beside `ScratchName`,
+because the key becomes a directory name on the VM host and
+`Config.project` already had that rule. And `MAX_NAME_LEN` moved
+into `check_segment`, so a project name over 64 characters is now
+refused in `bombyx.toml` too -- previously the same name was
+legal there and illegal as a registry key. That is the one
+change in this step that narrows what an existing config may
+say, and it carries a `**BREAKING:**` CHANGELOG entry.
+
+`cargo xtask validate` passes, coverage 98.3%.
+
+**Not verified against a real VM host.** The commands bombyx
+emits are untouched, so Definition of Done item 3 does not apply.
 
 ### 2026-09-04 -- chunks 2 and 3 re-split into seven steps
 

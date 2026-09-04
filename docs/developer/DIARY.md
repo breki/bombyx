@@ -4,6 +4,55 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**Three reviewers on the registry table: three guard gaps, and
+nine comments claiming more than the code did**
+
+`/review2` on #24. Four reading rounds, 44 findings, 39 fixed.
+
+The three that were real. The project name is a map key, and
+serde builds the map before any code of ours runs, so nothing
+checked it -- while `Config.project`, the same value on the
+other path, has carried three guards for months. It is now a
+`ProjectName` beside `ScratchName`. An entry came out of the
+lookup with none of its rules run, so `Project::validate` now
+runs them before `Registry::project` hands one out. And
+`MAX_NAME_LEN` lived in the two newtype constructors rather than
+in `check_segment`, so a 65-character name was legal in
+`bombyx.toml` and illegal as a registry key; the rule moved down
+and `bombyx.toml` lost the name too, which is the one thing in
+this step that narrows an existing config.
+
+Everything else was a sentence claiming more than the code
+enforced, and the same three claims came back twice. Round 1 of
+the security stage found three defects in the quality stage's
+fixes; round 2 found four in round 1's. Each time the fix itself
+was sound and the sentence written beside it was not: "the entry
+is checked here, not while the file parses" (the whole file has
+to parse first), "no caller can supply a different path" (the
+public type still derived `Deserialize`), "the only way to build
+one" (`parse` was `pub(super)`). The diagnosis both times was
+the commonest one on `/review`'s list, that the rule has no
+single home: what is checked, where and when is stated in
+`registry.rs`, `host.rs`, `root.rs`, `error.rs`, the class
+diagram and this file. The copies were corrected and the
+consolidation was not attempted inside the rounds.
+
+Two mistakes were ours rather than the code's. A test asserting
+that a bad project name is refused passed before the guard
+existed: it renamed one of three table headers, orphaning the
+other two, so the parse failed on a missing field and looked
+exactly like the guard working. And a doc comment ended up above
+the wrong function after another was inserted between them,
+which `CLAUDE.md` warns about under **Environment Constraints**
+and which we did to ourselves anyway.
+
+`fresh-reader` named four passages worth keeping: the
+`Symlinks::Refuse`/`Follow` pair in `config/read.rs`, why
+`APPDATA` is consulted only on Windows, the transcript on
+`ConfigError::Parse` showing a private key echoed into an error
+message, and the test comment about renaming all three table
+headers.
+
 **The registry file grew project tables, and got a module of its
 own**
 
@@ -12,10 +61,10 @@ Step 3 of seven in `project-config-off-repo`. The per-developer
 `remote_root`, `[vm]` and `[source]` -- the values a
 `bombyx.toml` holds today, minus `project`, which is the table
 key. `Registry::project` looks one up by name and reports a
-missing entry with a message naming the file and every key the
-entry needs. Nothing reads a project table yet: the tests are
-the only caller, which is what makes the step safe to land on
-its own.
+missing entry with a message naming the file and the tables the
+entry needs. bombyx does not load a project table yet -- the
+tests are the only caller, which is what makes the step safe to
+land on its own.
 
 The file needed one owner. `config/host.rs` held the only struct
 that parsed it, carrying `host` alone under
@@ -28,9 +77,10 @@ between `--host`, `BOMBYX_HOST` and that file. Steps 4 and 5 add
 to the new module rather than growing one whose header is about
 the VM host.
 
-The lookup was proven to bite before it was trusted. Made to
-return the first entry whatever name it was given, it failed the
-test that asks for a project nobody wrote a table for.
+We checked that the test fails before trusting it. With
+`Registry::project` made to return the first entry whatever name
+it was given, the test that asks for a project nobody wrote a
+table for failed.
 
 **Reviewing `todo done` found two ways to corrupt the file it
 edits, and one that destroyed text**

@@ -266,7 +266,8 @@ pub(crate) fn resolve_host(
         return Ok((host.to_owned(), HostOrigin::Env));
     }
     if let Some(dir) = sources.user_config_dir
-        && let Some(host) = registry::read(dir)?.and_then(|file| file.host)
+        && let Some(host) = registry::Registry::read(dir)?
+            .and_then(|file| file.host().map(str::to_owned))
     {
         return Ok((host, HostOrigin::UserFile));
     }

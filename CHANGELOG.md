@@ -23,6 +23,12 @@ and this project adheres to
 - The guest refuses a `source.script` that resolves outside the cloned project.
   `chmod` and `exec` follow symlinks, so a repository could otherwise point the
   script at a system file and have it made executable as root.
+- The per-developer `config.toml` accepts a `[projects.<name>]` table per
+  project, carrying `remote_root`, `[vm]` and `[source]`. bombyx does not load
+  one yet: `bombyx.toml` is still where a project is described.
+- Library API: `config::Registry`, `config::Project` and `name::ProjectName`,
+  plus a `ConfigError::ProjectNotFound` variant for a registry with no entry for
+  the project asked for.
 
 ### Changed
 
@@ -78,6 +84,10 @@ and this project adheres to
   `ConfigError::HostInProjectFile` was named `places`. Only one file can carry a
   VM host now, so the plural named something that no longer exists; a caller
   matching on either variant by field name must rename it.
+- **BREAKING:** A `project` name in `bombyx.toml` is capped at 64 characters,
+  the cap scratch VM names already had. The rule moved into the shared segment
+  check so one name cannot be legal in the project file and illegal as a
+  registry table key.
 
 ### Fixed
 

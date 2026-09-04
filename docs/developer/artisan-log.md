@@ -4,6 +4,27 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-04-project-remote-root-stays-a-string
+
+**Category:** Type safety
+
+`Project::remote_root` in `crates/bombyx/src/config/registry.rs`
+is a `String`, and so is `Config::remote_root`. The value has
+six rules attached in `config::root`, and it is the value bombyx
+builds the directory it deletes with `rm -rf` from. A newtype
+built through `TryFrom<String>` would make holding one the proof
+the rules ran, the way `RepoUrl` does.
+
+Deferred: the two fields have to gain a type together, or one of
+them ends up unwrapping the other's. That work is
+`newtype-remaining-config-fields` in `docs/todo.md`, GitHub #17,
+which covers all five checked fields. Raised again while
+reviewing #24; `Project::validate` now runs `root::check` on the
+value at lookup, so the rules do run on the one path that hands
+a `Project` out.
+
+---
+
 ### aq-2026-09-04-config-rs-is-mostly-its-own-test-module
 
 **Category:** Module size
@@ -15,6 +36,10 @@ rule the size gate targets is about the production code, which
 is not over budget. So the fix is to move the tests out with
 `#[cfg(test)] #[path = "config/tests.rs"] mod tests;` rather
 than to split the module.
+
+Raised again while reviewing #24, which added 24 more test
+lines to the file: the new test sits 750 lines from the code it
+is about. Still deferred, for the same reason.
 
 Deferred: unrelated to the change that surfaced it (#23, the
 overlay removal). Also tracked as `config-tests-own-file` in
