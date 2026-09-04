@@ -2,6 +2,38 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-04
+
+**`/issue` works a GitHub issue end to end**
+
+Ported from the mutrack project, where the same command was
+written from the session that produced its issues #23 and #24.
+The twelve steps go from reading the issue to reporting back on
+it: verify the body against the tree, settle the approach,
+branch, implement test-first, keep canon in step, verify, then
+commit, open the PR, review, watch CI and comment the outcome.
+
+Four things changed on the way in. The gates are
+`cargo xtask validate` rather than mutrack's dispatcher, and the
+npm bootstrap step is gone because bombyx has no `node_modules`
+to fill. mutrack keeps its review protocol inside its commit
+command, so its `/issue` restated the rounds; here `/review`
+owns the loop and `code-reviewers.md` owns the reviewers, so
+step 8 states only what is specific to working an issue and
+points at them for the rest. That also drops mutrack's
+two-round cap in favour of the three-round cap `/review`
+already has. And step 6 adds Definition of Done item 3, a real
+run against the VM host, which no gate can do.
+
+The part worth keeping is step 1. In the mutrack session six of
+eighteen issues had already been fixed before anyone started
+them, so the command opens by treating the issue body as a
+claim and checking every fact in it against the tree. bombyx
+issues carry the same risk from a different direction: each one
+cites a slug in `docs/todo.md` and usually a planning document
+under `docs/issues/`, and the issue body is the summary of those
+two, which is the copy that goes stale.
+
 ### 2026-09-03
 
 **`/short` answers in forty words**

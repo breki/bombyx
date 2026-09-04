@@ -170,6 +170,7 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 | `/retrospect` | Workflow retrospective |
 | `/todo` | Capture a work item into `docs/todo.md` |
 | `/implement` | Plan + execute a captured item |
+| `/issue` | Work a GitHub issue end to end |
 | `/architect` | Architecture guide |
 | `/short` | Restate the reply above in under 40 words |
 | `/template-sync` | Pull upstream rustbase improvements |

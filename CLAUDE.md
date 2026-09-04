@@ -951,6 +951,7 @@ a fresh empty `[Unreleased]` above it.
 | `/rundown` | Grouped one-line rundown of the session's work, ending with the decisions and actions left for the operator. Reports only -- changes nothing |
 | `/todo` | Capture a work item into `docs/todo.md` (no implementation) |
 | `/implement` | Plan + implement a captured item; writes `docs/issues/<slug>.md` |
+| `/issue` | Work a GitHub issue end to end: verify, implement, review, PR |
 | `/update-deps` | Upgrade third-party deps to the newest versions outside the 14-day cooldown |
 | `/simplify` | Review changed code for quality |
 | `/architect` | Project overview and architecture guide |
