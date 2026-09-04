@@ -165,6 +165,7 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 | `/validate` | Full quality pipeline |
 | `/commit` | Commit with diary and CHANGELOG (no reviewing) |
 | `/review` | Review uncommitted work; commits nothing |
+| `/review2` | The same reviewers, one at a time |
 | `/release` | Cut a SemVer release |
 | `/retrospect` | Workflow retrospective |
 | `/todo` | Capture a work item into `docs/todo.md` |

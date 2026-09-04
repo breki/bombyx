@@ -51,7 +51,21 @@ cannot tell a comment that carries a reason from padding.
 
 This file defines *which* reviewers run, *when*, and *how* to
 spawn them. The review criteria themselves live in the agent
-files above. `/review` is the only caller.
+files above.
+
+Three commands read this file. `/review` spawns the three
+reviewers together and reviews the tree in rounds; `/review2`
+runs them one at a time, each reading the previous one's fixes;
+`/issue` offers a review at its step 8 and points here for the
+rest. All three take the reviewers, the handoff and the
+reading-back checks from here, and each owns its own loop.
+
+`/review` asks each reviewer for every category its agent file
+lists. `/review2` asks each for one of them and carries the
+rest to the stage that owns it -- that narrowing is written in
+`/review2`, because it is a property of that sequence rather
+than of the reviewers. The criteria stay in the agent files
+either way.
 
 **An edit to an agent file takes effect on the next session,
 not this one.** Claude Code reads `.claude/agents/` at startup,
@@ -69,8 +83,8 @@ move, and `/review` under **Snapshot** specifies how it writes
 one. Neither argument is repeated here. What each reviewer is
 handed is in **Diff handoff** below.
 
-Never commit, amend or push -- `/review` owns the rest of its
-loop, including what a later round hands over.
+Never commit, amend or push. The calling command owns the rest
+of its loop, including what a later round or stage hands over.
 
 `red-team.md` repeats the no-commit rule for itself, because
 that agent has a shell and never reads this file. The other two
