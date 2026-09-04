@@ -181,6 +181,7 @@ classDiagram
   Registry *-- Project : projects
   Project *-- Vm : vm
   Project *-- Source : source
+  Project ..> Config : one entry becomes one
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
@@ -199,13 +200,22 @@ table per project carrying `remote_root`, `[vm]`, `[source]` and
 an optional `host` of its own. `config::host` reads both host
 keys out of that file, and ranks the project's above the
 top-level one, so an operator who keeps one project on a
-different machine writes it in that project's table. bombyx does
-not load a project table yet, and two steps stand between here
-and its doing so: `registry-config-load` in `docs/todo.md`
-builds a `Config` from an entry, and `project-selection-flag`
-adds the `--project` argument that first supplies a name. The
-per-project `host` key waits on the second of those, because
-nothing names a project until it lands.
+different machine writes it in that project's table.
+
+`Config::load_project` turns one entry into a `Config`. It reads
+the registry once and takes everything from it: the entry
+supplies every setting but the host, and `config::host::rank`
+ranks the host across `--host`, `BOMBYX_HOST`, that entry's own
+`host` and the file-wide one. One read rather than two, because
+a file edited mid-run could otherwise supply a project host and
+a file-wide host that never coexisted.
+
+No command calls it yet. One step stands between here and a
+command that does: `project-selection-flag` in `docs/todo.md`
+adds the `--project` argument that first supplies a name, and
+deletes `Config::load` and `bombyx.toml` with it. The
+per-project `host` key waits on that step too, because nothing
+names a project until it lands.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -321,6 +331,12 @@ is required, and it reaches `ssh` the same way, so
 `Project::validate` runs `host_problem` on it alongside the
 other checkers `Config::validate` calls.
 
+`Config::load_project` then runs `Config::validate` over the
+value it assembles, so an entry's fields are checked twice. That
+is deliberate rather than an oversight: `validate` is what every
+path building a `Config` calls, so a field added to `Config`
+without a matching check on the entry is still refused.
+
 Three values in an entry are checked while the file parses: the
 project name, because it is the table key and a `ProjectName`;
 `repo` and `script`, because their types refuse a bad value.
@@ -341,8 +357,9 @@ it.
 
 Three things keep that survivable meanwhile. `render` escapes
 for Ruby whatever it is handed. `bootstrap.sh` passes `--`
-before the ref. And the loading path is the only way a
-`Config` is built today, so in practice `validate` does run.
+before the ref. And the two loading
+functions are the only way a `Config` is built today, so in
+practice `validate` does run.
 
 `remote_root` should stop being a `String` first: it reaches
 `rm -rf`, and `config::root` already holds all of its rules in

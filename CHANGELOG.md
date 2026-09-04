@@ -37,6 +37,12 @@ and this project adheres to
   project.
 - Library API: a `project` field on `HostSources`, and a
   `HostOrigin::ProjectEntry` variant carrying the project name.
+- Library API: `Config::load_project(name, sources)` loads a project's settings
+  out of the per-developer `config.toml` -- the registry counterpart of
+  `Config::load`, returning the same `(Config, HostOrigin)` pair -- plus a
+  `ConfigError::RegistryNotFound` variant for a machine with no registry file at
+  all. No command calls it yet: `bombyx.toml` is still where a project is
+  described.
 
 ### Changed
 

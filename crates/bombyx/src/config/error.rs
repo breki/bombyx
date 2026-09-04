@@ -214,6 +214,32 @@ pub enum ConfigError {
         path: PathBuf,
     },
 
+    /// A project's settings were asked for and there is no
+    /// registry file to hold them.
+    ///
+    /// Separate from [`ConfigError::NotFound`], which says a
+    /// file is absent and stops there, and from
+    /// [`ConfigError::ProjectNotFound`], whose message claims
+    /// bombyx looked inside a file. The operator here has to
+    /// create the file *and* know what to put in it, so the
+    /// message says both.
+    ///
+    /// `place` is a `String` rather than a `PathBuf` because a
+    /// machine whose environment names no config directory has
+    /// no path to print. `config::host::registry_place` decides
+    /// the wording for both cases and is where it is written
+    /// down.
+    #[error(
+        "no registry file -- create {place} with a \
+         `[projects.{name}]` table"
+    )]
+    RegistryNotFound {
+        /// Project name that was looked up.
+        name: String,
+        /// The registry file bombyx would have read.
+        place: String,
+    },
+
     /// The winning source supplied an unusable host.
     ///
     /// Separate from [`ConfigError::Invalid`] so the message can

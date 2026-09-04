@@ -4,6 +4,74 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**A second loader: a `Config` out of the registry, by project
+name**
+
+Step 5 of seven in `project-config-off-repo` (#26).
+`Config::load_project(name, sources)` reads the operator's
+`config.toml`, takes the `[projects.<name>]` table for every
+setting but the host, ranks the host across the four sources and
+returns the same `(Config, HostOrigin)` pair `Config::load`
+does. Both loaders exist until step 6 (#18) deletes the old one.
+Nothing in the binary calls the new one, so no behaviour
+changed.
+
+The reason it is a sibling and not a rewrite is in the plan
+document: a rewrite would put the switch and the new loading
+path in one commit, which is the lump this re-split exists to
+avoid.
+
+`config/host.rs` split, and the reason is sharper than tidying.
+`resolve_host` opened the registry itself, and the new loader
+needs the same file for the entry -- its own comment said why
+reading it twice is wrong, because a file edited between the two
+reads can supply a project host and a file-wide host that never
+coexisted. So the four-source precedence is now `rank`, which
+takes the registry already read, and `resolve_host` is
+read-then-`rank` for `Config::load` alone. The top two sources
+came out into `caller_supplied`, shared by both, so the decision
+to open the file and the decision about which source wins cannot
+drift apart.
+
+`from_registry` overwrites `sources.project` with the name it
+was asked for rather than reading what the caller put there.
+Ranking one project's host while loading another's settings
+would boot this project's VM on that one's machine, and
+`destroy` would `rm -rf` there.
+
+Two smaller pieces. `ConfigError::RegistryNotFound` covers a
+machine with no registry file: `NotFound` says a file is absent
+and stops, and `ProjectNotFound` claims bombyx looked inside a
+file that is not there, while the operator here has to create
+the file and know what to put in it. And `host_place` is
+`registry_place`, because a third message now uses it and it was
+never about the host.
+
+`Config::parse` and `Config::for_tests` moved onto the registry,
+which is why the diff is large for a pure addition. Every test
+module in the crate builds its config through `for_tests`, so
+leaving it on `bombyx.toml` would mean rewriting it in step 6
+instead of deleting it. The forty-odd tests that are *about*
+parsing `bombyx.toml` keep testing it through a helper in
+`config.rs`'s own test module, and that helper is deleted with
+them.
+
+Eleven tests cover the loader, and five were proven by removing
+the code they cover: dropping the `sources.project` overwrite
+failed two, dropping the winning-host check failed one, and
+spelling `RegistryNotFound` as `NotFound` failed two. A sixth
+claim did not survive that treatment. A test said the entry is
+read before the host is ranked, and it passed with the two
+swapped, because with `--host` set both orders reach the same
+error. It now pins the order the only way that can fail: a
+broken entry and no host anywhere, where the order decides which
+of the two problems the operator is told about.
+
+`cargo xtask validate` passes, ten gates, coverage 98.4%.
+Definition of Done item 3 does not apply -- the new loader has
+no caller, and a dry run against a `bombyx.toml` emits the same
+four commands as before.
+
 **Three reviewers on the per-project host: one unguarded value,
 and two claims in the commit message that were not true**
 

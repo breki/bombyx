@@ -182,6 +182,32 @@ pub struct Registry {
 }
 
 impl Project {
+    /// Assembles a [`super::Config`] from this entry.
+    ///
+    /// `name` is the table key this entry was found under, and
+    /// becomes `Config::project`. The entry does not carry the
+    /// name itself, so a project cannot disagree with itself
+    /// about what it is called.
+    ///
+    /// `host` comes from the caller because four sources can
+    /// supply one and this entry is only the third of them.
+    /// `super::Config::load_project` ranks them and passes the
+    /// winner.
+    ///
+    /// The fields are cloned. The registry is read once per run
+    /// and one entry out of it is small, so borrowing them into
+    /// the `Config` -- and giving that type a lifetime every
+    /// module holding one would carry -- buys nothing.
+    pub(super) fn to_config(&self, name: &str, host: String) -> super::Config {
+        super::Config {
+            host,
+            project: name.to_owned(),
+            remote_root: self.remote_root.clone(),
+            vm: self.vm.clone(),
+            source: self.source.clone(),
+        }
+    }
+
     /// Runs the rules no type on these fields carries.
     ///
     /// Each rule lives in the module that owns the field, and
@@ -373,11 +399,19 @@ pub(super) fn path(dir: &Path) -> PathBuf {
 /// The only way to build a [`Registry`], so the path in an
 /// error message is always the path the text came from.
 ///
+/// `pub(super)` for one caller: the test-only
+/// `super::Config::parse` builds a registry from a string
+/// literal, so a test about loading a project needs no temporary
+/// directory. Reading a real file is [`Registry::read`].
+///
 /// # Errors
 ///
 /// Returns [`ConfigError::Parse`] when `source` is not valid
 /// TOML or carries a key the registry does not define.
-fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
+pub(super) fn parse(
+    source: &str,
+    path: &Path,
+) -> Result<Registry, ConfigError> {
     let file: RegistryFile = from_toml(source, path)?;
     Ok(Registry {
         path: path.to_path_buf(),

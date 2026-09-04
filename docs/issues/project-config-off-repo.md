@@ -246,6 +246,66 @@ commands stay identical, which a dry run can show.
 
 ## Decisions
 
+- **2026-09-04 -- The registry loader is
+  `Config::load_project(name, sources)`.** Step 6 deletes
+  `Config::load`, so the name chosen here is the only loader
+  bombyx has afterwards, and renaming it then would be churn in
+  the step that already carries every document. "load" states
+  that the function opens a file, which the common errors are
+  all about: no `config.toml`, no entry in it, a broken entry.
+  `for_project` hides that.
+
+  It splits in two. `load_project` reads the registry and hands
+  off to a private `from_registry(registry, name, sources)`,
+  which looks the entry up, ranks the host, checks the winner
+  and validates. The pure half is what the test-only
+  constructor calls, so a test needs no temporary directory.
+
+  `config/host.rs` splits the same way and for a harder reason.
+  `resolve_host` reads the registry itself, and the loader needs
+  the same file for the entry. Its own comment says why reading
+  it twice is wrong: a file edited between the two reads can
+  supply a project host and a file-wide host that never
+  coexisted. So the four-source precedence moves into a pure
+  `rank(sources, Option<&Registry>)`, and `resolve_host` becomes
+  read-then-`rank` for `Config::load` alone until step 6 deletes
+  it.
+
+  `from_registry` overwrites `sources.project` with `name`
+  rather than reading what the caller put there. The project
+  whose host is ranked is then always the project the rest of
+  the config came from, and a caller cannot make the two differ.
+
+- **2026-09-04 -- A missing registry file gets its own error,
+  `RegistryNotFound`.** It carries a `place` rather than a
+  `PathBuf`, so it reuses the function that words the file for
+  the two host messages, which already covers the case where the
+  environment names no config directory at all. That function is
+  now `registry_place`: a third message uses it, and it was
+  never about the host.
+  The message names the file and says to create it with a
+  `[projects.<name>]` table.
+
+  `ConfigError::NotFound` was the alternative and says only that
+  a file is absent, leaving the operator to find out what goes
+  in it. `ProjectNotFound` already names the tables to write,
+  but its message claims bombyx looked inside a file that does
+  not exist.
+
+- **2026-09-04 -- `Config::parse` becomes registry-based, and
+  the project-file tests get their own helper.** `parse` and
+  `for_tests` are both test-only constructors built from a
+  `bombyx.toml` string, and every test module in the crate uses
+  `for_tests`. Moving both onto the registry now means step 6
+  deletes `ProjectFile` and its tests rather than rewriting the
+  helper every module depends on.
+
+  The forty-odd tests in `config.rs` that are *about* parsing
+  `bombyx.toml` keep testing it. They reach it through one local
+  helper in that file's test module, and the helper now does the
+  `ProjectFile` parse itself. It is deleted in step 6 along with
+  the tests that call it and the struct it parses.
+
 - **2026-09-04 -- The flag and the environment variable go in
   step 6 (`project-selection-flag`), not step 4
   (`registry-project-host`).** The operator wants the VM host tied to

@@ -101,6 +101,26 @@ host" in `README.md` for the authoritative list, and
 `None` on every path today, so the key never wins. The README
 section above says the same and is where the count is kept.
 
+The ranking itself is `config::host::rank`, which takes the
+registry already read rather than opening it. `resolve_host`
+reads the file and calls it; `Config::load_project` reads the
+file for the project's settings and calls it with that same
+copy, so a file edited mid-run cannot supply a project host and
+a file-wide host that never coexisted.
+
+`Config::load_project(name, sources)` is the registry
+counterpart of `Config::load`: it takes a project name instead
+of a path to a `bombyx.toml`, reads the `[projects.<name>]`
+table for every setting but the host, and returns the same
+`(Config, HostOrigin)` pair. It ranks the host for the project
+it loads whatever `HostSources.project` says, so the settings
+and the host always come from one entry. No command calls it
+yet -- `project-selection-flag` in `docs/todo.md` is the step
+that switches the binary over and deletes `Config::load`.
+Errors it adds: `RegistryNotFound` when there is no registry
+file, and `ProjectNotFound` when the file has no table for the
+name.
+
 `Config::load` returns an error naming all three places when no
 source supplies a host. It takes a `HostSources` carrying the
 flag, the env value, the project name and the config dir, and
