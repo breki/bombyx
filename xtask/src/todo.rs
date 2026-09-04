@@ -10,7 +10,8 @@
 //!   that would not fit on one line.
 //! - `done` moves a pending bullet to the top of `## Done`
 //!   (newest first), stamping the date and linking it to
-//!   `issues/<slug>.md`.
+//!   `issues/<slug>.md` whether or not that file exists -- see
+//!   `move_to_done`.
 //!
 //! The command owns *placement and mechanics*; the caller
 //! supplies the *content* (slug, summary, body).
@@ -373,8 +374,13 @@ fn add_pending(content: &str, bullet: Vec<String>) -> Result<String, String> {
 /// in the project's Done convention: the issue link alone on the
 /// first line, a `  -- <summary>` continuation, then a trailing
 /// `  (<date>)` line. The entry always links to
-/// `issues/<slug>.md`; the only caller, `/implement`, creates
-/// that spec doc before finalising, so the link resolves.
+/// `issues/<slug>.md`, whether or not that document exists.
+/// `/implement` calls this and writes that document first, so
+/// its links resolve. Nothing else calls it: an item worked
+/// through `/issue` is completed by hand, and an item split out
+/// of a shared plan has no document of its own, so a link
+/// written that way can dangle. `todo-done-link` in
+/// `docs/todo.md` holds the fix.
 fn move_to_done(
     content: &str,
     slug: &str,

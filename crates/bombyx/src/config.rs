@@ -190,9 +190,12 @@ pub struct Overlay {
 impl ProjectFile {
     /// Assembles a [`Config`], with `host` supplied separately.
     ///
-    /// The host is ranked across four sources by
-    /// [`Config::load`] before this runs, which is why the
-    /// project file itself is forbidden to carry one.
+    /// `host` comes from elsewhere because `bombyx.toml` is
+    /// forbidden to carry one: that file travels inside a
+    /// repository bombyx does not trust, and the value reaches
+    /// `ssh` as a bare argument. [`Config::load`] ranks it
+    /// across four sources; the test-only `Config::parse` takes
+    /// it from its caller.
     fn into_config(self, host: String) -> Config {
         Config {
             host,
@@ -286,8 +289,9 @@ impl Config {
     ///
     /// **This reads up to three paths.** After `path`, it looks
     /// for the [`Overlay`] named by [`local_config_path`] --
-    /// `bombyx.toml` next to `bombyx.local.toml` -- which
-    /// supplies a host for this one project. If neither
+    /// `bombyx.local.toml`, beside the `bombyx.toml` it takes
+    /// its name from -- which supplies a host for this one
+    /// project. If neither
     /// `sources.flag`, `sources.env` nor that file names a
     /// host, the per-developer file in
     /// `sources.user_config_dir` is read for one. An optional
@@ -424,7 +428,7 @@ impl Config {
         // The rule is kept anyway, because each of those
         // protections lives in a different file from the value,
         // and either could be rewritten by somebody who does not
-        // know it was load-bearing.
+        // know it is what makes the value safe.
         guards::check_not_empty("project", &self.project)?;
         guards::check_not_an_option("project", &self.project, "ssh")?;
         guards::check_not_empty("remote_root", &self.remote_root)?;
@@ -625,8 +629,9 @@ mod tests {
             Path::new("/repo/infra/bombyx.local.toml")
         );
         // A `--config` pointing somewhere else keeps the same
-        // rule, so the override is discoverable from the file
-        // it overrides rather than being a fixed name.
+        // rule, so the host file is discoverable from whichever
+        // config file `--config` names rather than being a
+        // fixed name.
         assert_eq!(of("staging.toml"), Path::new("staging.local.toml"));
         // The extension is replaced, not preserved. Documented
         // rather than fixed: two configs differing only by
@@ -821,12 +826,11 @@ mod tests {
 
     #[test]
     fn an_overlay_host_is_taken_rather_than_left_in_place() {
-        // `resolve_host` is the only thing that reads the
-        // overlay's host, and it must leave nothing behind: a
-        // later reader finding the field still set could use a
-        // value that `--host` and the environment outrank. The
-        // emptied field is what makes that impossible rather
-        // than merely unintended.
+        // `resolve_host` empties the field it reads, and this
+        // pins that. No code depends on it today -- see the
+        // function's own comment -- so the test exists to keep
+        // the behaviour honest while the parameter stays `&mut`,
+        // and it goes when #23 deletes the branch.
         let mut overlay = Overlay {
             host: Some("from-overlay".to_owned()),
         };
@@ -840,10 +844,10 @@ mod tests {
 
     #[test]
     fn an_invalid_host_names_the_source_that_supplied_it() {
-        // Reported as a plain field error, the only path in the
-        // message was the project file's -- the one file that must
-        // not carry a host, so it sent the operator to edit the
-        // wrong thing.
+        // A bad host must be reported against the source that
+        // supplied it. The project file is forbidden to carry a
+        // host at all, so naming it in the message sends the
+        // operator to edit the one file that cannot be at fault.
         let (dir, base) = project_dir(&minimal());
         write_user_file(dir.path(), "-oProxyCommand=x");
         let err = load(&base, &user_sources(dir.path())).unwrap_err();
@@ -1124,26 +1128,32 @@ mod tests {
 
     #[test]
     fn an_overlay_rejects_a_project_field() {
-        // The overlay supplies the VM host and nothing else.
-        // Every project value comes from the file the operator
-        // owns, so the four keys the overlay used to replace --
-        // `project`, `remote_root`, `[vm]` and `[source]` --
-        // are unknown keys here now, and `deny_unknown_fields`
-        // refuses them. Silently ignoring one would leave the
-        // operator reading a value that is not in force.
-        for key in [
-            "project = \"other\"",
-            "remote_root = \"/srv/vms\"",
-            "[vm]\nprovider = \"libvirt\"\nbox = \"b\"\ncpus = 1\nmemory = 1024",
-            "[source]\nrepo = \"https://e/r.git\"\nref = \"main\"\nscript = \"s\"",
+        // The overlay accepts `host` only. Every project value
+        // comes from the file the operator owns, so `project`,
+        // `remote_root`, `[vm]` and `[source]` are unknown
+        // fields here and `deny_unknown_fields` refuses them.
+        // Silently ignoring one would leave the operator reading
+        // a value that is not in force.
+        //
+        // The message must name the key as well as the file,
+        // because `README.md` and `CHANGELOG.md` both promise
+        // it does. That half of the message is `toml`'s
+        // `unknown field` wording, so it is the half a
+        // dependency can change under us.
+        for (key, src) in [
+            ("project", "project = \"other\""),
+            ("remote_root", "remote_root = \"/srv/vms\""),
+            // The tables need no contents: `deny_unknown_fields`
+            // refuses the table key before looking inside it.
+            ("vm", "[vm]"),
+            ("source", "[source]"),
         ] {
-            let (_dir, loaded) = load_with_overlay(key);
+            let (_dir, loaded) = load_with_overlay(src);
             let err = loaded.unwrap_err();
-            assert!(matches!(err, ConfigError::Parse { .. }), "{key}: {err}");
-            assert!(
-                err.to_string().contains("bombyx.local.toml"),
-                "{key}: {err}"
-            );
+            let text = err.to_string();
+            assert!(matches!(err, ConfigError::Parse { .. }), "{key}: {text}");
+            assert!(text.contains("bombyx.local.toml"), "{key}: {text}");
+            assert!(text.contains(key), "{key} must be named: {text}");
         }
     }
 
@@ -1207,48 +1217,69 @@ mod tests {
         assert!(matches!(err, ConfigError::Parse { .. }));
     }
 
+    /// Every `[vm]` and `[source]` field, with the line that
+    /// states it.
+    ///
+    /// The requiredness tests below omit one entry at a time
+    /// and write the rest, so both tables come from here rather
+    /// than from a literal in each test. A literal sibling
+    /// table is the hazard: adding a required `[source]` field
+    /// later would make the `[vm]` test fail on the new field
+    /// while its message blamed whichever `[vm]` field it had
+    /// omitted.
+    const TABLE_FIELDS: [(&str, &str, &str); 7] = [
+        ("vm", "provider", "provider = \"libvirt\""),
+        ("vm", "box", "box = \"generic/ubuntu2204\""),
+        ("vm", "cpus", "cpus = 2"),
+        ("vm", "memory", "memory = 2048"),
+        ("source", "repo", "repo = \"https://example.invalid/p.git\""),
+        ("source", "ref", "ref = \"main\""),
+        ("source", "script", "script = \"vagrant/provision.sh\""),
+    ];
+
+    /// A project file stating every required field except
+    /// `omitted`, which names one entry of [`TABLE_FIELDS`].
+    fn config_without(omitted: &str) -> String {
+        let mut src = String::from("project = \"myproject\"\n");
+        for table in ["vm", "source"] {
+            use std::fmt::Write as _;
+            let _ = writeln!(src, "\n[{table}]");
+            for (owner, field, line) in TABLE_FIELDS {
+                if owner == table && field != omitted {
+                    src.push_str(line);
+                    src.push('\n');
+                }
+            }
+        }
+        src
+    }
+
     #[test]
-    fn every_vm_field_is_required() {
-        // A `[vm]` table missing any one field must be an
-        // error, not a machine built from a mix of stated and
-        // invented sizes. Nothing enforces this except `Vm`'s
-        // fields all being required: a `#[serde(default)]`
-        // added to one of them later would turn a half-stated
-        // table into a silent default, and the operator would
-        // read one machine size in the file while the VM ran
-        // with another.
+    fn every_vm_and_source_field_is_required() {
+        // A table present but incomplete must be an error, not
+        // a VM built from a mix of stated and invented values.
+        // Nothing enforces this except every field of `Vm` and
+        // `Source` being required: a `#[serde(default)]` added
+        // to one of them later would turn a half-stated table
+        // into a silent default, and the operator would read one
+        // value in the file while the guest ran with another.
+        //
+        // Both tables, because the rule protects a required
+        // serde field with no default rather than a table name,
+        // and `[source]`'s values are the ones reaching `git` on
+        // the guest.
         //
         // Each field is omitted in turn rather than testing one
-        // partial table, so the test names the field that
+        // partial table, so a failure names the field that
         // stopped being required instead of only reporting that
         // something did.
         //
-        // `Config::parse` directly rather than the `parse`
-        // helper, which appends the complete tables and would
-        // repair the very fixture under test.
-        let fields = [
-            ("provider", "provider = \"libvirt\""),
-            ("box", "box = \"generic/ubuntu2204\""),
-            ("cpus", "cpus = 2"),
-            ("memory", "memory = 2048"),
-        ];
-        for (omitted, _) in fields {
-            let mut table = String::new();
-            for (name, line) in fields {
-                if name != omitted {
-                    table.push_str(line);
-                    table.push('\n');
-                }
-            }
-            let src = format!(
-                "project = \"myproject\"\n\
-                 [source]\n\
-                 repo = \"https://example.invalid/p.git\"\n\
-                 ref = \"main\"\n\
-                 script = \"vagrant/provision.sh\"\n\
-                 \n\
-                 [vm]\n{table}"
-            );
+        // `Config::parse` rather than the `parse` helper: the
+        // fixture states both tables, so `completed` would leave
+        // it alone, and stating them is the point -- the omission
+        // has to be visible in the table the test writes.
+        for (_, omitted, _) in TABLE_FIELDS {
+            let src = config_without(omitted);
             let err = Config::parse(&src, Path::new("bombyx.toml"), "vmhost")
                 .unwrap_err();
             let text = err.to_string();

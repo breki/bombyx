@@ -46,7 +46,7 @@ struct Cli {
     #[arg(short, long, default_value = CONFIG_FILE)]
     config: PathBuf,
 
-    /// SSH alias of the VM host, overriding your config.toml
+    /// SSH alias of the VM host; outranks every other source
     #[arg(long)]
     host: Option<String>,
 

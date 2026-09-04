@@ -72,7 +72,7 @@ running it).
 ## Configuration
 
 `bombyx.toml` in the project root. Committed, and carries
-**no `host`** -- one there is an error, not a warning:
+**no `host`** -- one there is an error, not a warning.
 
 `bombyx.toml.sample` in the repository root is the only full
 example, and a test loads it as shipped. Keys:

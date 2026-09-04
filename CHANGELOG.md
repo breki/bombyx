@@ -131,11 +131,15 @@ and this project adheres to
   the file and the key. Every setting other than the VM host comes from
   `bombyx.toml`, so a project's values are read in one file rather than merged
   from two.
-- **BREAKING:** The `bombyx: <local> overrides <config>` line on stderr is gone.
-  With the overlay reduced to a host, that line described something the file
-  cannot do; the host provenance line already names `bombyx.local.toml` whenever
-  that file supplies the host. A present-but-empty overlay now prints nothing,
-  because it changed nothing.
+- **BREAKING:** The `bombyx: bombyx.local.toml overrides bombyx.toml` line on
+  stderr is gone. With `bombyx.local.toml` reduced to a host, that line
+  described something the file cannot do; the host provenance line already
+  names it whenever it supplies the host. A `bombyx.local.toml` that is present
+  but empty now prints nothing, because it changed nothing.
+- **BREAKING:** The `Config::with_overlay` library method, and `Overlay`'s
+  `project`, `remote_root`, `vm` and `source` public fields. `Overlay` now
+  carries `host` alone, so a downstream that merged project values through it
+  has no replacement: read them from the project file.
 
 
 ## [0.4.1] - 2026-08-18

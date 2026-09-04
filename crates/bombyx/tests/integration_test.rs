@@ -604,10 +604,10 @@ fn the_host_flag_outranks_every_file() {
 
 #[test]
 fn a_flag_host_says_where_the_host_came_from() {
-    // With a `bombyx.local.toml` present, the "overrides" notice
-    // otherwise reads as "the host in that file is in force"
-    // when the flag actually won. `destroy` runs `rm -rf` on the
-    // winner, so the two notices must not disagree.
+    // With a `bombyx.local.toml` naming a host, the flag has to
+    // win and the provenance line has to say so. `destroy` runs
+    // `rm -rf` on the winning host, so a line naming the file
+    // that lost would point the operator at the wrong machine.
     let dir = project_dir();
     std::fs::write(
         dir.path().join("bombyx.local.toml"),
@@ -644,7 +644,39 @@ fn an_overlay_without_a_host_says_nothing_about_the_file() {
     // The host came from the per-developer file.
     assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
     assert!(!stderr.contains("bombyx.local.toml"), "{stderr}");
+    // `bombyx.local.toml` supplies a host and nothing else, so
+    // no output may say it overrides the project file: the word
+    // would name a capability the file does not have.
     assert!(!stderr.contains("overrides"), "{stderr}");
+}
+
+#[test]
+fn a_local_config_host_is_reported_as_the_source() {
+    // `docs/usage.md` and `README.md` both accept a real
+    // exposure on the strength of this one line: a
+    // `bombyx.local.toml` committed to a repository redirects
+    // every `ssh` bombyx runs, `destroy` included, and what
+    // bombyx offers against that is saying on stderr where the
+    // host came from.
+    //
+    // So the line needs a test of its own. The neighbouring
+    // tests assert the `--host` case and two negatives, and
+    // none of them fails if the `HostOrigin::Overlay` branch
+    // stops printing -- deleting the `if` in `main.rs` leaves
+    // the suite green and the mitigation gone.
+    let dir = project_dir();
+    std::fs::write(
+        dir.path().join("bombyx.local.toml"),
+        "host = \"from-overlay\"\n",
+    )
+    .unwrap();
+    bombyx_in(&dir)
+        .args(["--dry-run", "status"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "host from-overlay from bombyx.local.toml",
+        ));
 }
 
 #[test]

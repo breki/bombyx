@@ -50,10 +50,11 @@ is what this branch is.
 
 **`bombyx.local.toml` carries a host and nothing else**
 
-Step 1 of seven in moving the project config off the repo, and
-the largest of them. `Overlay` had five fields and now has one.
-Gone with the other four: `Config::with_overlay`, the `replace`
-helper, and `into_config`'s overlay parameter.
+This is step 1 of seven in moving the project config off the
+repo, and it is the largest of them. `Overlay` had five fields
+and now has one. Three more things went with the other four:
+`Config::with_overlay`, the `replace` helper, and
+`into_config`'s overlay parameter.
 
 The reason to delete the overlay depends on the rest of the
 move -- once the base config is the operator's own private
