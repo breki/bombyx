@@ -125,6 +125,17 @@ and this project adheres to
   functions. doctor::host_findings composes them and is the supported entry
   point; making the two pub(crate) is what stops a caller assembling a report
   with no provider row.
+- **BREAKING:** `bombyx.local.toml` no longer overrides project fields. It
+  carries `host` and nothing else; `project`, `remote_root`, `[vm]` and
+  `[source]` in that file are now unknown keys and bombyx refuses them, naming
+  the file and the key. Every setting other than the VM host comes from
+  `bombyx.toml`, so a project's values are read in one file rather than merged
+  from two.
+- **BREAKING:** The `bombyx: <local> overrides <config>` line on stderr is gone.
+  With the overlay reduced to a host, that line described something the file
+  cannot do; the host provenance line already names `bombyx.local.toml` whenever
+  that file supplies the host. A present-but-empty overlay now prints nothing,
+  because it changed nothing.
 
 
 ## [0.4.1] - 2026-08-18

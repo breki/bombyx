@@ -358,7 +358,8 @@ clones the repo.
 
 If this one project needs a different machine from your usual
 one, name that in a gitignored `bombyx.local.toml` beside it.
-It overrides only the fields it names.
+That file accepts `host` and nothing else, so every setting
+above stays in the one file the whole team reads.
 
 ### `.gitignore`
 

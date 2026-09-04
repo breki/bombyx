@@ -46,9 +46,12 @@ pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
 
 /// The per-developer configuration file.
 ///
-/// Only `host` for now. It is a separate shape from [`Overlay`]
-/// because this file is not beside a project and cannot
-/// meaningfully carry `project`.
+/// Carries only `host`, the same as [`Overlay`]. The two are
+/// separate types because they are separate files with
+/// different reasons to exist and different precedence, and
+/// merging them would mean one `deny_unknown_fields` list
+/// covering both -- so a key added to one file would silently
+/// become legal in the other.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UserFile {
@@ -266,10 +269,9 @@ impl std::fmt::Display for HostOrigin {
 /// no-host-anywhere error.
 ///
 /// Takes the overlay by `&mut` and *removes* the host it finds,
-/// so the value is consumed where it is ranked. What is left
-/// provably carries no host, which is what makes
-/// `Config::with_overlay` ignoring the field safe rather than
-/// merely intended.
+/// so the value is consumed where it is ranked and no later
+/// reader can find it still sitting there and use it a second
+/// time.
 ///
 /// The per-developer file is read *last* and only if it is
 /// needed, so `--host` works on a machine whose file is absent

@@ -30,9 +30,9 @@
 //!
 //! # Where each rule lives
 //!
-//! This module owns [`Config`] itself, the overlay, and the
-//! order the two are assembled in. Everything else is a private
-//! child module, so rustdoc will not list them:
+//! This module owns [`Config`] itself and the [`Overlay`] that
+//! names a VM host for one project. Everything else is a
+//! private child module, so rustdoc will not list them:
 //!
 //! - `read` -- getting a config file off disk: whether the path
 //!   may be a symlink, how large a file may be, where the
@@ -164,67 +164,42 @@ fn default_remote_root() -> String {
     DEFAULT_REMOTE_ROOT.to_owned()
 }
 
-/// Per-project overrides, read from a file beside the config.
+/// A VM host for one project, read from a file beside the
+/// config.
 ///
-/// Every field is optional, so an overlay names only what
-/// differs. This is the escape hatch for one repo that needs
-/// something other than the shared value -- a second VM host
-/// for one project, or a different `remote_root` on one
-/// machine. The usual per-developer host lives in the
-/// `config.toml` that [`HostSources::user_config_dir`] points
-/// at, not here; this file outranks it.
+/// This is the escape hatch for one repository that has to run
+/// on a machine other than the operator's usual one. The usual
+/// per-developer host lives in the `config.toml` that
+/// [`HostSources::user_config_dir`] points at, not here; this
+/// file outranks it.
 ///
-/// The same `deny_unknown_fields` treatment as the project
-/// file: a typo here must be an error rather than a setting
-/// that silently does nothing.
+/// It carries a host and nothing else. Every other setting
+/// comes from the project file, so naming one here is a typo
+/// and `deny_unknown_fields` refuses it -- the same treatment
+/// the project file gets, and for the same reason: a key that
+/// silently did nothing would leave the operator reading a
+/// value that is not in force.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Overlay {
     /// Supplies [`Config::host`] for this project, outranked
     /// only by `--host` and [`HOST_ENV`].
-    ///
-    /// [`Config::load`] *takes* this value while ranking the
-    /// sources, so the overlay it later merges carries `None`.
-    /// [`Config::with_overlay`] therefore never applies it --
-    /// see that method.
     pub host: Option<String>,
-    /// Replaces [`Config::project`].
-    pub project: Option<String>,
-    /// Replaces [`Config::remote_root`].
-    pub remote_root: Option<String>,
-    /// Replaces [`Config::vm`] wholesale.
-    ///
-    /// Whole-section rather than field by field: a half-stated
-    /// machine reads as a merge of two sizes and neither file
-    /// shows the result. Naming `[vm]` here means naming all of
-    /// it, which is what the base file already requires.
-    pub vm: Option<Vm>,
-    /// Replaces [`Config::source`] wholesale, for the same
-    /// reason as [`Overlay::vm`].
-    pub source: Option<Source>,
-}
-
-/// Overwrites `dst` when the overlay supplied a value.
-fn replace<T>(dst: &mut T, src: Option<T>) {
-    if let Some(value) = src {
-        *dst = value;
-    }
 }
 
 impl ProjectFile {
-    /// Assembles a [`Config`], applying `overlay` to the
-    /// project fields.
-    fn into_config(self, host: String, overlay: Option<Overlay>) -> Config {
-        let cfg = Config {
+    /// Assembles a [`Config`], with `host` supplied separately.
+    ///
+    /// The host is ranked across four sources by
+    /// [`Config::load`] before this runs, which is why the
+    /// project file itself is forbidden to carry one.
+    fn into_config(self, host: String) -> Config {
+        Config {
             host,
             project: self.project,
             remote_root: self.remote_root,
             vm: self.vm,
             source: self.source,
-        };
-        match overlay {
-            Some(overlay) => cfg.with_overlay(overlay),
-            None => cfg,
         }
     }
 }
@@ -250,40 +225,6 @@ fn reject_host_key(
 }
 
 impl Config {
-    /// Returns this configuration with `overlay` applied.
-    ///
-    /// Does not validate: the caller validates once, after
-    /// merging, so an overlay cannot become the one path into
-    /// the config that skips the checks the base file passes.
-    ///
-    /// **`Overlay::host` is not applied.** The host is ranked
-    /// against `--host` and [`HOST_ENV`] by [`Config::load`],
-    /// which *takes* the overlay's value in the process, so the
-    /// overlay reaching this method carries `None`. Applying it
-    /// here as well would silently promote the file above two
-    /// sources that outrank it. A caller building an [`Overlay`]
-    /// by hand and setting `host` will find it ignored -- put the
-    /// host in `HostSources` and let [`Config::load`] resolve it.
-    #[must_use]
-    pub fn with_overlay(mut self, overlay: Overlay) -> Self {
-        // Destructured rather than read field by field: adding
-        // a field to `Overlay` then fails to compile here,
-        // instead of parsing fine and silently doing nothing.
-        let Overlay {
-            host: _,
-            project,
-            remote_root,
-            vm,
-            source,
-        } = overlay;
-
-        replace(&mut self.project, project);
-        replace(&mut self.remote_root, remote_root);
-        replace(&mut self.vm, vm);
-        replace(&mut self.source, source);
-        self
-    }
-
     /// Parses a project file, with `host` supplied separately.
     ///
     /// `path` is used only for error messages.
@@ -318,7 +259,7 @@ impl Config {
     ) -> Result<Self, ConfigError> {
         let file: ProjectFile = from_toml(source, path)?;
         reject_host_key(&file, path, &HostSources::default())?;
-        let cfg = file.into_config(host.to_owned(), None);
+        let cfg = file.into_config(host.to_owned());
         cfg.validate()?;
         Ok(cfg)
     }
@@ -340,25 +281,27 @@ impl Config {
         .expect("the shared test config must be valid")
     }
 
-    /// Loads a configuration: the project file, the overlay
-    /// beside it, and a VM host from `sources`.
+    /// Loads a configuration: the project file, and a VM host
+    /// ranked across `sources` and the two optional files.
     ///
     /// **This reads up to three paths.** After `path`, it looks
-    /// for the overlay named by [`local_config_path`] --
-    /// `bombyx.toml` next to `bombyx.local.toml` -- and merges
-    /// it over the file when present. If neither `sources.flag`,
-    /// `sources.env` nor the overlay names a host, the
-    /// per-developer file in `sources.user_config_dir` is read
-    /// for one. An optional file that exists but cannot be read
-    /// or parsed is an error rather than a silent fallback.
+    /// for the [`Overlay`] named by [`local_config_path`] --
+    /// `bombyx.toml` next to `bombyx.local.toml` -- which
+    /// supplies a host for this one project. If neither
+    /// `sources.flag`, `sources.env` nor that file names a
+    /// host, the per-developer file in
+    /// `sources.user_config_dir` is read for one. An optional
+    /// file that exists but cannot be read or parsed is an
+    /// error rather than a silent fallback.
     ///
     /// The user file is read only when nothing else supplied a
     /// host, so `--host` still works on a machine whose
     /// per-developer file is missing or broken.
     ///
-    /// Validation runs once, after everything is merged, so an
-    /// override is subject to the same rules as the file it
-    /// overrides.
+    /// Every setting other than the host comes from `path`
+    /// alone. Validation therefore runs on the project file's
+    /// own values, with the winning host already in place so it
+    /// is checked too.
     ///
     /// Returns the winning [`HostOrigin`] alongside the config,
     /// so a caller reporting which host is in force does not
@@ -374,9 +317,9 @@ impl Config {
     /// [`ConfigError::HostInProjectFile`] if the project file
     /// carries a `host` key, [`ConfigError::HostMissing`] if no
     /// source names a host, and [`ConfigError::Empty`] /
-    /// [`ConfigError::Invalid`] if a field fails validation
-    /// after merging. The path carried by an error may be an
-    /// optional file's rather than `path`.
+    /// [`ConfigError::Invalid`] if a field fails validation.
+    /// The path carried by an error may be an optional file's
+    /// rather than `path`.
     pub fn load(
         path: &Path,
         sources: &HostSources,
@@ -427,10 +370,7 @@ impl Config {
             });
         }
 
-        // Validation happens once, after merging. Validating
-        // the base first would let an overlay set a value the
-        // base file could never carry.
-        let cfg = file.into_config(host, overlay);
+        let cfg = file.into_config(host);
         cfg.validate()?;
         Ok((cfg, origin))
     }
@@ -695,75 +635,14 @@ mod tests {
         assert_eq!(of("bombyx"), Path::new("bombyx.local.toml"));
     }
 
-    #[test]
-    fn overlay_replaces_only_the_fields_it_sets() {
-        // An overlay naming one field must leave the rest
-        // alone.
-        let overlay: Overlay = toml::from_str("project = \"other\"").unwrap();
-        let cfg = good().with_overlay(overlay);
-        assert_eq!(cfg.project, "other");
-        assert_eq!(cfg.host, "vmhost");
-        assert_eq!(cfg.remote_root, "~/vms");
-    }
-
-    #[test]
-    fn an_overlay_replaces_a_whole_table_or_none_of_it() {
-        // `[vm]` and `[source]` are replaced wholesale, so one
-        // machine size is in force rather than a merge of two
-        // that neither file states. Nothing pinned this, and the
-        // invariant rests on `Vm`'s fields all being required --
-        // a later `#[serde(default)]` would quietly turn it into
-        // a partial merge.
-        let overlay: Overlay = toml::from_str(
-            "[vm]\n\
-             provider = \"hyperv\"\n\
-             box = \"other/box\"\n\
-             cpus = 8\n\
-             memory = 16384\n",
-        )
-        .unwrap();
-        let cfg = good().with_overlay(overlay);
-        assert_eq!(cfg.vm.provider, Provider::Hyperv);
-        assert_eq!(cfg.vm.cpus, 8);
-        // `[source]` was not named, so the base file's stands.
-        assert_eq!(cfg.source.git_ref, "main");
-
-        // A half-stated table is refused rather than merged.
-        let partial: Result<Overlay, _> = toml::from_str("[vm]\ncpus = 8\n");
-        assert!(partial.is_err(), "a partial [vm] must not parse");
-    }
-
-    #[test]
-    fn with_overlay_does_not_apply_host() {
-        // `host` is ranked against `--host` and the environment
-        // by `resolve_host`, both of which outrank the file.
-        // Applying it here as well would silently promote the
-        // file above them, so this seam is asserted rather than
-        // left to a comment.
-        let overlay: Overlay = toml::from_str("host = \"my-vmhost\"").unwrap();
-        assert_eq!(good().with_overlay(overlay).host, "vmhost");
-    }
-
-    #[test]
-    fn overlay_can_set_every_project_field() {
-        // Every project field must be overridable. This test is
-        // what fails when a field is added to `Config` and to
-        // `Overlay` but the two are never actually wired
-        // together.
-        let src = "project = \"p\"\n\
-                   remote_root = \"/srv/v\"\n";
-        let cfg = good().with_overlay(toml::from_str(src).unwrap());
-        assert_eq!(cfg.project, "p");
-        assert_eq!(cfg.remote_root, "/srv/v");
-    }
-
     /// Writes a base config plus an overlay, and loads them.
     ///
-    /// Goes through [`Config::load`] rather than composing
-    /// `with_overlay` and `validate` by hand: the order of
-    /// those two is the security-relevant part, so a test that
-    /// arranges the order itself would stay green if `load`
-    /// stopped doing it that way.
+    /// Goes through [`Config::load`] rather than parsing the
+    /// two files and validating by hand. `load` is what ranks
+    /// the host sources and then validates the winner, and that
+    /// sequence is the security-relevant part, so a test
+    /// arranging it itself would stay green if `load` stopped
+    /// doing it that way.
     fn load_with_overlay(
         overlay: &str,
     ) -> (tempfile::TempDir, Result<Config, ConfigError>) {
@@ -942,14 +821,14 @@ mod tests {
 
     #[test]
     fn an_overlay_host_is_taken_rather_than_left_in_place() {
-        // `with_overlay` ignores `host`, and this is what makes
-        // that safe rather than merely intended: by the time the
-        // overlay is merged the field is empty, so no later change
-        // to the merge can resurrect a value that two other
-        // sources outrank.
+        // `resolve_host` is the only thing that reads the
+        // overlay's host, and it must leave nothing behind: a
+        // later reader finding the field still set could use a
+        // value that `--host` and the environment outrank. The
+        // emptied field is what makes that impossible rather
+        // than merely unintended.
         let mut overlay = Overlay {
             host: Some("from-overlay".to_owned()),
-            ..Overlay::default()
         };
         let sources = HostSources::default();
         let (host, origin) =
@@ -1244,6 +1123,31 @@ mod tests {
     }
 
     #[test]
+    fn an_overlay_rejects_a_project_field() {
+        // The overlay supplies the VM host and nothing else.
+        // Every project value comes from the file the operator
+        // owns, so the four keys the overlay used to replace --
+        // `project`, `remote_root`, `[vm]` and `[source]` --
+        // are unknown keys here now, and `deny_unknown_fields`
+        // refuses them. Silently ignoring one would leave the
+        // operator reading a value that is not in force.
+        for key in [
+            "project = \"other\"",
+            "remote_root = \"/srv/vms\"",
+            "[vm]\nprovider = \"libvirt\"\nbox = \"b\"\ncpus = 1\nmemory = 1024",
+            "[source]\nrepo = \"https://e/r.git\"\nref = \"main\"\nscript = \"s\"",
+        ] {
+            let (_dir, loaded) = load_with_overlay(key);
+            let err = loaded.unwrap_err();
+            assert!(matches!(err, ConfigError::Parse { .. }), "{key}: {err}");
+            assert!(
+                err.to_string().contains("bombyx.local.toml"),
+                "{key}: {err}"
+            );
+        }
+    }
+
+    #[test]
     fn an_overlay_that_is_not_a_regular_file_is_refused() {
         // A derived path pointing at a directory or a symlink
         // is not "no overlay": it is a state to report. A repo
@@ -1301,6 +1205,62 @@ mod tests {
     fn rejects_missing_required_field() {
         let err = parse("remote_root = \"/srv/v\"\n").unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
+    }
+
+    #[test]
+    fn every_vm_field_is_required() {
+        // A `[vm]` table missing any one field must be an
+        // error, not a machine built from a mix of stated and
+        // invented sizes. Nothing enforces this except `Vm`'s
+        // fields all being required: a `#[serde(default)]`
+        // added to one of them later would turn a half-stated
+        // table into a silent default, and the operator would
+        // read one machine size in the file while the VM ran
+        // with another.
+        //
+        // Each field is omitted in turn rather than testing one
+        // partial table, so the test names the field that
+        // stopped being required instead of only reporting that
+        // something did.
+        //
+        // `Config::parse` directly rather than the `parse`
+        // helper, which appends the complete tables and would
+        // repair the very fixture under test.
+        let fields = [
+            ("provider", "provider = \"libvirt\""),
+            ("box", "box = \"generic/ubuntu2204\""),
+            ("cpus", "cpus = 2"),
+            ("memory", "memory = 2048"),
+        ];
+        for (omitted, _) in fields {
+            let mut table = String::new();
+            for (name, line) in fields {
+                if name != omitted {
+                    table.push_str(line);
+                    table.push('\n');
+                }
+            }
+            let src = format!(
+                "project = \"myproject\"\n\
+                 [source]\n\
+                 repo = \"https://example.invalid/p.git\"\n\
+                 ref = \"main\"\n\
+                 script = \"vagrant/provision.sh\"\n\
+                 \n\
+                 [vm]\n{table}"
+            );
+            let err = Config::parse(&src, Path::new("bombyx.toml"), "vmhost")
+                .unwrap_err();
+            let text = err.to_string();
+            assert!(
+                matches!(err, ConfigError::Parse { .. }),
+                "omitting {omitted}: {text}"
+            );
+            assert!(
+                text.contains("missing field") && text.contains(omitted),
+                "omitting {omitted} must be refused by name, got {text}"
+            );
+        }
     }
 
     #[test]

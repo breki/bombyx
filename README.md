@@ -15,7 +15,7 @@ agent works inside it.
 - [Configure](#configure)
   - [Why `host` is not in `bombyx.toml`](#why-host-is-not-in-bombyxtoml)
   - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
-  - [Per-project overrides](#per-project-overrides)
+  - [A different machine for one project](#a-different-machine-for-one-project)
 - [Use](#use)
 - [Updating bombyx](#updating-bombyx)
   - [A version number is the only thing
@@ -219,35 +219,38 @@ happen to be in. An exported-but-empty `BOMBYX_HOST` counts as
 unset for the same reason: that is what a shell script means by
 it.
 
-### Per-project overrides
+### A different machine for one project
 
-`bombyx.local.toml`, beside the project file and gitignored,
-overrides any field for one project -- a second VM host for
-one repo, a different `remote_root` on one machine:
+Your `config.toml` names the VM host you use for everything.
+When one repository has to run somewhere else, name that
+machine in a `bombyx.local.toml` beside its project file, and
+gitignore the file:
 
 ```toml
 host = "other-vmhost"    # just this project
-remote_root = "/srv/vms"
 ```
 
-Every field is optional there, and only the ones present are
-replaced. The file is optional too -- most projects never need
-one. The name is derived from the config's, so
-`--config staging.toml` looks for `staging.local.toml` and the
-override is always named after what it overrides.
+`host` is the only key this file accepts. Anything else is a
+typo and bombyx says so, naming the file and the key. Every
+other setting comes from `bombyx.toml`, which is the file the
+whole team shares, so there is one place to read a project's
+values rather than two files to merge in your head.
 
-bombyx prints one line to stderr when an override file is in
-force, so the two states are distinguishable without opening
-either file. It prints a second line naming where the host came
-from, unless that was your own `config.toml` -- the ordinary
-case, and not worth a line on every command. Between them, the
-host that `destroy` would run `rm -rf` on is always visible
-without reasoning about precedence.
+The file itself is optional and most projects never need one.
+Its name is derived from the config's, so
+`--config staging.toml` looks for `staging.local.toml`.
 
-Validation runs *after* the merge, so an override is subject to
-exactly the same checks as the committed file rather than being
-a way around them. That includes every rule on `remote_root`,
-which is the value `destroy` builds an `rm -rf` path from.
+When this file supplies the host, bombyx prints one line on
+stderr naming it as the source. That line is printed for every
+source except your own `config.toml`, which is the ordinary
+case and not worth a line on every command. So the host that
+`destroy` would run `rm -rf` on is visible without reasoning
+about precedence, and an empty or absent `bombyx.local.toml`
+prints nothing, because it changed nothing.
+
+The host is checked wherever it came from. A value starting
+with `-` is refused rather than handed to `ssh` as an option,
+and the error names the file or the flag that supplied it.
 
 ## Use
 

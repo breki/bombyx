@@ -91,7 +91,7 @@ script = "vagrant/provision.sh"   # path inside the clone
 #
 # Three other sources override that when you need them --
 # `--host`, `BOMBYX_HOST`, and a gitignored `bombyx.local.toml`
-# beside this file, which can also override any field above.
+# beside this file, which carries a host and nothing else.
 # "Where bombyx looks for the host" in bombyx's own README
 # gives the full order; it is deliberately documented in one
 # place.

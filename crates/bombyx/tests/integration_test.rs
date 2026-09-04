@@ -622,18 +622,17 @@ fn a_flag_host_says_where_the_host_came_from() {
 }
 
 #[test]
-fn an_overlay_without_a_host_does_not_claim_the_host() {
-    // The gap between the two notices. A `bombyx.local.toml`
-    // setting only `remote_root` still prints "overrides", which
-    // reads as "the host in that file is in force" -- while the
-    // host actually came from the per-developer file. The
-    // provenance line has to name the real source.
+fn an_overlay_without_a_host_says_nothing_about_the_file() {
+    // A `bombyx.local.toml` can supply a host and nothing else,
+    // so an empty one changed nothing and bombyx must claim
+    // nothing on its behalf. Two claims are wrong here: naming
+    // the file as the host's source when the per-developer file
+    // supplied it, and saying the file overrides the project
+    // config when it cannot. `destroy` runs `rm -rf` on the
+    // host that wins, so a line naming the wrong file is worse
+    // than no line.
     let dir = project_dir();
-    std::fs::write(
-        dir.path().join("bombyx.local.toml"),
-        "remote_root = \"/srv/vms\"\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("bombyx.local.toml"), "").unwrap();
 
     let out = bombyx_in(&dir)
         .args(["--dry-run", "status"])
@@ -642,15 +641,10 @@ fn an_overlay_without_a_host_does_not_claim_the_host() {
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
 
-    // The overlay is in force for the field it does set.
-    assert!(stdout.contains("/srv/vms/myproject"), "{stdout}");
-    // The host came from the per-developer file, and nothing may
-    // attribute it to the overlay.
+    // The host came from the per-developer file.
     assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
-    assert!(
-        !stderr.contains("host vmhost from bombyx.local.toml"),
-        "{stderr}"
-    );
+    assert!(!stderr.contains("bombyx.local.toml"), "{stderr}");
+    assert!(!stderr.contains("overrides"), "{stderr}");
 }
 
 #[test]
