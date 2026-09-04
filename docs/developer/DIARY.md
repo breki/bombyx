@@ -4,6 +4,50 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**canon-check could not see a rule whose bold heading wrapped**
+
+Every markdown file here wraps at 80 columns, so a bold rule
+longer than about 70 characters spans two lines. `canon-check`
+read the files line by line, so it saw neither half: a correct
+pointer at such a rule failed the gate with "names no heading",
+and a pointer that wrapped was never checked at all. We found
+it while writing `/review2`, which could not cite the rule it
+meant and had to point somewhere vaguer.
+
+`canon.rs` now joins each paragraph, list item and heading into
+one `Block` and scans that, keeping the source line of every
+piece so a finding still names a line somebody can open. A
+heading is closed as a block of its own, so its text never runs
+into the paragraph beneath it.
+
+`/review2` then ran on the fix and found the fix's own worst
+defect. Joining the lines made us read the bold lead at the
+start of each block, and the code it replaced read it at the
+start of each *line* -- so 19 rules that open a continuation
+line, `CLAUDE.md`'s "In code comments the actor is usually the
+program" among them, quietly stopped being citable. The gate
+stayed green, because nothing cites them yet. `red-team` found
+it by diffing the two target sets over the real canon files,
+which is the check we did not think to run.
+
+Two more from the same run. The pointer scan resumed past the
+closing `**`, so an unclosed run swallowed the next pointer --
+across a whole paragraph now, where before it cost the rest of
+a line. And the Done entry we hand-wrote into `docs/todo.md`
+was in a shape `cargo xtask todo`'s parser does not read, so
+the item vanished from `todo list --done` and its slug looked
+free to reuse. Both were invisible to every gate.
+
+The stop rule in `/review2` ran for the first time and behaved.
+Round one of the correctness stage found two behaviour defects
+and earned round two; round two found a record, a comment and a
+missing test, so the stage ended there rather than fishing for
+a clean sheet.
+
+One thing the run left behind: `fresh-reader`'s backlog now
+holds 33 open entries, which is past the point where a backlog
+is the problem rather than a record of one.
+
 **`/review2` reviews one reviewer at a time, and reviewing
 itself broke it**
 

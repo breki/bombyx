@@ -224,24 +224,10 @@ plan, decisions, and outcome.
   a markdown link. Either `done` should take the link target, or mirror `add`'s
   `--issue` flag and write a plain bold slug without one.
 
-- **canon-xref-wrapped-bold** -- canon-check cannot see a wrapped bold heading
-  `reference_targets` in `xtask/src/canon.rs` collects a bold-led paragraph as a
-  reference target only when the opening and closing `**` fall on the same line:
-  it calls `between(line, "**", "**")` per line. Every markdown file here wraps
-  at 80 columns, so a bold lead-in longer than about 70 characters spans two
-  lines and becomes invisible to the checker. A valid cross-reference to it then
-  fails the gate with 'names no heading', and the author's only recourse is to
-  point somewhere else. Found while writing `/review2`, which could not cite
-  `CLAUDE.md`'s rule beginning 'Ask before testing something that is not the'
-  because that bold text wraps before 'program.'. This is the wrap hazard
-  `CLAUDE.md` already records under **Do not grep canon prose for a phrase**,
-  and canon-check was fixed for it once in a different check by collapsing
-  whitespace runs. The fix is the same shape: collect targets from the flattened
-  text rather than line by line. Note the inverse risk -- flattening naively
-  would let a bold span cross a paragraph boundary, so join only consecutive
-  non-blank lines.
-
 ## Done
+
+- **canon-xref-wrapped-bold** -- canon-check reads paragraphs
+  (2026-09-04)
 
 - [**overlay-drop-project-overrides**](issues/project-config-off-repo.md)
   -- the overlay carries a host and nothing else

@@ -82,9 +82,12 @@ grant simply fails at that step, and two such gaps shipped in
 
 **Snapshot** to `target/review2-1.diff` and
 `target/review2-1.files`, by the recipe in `/review` under
-**Snapshot**. Every warning there applies: name the untracked
-paths rather than sweeping them, subtract the backlogs, and
-report the intent-to-add entries left in the index.
+**Snapshot**. That pair is stage 1's snapshot, so stage 1 does
+not take another; every later one is named
+`target/review2-<stage>-<round>.diff` and `.files`. Every
+warning in that recipe applies: name the untracked paths
+rather than sweeping them, subtract the backlogs, and report
+the intent-to-add entries left in the index.
 
 **Run the artifacts**, per `/review` under **Run it before
 anyone reads it**. Once here, and afterwards only for an

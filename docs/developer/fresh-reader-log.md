@@ -9,6 +9,87 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-04-canon-rs-assumes-the-review-vocabulary
+
+**Category:** Terms used before they are introduced
+
+Four findings from one read of `xtask/src/canon.rs`, all the
+same shape: the module explains its mechanisms and not its
+words.
+
+- FR-3. "canon" carries the whole module and is never defined
+  in it. Which files it covers is only decidable 460 lines
+  down, in `canon_files`, and a reader cannot tell whether
+  `docs/` is in scope. One clause naming the four kinds of
+  file, and saying `docs/` is deliberately out, would settle
+  it.
+- FR-4. `unknown_ids` and `is_backlog_id` never say what
+  `rt-`, `aq-` and `fr-` stand for, what a backlog is, or
+  where one lives. The reader worked the prefixes out from
+  `code-reviewers.md`, not from the file.
+- FR-5. "The ID scheme exists so an ID greps" and "the
+  declaration is in the prose, so it greps" have no subject
+  doing anything, and in this repo a third reading is live:
+  `CLAUDE.md` warns that a wrapped phrase defeats grep. Say
+  who searches for what.
+- FR-6. In `ungranted_git`, "The declaration may wrap across
+  lines" sits right after `grants` is read from the single
+  `allowed-tools:` line, and means the *other* declaration --
+  the prose sentence ``no `git <sub>` grant``. The reader
+  concluded a wrapped `allowed-tools:` was tolerated, then
+  found it was not.
+
+Deferred: all four are prose the wrapped-bold change did not
+touch, and fixing them is churn outside its diff.
+
+---
+
+### fr-2026-09-04-todo-md-header-documents-one-entry-shape
+
+**Category:** A convention the file does not state
+
+FR-14. `docs/todo.md`'s header describes only the linked entry
+shape, while the file holds three: linked
+(`[**slug**](issues/slug.md)`), bare bold, and backticked.
+Somebody completing an item by hand cannot tell which to
+write, or that a bare bold slug is correct for an item with no
+planning document rather than one somebody forgot to link. The
+pending `todo-done-link` item explains the absence 200 lines
+below, and reads as a bug report rather than as the file's
+conventions.
+
+Deferred: `todo-done-link` is likely to change which shapes
+are legal, so documenting all three now would be written
+twice.
+
+---
+
+### fr-2026-09-04-review2-justifications-narrate-their-history
+
+**Category:** History where a reason belongs
+
+Two findings against `.claude/commands/review2.md`, both about
+prose that tells the reader what happened instead of what to
+do.
+
+- FR-11. "the step that deletes the file deletes them with
+  it" names no file, no step and no plan, so a reader cannot
+  judge whether their own deferral resembles the example the
+  sentence exists to give.
+- FR-12. The stop rule's justification says the previous
+  version "could only be satisfied by a code finding, which
+  is the mirror of a condition reverted in `bd52dcd`". The
+  previous version is not in the file and the hash has to be
+  read to learn what it means. The instruction that follows
+  -- take findings against this rule to a backlog -- stands
+  on its own.
+
+Deferred: `review2.md` itself says a finding against the stop
+rule waits for a run that measures it, and FR-12 is next to
+that rule. FR-11 rides along so the two are fixed together.
+
+---
+
 ### fr-2026-09-04-open-questions-count-does-not-match-its-list
 
 **Category:** A count that disagrees with the list under it

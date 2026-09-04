@@ -35,6 +35,11 @@ pub struct Finding {
 
 /// Paths named in prose that are correct to be absent here.
 ///
+/// An entry matches as a prefix, so a trailing `/` exempts a
+/// whole subtree and a bare filename exempts anything
+/// starting with it -- `scripts/e2e.sh` also covers
+/// `scripts/e2e.sh.bak`.
+///
 /// Each entry needs a reason, because an unexplained entry is
 /// indistinguishable from a defect somebody silenced.
 const ABSENT_ON_PURPOSE: &[(&str, &str)] = &[
@@ -58,8 +63,10 @@ const REPO_PREFIXES: &[&str] =
 /// markdown rule in `CLAUDE.md`.
 const MAX_COLS: usize = 80;
 
-/// How many checks run, for the summary line. Bump it when a
-/// check is added, so the count cannot quietly drift.
+/// How many checks run, for the summary line only. Nothing
+/// compares it against `collect`, so bump it by hand when a
+/// check is added: a stale value misreports the count and
+/// breaks nothing else.
 const CHECK_COUNT: usize = 5;
 
 /// Text between the first `open` and the next `close` after it,
@@ -75,9 +82,126 @@ fn between<'a>(
     Some((start, &rest[..end]))
 }
 
-/// Every `**Bold**` run that opens a line or follows `## `,
-/// plus every heading. These are what a cross-reference may
-/// name.
+/// A paragraph, one list item or one heading, with its lines
+/// joined.
+///
+/// Every markdown file here wraps at 80 columns, so a bold
+/// lead-in or a cross-reference is regularly split across two
+/// lines and a line-by-line search never sees it. `text` holds
+/// the lines trimmed and joined with a single space, and
+/// `first_line` with `more` remembers which source line each
+/// piece came from, so a finding still names a line the
+/// author can open.
+struct Block {
+    /// The trimmed lines, joined with one space.
+    text: String,
+    /// The 1-indexed source line the block opens with. It is
+    /// a field rather than the first `more` entry so that
+    /// `line_at` always has an answer to give.
+    first_line: usize,
+    /// One entry per line after the first: the byte offset
+    /// where that line begins in `text`, and its 1-indexed
+    /// source line.
+    more: Vec<(usize, usize)>,
+}
+
+impl Block {
+    /// A block holding one line.
+    fn new(first_line: usize, text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            first_line,
+            more: Vec::new(),
+        }
+    }
+
+    /// Append a wrapped continuation line.
+    fn push(&mut self, source_line: usize, text: &str) {
+        self.text.push(' ');
+        self.more.push((self.text.len(), source_line));
+        self.text.push_str(text);
+    }
+
+    /// Where each joined line begins in `text`.
+    fn line_offsets(&self) -> impl Iterator<Item = usize> + '_ {
+        std::iter::once(0).chain(self.more.iter().map(|(at, _)| *at))
+    }
+
+    /// The 1-indexed source line that byte `offset` fell in.
+    fn line_at(&self, offset: usize) -> usize {
+        self.more
+            .iter()
+            .rev()
+            .find(|(at, _)| *at <= offset)
+            .map_or(self.first_line, |(_, line)| *line)
+    }
+}
+
+/// The text after a `- `, `* `, `+ ` or `12. ` list marker, or
+/// the whole line when it carries none.
+fn strip_list_marker(line: &str) -> &str {
+    for marker in ["- ", "* ", "+ "] {
+        if let Some(rest) = line.strip_prefix(marker) {
+            return rest.trim_start();
+        }
+    }
+    let digits = line.chars().take_while(char::is_ascii_digit).count();
+    if digits > 0 && line[digits..].starts_with(". ") {
+        return line[digits + 2..].trim_start();
+    }
+    line
+}
+
+/// Split the file into blocks of consecutive non-blank lines.
+///
+/// A blank line, a heading and a new list item each end the
+/// block before them. Ending at a blank line is what stops a
+/// `**` left open in one paragraph from closing in the next
+/// and inventing a target that spans both.
+///
+/// A heading is a block of its own: it ends the block before
+/// it and is closed straight away, so its text never joins
+/// the paragraph beneath it. Without that, a `**` opened in a
+/// heading pairs with one in the prose below and the checker
+/// reports a pointer nobody wrote.
+fn blocks(content: &str) -> Vec<Block> {
+    let mut out = Vec::new();
+    let mut cur: Option<Block> = None;
+    for (i, raw) in content.lines().enumerate() {
+        let line = raw.trim();
+        let heading = line.starts_with('#');
+        let breaks = line.is_empty()
+            || heading
+            || strip_list_marker(line).len() != line.len();
+        if breaks && let Some(block) = cur.take() {
+            out.push(block);
+        }
+        if line.is_empty() {
+            continue;
+        }
+        if heading {
+            out.push(Block::new(i + 1, line));
+            continue;
+        }
+        match &mut cur {
+            Some(block) => block.push(i + 1, line),
+            None => cur = Some(Block::new(i + 1, line)),
+        }
+    }
+    out.extend(cur);
+    out
+}
+
+/// Every `**Bold**` run that opens a line, after any list
+/// marker, plus every heading. These are what a
+/// cross-reference may name.
+///
+/// A line, not a paragraph: a rule as often opens the third
+/// line of a paragraph as the first, and a bold run that
+/// merely lands at a line start by an accident of wrapping
+/// becomes citable too. Accepting those costs nothing -- a
+/// target nobody names is never looked up -- while missing
+/// one fails a correct pointer.
 pub fn reference_targets(content: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for raw in content.lines() {
@@ -94,10 +218,18 @@ pub fn reference_targets(content: &str) -> BTreeSet<String> {
             });
             out.insert(title.to_string());
         }
-        if line.starts_with("**")
-            && let Some((_, inner)) = between(line, "**", "**")
-        {
-            out.insert(inner.trim_end_matches('.').to_string());
+    }
+    for block in blocks(content) {
+        // Scanning from a line start rather than from the
+        // whole block is what lets a `**` run that wraps
+        // still close.
+        for offset in block.line_offsets() {
+            let lead = strip_list_marker(&block.text[offset..]);
+            if lead.starts_with("**")
+                && let Some((_, inner)) = between(lead, "**", "**")
+            {
+                out.insert(inner.trim_end_matches('.').to_string());
+            }
         }
     }
     out
@@ -116,18 +248,26 @@ pub fn unresolved_xrefs(
     targets: &BTreeSet<String>,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
-    for (i, line) in content.lines().enumerate() {
-        let mut rest = line;
+    for block in blocks(content) {
+        let mut rest = block.text.as_str();
+        let mut base = 0;
         while let Some((at, inner)) = between(rest, "under **", "**") {
             if !targets.contains(inner) {
                 out.push(Finding {
                     kind: "xref",
                     file: file.to_string(),
-                    line: i + 1,
+                    line: block.line_at(base + at),
                     message: format!("**{inner}** names no heading"),
                 });
             }
-            rest = &rest[at + "under **".len() + inner.len()..];
+            // Resume just past `under **` rather than past
+            // the closing `**`. An unclosed run pairs with
+            // the *opening* `**` of the next pointer, and
+            // skipping the pair would swallow that pointer's
+            // `under **` and stop checking it.
+            let step = at + "under **".len();
+            base += step;
+            rest = &rest[step..];
         }
     }
     out
@@ -352,7 +492,11 @@ fn canon_files(root: &Path) -> Vec<String> {
     out
 }
 
-/// Run every canon check over the tree, newest-sorted.
+/// Run every canon check over the tree.
+///
+/// The findings come out grouped by check, then by file and
+/// line, so two runs over an unchanged tree print the same
+/// text.
 ///
 /// Returns the findings and the number of files read, so both
 /// callers can report the same counts.
@@ -469,6 +613,149 @@ mod tests {
             unresolved_xrefs("a.md", "the only one asked what **worked**", &t)
                 .is_empty()
         );
+    }
+
+    /// Every markdown file here wraps at 80 columns, so a
+    /// bold lead-in longer than about 70 characters spans two
+    /// lines. Reading it line by line makes it invisible.
+    #[test]
+    fn a_bold_lead_in_that_wraps_is_still_a_reference_target() {
+        let t = targets(
+            "**Ask before testing something that is\nnot the program.** Then x\n",
+        );
+        assert!(
+            t.contains("Ask before testing something that is not the program")
+        );
+    }
+
+    /// Most rules in `CLAUDE.md` are list items, so the bold
+    /// lead sits behind a `- ` marker.
+    #[test]
+    fn a_list_item_bold_lead_is_a_reference_target() {
+        let t = targets(
+            "- **Do not grep canon prose for a\n  phrase.** Every file wraps.\n",
+        );
+        assert!(t.contains("Do not grep canon prose for a phrase"));
+    }
+
+    /// Joining must stop at a blank line, or a bold run left
+    /// open in one paragraph closes in the next and invents a
+    /// target spanning both.
+    #[test]
+    fn a_bold_run_does_not_close_across_a_paragraph_break() {
+        let t = targets("**Unclosed lead\n\nand a later** bold\n");
+        assert!(!t.contains("Unclosed lead and a later"));
+    }
+
+    /// A rule often opens a line partway through a paragraph.
+    /// Reading only the paragraph's first line loses it, which
+    /// is the defect the whole change exists to remove.
+    #[test]
+    fn a_bold_lead_on_a_continuation_line_is_a_target() {
+        let t = targets(
+            "Prefer strong types. Avoid primitive obsession.\n**The representation has to be argued for.**\n`ScriptPath` is a checked `String`.\n",
+        );
+        assert!(t.contains("The representation has to be argued for"));
+    }
+
+    /// An unclosed `under **` pairs with the *opening* `**`
+    /// of the next pointer. Resuming after that pair would
+    /// eat the second pointer's `under **` and stop checking
+    /// it, and joining the lines widened the loss from the
+    /// rest of a line to the rest of a paragraph.
+    #[test]
+    fn an_unclosed_bold_does_not_hide_the_next_pointer() {
+        let bad = unresolved_xrefs(
+            "a.md",
+            "see under **Unclosed and\nalso under **Nope** here\n",
+            &BTreeSet::new(),
+        );
+        assert_eq!(bad.len(), 2, "both pointers are checked");
+        assert!(bad[1].message.contains("Nope"));
+        assert_eq!(bad[1].line, 2);
+    }
+
+    /// A heading is not always followed by a blank line, and
+    /// the bold rule under one is still a target.
+    #[test]
+    fn a_bold_lead_directly_under_a_heading_is_a_target() {
+        let t = targets("## Rules\n**Say it once.** No preamble.\n");
+        assert!(t.contains("Say it once"));
+    }
+
+    /// What the heading break is for: a heading's text must
+    /// not join the paragraph beneath it, or a `**` opened in
+    /// the heading pairs with one below and the checker
+    /// reports a pointer nobody wrote.
+    #[test]
+    fn a_heading_does_not_join_the_paragraph_below_it() {
+        let bad = unresolved_xrefs(
+            "a.md",
+            "## Rules under **No\nsuch rule** x\n",
+            &BTreeSet::new(),
+        );
+        assert!(bad.is_empty(), "got {bad:?}");
+    }
+
+    /// Two bullets with no blank line between them are one
+    /// paragraph to a naive join, which would lose the second
+    /// lead and merge the first into it.
+    #[test]
+    fn adjacent_list_items_stay_separate_targets() {
+        let t = targets("- **First rule.** x\n- **Second rule.** y\n");
+        assert!(t.contains("First rule"));
+        assert!(t.contains("Second rule"));
+    }
+
+    #[test]
+    fn list_markers_are_stripped_and_ordinary_text_is_not() {
+        for (line, want) in [
+            ("- item", "item"),
+            ("* item", "item"),
+            ("+ item", "item"),
+            ("12. item", "item"),
+            ("12 item", "12 item"),
+            ("12.item", "12.item"),
+            ("item", "item"),
+        ] {
+            assert_eq!(strip_list_marker(line), want, "on {line}");
+        }
+    }
+
+    /// The second pointer in a joined paragraph has to be
+    /// attributed to its own source line, not the first's.
+    #[test]
+    fn each_pointer_in_a_joined_paragraph_names_its_own_line() {
+        let bad = unresolved_xrefs(
+            "a.md",
+            "see under **Nope one** and\nalso under **Nope two** here\n",
+            &BTreeSet::new(),
+        );
+        assert_eq!(bad.len(), 2);
+        assert_eq!((bad[0].line, bad[1].line), (1, 2));
+    }
+
+    /// The citing side wraps too, and a pointer split over two
+    /// lines was checked by nothing at all.
+    #[test]
+    fn a_wrapped_xref_is_checked_and_reported_on_its_own_line() {
+        let t = targets("## Snapshot\n");
+        assert!(
+            unresolved_xrefs(
+                "a.md",
+                "as it says\nunder **Snapshot**, do it\n",
+                &t
+            )
+            .is_empty()
+        );
+        let bad = unresolved_xrefs(
+            "a.md",
+            "one\ntwo under **No\nsuch rule** x\n",
+            &t,
+        );
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0].message, "**No such rule** names no heading");
+        assert_eq!(bad[0].line, 2);
     }
 
     #[test]

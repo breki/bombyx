@@ -4,6 +4,60 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-04-canon-check-surface-is-pub-for-nobody
+
+**Category:** Abstraction Boundaries / API Design
+
+`xtask/src/canon.rs` marks `Finding`, `reference_targets`,
+`unresolved_xrefs`, `missing_paths`, `ungranted_git`,
+`over_wide`, `unknown_ids`, `ids_in_backlog` and `collect`
+`pub`, but `xtask/src/main.rs` and `xtask/src/validate.rs`
+call only `canon_check` and `canon_check_detail`. The unit
+tests sit in the same module and reach everything through
+`use super::*`, so they need no visibility either. The `pub`
+fixes the shape of each check as a contract nobody has.
+
+Deferred: the surface predates the wrapped-bold fix, and
+narrowing it touches every check in the file rather than the
+two functions that changed.
+
+---
+
+### aq-2026-09-04-blocks-rebuilt-per-check
+
+**Category:** Efficiency
+
+`collect` in `xtask/src/canon.rs` calls `reference_targets`
+over every canon file and then `unresolved_xrefs` over every
+canon file, and each call rebuilds the paragraph blocks from
+scratch, so each file is copied into `String`s twice.
+`reference_targets` also walks the content twice on its own,
+once for headings and once for blocks. Building the blocks
+once per file in `collect` and passing `&[Block]` to both
+would end that, but `Block` is private and the checks are
+`pub`, so it waits on the entry above.
+
+Deferred: 23 small markdown files, so the cost is invisible
+today.
+
+---
+
+### aq-2026-09-04-canon-rs-past-the-module-size-rule
+
+**Category:** Module Size
+
+`xtask/src/canon.rs` is 733 lines and holds two structs, five
+independent checks and the driver. The checks share no state,
+so a split into `canon/mod.rs` (the entry points, `Finding`,
+`collect`), `canon/block.rs` (`Block`, `blocks`,
+`strip_list_marker`, `between`) and `canon/checks.rs` is
+cheap.
+
+Deferred: a file split is rework across the whole module and
+belongs in its own commit, not in a review round.
+
+---
+
 ### aq-2026-09-04-required-tables-fixture-has-three-homes
 
 **Category:** One rule with no single home
