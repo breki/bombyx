@@ -35,6 +35,9 @@ plan, decisions, and outcome.
   a known-good point, which is exactly after up completes.
 
 - **done-links-may-dangle** -- todo done can write a dangling issue link
+  FIXED IN THE TREE; the Done move waits on the merge, per /issue step 12.
+  Duplicated by todo-done-link below, which has the fuller account.
+  The description that follows is the state before the fix.
   cargo xtask todo done always renders the Done entry as
   [**slug**](issues/slug.md), whether or not that file exists. Items completed
   through /implement have a doc so the link resolves; anything closed outside
@@ -206,6 +209,9 @@ plan, decisions, and outcome.
   question, undecided.
 
 - **todo-done-link** -- todo done writes a link that need not resolve
+  FIXED IN THE TREE; the Done move waits on the merge, per /issue step 12.
+  Duplicates done-links-may-dangle above. The description that
+  follows is the state before the fix.
   `move_to_done` in `xtask/src/todo.rs` always renders the Done entry as `-
   [**<slug>**](issues/<slug>.md)`, and its doc comment says why that is safe:
   `/implement` is the only caller and it writes that document before finalising.

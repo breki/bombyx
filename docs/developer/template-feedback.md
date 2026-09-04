@@ -78,9 +78,11 @@ are wrong for the commonest one. bombyx shipped a third in
 `0501500` and `a442513`; the template still has the original
 behaviour.
 
-`move_to_done` in `xtask/src/todo.rs` derives the link from the
-slug, always rendering `- [**slug**](issues/<slug>.md)`. Three
-shapes of completed item turn up in practice:
+In the template, `move_to_done` in `xtask/src/todo.rs` derives
+the link from the slug, always rendering
+`- [**slug**](issues/<slug>.md)`. The path is valid in both
+projects, so note which one each paragraph below is about.
+Three shapes of completed item turn up in practice:
 
 1. An item worked through `/implement`, which writes
    `docs/issues/<slug>.md` before finalising. The derived link
@@ -99,13 +101,38 @@ and again on `overlay-drop-host-source` the same day, and both
 links were corrected by hand to point at the shared plan. Five
 more steps of that plan were queued behind them.
 
-So the caller has to be able to name the document. `done` now
-takes `--doc <path>`, written relative to `docs/`, and omitting
-it writes no link at all. `move_to_done` stays pure over the
+So the caller has to be able to name the document. In bombyx,
+`done` now takes `--doc <path>`, written relative to `docs/`,
+and omitting it writes no link at all. `move_to_done` stays pure over the
 markdown: it renders the target it was handed, and the caller
 checks that the file exists.
 
-Two facts the template does not have to rediscover.
+The guard has five rules, and three of them were not in the
+first cut -- a reviewer added them after the first two shipped.
+State the whole family, because building it from a shorter list
+is how the weak version gets written again:
+
+- **Blank.** Omitting `--doc` is how you ask for no link.
+- **Rooted.** A leading separator or a drive letter anchors the
+  link to a filesystem root instead of to `docs/`.
+- **Unrenderable.** State this as the set that is *allowed* --
+  letters, digits, `-`, `_`, `.` and `/` -- not as a list of
+  what is banned. We wrote the banned list twice and it fell
+  behind the code both times: a backslash was added in one
+  review round and the comments describing the list were wrong
+  by the next. The allowed set is one sentence and refuses, with
+  nobody having had to think of each, whitespace and parentheses
+  (which truncate a bare destination), a backslash (a literal in
+  markdown, and a real separator to `Path::join` on Windows, so
+  the host would decide), angle brackets, and `#`, `?` and `%`.
+- **Escaping the repository.** `../../../../etc/passwd` is not
+  rooted and *does* name a file on the author's machine, so an
+  existence check alone passes it. Count components rather than
+  resolving on disk, and allow one `..` -- `docs/todo.md`
+  linking to `../README.md` reaches the repository root.
+- **Naming no file.** The original defect.
+
+Three facts the template does not have to rediscover.
 
 **`Path::is_absolute` is the wrong predicate for a link.** The
 guard refusing a rooted `--doc` used it, and Windows CI failed
@@ -125,6 +152,17 @@ must *not* wrap: `raw_slug` accepts a bold slug only when the
 entry parses as nothing, disappears from `todo list --done`, and
 lets `add` mint a duplicate slug. That trap is in the template
 as shipped and had no test.
+
+**Every argument that reaches the file needs the same
+treatment, not just the one that prompted the work.** Guarding
+`--doc` and stopping there left `--date` and `--slug` beside it
+unchecked, and both are interpolated into the same file. A
+newline in either fabricates a bullet the parser accepts as a
+genuine entry, so the list command reports work nobody did and
+the duplicate-slug check reserves that slug for ever. Both were
+demonstrated against the real file. `--slug` had a shape rule
+already, applied only when *reading* lines back and never to
+what `add` was given.
 
 `add --issue` is the untouched sibling. It derives its path the
 same way and can write the same dead link, and in bombyx it has

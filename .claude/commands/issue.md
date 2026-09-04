@@ -212,16 +212,28 @@ letting it read as a regression.
 Comment on the issue with the outcome: what was fixed, the
 commit, the verification, and what remains unverified.
 
-**The operator merges the PR, so this command ends here.**
-Closing the issue waits on that merge, and so does moving its
-entry in `docs/todo.md` to `## Done` -- `cargo xtask todo done`
-is the command for it and nothing calls it on your behalf. An
-item worked this way usually has no `docs/issues/<slug>.md` of
-its own, so pass `--doc` naming the plan it belongs to, or omit
-`--doc` and the entry carries no link. Say
-in the report that both are outstanding. The one exception is
-an issue step 1 established was already satisfied: close that
-one there and then, with the evidence.
+**The operator merges the PR, so this command ends here.** Two
+things wait on that merge: closing the issue, and moving its
+entry in `docs/todo.md` to `## Done`. Say in your report that
+both are outstanding.
+
+The one exception is an issue step 1 established was already
+satisfied. Close that one there and then, with the evidence.
+
+Nothing moves the backlog entry on your behalf, and the command
+that does needs a date and a document:
+
+```
+cargo xtask todo done <slug> --date <today's date> \
+  --doc issues/<the plan it belongs to>.md
+```
+
+An item worked this way usually has no `docs/issues/<slug>.md`
+of its own, so `--doc` names the plan rather than the slug.
+Omitting `--doc` altogether writes an entry with no link, which
+is right when there is no plan either. A `--doc` naming no file
+is refused, so a guessed path fails loudly instead of writing a
+dead link.
 
 ## Rules
 

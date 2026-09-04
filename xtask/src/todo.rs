@@ -99,8 +99,20 @@ pub fn todo(action: TodoAction) -> Result<(), String> {
     }
 }
 
+/// The directory holding `todo.md`, and the directory a
+/// `--doc` link resolves against.
+///
+/// One function for both, because `DocLink` checks the target
+/// against the directory the link is written *from*: two
+/// independent spellings of `docs/` could drift and the guard
+/// would then vet a different directory than the one the reader
+/// resolves in.
+fn docs_dir() -> std::path::PathBuf {
+    workspace_root().join("docs")
+}
+
 fn todo_path() -> std::path::PathBuf {
-    workspace_root().join("docs").join("todo.md")
+    docs_dir().join("todo.md")
 }
 
 fn read_todo() -> Result<String, String> {
@@ -134,7 +146,8 @@ fn add(
     body: Option<&str>,
     issue: bool,
 ) -> Result<(), String> {
-    require_nonempty("todo --slug", slug)?;
+    let slug = Slug::new("todo --slug", slug)?;
+    let slug = slug.as_str();
     require_nonempty("todo --summary", summary)?;
     // Render the bullet before reading the file, so a bad
     // argument fails the same way with or without a readable
@@ -157,26 +170,120 @@ fn done_cmd(
     date: &str,
     doc: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(rel) = doc {
-        require_doc(&workspace_root().join("docs"), rel)?;
-    }
+    // Every argument that reaches the file is checked before
+    // `read_todo`, so a bad one fails the same way with or
+    // without a readable `docs/todo.md` -- the property
+    // `add_rejects_an_overlong_summary_before_any_io` pins for
+    // `add`.
+    let slug = Slug::new("todo done <slug>", slug)?;
+    let date = DoneDate::new(date)?;
+    let link = doc.map(|rel| DocLink::new(&docs_dir(), rel)).transpose()?;
     let content = read_todo()?;
-    let updated = move_to_done(&content, slug, date, summary, doc)?;
+    let updated = move_to_done(&content, &slug, &date, summary, link.as_ref())?;
     write_todo(&updated)?;
-    println!("Moved '{slug}' to Done ({date}).");
+    println!("Moved '{}' to Done ({}).", slug.as_str(), date.as_str());
     Ok(())
+}
+
+/// A queue entry's identifier, proven to be the shape the file
+/// can read back.
+///
+/// Holding one is the proof it passed [`valid_slug`]. The rule
+/// is in that function; this type is what makes it run on the
+/// way *in*, not only on lines read back out.
+///
+/// A slug is spliced into the file three ways -- as a bullet
+/// label, as part of a link path in `bullet_lines`, and as the
+/// key `move_to_done` searches for -- so a newline in one
+/// writes a second bullet the parser accepts as a real entry
+/// and leaves the original truncated. [`DocLink`] is the
+/// sibling type, guarding the other value that reaches the
+/// file.
+#[derive(Debug)]
+struct Slug(String);
+
+impl Slug {
+    /// Checks `raw` and reports which rule it broke.
+    ///
+    /// `what` names the argument in the message, because the two
+    /// callers spell it differently: `add` has a `--slug` flag
+    /// and `done` takes the slug positionally. A constructor
+    /// naming one of them sends the other's operator looking for
+    /// a flag their subcommand does not have.
+    ///
+    /// # Errors
+    ///
+    /// Blank, or failing [`valid_slug`], which holds the shape
+    /// and why it is that narrow.
+    fn new(what: &str, raw: &str) -> Result<Self, String> {
+        require_nonempty(what, raw)?;
+        if !valid_slug(raw) {
+            return Err(format!(
+                "{what} '{raw}' is not a slug; use lowercase letters, \
+                 digits and dashes, which is the only shape docs/todo.md \
+                 can be read back as"
+            ));
+        }
+        Ok(Self(raw.to_owned()))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A completion date, proven to be `YYYY-MM-DD`.
+///
+/// The date is written into the entry as `  (<date>)`, so a
+/// newline in it closes the entry early and fabricates a bullet
+/// underneath -- which `todo list --done` then reports as
+/// completed work. Neither of the treatments its neighbours get
+/// reaches it: a summary is whitespace-collapsed and a slug has
+/// a shape rule, and a date has its own.
+///
+/// The shape is checked and the calendar is not. `2026-02-31`
+/// passes. Rejecting it would mean a date library for a field a
+/// human types from their own clock, and a wrong-but-plausible
+/// date misleads nobody the way a spliced bullet does.
+#[derive(Debug)]
+struct DoneDate(String);
+
+impl DoneDate {
+    /// # Errors
+    ///
+    /// Anything that is not ten characters of `YYYY-MM-DD`.
+    fn new(raw: &str) -> Result<Self, String> {
+        let shaped = raw.len() == 10
+            && raw.chars().enumerate().all(|(i, c)| {
+                if i == 4 || i == 7 {
+                    c == '-'
+                } else {
+                    c.is_ascii_digit()
+                }
+            });
+        if !shaped {
+            return Err(format!(
+                "todo --date '{raw}' is not a YYYY-MM-DD date"
+            ));
+        }
+        Ok(Self(raw.to_owned()))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Whether `rel` would anchor a markdown link to a filesystem
 /// root rather than to `docs/`.
 ///
-/// `Path::is_absolute` cannot answer this, because it answers
-/// for the machine the code was compiled for and a link is read
-/// on every other one. It calls `/etc/passwd` relative on
-/// Windows and `C:\docs\plan.md` relative on Unix, and both are
-/// rooted in a link. Windows CI is what surfaced the first of
-/// those. So the shapes are matched directly: a leading
-/// separator, or a drive letter.
+/// `Path::is_absolute` cannot answer this: it answers for the
+/// machine the code was compiled for, and a link is read on
+/// every other one. It calls `/etc/passwd` relative on Windows
+/// and `C:\docs\plan.md` relative on Unix, and both are rooted
+/// in a link. Windows CI is what surfaced the first of those. So
+/// the shapes are matched directly: a leading separator, or a
+/// drive letter.
 fn is_rooted_link(rel: &str) -> bool {
     if rel.starts_with('/') || rel.starts_with('\\') {
         return true;
@@ -188,41 +295,161 @@ fn is_rooted_link(rel: &str) -> bool {
     )
 }
 
-/// Refuses a `--doc` that would render a link a reader cannot
-/// follow.
+/// Whether `rel` uses any character outside the set `--doc`
+/// allows.
 ///
-/// `rel` is written relative to `docs/`, because that is where
-/// `docs/todo.md` sits and a markdown link resolves against the
-/// file holding it. `docs` is the directory to resolve against,
-/// passed in rather than read here so the check is exercised
-/// against a directory the test chooses.
+/// **This is where the allowed set is written down.** Other
+/// sites name this function rather than repeating it.
 ///
-/// Three ways a value fails, and the reason differs each time.
-/// Blank names nothing. A rooted path sends every other reader
-/// to a filesystem root rather than to `docs/`, which
-/// [`is_rooted_link`] decides without asking the host. And a
-/// path naming no regular file -- missing, or a directory -- is
-/// the dead link this whole guard exists to stop, which was
-/// written twice before it did.
-fn require_doc(docs: &std::path::Path, rel: &str) -> Result<(), String> {
-    if rel.trim().is_empty() {
-        return Err("todo --doc is blank; omit it for no link".to_owned());
+/// The set is ASCII letters, digits, `-`, `_`, `.` and `/`.
+/// Stating what is allowed, rather than listing what is banned,
+/// is what stops the rule and its description drifting apart:
+/// an allowed set of six kinds of character does not grow, and
+/// every path to a document in this repository is spelled with
+/// them, so it costs nothing.
+///
+/// It keeps out two different kinds of thing, and the error
+/// says the second rather than the first. Whitespace and
+/// parentheses truncate a bare markdown destination; a
+/// backslash is a literal in markdown, and `Path::join` on
+/// Windows would treat it as a real separator, which is the
+/// host deciding a question about a link; angle brackets are
+/// the other destination syntax. But `#`, `?` and `%` break
+/// nothing -- `(issues/plan.md#step-3)` renders and resolves.
+/// They are refused because `--doc` takes a path and a fragment
+/// is not part of one.
+fn outside_allowed_chars(rel: &str) -> bool {
+    !rel.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')
+    })
+}
+
+/// Whether `rel`, resolved from `docs/`, leaves the repository.
+///
+/// Counted rather than resolved on disk, so the answer does not
+/// depend on which directories happen to exist. `docs/` is one
+/// level below the root, so the walk starts at depth 1: each
+/// ordinary component descends, each `..` climbs, and dropping
+/// below zero means the path has climbed past the root.
+///
+/// One `..` is legitimate and must stay so -- `docs/todo.md`
+/// linking to `../README.md` reaches the repository root, which
+/// is where the README is.
+fn escapes_repo(rel: &str) -> bool {
+    let mut depth: i32 = 1;
+    for part in rel.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                depth -= 1;
+                if depth < 0 {
+                    return true;
+                }
+            }
+            _ => depth += 1,
+        }
     }
-    if is_rooted_link(rel) {
-        return Err(format!(
-            "todo --doc '{rel}' must be relative to docs/, because a \
-             rooted path in a markdown link resolves from the filesystem \
-             root on whoever reads it"
-        ));
+    false
+}
+
+/// A `--doc` target proven followable from `docs/todo.md`.
+///
+/// Holding one is the proof that it passed every rule below, so
+/// `move_to_done` cannot render a target nobody checked. A
+/// checking function beside the renderer would prove only that
+/// the paths calling it were checked -- and this value goes
+/// straight into a `format!`, on a file this project reads
+/// daily and ships to a template downstream.
+///
+/// Being a distinct type also stops a swap: `move_to_done`
+/// takes a summary and a link in adjacent positions, and as two
+/// `Option<&str>` they were interchangeable to the compiler.
+#[derive(Debug)]
+struct DocLink(String);
+
+impl DocLink {
+    /// Checks `rel`, written relative to `docs/`, and refuses
+    /// every shape that would not survive the trip to another
+    /// reader.
+    ///
+    /// Five rules.
+    ///
+    /// **Blank** names nothing; omitting `--doc` is how you ask
+    /// for no link.
+    ///
+    /// **Rooted** anchors the link to a filesystem root instead
+    /// of to `docs/`, so it resolves only on a machine laid out
+    /// like the author's. [`is_rooted_link`] decides this
+    /// without asking the host, because `Path::is_absolute`
+    /// answers for the machine that compiled the code and a link
+    /// is read on every other one.
+    ///
+    /// **Not renderable** is decided by
+    /// [`outside_allowed_chars`], which holds the set and the
+    /// reasoning.
+    ///
+    /// **Outside the repository** is the one existence alone
+    /// cannot see. `../../../../etc/passwd` is not rooted and
+    /// *does* name a file here, so a check for existence passes
+    /// it and writes a link dead for everybody else.
+    /// [`escapes_repo`] answers it by counting components rather
+    /// than touching the disk, so a missing directory cannot
+    /// change the verdict. One `..` is legitimate: `docs/todo.md`
+    /// linking to `../README.md` reaches the repository root.
+    ///
+    /// **Names no file** is the original defect -- the dead link
+    /// that prompted all of this.
+    fn new(docs: &std::path::Path, rel: &str) -> Result<Self, String> {
+        if rel.trim().is_empty() {
+            return Err("todo --doc is blank; omit it for no link".to_owned());
+        }
+        if is_rooted_link(rel) {
+            return Err(format!(
+                "todo --doc '{rel}' is rooted, so the link would resolve \
+                 from a filesystem root rather than from docs/; write it \
+                 relative to docs/"
+            ));
+        }
+        if outside_allowed_chars(rel) {
+            return Err(format!(
+                "todo --doc '{rel}' is not a path this can link to; it \
+                 takes a path spelled with letters, digits, '-', '_', '.' \
+                 and '/', and not a URL or a #fragment"
+            ));
+        }
+        if escapes_repo(rel) {
+            return Err(format!(
+                "todo --doc '{rel}' resolves outside the repository, so the \
+                 link would be dead for every other reader"
+            ));
+        }
+        if !docs.join(rel).is_file() {
+            return Err(format!(
+                "todo --doc '{rel}' names no file under docs/, so the link \
+                 would be dead; pass the plan the item belongs to, or omit \
+                 --doc"
+            ));
+        }
+        Ok(Self(rel.to_owned()))
     }
-    if !docs.join(rel).is_file() {
-        return Err(format!(
-            "todo --doc '{rel}' names no file under docs/; the link would \
-             be dead. Pass the plan the item belongs to, or omit --doc for \
-             no link"
-        ));
+
+    fn as_str(&self) -> &str {
+        &self.0
     }
-    Ok(())
+
+    /// A link that skipped the checks.
+    ///
+    /// **Test-only.** `move_to_done` is pure over the markdown
+    /// and its tests are about placement and shape, against
+    /// fixture files that do not exist on disk. Whether a target
+    /// is followable is `new`'s subject and is covered by its own
+    /// table, so requiring a real file here would only make those
+    /// tests build a directory to prove something they are not
+    /// testing.
+    #[cfg(test)]
+    fn unchecked(rel: &str) -> Self {
+        Self(rel.to_owned())
+    }
 }
 
 // ---- Pure helpers (unit-tested) -------------------------------
@@ -244,9 +471,14 @@ const SEP: &str = " -- ";
 /// alone are too weak a guard: inline code in a sentence, as in
 /// `` - `bombyx.toml` -- lives at the repo root ``, is
 /// structurally identical to a backticked entry. Requiring the
-/// captured text to look like a slug rejects it, and rejects a
-/// space-bearing capture that `done` would otherwise splice
-/// into a link path.
+/// captured text to look like a slug rejects it.
+///
+/// **This is where the slug shape is written down.** The set is
+/// lowercase ASCII, digits and `-`, and it is that narrow
+/// because a slug reaches three places -- a bullet label, a
+/// link path in `bullet_lines`, and the parser above -- and no
+/// character in the set means anything to any of them.
+/// [`Slug`] is what makes this run on a value coming *in*.
 fn valid_slug(slug: &str) -> bool {
     !slug.is_empty()
         && slug
@@ -327,7 +559,6 @@ fn summary_line(
 /// The `- <label> -- <summary>` first line of a Pending bullet.
 fn pending_line(label: &str, summary: &str) -> Result<String, String> {
     summary_line(&format!("- {label} --"), summary, MARKDOWN_WIDTH)
-        .map_err(|e| format!("{e}; move the detail into --body"))
 }
 
 /// The `  -- <summary>` continuation used when the slug's label
@@ -367,20 +598,46 @@ fn parse_section(content: &str, heading: &str) -> Vec<(String, String)> {
             i += 1;
             continue;
         };
-        let mut summary = parse_summary(&lines[i]);
-        let mut j = i + 1;
-        while j < end && !lines[j].starts_with("- ") {
-            if summary.is_empty()
-                && let Some(rest) = lines[j].trim_start().strip_prefix("-- ")
-            {
-                summary.push_str(rest.trim());
-            }
-            j += 1;
-        }
-        out.push((slug, summary));
+        let j = block_end(&lines, i, end);
+        out.push((slug, block_summary(&lines, i, j)));
         i = j;
     }
     out
+}
+
+/// Where the bullet starting at `first` ends: the next
+/// top-level bullet or heading, or `end`.
+///
+/// A bullet owns every line under it until one of those, which
+/// is what lets an entry carry a summary continuation and a
+/// wrapped body.
+fn block_end(lines: &[String], first: usize, end: usize) -> usize {
+    ((first + 1)..end)
+        .find(|&i| lines[i].starts_with("- ") || lines[i].starts_with("## "))
+        .unwrap_or(end)
+}
+
+/// A bullet's summary, wherever in its block it sits.
+///
+/// Two shapes carry it and the reader must accept both. A plain
+/// entry puts it after ` -- ` on the first line. A linked entry
+/// cannot -- the label carries the slug twice and leaves no room
+/// -- so it goes on a `  -- ` continuation underneath.
+///
+/// A reader that stops at the first line destroys a linked
+/// entry's summary rather than merely missing it, because
+/// `move_to_done` splices the whole block away once it has read
+/// what it wanted. `parse_section` and `move_to_done` both call
+/// this, so they cannot disagree about where the summary is.
+fn block_summary(lines: &[String], first: usize, end: usize) -> String {
+    let summary = parse_summary(&lines[first]);
+    if !summary.is_empty() {
+        return summary;
+    }
+    ((first + 1)..end)
+        .find_map(|i| lines[i].trim_start().strip_prefix("-- "))
+        .map(|rest| rest.trim().to_owned())
+        .unwrap_or_default()
 }
 
 /// The lines of a new Pending bullet.
@@ -392,6 +649,12 @@ fn parse_section(content: &str, heading: &str) -> Vec<(String, String)> {
 /// summary at all. Those take the same two-line shape `done`
 /// writes -- label alone, then a `  -- summary` continuation --
 /// which `parse_section` already reads.
+/// `add` still derives `issues/<slug>.md` while `done` no
+/// longer does, and that is deliberate. `add` captures an item
+/// *before* its spec is written, so the target legitimately may
+/// not exist yet and a guard like [`DocLink`]'s would refuse a
+/// correct call. Whether the flag should take a path instead,
+/// or go, is open -- `add-issue-flag-unused` in `docs/todo.md`.
 fn bullet_lines(
     slug: &str,
     summary: &str,
@@ -403,7 +666,13 @@ fn bullet_lines(
             continuation_line(summary)?,
         ]);
     }
-    Ok(vec![pending_line(&format!("**{slug}**"), summary)?])
+    // `add` is the caller with a `--body`, so the hint is
+    // attached here rather than inside `pending_line`. `done`
+    // shares that renderer and has no such flag.
+    Ok(vec![
+        pending_line(&format!("**{slug}**"), summary)
+            .map_err(|e| format!("{e}; move the detail into --body"))?,
+    ])
 }
 
 /// Rejects a slug already used anywhere in the file.
@@ -463,12 +732,19 @@ fn add_pending(content: &str, bullet: Vec<String>) -> Result<String, String> {
 /// Whether the file `doc` names exists is checked by the caller,
 /// which has the workspace root; this function is pure over the
 /// markdown.
+///
+/// `slug` and `date` arrive as their own types rather than as
+/// `&str`, for the same reason `doc` does. This function splices
+/// all three into the file, and taking two of them unchecked
+/// would mean a second caller could re-open the injections
+/// [`Slug`] and [`DoneDate`] were added to close, with nothing
+/// to stop it compiling.
 fn move_to_done(
     content: &str,
-    slug: &str,
-    date: &str,
+    slug: &Slug,
+    date: &DoneDate,
     summary: Option<&str>,
-    doc: Option<&str>,
+    doc: Option<&DocLink>,
 ) -> Result<String, String> {
     let ends_with_newline = content.ends_with('\n');
     let mut lines = to_owned_lines(content);
@@ -478,32 +754,50 @@ fn move_to_done(
     let b = (p_start..p_end)
         .find(|&i| {
             lines[i].starts_with("- ")
-                && parse_slug(&lines[i]).as_deref() == Some(slug)
+                && parse_slug(&lines[i]).as_deref() == Some(slug.as_str())
         })
-        .ok_or_else(|| format!("no pending todo with slug '{slug}'"))?;
-    // Block runs to the next top-level bullet or the next H2.
-    let block_end = ((b + 1)..p_end)
-        .find(|&i| lines[i].starts_with("- ") || lines[i].starts_with("## "))
-        .unwrap_or(p_end);
+        .ok_or_else(|| {
+            format!("no pending todo with slug '{}'", slug.as_str())
+        })?;
+    let b_end = block_end(&lines, b, p_end);
 
+    // Read the summary from the whole block, not just the first
+    // line: a linked entry keeps it on a continuation, and the
+    // splice below destroys whatever is not read here.
     let done_summary =
-        summary.map_or_else(|| parse_summary(&lines[b]), str::to_owned);
+        summary.map_or_else(|| block_summary(&lines, b, b_end), str::to_owned);
+    // Checked here rather than on the flag, because this is
+    // where the flag and the fallback meet. Guarding the flag
+    // alone let the fallback through: an entry with no summary
+    // to inherit produced `- **slug** -- `, the contentless stub
+    // `require_nonempty` exists to prevent.
+    require_nonempty("todo --summary", &done_summary)?;
 
     // Remove the pending block (and the blank lines after it, up
     // to the next bullet/heading).
-    lines.splice(b..block_end, std::iter::empty());
+    lines.splice(b..b_end, std::iter::empty());
 
     // Build and insert the Done entry at the top of `## Done`.
     let (d_start, _) = section_body(&lines, "## Done")
         .ok_or("docs/todo.md has no '## Done' section")?;
     let mut entry = match doc {
         Some(doc) => vec![
-            format!("- [**{slug}**]({doc})"),
+            format!("- [**{}**]({})", slug.as_str(), doc.as_str()),
             continuation_line(&done_summary)?,
         ],
-        None => vec![pending_line(&format!("**{slug}**"), &done_summary)?],
+        None => {
+            vec![
+                pending_line(&format!("**{}**", slug.as_str()), &done_summary)
+                    .map_err(|e| {
+                        format!(
+                            "{e}; pass a shorter --summary, or a --doc, which \
+                         moves the summary onto its own line"
+                        )
+                    })?,
+            ]
+        }
     };
-    entry.push(format!("  ({date})"));
+    entry.push(format!("  ({})", date.as_str()));
     // `d_start` is the line after "## Done"; if it is the
     // customary blank, insert past it so we keep heading + blank.
     let (at, prepend_blank) =
@@ -652,8 +946,14 @@ mod tests {
 
     #[test]
     fn move_to_done_finds_a_backticked_pending_entry() {
-        let out = move_to_done(MIXED, "hand-written", "2026-08-10", None, None)
-            .unwrap();
+        let out = move_to_done(
+            MIXED,
+            &Slug::new("todo --slug", "hand-written").unwrap(),
+            &DoneDate::new("2026-08-10").unwrap(),
+            None,
+            None,
+        )
+        .unwrap();
         assert!(!out.contains("- `hand-written`"));
         assert!(!out.contains("with a continuation line"));
         // No `doc`, so the entry is the one-line shape and the
@@ -742,10 +1042,10 @@ mod tests {
     fn move_to_done_moves_multiline_block_and_stamps_date() {
         let out = move_to_done(
             SAMPLE,
-            "alpha-task",
-            "2026-07-23",
+            &Slug::new("todo --slug", "alpha-task").unwrap(),
+            &DoneDate::new("2026-07-23").unwrap(),
             None,
-            Some("issues/alpha-task.md"),
+            Some(&DocLink::unchecked("issues/alpha-task.md")),
         )
         .unwrap();
         // Gone from Pending (including its body line).
@@ -767,10 +1067,10 @@ mod tests {
     fn move_to_done_uses_summary_override() {
         let out = move_to_done(
             SAMPLE,
-            "beta-task",
-            "2026-07-23",
+            &Slug::new("todo --slug", "beta-task").unwrap(),
+            &DoneDate::new("2026-07-23").unwrap(),
             Some("a curated done summary"),
-            Some("issues/beta-task.md"),
+            Some(&DocLink::unchecked("issues/beta-task.md")),
         )
         .unwrap();
         assert!(out.contains("  -- a curated done summary\n  (2026-07-23)"));
@@ -781,8 +1081,14 @@ mod tests {
         // The case that has fired twice: an item completed
         // through `/issue` whose plan is shared with six other
         // steps, so `issues/<slug>.md` names nothing.
-        let out = move_to_done(SAMPLE, "alpha-task", "2026-07-23", None, None)
-            .unwrap();
+        let out = move_to_done(
+            SAMPLE,
+            &Slug::new("todo --slug", "alpha-task").unwrap(),
+            &DoneDate::new("2026-07-23").unwrap(),
+            None,
+            None,
+        )
+        .unwrap();
         assert!(
             !out.contains("[**alpha-task**]"),
             "no link may be written: {out}"
@@ -812,10 +1118,10 @@ mod tests {
         // A shared plan, not `issues/<slug>.md`.
         let out = move_to_done(
             SAMPLE,
-            "alpha-task",
-            "2026-07-23",
+            &Slug::new("todo --slug", "alpha-task").unwrap(),
+            &DoneDate::new("2026-07-23").unwrap(),
             None,
-            Some("issues/project-config-off-repo.md"),
+            Some(&DocLink::unchecked("issues/project-config-off-repo.md")),
         )
         .unwrap();
         assert!(
@@ -831,51 +1137,283 @@ mod tests {
         );
     }
 
+    /// A `docs/`-shaped fixture: a repo root with one document
+    /// under it.
+    ///
+    /// Built under `target/` rather than resolved against the
+    /// real `docs/`, so renaming a plan file cannot break a
+    /// `todo` unit test for reasons unrelated to `todo`.
+    fn docs_fixture() -> std::path::PathBuf {
+        let root = workspace_root().join("target/todo-doclink-fixture");
+        let docs = root.join("docs");
+        std::fs::create_dir_all(docs.join("issues")).unwrap();
+        std::fs::write(docs.join("issues/plan.md"), "x\n").unwrap();
+        std::fs::write(root.join("README.md"), "x\n").unwrap();
+        docs
+    }
+
     #[test]
-    fn require_doc_accepts_only_a_file_a_reader_can_follow() {
-        // The family, not just the case that prompted the work.
-        // Checked against the real `docs/`, so the fixture cannot
-        // drift from the tree the links actually resolve in.
-        let docs = workspace_root().join("docs");
+    fn doclink_accepts_only_a_target_every_reader_can_follow() {
+        let docs = docs_fixture();
 
-        // The shared plan that prompted this: a real file.
-        assert!(
-            require_doc(&docs, "issues/project-config-off-repo.md").is_ok()
+        // A document beside the file, and one a level up: both
+        // resolve from `docs/todo.md` on anybody's machine.
+        assert_eq!(
+            DocLink::new(&docs, "issues/plan.md").unwrap().as_str(),
+            "issues/plan.md"
         );
+        assert!(DocLink::new(&docs, "../README.md").is_ok());
 
-        for (rel, why) in [
-            ("issues/no-such-plan.md", "names no file"),
-            ("", "empty"),
-            ("issues", "a directory, not a file"),
-            ("/etc/passwd", "absolute"),
+        // The whole family, each asserting the reason it was
+        // refused rather than merely that something was. A
+        // shared assertion would pass with every branch wrong.
+        for (rel, needle) in [
+            ("", "blank"),
             ("   ", "blank"),
+            ("/etc/passwd", "rooted"),
+            ("/docs/plan.md", "rooted"),
+            ("C:\\docs\\plan.md", "rooted"),
+            ("\\\\server\\share", "rooted"),
+            // Escapes the repository. It resolves on the author's
+            // machine and nowhere else, which is the defect the
+            // existence check alone cannot see.
+            ("../../../../etc/passwd", "outside"),
+            ("issues/../../../etc/passwd", "outside"),
+            // Everything outside the allowed set, whatever the
+            // reason it is unwelcome. Listing what is banned is
+            // what fell behind twice: a backslash was added to
+            // the list in one round and the descriptions of the
+            // list were wrong by the next.
+            ("issues/my plan.md", "not a path this can link to"),
+            ("issues/a(b).md", "not a path this can link to"),
+            ("issues/a)b.md", "not a path this can link to"),
+            // A backslash is a literal in markdown, and on
+            // Windows `Path::join` would make it a real
+            // separator, so the host would decide -- the
+            // mistake the rooted rule exists to avoid.
+            ("issues\\plan.md", "not a path this can link to"),
+            ("<x>.md", "not a path this can link to"),
+            // These the ban list allowed. None of them belongs
+            // in a path to a file in this repository, and an
+            // allowed set refuses them without anybody having
+            // thought of them first.
+            ("issues/plan.md#heading", "not a path this can link to"),
+            ("issues/plan.md?raw=1", "not a path this can link to"),
+            ("issues/my%20plan.md", "not a path this can link to"),
+            ("issues/plan\u{7f}.md", "not a path this can link to"),
+            // Nothing there, or not a file.
+            ("issues/absent.md", "names no file"),
+            ("issues", "names no file"),
         ] {
-            let err = require_doc(&docs, rel).unwrap_err();
+            let err = DocLink::new(&docs, rel).unwrap_err();
             assert!(
                 err.contains("--doc"),
-                "{why}: the error must name the flag: {err}"
+                "{rel:?}: the error must name the flag: {err}"
+            );
+            assert!(
+                err.contains(needle),
+                "{rel:?}: expected the {needle:?} reason, got: {err}"
             );
         }
+    }
 
-        // Absoluteness is judged as a *markdown link*, not by
-        // the host filesystem, and the two disagree in both
-        // directions. `Path::is_absolute` says no to
-        // `/etc/passwd` on Windows and no to `C:\x` on Unix,
-        // yet each is root-anchored in a link and breaks for
-        // every reader. Windows CI caught the first of these.
-        for rooted in ["/etc/passwd", "/docs/plan.md", "C:\\docs\\plan.md"] {
-            let err = require_doc(&docs, rooted).unwrap_err();
+    #[test]
+    fn every_argument_reaching_the_file_is_refused_a_newline() {
+        // `--doc` was guarded and its three neighbours were not,
+        // though all four are interpolated into `docs/todo.md`.
+        // A newline in any of them fabricates a bullet the
+        // parser accepts as a real entry, so `todo list` reports
+        // work nobody did and `check_slug_free` reserves that
+        // slug for ever. Demonstrated on the real file for
+        // `--date` and `--slug` before this test was written.
+        let splice = "x\n- **ghost** -- injected";
+
+        assert!(Slug::new("todo --slug", splice).is_err(), "slug");
+        assert!(
+            Slug::new("todo --slug", "has space").is_err(),
+            "a space is not a slug"
+        );
+        assert!(
+            Slug::new("todo --slug", "UPPER").is_err(),
+            "kebab-case only"
+        );
+        assert!(Slug::new("todo --slug", "").is_err(), "empty");
+        assert_eq!(
+            Slug::new("todo --slug", "real-slug-2").unwrap().as_str(),
+            "real-slug-2"
+        );
+
+        assert!(DoneDate::new(splice).is_err(), "date");
+        assert!(DoneDate::new("2026-9-4").is_err(), "must be zero-padded");
+        assert!(DoneDate::new("not-a-date").is_err());
+        assert!(DoneDate::new("2026-09-04 ").is_err(), "trailing space");
+        assert_eq!(DoneDate::new("2026-09-04").unwrap().as_str(), "2026-09-04");
+    }
+
+    #[test]
+    fn the_no_link_branch_does_not_name_a_flag_done_lacks() {
+        // Reachable, not theoretical: a linked pending entry
+        // keeps its summary on a continuation, budget 75. Moving
+        // it to Done *without* `--doc` needs the whole entry on
+        // one line, so the budget drops to 73 minus the slug. An
+        // entry legal as Pending can therefore fail here, and
+        // the message was telling the operator to reach for
+        // `--body`, which `done` does not have.
+        let slug = "todo-tooling-format-mismatch";
+        let src = format!(
+            "# TODO\n\n## Pending\n\n- [**{slug}**](issues/{slug}.md)\n  -- {}\n\n## Done\n",
+            "x".repeat(60)
+        );
+        let err = move_to_done(
+            &src,
+            &Slug::new("todo --slug", slug).unwrap(),
+            &DoneDate::new("2026-09-04").unwrap(),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("too long"), "got: {err}");
+        assert!(!err.contains("--body"), "done has no --body: {err}");
+        assert!(err.contains("--summary"), "must name a real way out: {err}");
+    }
+
+    #[test]
+    fn done_refuses_an_empty_summary_however_it_arrives() {
+        // The guard was on the flag, so omitting the flag walked
+        // past it: `move_to_done` falls back to the entry's own
+        // summary, and a linked bullet with no ` -- ` anywhere
+        // has none. `raw_slug`'s link branch accepts that first
+        // line without requiring the separator, so such an entry
+        // parses and then completes as `- **foo** -- ` with a
+        // trailing space -- the contentless stub
+        // `require_nonempty` exists to prevent.
+        let src = "\
+# TODO
+
+## Pending
+
+- [**foo**](issues/foo.md)
+  some body text with no summary separator
+
+## Done
+";
+        let err = move_to_done(
+            src,
+            &Slug::new("todo --slug", "foo").unwrap(),
+            &DoneDate::new("2026-09-04").unwrap(),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("--summary"), "got: {err}");
+    }
+
+    #[test]
+    fn done_refuses_a_blank_summary_flag() {
+        // The other half of the test above: an explicit blank
+        // flag, rather than a fallback with nothing to inherit.
+        // Both meet at `done_summary`, which is why one check
+        // there covers both.
+        let src = "\
+# TODO
+
+## Pending
+
+- **foo** -- a real summary
+
+## Done
+";
+        let err = move_to_done(
+            src,
+            &Slug::new("todo --slug", "foo").unwrap(),
+            &DoneDate::new("2026-09-04").unwrap(),
+            Some("   "),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("--summary"), "got: {err}");
+    }
+
+    #[test]
+    fn done_checks_its_slug_and_date_before_any_io() {
+        // These two can be judged from the arguments alone, so
+        // they fail the same way with or without a readable
+        // docs/todo.md. The summary cannot: it may come from the
+        // file, so `move_to_done` owns it -- see
+        // `done_refuses_an_empty_summary_however_it_arrives`.
+        // `done` takes its slug positionally, so the message
+        // must not send the operator looking for a `--slug`
+        // flag. `add` has one; this subcommand does not. Same
+        // defect as RT-4 one round earlier, from the other
+        // shared helper.
+        let err = done_cmd("Not A Slug", None, "2026-09-04", None).unwrap_err();
+        assert!(err.contains("todo done"), "got: {err}");
+        assert!(!err.contains("--slug"), "done has no --slug: {err}");
+        assert!(
+            done_cmd("fine-slug", None, "yesterday", None)
+                .unwrap_err()
+                .contains("--date")
+        );
+    }
+
+    #[test]
+    fn move_to_done_keeps_a_two_line_entrys_summary() {
+        // `add --issue` writes the summary on a continuation
+        // line, because the linked label leaves no room beside
+        // it. Reading only the bullet's first line finds no
+        // ` -- ` there and returns an empty summary, and the
+        // continuation is then spliced away with the rest of the
+        // block -- so the text is gone, not merely unread.
+        // `parse_section` already scans the block for it; these
+        // two must agree.
+        let src = "\
+# TODO
+
+## Pending
+
+- [**linked**](issues/linked.md)
+  -- a summary that must survive
+
+## Done
+";
+        let link = DocLink::unchecked("issues/plan.md");
+        for doc in [None, Some(&link)] {
+            let out = move_to_done(
+                src,
+                &Slug::new("todo --slug", "linked").unwrap(),
+                &DoneDate::new("2026-09-04").unwrap(),
+                None,
+                doc,
+            )
+            .unwrap();
             assert!(
-                err.contains("relative"),
-                "{rooted} must be refused as rooted, not as missing: {err}"
+                out.contains("a summary that must survive"),
+                "doc={doc:?} lost the summary: {out}"
+            );
+            // And the file's own reader finds it, which is what
+            // `todo list --done` reports.
+            let done = parse_section(&out, "## Done");
+            assert_eq!(
+                done,
+                vec![(
+                    "linked".to_owned(),
+                    "a summary that must survive".to_owned()
+                )],
+                "doc={doc:?}"
             );
         }
     }
 
     #[test]
     fn move_to_done_errors_on_unknown_slug() {
-        let err =
-            move_to_done(SAMPLE, "nope", "2026-07-23", None, None).unwrap_err();
+        let err = move_to_done(
+            SAMPLE,
+            &Slug::new("todo --slug", "nope").unwrap(),
+            &DoneDate::new("2026-07-23").unwrap(),
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("nope"));
     }
 
