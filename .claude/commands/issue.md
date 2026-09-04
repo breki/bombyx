@@ -79,6 +79,21 @@ red, then restore. A test that passes whether or not the
 behaviour is present is worse than no test: it reports that
 something is checked while nobody is checking it.
 
+**Writing a guard? Read the two rules first.** `CLAUDE.md`
+under **Coding Standards** says a value with a rule attached
+gets a type that enforces it, not a `String` and a checking
+function somewhere else. The bullet beginning **Guarding one
+field? Check its siblings** then says a rule protects a
+*primitive*, not a field name, so every value reaching that
+same primitive needs it too. Both are easy to walk past while
+writing the guard the issue asked for.
+
+Name the primitive out loud, then list every value that reaches
+it. A `--doc` guard was written as a bare function and covered
+one argument of four; reviewers produced both rules afterwards,
+by which point two of the three unguarded siblings turned out to
+inject text into the file the guard was protecting.
+
 **Scope discipline.** Fix what the issue describes. When you
 find an adjacent problem, capture it with `/todo` rather than
 folding it in, unless leaving it would make your own change

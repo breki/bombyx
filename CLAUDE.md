@@ -331,6 +331,16 @@ for tools that are not present:
   before an item silently reassigns the comment above it to the
   new one. `sed`/`perl` are fine for flat text and one-line
   substitutions.
+
+  **A scripted string replace over Rust is the same hazard**,
+  whatever language does the replacing. Six edits needed a
+  repair round in one sitting: a `\bplaces\b` rename caught
+  the word in a sentence, a replacement left a duplicated
+  clause behind, a `map_err` closure came out nested wrongly,
+  and a signature change missed one call site. Every one of
+  them sat next to a `///` block. Reach for `Edit` with an
+  anchor unique in the file, and keep a scripted replace for a
+  substitution that fits on one line.
 - **Print the variable before claiming what it holds.** Three
   false statements this week came from writing an environment
   claim from expectation: that the guest's DMI exposes the host
