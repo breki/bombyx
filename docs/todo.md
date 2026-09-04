@@ -34,22 +34,6 @@ plan, decisions, and outcome.
   first successful up. The first is more useful: the snapshot should be taken at
   a known-good point, which is exactly after up completes.
 
-- **done-links-may-dangle** -- todo done can write a dangling issue link
-  FIXED IN THE TREE; the Done move waits on the merge, per /issue step 12.
-  Duplicated by todo-done-link below, which has the fuller account.
-  The description that follows is the state before the fix.
-  cargo xtask todo done always renders the Done entry as
-  [**slug**](issues/slug.md), whether or not that file exists. Items completed
-  through /implement have a doc so the link resolves; anything closed outside
-  that flow gets a dead link. Seen twice: first-real-run was hand-written into
-  Done without a link precisely to dodge this, and todo-tooling-format-mismatch
-  got an issue doc partly so the generated link would resolve. Options: omit the
-  link when docs/issues/<slug>.md is absent, which needs an existence check
-  passed in from the caller since move_to_done is otherwise pure over the
-  markdown; or keep it unconditional and have /implement guarantee the doc
-  exists before finalising. The second matches current intent but is enforced
-  nowhere.
-
 - **host-network-isolation** -- apply and verify the nftables rules on frosti
   docs/vm-host-setup.md now documents an nftables ruleset that keeps agent VMs
   off the home LAN, the tailnet, Docker and the VM host's own services, while
@@ -208,31 +192,6 @@ plan, decisions, and outcome.
   Step 7 of 7; GitHub issue #27. Depends on project-selection-flag. One design
   question, undecided.
 
-- **todo-done-link** -- todo done writes a link that need not resolve
-  FIXED IN THE TREE; the Done move waits on the merge, per /issue step 12.
-  Duplicates done-links-may-dangle above. The description that
-  follows is the state before the fix.
-  `move_to_done` in `xtask/src/todo.rs` always renders the Done entry as `-
-  [**<slug>**](issues/<slug>.md)`, and its doc comment says why that is safe:
-  `/implement` is the only caller and it writes that document before finalising.
-  The comment was corrected in `f827993`, so what remains is the behaviour.
-  `/implement` is still the only command that calls `done`, but the operator
-  runs it by hand for an item worked through `/issue`, and an item split out of
-  a shared plan has no document of its own --
-  overlay-drop-project-overrides is one of seven steps whose plan is
-  `docs/issues/project-config-off-repo.md`. Completing it that way wrote a link
-  to a file that does not exist, and the link had to be corrected by hand.
-  canon-check does not catch it, because it checks backticked paths and this is
-  a markdown link. Either `done` should take the link target, or mirror `add`'s
-  `--issue` flag and write a plain bold slug without one.
-  Correcting the link by hand has a second failure mode, found on
-  canon-xref-wrapped-bold: `raw_slug` in `xtask/src/todo.rs` needs `" -- "`
-  immediately after the closing `**`, so an entry whose summary starts on the
-  next line parses as nothing. `todo list --done` then skips the item and
-  `check_slug_free` reports its slug as unused, so `todo add` will make a
-  duplicate. Whichever fix `done` gets, no operator should be hand-writing
-  these entries.
-
 - **config-tests-own-file** -- config.rs tests into config/tests.rs
   config.rs is 1371 lines; its production half is under 500, so the ~880-line
   `mod tests` is what makes the file unreadable in one pass. CLAUDE.md records
@@ -262,7 +221,24 @@ plan, decisions, and outcome.
   deleted. Found while fixing #7, and kept out of it: that issue is about done,
   and this flag has no caller to endanger.
 
+- **done-drops-the-body-silently** -- say that todo done discards the body
+  move_to_done splices the whole pending block away and re-emits only the slug,
+  summary and date, so an entry's analysis body is dropped without a word. That
+  is intended -- every entry under ## Done is two or three lines -- but nothing
+  says so, and 'block spliced, content not carried' is exactly the shape of the
+  summary-loss bug the /review2 on #7 found. Completing done-links-may-dangle
+  and todo-done-link on 2026-09-04 dropped a dozen lines of analysis each; the
+  content survives in git history and in docs/developer/template-feedback.md.
+  Either say it in move_to_done's doc comment and the Done clap help, or carry
+  the body across. Found while using the fixed tool for the first time.
+
 ## Done
+
+- **todo-done-link** -- todo done writes a link that need not resolve
+  (2026-09-04)
+
+- **done-links-may-dangle** -- todo done can write a dangling issue link
+  (2026-09-04)
 
 - [**overlay-drop-host-source**](issues/project-config-off-repo.md)
   -- delete bombyx.local.toml entirely
