@@ -30,13 +30,12 @@
 //!
 //! # Where each rule lives
 //!
-//! This module owns [`Config`] itself and the [`Overlay`] that
-//! names a VM host for one project. Everything else is a
+//! This module owns [`Config`] itself. Everything else is a
 //! private child module, so rustdoc will not list them:
 //!
 //! - `read` -- getting a config file off disk: whether the path
-//!   may be a symlink, how large a file may be, where the
-//!   overlay sits, and how a TOML error is summarised.
+//!   may be a symlink, how large a file may be, and how a TOML
+//!   error is summarised.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
@@ -87,7 +86,6 @@ pub use host::{
 pub(crate) use host::{
     HostProblem, host_places, host_problem, is_anchored_dir, resolve_host,
 };
-pub use read::local_config_path;
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
 
@@ -164,29 +162,6 @@ fn default_remote_root() -> String {
     DEFAULT_REMOTE_ROOT.to_owned()
 }
 
-/// A VM host for one project, read from a file beside the
-/// config.
-///
-/// This is the escape hatch for one repository that has to run
-/// on a machine other than the operator's usual one. The usual
-/// per-developer host lives in the `config.toml` that
-/// [`HostSources::user_config_dir`] points at, not here; this
-/// file outranks it.
-///
-/// It carries a host and nothing else. Every other setting
-/// comes from the project file, so naming one here is a typo
-/// and `deny_unknown_fields` refuses it -- the same treatment
-/// the project file gets, and for the same reason: a key that
-/// silently did nothing would leave the operator reading a
-/// value that is not in force.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Overlay {
-    /// Supplies [`Config::host`] for this project, outranked
-    /// only by `--host` and [`HOST_ENV`].
-    pub host: Option<String>,
-}
-
 impl ProjectFile {
     /// Assembles a [`Config`], with `host` supplied separately.
     ///
@@ -194,7 +169,7 @@ impl ProjectFile {
     /// forbidden to carry one: that file travels inside a
     /// repository bombyx does not trust, and the value reaches
     /// `ssh` as a bare argument. [`Config::load`] ranks it
-    /// across four sources; the test-only `Config::parse` takes
+    /// across three sources; the test-only `Config::parse` takes
     /// it from its caller.
     fn into_config(self, host: String) -> Config {
         Config {
@@ -223,7 +198,7 @@ fn reject_host_key(
     }
     Err(ConfigError::HostInProjectFile {
         path: path.to_path_buf(),
-        places: host_places(sources, local_config_path(path).as_deref()),
+        places: host_places(sources),
     })
 }
 
@@ -285,22 +260,16 @@ impl Config {
     }
 
     /// Loads a configuration: the project file, and a VM host
-    /// ranked across `sources` and the two optional files.
+    /// ranked across `sources` and the per-developer file.
     ///
-    /// **This reads up to three paths.** After `path`, it looks
-    /// for the [`Overlay`] named by [`local_config_path`] --
-    /// `bombyx.local.toml`, beside the `bombyx.toml` it takes
-    /// its name from -- which supplies a host for this one
-    /// project. If neither
-    /// `sources.flag`, `sources.env` nor that file names a
-    /// host, the per-developer file in
-    /// `sources.user_config_dir` is read for one. An optional
-    /// file that exists but cannot be read or parsed is an
-    /// error rather than a silent fallback.
+    /// **This reads up to two paths.** After `path`, and only
+    /// when neither `sources.flag` nor `sources.env` names a
+    /// host, the per-developer file in `sources.user_config_dir`
+    /// is read for one. That file existing but failing to read
+    /// or parse is an error rather than a silent fallback.
     ///
-    /// The user file is read only when nothing else supplied a
-    /// host, so `--host` still works on a machine whose
-    /// per-developer file is missing or broken.
+    /// Reading it last is what makes `--host` work on a machine
+    /// whose per-developer file is missing or broken.
     ///
     /// Every setting other than the host comes from `path`
     /// alone. Validation therefore runs on the project file's
@@ -337,17 +306,7 @@ impl Config {
         let file: ProjectFile = from_toml(&source, path)?;
         reject_host_key(&file, path, sources)?;
 
-        let local = local_config_path(path);
-        let mut overlay = match &local {
-            Some(local) => match read_optional(local, Symlinks::Refuse)? {
-                Some(source) => Some(from_toml::<Overlay>(&source, local)?),
-                None => None,
-            },
-            None => None,
-        };
-
-        let (host, origin) =
-            resolve_host(sources, overlay.as_mut(), local.as_deref())?;
+        let (host, origin) = resolve_host(sources)?;
 
         // Checked here, while the winning source is still known,
         // so the message identifies the file (or flag) actually
@@ -355,9 +314,6 @@ impl Config {
         if let Some(problem) = host_problem(&host) {
             return Err(ConfigError::InvalidHost {
                 origin: match origin {
-                    HostOrigin::Overlay => local
-                        .as_deref()
-                        .map_or_else(|| origin.to_string(), path_display),
                     HostOrigin::UserFile => sources
                         .user_config_dir
                         .map(|d| d.join(USER_CONFIG_FILE))
@@ -393,10 +349,9 @@ impl Config {
     /// A cloned repo cannot supply that value, because `host` is
     /// refused in `bombyx.toml` (see
     /// [`ConfigError::HostInProjectFile`]). The check covers the
-    /// three sources that can: a gitignored
-    /// `bombyx.local.toml`, a per-developer `config.toml`, and
+    /// two sources that can: a per-developer `config.toml`, and
     /// `--host` / [`HOST_ENV`]. A mistake or a careless script
-    /// fills any of those in. The other fields *are*
+    /// fills either of those in. The other fields *are*
     /// repo-supplied, so their rules carry the full weight.
     fn validate(&self) -> Result<(), ConfigError> {
         // The host rule lives in `host_problem`, so this and the
@@ -619,51 +574,6 @@ mod tests {
         assert_eq!(cfg.remote_root, "/srv/vms");
     }
 
-    #[test]
-    fn local_config_path_sits_beside_the_config() {
-        let of = |p: &str| local_config_path(Path::new(p)).unwrap();
-
-        assert_eq!(of("bombyx.toml"), Path::new("bombyx.local.toml"));
-        assert_eq!(
-            of("/repo/infra/bombyx.toml"),
-            Path::new("/repo/infra/bombyx.local.toml")
-        );
-        // A `--config` pointing somewhere else keeps the same
-        // rule, so the host file is discoverable from whichever
-        // config file `--config` names rather than being a
-        // fixed name.
-        assert_eq!(of("staging.toml"), Path::new("staging.local.toml"));
-        // The extension is replaced, not preserved. Documented
-        // rather than fixed: two configs differing only by
-        // extension would share one overlay.
-        assert_eq!(of("staging.yaml"), Path::new("staging.local.toml"));
-        assert_eq!(of("bombyx"), Path::new("bombyx.local.toml"));
-    }
-
-    /// Writes a base config plus an overlay, and loads them.
-    ///
-    /// Goes through [`Config::load`] rather than parsing the
-    /// two files and validating by hand. `load` is what ranks
-    /// the host sources and then validates the winner, and that
-    /// sequence is the security-relevant part, so a test
-    /// arranging it itself would stay green if `load` stopped
-    /// doing it that way.
-    fn load_with_overlay(
-        overlay: &str,
-    ) -> (tempfile::TempDir, Result<Config, ConfigError>) {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("bombyx.toml");
-        std::fs::write(&base, minimal()).unwrap();
-        std::fs::write(dir.path().join("bombyx.local.toml"), overlay).unwrap();
-        // A per-developer file supplies the host, which is the
-        // ordinary arrangement: the project file cannot carry
-        // one. It is the lowest-precedence source, so an overlay
-        // naming `host` still overrides it.
-        write_user_file(dir.path(), "vmhost");
-        let loaded = load(&base, &user_sources(dir.path()));
-        (dir, loaded)
-    }
-
     /// [`Config::load`] without the origin.
     ///
     /// Most tests are about the resulting config; the ones about
@@ -712,13 +622,13 @@ mod tests {
         // developer, and this file is committed. Refused rather
         // than ignored, so a stale key cannot sit in a repo
         // aiming everyone's `destroy` at one person's machine.
-        let (_dir, base) = project_dir("host = \"vmhost\"\nproject = \"p\"\n");
-        let err = load(&base, &HostSources::default()).unwrap_err();
+        let (dir, base) = project_dir("host = \"vmhost\"\nproject = \"p\"\n");
+        let err = load(&base, &user_sources(dir.path())).unwrap_err();
         assert!(matches!(err, ConfigError::HostInProjectFile { .. }));
         let text = err.to_string();
         // The message has to say where the line goes instead,
         // or it only reports a problem.
-        assert!(text.contains("bombyx.local.toml"), "{text}");
+        assert!(text.contains(USER_CONFIG_FILE), "{text}");
         assert!(text.contains("committed"), "{text}");
     }
 
@@ -736,13 +646,13 @@ mod tests {
 
     #[test]
     fn reports_no_host_configured_when_nothing_supplies_one() {
-        let (_dir, base) = project_dir(&minimal());
-        let err = load(&base, &HostSources::default()).unwrap_err();
+        let (dir, base) = project_dir(&minimal());
+        let err = load(&base, &user_sources(dir.path())).unwrap_err();
         assert!(matches!(err, ConfigError::HostMissing { .. }));
         // Every way out is named, since the operator has to pick
-        // one and the files are not discoverable by guessing.
+        // one and the file is not discoverable by guessing.
         let text = err.to_string();
-        assert!(text.contains("bombyx.local.toml"), "{text}");
+        assert!(text.contains(USER_CONFIG_FILE), "{text}");
         assert!(text.contains("--host"), "{text}");
         assert!(text.contains(HOST_ENV), "{text}");
     }
@@ -756,16 +666,11 @@ mod tests {
     }
 
     #[test]
-    fn host_precedence_runs_flag_env_overlay_user_file() {
-        // All four sources present at once, then removed one at
+    fn host_precedence_runs_flag_env_user_file() {
+        // All three sources present at once, then removed one at
         // a time. Testing each in isolation would pass with any
         // ordering at all.
         let (dir, base) = project_dir(&minimal());
-        std::fs::write(
-            dir.path().join("bombyx.local.toml"),
-            "host = \"from-overlay\"\n",
-        )
-        .unwrap();
         write_user_file(dir.path(), "from-user-file");
 
         let all = HostSources {
@@ -782,9 +687,6 @@ mod tests {
             env: None,
             ..no_flag
         };
-        assert_eq!(load(&base, &no_env).unwrap().host, "from-overlay");
-
-        std::fs::remove_file(dir.path().join("bombyx.local.toml")).unwrap();
         assert_eq!(load(&base, &no_env).unwrap().host, "from-user-file");
     }
 
@@ -795,18 +697,13 @@ mod tests {
         // every source, since a constant would satisfy any one of
         // them.
         let (dir, base) = project_dir(&minimal());
-        std::fs::write(
-            dir.path().join("bombyx.local.toml"),
-            "host = \"from-overlay\"\n",
-        )
-        .unwrap();
         write_user_file(dir.path(), "from-user-file");
 
         let origin_of =
             |sources: &HostSources| Config::load(&base, sources).unwrap().1;
 
         let user = user_sources(dir.path());
-        assert_eq!(origin_of(&user), HostOrigin::Overlay);
+        assert_eq!(origin_of(&user), HostOrigin::UserFile);
 
         let env = HostSources {
             env: Some("from-env"),
@@ -819,27 +716,6 @@ mod tests {
             ..env
         };
         assert_eq!(origin_of(&flag), HostOrigin::Flag);
-
-        std::fs::remove_file(dir.path().join("bombyx.local.toml")).unwrap();
-        assert_eq!(origin_of(&user), HostOrigin::UserFile);
-    }
-
-    #[test]
-    fn an_overlay_host_is_taken_rather_than_left_in_place() {
-        // `resolve_host` empties the field it reads, and this
-        // pins that. No code depends on it today -- see the
-        // function's own comment -- so the test exists to keep
-        // the behaviour honest while the parameter stays `&mut`,
-        // and it goes when #23 deletes the branch.
-        let mut overlay = Overlay {
-            host: Some("from-overlay".to_owned()),
-        };
-        let sources = HostSources::default();
-        let (host, origin) =
-            resolve_host(&sources, Some(&mut overlay), None).unwrap();
-        assert_eq!(host, "from-overlay");
-        assert_eq!(origin, HostOrigin::Overlay);
-        assert_eq!(overlay.host, None);
     }
 
     #[test]
@@ -945,9 +821,8 @@ mod tests {
 
     #[test]
     fn a_user_config_rejects_an_unknown_key() {
-        // Same rule as the overlay: a typo in a file nobody
-        // reads twice must be an error, not a setting that does
-        // nothing.
+        // A typo in a file nobody reads twice must be an error,
+        // not a setting that silently does nothing.
         let (dir, base) = project_dir(&minimal());
         std::fs::write(dir.path().join(USER_CONFIG_FILE), "hsot = \"x\"\n")
             .unwrap();
@@ -1090,90 +965,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_overlay_file_changes_nothing() {
-        // A developer who clears the file, rather than deleting
-        // it, must get the committed configuration -- this is
-        // the present-but-empty branch, which absence does not
-        // exercise.
-        let (_dir, loaded) = load_with_overlay("");
-        assert_eq!(loaded.unwrap(), good());
-    }
-
-    #[test]
-    fn an_overlay_cannot_smuggle_an_ssh_option() {
-        // `host` reaches `ssh` as its first positional
-        // argument, and `ssh` does not honour `--`, so a
-        // leading `-` is read as an option. The overlay must not
-        // be the one source that skips that check.
-        let (_dir, loaded) = load_with_overlay("host = \"-oProxyCommand=x\"");
-        let err = loaded.unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
-        // And the message identifies the file holding the value.
-        assert!(err.to_string().contains("bombyx.local.toml"), "{err}");
-    }
-
-    #[test]
-    fn an_overlay_rejects_an_unknown_key() {
-        // A typo must be an error rather than a setting that
-        // silently does nothing -- and the message has to name
-        // the overlay, since the operator has two files open
-        // and only one of them is at fault.
-        let (_dir, loaded) = load_with_overlay("hsot = \"x\"");
-        let err = loaded.unwrap_err();
-        assert!(matches!(err, ConfigError::Parse { .. }));
-        let text = err.to_string();
-        assert!(text.contains("bombyx.local.toml"), "{text}");
-        assert!(text.contains("hsot"), "{text}");
-    }
-
-    #[test]
-    fn an_overlay_rejects_a_project_field() {
-        // The overlay accepts `host` only. Every project value
-        // comes from the file the operator owns, so `project`,
-        // `remote_root`, `[vm]` and `[source]` are unknown
-        // fields here and `deny_unknown_fields` refuses them.
-        // Silently ignoring one would leave the operator reading
-        // a value that is not in force.
-        //
-        // The message must name the key as well as the file,
-        // because `README.md` and `CHANGELOG.md` both promise
-        // it does. That half of the message is `toml`'s
-        // `unknown field` wording, so it is the half a
-        // dependency can change under us.
-        for (key, src) in [
-            ("project", "project = \"other\""),
-            ("remote_root", "remote_root = \"/srv/vms\""),
-            // The tables need no contents: `deny_unknown_fields`
-            // refuses the table key before looking inside it.
-            ("vm", "[vm]"),
-            ("source", "[source]"),
-        ] {
-            let (_dir, loaded) = load_with_overlay(src);
-            let err = loaded.unwrap_err();
-            let text = err.to_string();
-            assert!(matches!(err, ConfigError::Parse { .. }), "{key}: {text}");
-            assert!(text.contains("bombyx.local.toml"), "{key}: {text}");
-            assert!(text.contains(key), "{key} must be named: {text}");
-        }
-    }
-
-    #[test]
-    fn an_overlay_that_is_not_a_regular_file_is_refused() {
-        // A derived path pointing at a directory or a symlink
-        // is not "no overlay": it is a state to report. A repo
-        // can create either one.
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("bombyx.toml");
-        std::fs::write(&base, minimal()).unwrap();
-        std::fs::create_dir(dir.path().join("bombyx.local.toml")).unwrap();
-
-        assert!(matches!(
-            load(&base, &flag_sources("vmhost")).unwrap_err(),
-            ConfigError::NotAFile(_)
-        ));
-    }
-
-    #[test]
     fn an_oversized_config_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("bombyx.toml");
@@ -1187,15 +978,6 @@ mod tests {
             load(&base, &flag_sources("vmhost")).unwrap_err(),
             ConfigError::TooLarge(_)
         ));
-    }
-
-    #[test]
-    fn local_config_path_declines_a_path_with_no_file_name() {
-        // `..` and a bare directory have no stem to build on,
-        // and answering with a sibling path would put the
-        // overlay outside the directory it belongs to.
-        assert_eq!(local_config_path(Path::new("..")), None);
-        assert_eq!(local_config_path(Path::new("")), None);
     }
 
     #[test]
@@ -1420,8 +1202,8 @@ mod tests {
         // Was a `Read` error carrying whatever the OS said,
         // which differs per platform ("Is a directory" on Unix,
         // "Access is denied" on Windows) and explains nothing.
-        // The type check that keeps a symlinked overlay from
-        // being read now answers this case first, and says what
+        // The type check that keeps a symlinked project file
+        // from being read answers this case first, and says what
         // is actually wrong.
         let dir = tempfile::tempdir().unwrap();
         let err = load(dir.path(), &flag_sources("vmhost")).unwrap_err();

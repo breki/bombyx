@@ -189,17 +189,16 @@ New-Item -ItemType Directory -Force "$env:APPDATA\bombyx" | Out-Null
 Set-Content "$env:APPDATA\bombyx\config.toml" 'host = "vmhost"'
 ```
 
-That covers every project on this machine. Three other sources
+That covers every project on this machine. Two other sources
 override it when you need them, highest first:
 
 | | Source | Use |
 |-|--------|-----|
 | 1 | `--host other` | one run against another machine |
 | 2 | `BOMBYX_HOST=other` | a shell, CI, or an agent |
-| 3 | `bombyx.local.toml` | one project only; gitignore it |
 
-If none of these three and no `config.toml` names a host,
-bombyx stops and lists them rather than guessing.
+If neither of those and no `config.toml` names a host, bombyx
+stops and lists all three rather than guessing.
 
 ## Part 2: the VM host
 
@@ -357,14 +356,13 @@ you commit, so it should hold only what is true for anyone who
 clones the repo.
 
 If this one project needs a different machine from your usual
-one, name that in a gitignored `bombyx.local.toml` beside it.
-That file accepts `host` and nothing else, so every setting
-above stays in the one file the whole team reads.
+one, pass `--host` on the run that needs it. There is no way to
+record the choice yet; `docs/issues/project-config-off-repo.md`
+plans a per-project entry in your `config.toml`.
 
 ### `.gitignore`
 
 ```gitignore
-bombyx.local.toml
 vagrant/.vagrant/
 ```
 

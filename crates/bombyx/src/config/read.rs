@@ -7,7 +7,7 @@
 //! the file must look like is `super::guards` and the field
 //! modules beside it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::ConfigError;
 
@@ -162,31 +162,6 @@ pub(super) fn read_optional(
     Ok(Some(source))
 }
 
-/// Where the per-project host file for `path` lives, if it can
-/// have one.
-///
-/// That file is `bombyx.local.toml`, which this crate's type
-/// calls `Overlay`. It sits beside the config it belongs to,
-/// named `<stem>.local.toml`:
-/// the original extension is *replaced*, not preserved, so
-/// `staging.toml` and `staging.yaml` would share
-/// `staging.local.toml`. Deriving it from the argument rather
-/// than fixing one name is what makes `--config staging.toml`
-/// look for `staging.local.toml`, so the host file is always
-/// discoverable from whichever config file `--config` names.
-///
-/// `None` when `path` has no file name at all -- `..`, or a
-/// bare directory. Returning a path there would put the host
-/// file *beside* the directory rather than in it, which is a
-/// surprise nobody asked for.
-#[must_use]
-pub fn local_config_path(path: &Path) -> Option<PathBuf> {
-    let stem = path.file_stem()?;
-    let mut name = stem.to_os_string();
-    name.push(".local.toml");
-    Some(path.with_file_name(name))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,32 +179,5 @@ mod tests {
         // Past the end clamps rather than panicking, which is what
         // a truncated file produces.
         assert_eq!(line_column("ab", 99), (1, 3));
-    }
-
-    #[test]
-    fn the_host_file_sits_beside_the_config_it_is_named_after() {
-        // The extension is *replaced*, not kept, so `staging.toml`
-        // and `staging.yaml` would both look for
-        // `staging.local.toml`. That is deliberate -- see the
-        // function -- and this is where the doc's own example is
-        // pinned so the two cannot disagree.
-        let p = |s: &str| local_config_path(Path::new(s));
-        assert_eq!(p("bombyx.toml"), Some(PathBuf::from("bombyx.local.toml")));
-        assert_eq!(
-            p("staging.toml"),
-            Some(PathBuf::from("staging.local.toml"))
-        );
-        assert_eq!(
-            p("staging.yaml"),
-            Some(PathBuf::from("staging.local.toml"))
-        );
-        assert_eq!(
-            p("a/b/bombyx.toml"),
-            Some(PathBuf::from("a/b/bombyx.local.toml"))
-        );
-        // No file name at all, so there is nowhere sensible to
-        // put an overlay.
-        assert_eq!(p(".."), None);
-        assert_eq!(p("/"), None);
     }
 }

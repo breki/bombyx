@@ -288,27 +288,12 @@ own machine instead -- see **Where bombyx looks for the host**
 in `../README.md`.
 
 The charset check on `host` stays, because the remaining
-sources can still be wrong: a gitignored `bombyx.local.toml`,
-your `config.toml`, `BOMBYX_HOST`, or a mistyped `--host`. It
-guards the argv, not one particular file.
+sources can still be wrong: your `config.toml`, `BOMBYX_HOST`,
+or a mistyped `--host`. It guards the argv, not one particular
+file.
 
-`bombyx.local.toml` carries a host, so the charset check
-applies to it exactly as it applies to `--host` and
-`BOMBYX_HOST`. Every other value comes from `bombyx.toml` and
-is validated there.
-
-That file is worth one more paragraph, because it is the
-residual exposure in this path. It sits inside the project
-directory, only convention keeps it out of git, and it outranks
-your own `config.toml`. So a repository that commits one
-redirects every `ssh` bombyx runs, `destroy` included, to a
-machine of its choosing -- which is the attack `host` was
-removed from `bombyx.toml` to prevent. bombyx does not refuse
-such a file. What it does is print a line on stderr saying the
-host came from a `bombyx.local.toml`, so the redirection is
-visible rather than silent. That line names the default
-filename rather than the derived one, so under
-`--config staging.toml` it says `bombyx.local.toml` while
-`staging.local.toml` is the file that supplied the host.
-`docs/developer/redteam-log.md` tracks it as
-`rt-2026-09-04-provenance-line-names-the-default-filename`.
+Every one of those three sits outside the checkout. That is the
+property the design turns on, and it is worth stating on its
+own: bombyx opens no file inside the project directory to find
+a host, so a repository cannot name the machine your `destroy`
+runs `rm -rf` on. It can only fail to run.

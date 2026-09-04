@@ -2,7 +2,7 @@
 //!
 //! The host is the one setting that is deliberately **not** in the
 //! project file: it belongs to whoever drives bombyx, not to the
-//! repo. So it has four possible sources with a ranking between
+//! repo. So it has three possible sources with a ranking between
 //! them, a charset rule, a per-developer file, and a provenance
 //! answer -- a self-contained subject, which is why it is a module
 //! of its own rather than part of parsing `bombyx.toml`.
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::error::FieldError;
-use super::{ConfigError, Overlay, Symlinks, from_toml, guards, read_optional};
+use super::{ConfigError, Symlinks, from_toml, guards, read_optional};
 
 /// Characters allowed in an SSH destination.
 ///
@@ -46,12 +46,9 @@ pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
 
 /// The per-developer configuration file.
 ///
-/// Carries only `host`, the same as [`Overlay`]. The two are
-/// separate types because they are separate files with
-/// different reasons to exist and different precedence, and
-/// merging them would mean one `deny_unknown_fields` list
-/// covering both -- so a key added to one file would silently
-/// become legal in the other.
+/// Carries only `host`. `deny_unknown_fields` refuses every
+/// other key, so a setting meant for `bombyx.toml` and typed
+/// here is reported rather than ignored.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UserFile {
@@ -245,8 +242,6 @@ pub enum HostOrigin {
     Flag,
     /// The [`HOST_ENV`] environment variable.
     Env,
-    /// A `bombyx.local.toml` beside the project file.
-    Overlay,
     /// The per-developer [`USER_CONFIG_FILE`].
     UserFile,
 }
@@ -256,7 +251,6 @@ impl std::fmt::Display for HostOrigin {
         let name = match self {
             Self::Flag => "--host",
             Self::Env => HOST_ENV,
-            Self::Overlay => "bombyx.local.toml",
             Self::UserFile => USER_CONFIG_FILE,
         };
         f.write_str(name)
@@ -264,20 +258,6 @@ impl std::fmt::Display for HostOrigin {
 }
 
 /// Finds the VM host, highest-precedence source first.
-///
-/// `local` is the overlay's path, named only in the
-/// no-host-anywhere error.
-///
-/// Takes the overlay by `&mut` and *removes* the host it finds.
-///
-/// `Config::load` never reads the overlay again, and this
-/// function is `pub(crate)`, so no code outside bombyx can
-/// reach it either. The `&mut` therefore protects nothing
-/// today. It stays because step 2 of the plan in
-/// `docs/issues/project-config-off-repo.md` (#23) deletes
-/// `bombyx.local.toml` and this branch with it, so narrowing
-/// the parameter to `&Overlay` first is work that step throws
-/// away.
 ///
 /// The per-developer file is read *last* and only if it is
 /// needed, so `--host` works on a machine whose file is absent
@@ -290,17 +270,12 @@ impl std::fmt::Display for HostOrigin {
 /// way: it was asked for, so the empty-value error identifies it.
 pub(crate) fn resolve_host(
     sources: &HostSources,
-    overlay: Option<&mut Overlay>,
-    local: Option<&Path>,
 ) -> Result<(String, HostOrigin), ConfigError> {
     if let Some(host) = sources.flag {
         return Ok((host.to_owned(), HostOrigin::Flag));
     }
     if let Some(host) = sources.env.filter(|v| !v.trim().is_empty()) {
         return Ok((host.to_owned(), HostOrigin::Env));
-    }
-    if let Some(host) = overlay.and_then(|o| o.host.take()) {
-        return Ok((host, HostOrigin::Overlay));
     }
     if let Some(dir) = sources.user_config_dir {
         let path = dir.join(USER_CONFIG_FILE);
@@ -312,30 +287,19 @@ pub(crate) fn resolve_host(
         }
     }
     Err(ConfigError::HostMissing {
-        places: host_places(sources, local),
+        places: host_places(sources),
     })
 }
 
-/// Names the files that can carry a host, for an error message.
+/// Names the file that can carry a host, for an error message.
 ///
-/// Both are paths the operator can act on, so they are printed
-/// in full rather than described.
-pub(crate) fn host_places(
-    sources: &HostSources,
-    local: Option<&Path>,
-) -> String {
-    let user = sources.user_config_dir.map(|d| d.join(USER_CONFIG_FILE));
-    match (user, local) {
-        (Some(user), Some(local)) => {
-            format!("{} or {}", user.display(), local.display())
-        }
-        (Some(user), None) => user.display().to_string(),
-        (None, Some(local)) => local.display().to_string(),
-        // No home directory in the environment and no project
-        // file with a name, so there is nothing concrete to
-        // point at.
-        (None, None) => {
-            format!("a {USER_CONFIG_FILE} in your config directory")
-        }
+/// It is a path the operator can act on, so it is printed in
+/// full rather than described.
+pub(crate) fn host_places(sources: &HostSources) -> String {
+    match sources.user_config_dir.map(|d| d.join(USER_CONFIG_FILE)) {
+        Some(user) => user.display().to_string(),
+        // No home directory in the environment, so there is
+        // nothing concrete to point at.
+        None => format!("a {USER_CONFIG_FILE} in your config directory"),
     }
 }

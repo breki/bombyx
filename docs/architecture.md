@@ -154,9 +154,6 @@ classDiagram
     Libvirt
     Hyperv
   }
-  class Overlay {
-    +Option~String~ host
-  }
   class HostSources {
     +Option~str~ flag
     +Option~str~ env
@@ -166,7 +163,6 @@ classDiagram
     <<enumeration>>
     Flag
     Env
-    Overlay
     UserFile
   }
 
@@ -175,15 +171,9 @@ classDiagram
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
-  Overlay ..> Config : supplies host
   HostSources ..> Config : supplies host
   HostSources ..> HostOrigin : reports which won
 ```
-
-`Overlay` is the optional `bombyx.local.toml` beside the
-project file. It carries a VM host and nothing else, and it is
-the third of four host sources -- behind `--host` and
-`BOMBYX_HOST`, ahead of the per-developer `config.toml`.
 
 `Config` is what bombyx runs with. `host` is the one field never
 read from `bombyx.toml`, because a VM host belongs to a person

@@ -202,43 +202,30 @@ fn up_runs_nothing_on_the_workstation() {
 }
 
 #[test]
-fn a_local_config_overrides_the_user_config_host() {
-    // The per-project escape hatch: one repo that needs a
-    // different machine from the one in your `config.toml`.
-    let dir = project_dir();
-    std::fs::write(
-        dir.path().join("bombyx.local.toml"),
-        "host = \"my-vmhost\"\n",
-    )
-    .unwrap();
+fn a_stray_local_config_is_not_read() {
+    // bombyx no longer opens `bombyx.local.toml`, so a leftover
+    // one is an ordinary unread file. Both halves matter. The
+    // host it names must lose to the per-developer config, and
+    // contents that are not TOML at all must not become an
+    // error -- a parse failure would prove bombyx had opened
+    // the file after all.
+    for contents in ["host = \"my-vmhost\"\n", "host = "] {
+        let dir = project_dir();
+        std::fs::write(dir.path().join("bombyx.local.toml"), contents).unwrap();
 
-    let lines = dry_run(&dir, &["--dry-run", "status"]);
-    assert!(lines[0].starts_with("ssh my-vmhost "), "{}", lines[0]);
-    // The committed project config still applies.
-    assert!(lines[0].contains("~/'vms/myproject'"), "{}", lines[0]);
+        let lines = dry_run(&dir, &["--dry-run", "status"]);
+        assert!(lines[0].starts_with("ssh vmhost "), "{}", lines[0]);
+    }
 }
 
 #[test]
-fn a_local_config_is_optional() {
-    // The overwhelmingly common case is not having one, so its
-    // absence must not be an error.
+fn a_missing_local_config_is_not_mentioned() {
+    // The ordinary case, kept as its own test so the pair above
+    // cannot pass merely because bombyx stopped running.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "status"]);
     assert!(lines[0].starts_with("ssh vmhost "), "{}", lines[0]);
-}
-
-#[test]
-fn a_broken_local_config_is_reported() {
-    // Silently ignoring it would send commands to the host the
-    // override exists to replace.
-    let dir = project_dir();
-    std::fs::write(dir.path().join("bombyx.local.toml"), "host = ").unwrap();
-
-    bombyx_in(&dir)
-        .args(["--dry-run", "status"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("bombyx.local.toml"));
+    assert!(lines[0].contains("~/'vms/myproject'"), "{}", lines[0]);
 }
 
 #[test]
@@ -571,13 +558,13 @@ fn a_host_in_the_project_file_is_refused() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("`host` is not allowed"))
-        .stderr(predicate::str::contains("bombyx.local.toml"));
+        .stderr(predicate::str::contains(USER_CONFIG_FILE));
 }
 
 #[test]
 fn no_host_anywhere_names_every_way_to_set_one() {
     // The first-run failure. It has to be actionable: an
-    // operator who has never configured a host learns all four
+    // operator who has never configured a host learns all three
     // sources from this one message.
     let dir = project_dir_with("project = \"myproject\"\n");
     bombyx_in(&dir)
@@ -590,93 +577,26 @@ fn no_host_anywhere_names_every_way_to_set_one() {
 }
 
 #[test]
-fn the_host_flag_outranks_every_file() {
-    // Both files name a host, and the flag still wins.
+fn the_host_flag_outranks_the_user_config() {
+    // The per-developer file names a host, and the flag still
+    // wins.
     let dir = project_dir();
-    std::fs::write(
-        dir.path().join("bombyx.local.toml"),
-        "host = \"from-overlay\"\n",
-    )
-    .unwrap();
     let lines = dry_run(&dir, &["--dry-run", "--host", "from-flag", "status"]);
     assert!(lines[0].starts_with("ssh from-flag "), "{}", lines[0]);
 }
 
 #[test]
 fn a_flag_host_says_where_the_host_came_from() {
-    // With a `bombyx.local.toml` naming a host, the flag has to
-    // win and the provenance line has to say so. `destroy` runs
-    // `rm -rf` on the winning host, so a line naming the file
+    // The per-developer file names a host, the flag beats it,
+    // and the provenance line has to say so. `destroy` runs
+    // `rm -rf` on the winning host, so a line naming the source
     // that lost would point the operator at the wrong machine.
     let dir = project_dir();
-    std::fs::write(
-        dir.path().join("bombyx.local.toml"),
-        "host = \"from-overlay\"\n",
-    )
-    .unwrap();
     bombyx_in(&dir)
         .args(["--dry-run", "--host", "from-flag", "status"])
         .assert()
         .success()
         .stderr(predicate::str::contains("host from-flag from --host"));
-}
-
-#[test]
-fn an_overlay_without_a_host_says_nothing_about_the_file() {
-    // A `bombyx.local.toml` can supply a host and nothing else,
-    // so an empty one changed nothing and bombyx must claim
-    // nothing on its behalf. Two claims are wrong here: naming
-    // the file as the host's source when the per-developer file
-    // supplied it, and saying the file overrides the project
-    // config when it cannot. `destroy` runs `rm -rf` on the
-    // host that wins, so a line naming the wrong file is worse
-    // than no line.
-    let dir = project_dir();
-    std::fs::write(dir.path().join("bombyx.local.toml"), "").unwrap();
-
-    let out = bombyx_in(&dir)
-        .args(["--dry-run", "status"])
-        .assert()
-        .success();
-    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-
-    // The host came from the per-developer file.
-    assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
-    assert!(!stderr.contains("bombyx.local.toml"), "{stderr}");
-    // `bombyx.local.toml` supplies a host and nothing else, so
-    // no output may say it overrides the project file: the word
-    // would name a capability the file does not have.
-    assert!(!stderr.contains("overrides"), "{stderr}");
-}
-
-#[test]
-fn a_local_config_host_is_reported_as_the_source() {
-    // `docs/usage.md` and `README.md` both accept a real
-    // exposure on the strength of this one line: a
-    // `bombyx.local.toml` committed to a repository redirects
-    // every `ssh` bombyx runs, `destroy` included, and what
-    // bombyx offers against that is saying on stderr where the
-    // host came from.
-    //
-    // So the line needs a test of its own. The neighbouring
-    // tests assert the `--host` case and two negatives, and
-    // none of them fails if the `HostOrigin::Overlay` branch
-    // stops printing -- deleting the `if` in `main.rs` leaves
-    // the suite green and the mitigation gone.
-    let dir = project_dir();
-    std::fs::write(
-        dir.path().join("bombyx.local.toml"),
-        "host = \"from-overlay\"\n",
-    )
-    .unwrap();
-    bombyx_in(&dir)
-        .args(["--dry-run", "status"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "host from-overlay from bombyx.local.toml",
-        ));
 }
 
 #[test]
@@ -698,15 +618,24 @@ fn an_invalid_host_does_not_blame_the_project_file() {
 }
 
 #[test]
-fn the_host_env_var_outranks_the_files() {
-    // Between the flag and the files: useful in CI, or for an
-    // agent driving bombyx with no config directory of its own.
+fn the_host_env_var_outranks_the_user_config() {
+    // Between the flag and the per-developer file: useful in CI,
+    // or for an agent driving bombyx with no config directory of
+    // its own.
+    //
+    // The provenance line is asserted here too. An exported
+    // `BOMBYX_HOST` redirects every `ssh` bombyx runs, `destroy`
+    // included, and what bombyx offers against that is one line
+    // on stderr naming the variable. Deleting the `if` in
+    // `main.rs` has to turn a test red, and the flag test above
+    // covers only the other half.
     let dir = project_dir();
     let out = bombyx_in(&dir)
-        .env("BOMBYX_HOST", "from-env")
+        .env(HOST_ENV, "from-env")
         .args(["--dry-run", "status"])
         .assert()
-        .success();
+        .success()
+        .stderr(predicate::str::contains("host from-env from BOMBYX_HOST"));
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(stdout.starts_with("ssh from-env "), "{stdout}");
 }

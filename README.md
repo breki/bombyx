@@ -179,16 +179,15 @@ arrives from the repo at all.
 
 ### Where bombyx looks for the host
 
-Four sources, first match wins:
+Three sources, first match wins:
 
 | | Source | Use |
 |-|--------|-----|
 | 1 | `--host vmhost-b` | a one-off run |
 | 2 | `BOMBYX_HOST=vmhost-b` | a shell, CI, or an agent |
-| 3 | `bombyx.local.toml` | this project only; gitignore it |
-| 4 | your `config.toml` | every project -- the usual one |
+| 3 | your `config.toml` | every project -- the usual one |
 
-If none of them names a host, bombyx stops and lists all four
+If none of them names a host, bombyx stops and lists all three
 rather than guessing.
 
 **This section is the authoritative list** -- the sample config
@@ -219,41 +218,29 @@ happen to be in. An exported-but-empty `BOMBYX_HOST` counts as
 unset for the same reason: that is what a shell script means by
 it.
 
-### A different machine for one project
+### Which host a command is about to use
 
 Your `config.toml` specifies the VM host you use for
-everything. When one repository has to run somewhere else,
-name that
-machine in a `bombyx.local.toml` beside its project file, and
-gitignore the file:
+everything, and `--host` or `BOMBYX_HOST` redirects one run
+somewhere else. Whenever either of those wins, bombyx prints
+one line on stderr naming the source:
 
-```toml
-host = "other-vmhost"    # just this project
+```
+bombyx: host vmhost-b from --host
 ```
 
-`host` is the only key this file accepts. Anything else is a
-typo and bombyx says so, naming the file and the key. Every
-other setting comes from `bombyx.toml`, which is the file the
-whole team shares, so there is one place to read a project's
-values rather than two files to merge in your head.
+Your own `config.toml` gets no such line. It is the ordinary
+case, and a line on every command is noise nobody reads. So
+the rule is: silence means the host came from your own file,
+and a line means something overrode it. Either way the host
+that `destroy` would run `rm -rf` on is visible without
+reasoning about precedence.
 
-The file itself is optional and most projects never need one.
-Its name is derived from the config's, so
-`--config staging.toml` looks for `staging.local.toml`.
-
-When this file supplies the host, bombyx prints one line on
-stderr naming it as the source. That line is printed for every
-source except your own `config.toml`, which is the ordinary
-case and not worth a line on every command. So the host that
-`destroy` would run `rm -rf` on is visible without reasoning
-about precedence, and an empty or absent `bombyx.local.toml`
-prints nothing, because it changed nothing.
-
-One gap in that line: it always prints the name
-`bombyx.local.toml`, so under `--config staging.toml` it says
-that while `staging.local.toml` is the file that supplied the
-host. `docs/developer/redteam-log.md` tracks it as
-`rt-2026-09-04-provenance-line-names-the-default-filename`.
+There is no way yet to give one project a host of its own
+permanently -- `--host` covers a single run, and nothing
+records the choice. `docs/issues/project-config-off-repo.md`
+plans one: a per-project entry in the `config.toml` you
+already own.
 
 The host is checked wherever it came from. A value starting
 with `-` is refused rather than handed to `ssh` as an option,
