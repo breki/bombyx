@@ -292,5 +292,6 @@ sources can still be wrong: a gitignored `bombyx.local.toml`,
 your `config.toml`, `BOMBYX_HOST`, or a mistyped `--host`. It
 guards the argv, not one particular file.
 
-Validation runs after `bombyx.local.toml` is merged in, so a
-per-project override is subject to the same checks.
+`bombyx.local.toml` carries a host and nothing else, so the
+charset check is the whole of what that file has to pass. Every
+other value comes from `bombyx.toml` and is validated there.

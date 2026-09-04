@@ -155,7 +155,7 @@ classDiagram
     Hyperv
   }
   class Overlay {
-    +all fields optional
+    +Option~String~ host
   }
   class HostSources {
     +Option~str~ flag
@@ -175,7 +175,7 @@ classDiagram
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
-  Overlay ..> Config : replaces fields of
+  Overlay ..> Config : supplies host
   HostSources ..> Config : supplies host
   HostSources ..> HostOrigin : reports which won
 ```

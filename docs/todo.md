@@ -190,11 +190,6 @@ plan, decisions, and outcome.
   as the restart, and the step names already exist in `validate.rs`'s step list.
   Raised by the workflow retrospective, 2026-09-03.
 
-- **overlay-drop-project-overrides** -- the overlay drops its project fields
-  Step 1 of 7 in the project-config-off-repo re-split; GitHub issue #22. Pure
-  removal, and the larger half of that work. Decided in
-  `docs/issues/project-config-off-repo.md`.
-
 - **overlay-drop-host-source** -- delete bombyx.local.toml entirely
   Step 2 of 7; GitHub issue #23. Depends on overlay-drop-project-overrides.
   Pure removal.
@@ -214,7 +209,23 @@ plan, decisions, and outcome.
   Step 7 of 7; GitHub issue #27. Depends on project-selection-flag. One design
   question, undecided.
 
+- **todo-done-link** -- todo done writes a link that need not resolve
+  `move_to_done` in `xtask/src/todo.rs` always renders the Done entry as `-
+  [**<slug>**](issues/<slug>.md)`, and its doc comment says why that is safe:
+  `/implement` is the only caller and it writes that document before finalising.
+  `/issue` is now a second caller, and an item split out of a shared plan has no
+  document of its own -- overlay-drop-project-overrides is one of seven steps
+  whose plan is `docs/issues/project-config-off-repo.md`. Completing it wrote a
+  link to a file that does not exist, and the link had to be corrected by hand.
+  canon-check does not catch it, because it checks backticked paths and this is
+  a markdown link. Either `done` should take the link target, or mirror `add`'s
+  `--issue` flag and write a plain bold slug without one.
+
 ## Done
+
+- [**overlay-drop-project-overrides**](issues/project-config-off-repo.md)
+  -- the overlay carries a host and nothing else
+  (2026-09-04)
 
 - [**remote-clone-project-source**](issues/project-config-off-repo.md)
   -- dropped the push; no program read the archive

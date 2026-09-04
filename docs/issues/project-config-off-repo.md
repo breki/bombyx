@@ -230,6 +230,33 @@ commands stay identical, which a dry run can show.
 
 ## Decisions
 
+- **2026-09-04 -- Delete the "overrides" notice in step 1.**
+  Once the overlay carries only `host`, the line
+  `bombyx: bombyx.local.toml overrides bombyx.toml` describes
+  something the file cannot do. The host provenance line under
+  it already names `bombyx.local.toml` whenever that file
+  supplies the host, so nothing true is lost. An overlay file
+  present but empty then prints nothing, which is the honest
+  report: it changed nothing. The integration test
+  `an_overlay_without_a_host_does_not_claim_the_host` exists to
+  police the gap between the two notices, and it goes with the
+  notice.
+
+  This is the one place step 1 changes behaviour outside the
+  overlay, and #22 claims it changes none. The alternative was
+  rewording the line to say bombyx *read* the file, which keeps
+  a signal that a mistyped filename fell back silently, at the
+  cost of a line saying what the line beneath it already says.
+
+- **2026-09-04 -- `resolve_host` keeps `&mut Overlay` and
+  `take()` in step 1.** Its doc comment justifies the `take` by
+  saying it makes `Config::with_overlay` ignoring `host` safe
+  rather than merely intended, and step 1 deletes
+  `with_overlay`, so that sentence goes. The mechanism stays:
+  step 2 (#23) deletes the whole overlay branch of
+  `resolve_host`, so narrowing it to `&Overlay` now is work
+  that step 2 throws away.
+
 - **2026-09-02 -- Drop the push before moving the config.**
   The push is dead weight already, and `vagrant_dir` is the
   only config value naming a location inside the checkout.
@@ -295,6 +322,34 @@ direct unit tests.
 **Not verified against a real VM host.** This chunk changes
 what executes there, so Definition of Done item 3 applies and is
 not met. frosti was unreachable from this session.
+
+### 2026-09-04 -- step 1 landed
+
+`Overlay` now carries `host` and nothing else. Gone with the
+four project fields: `Config::with_overlay`, the `replace`
+helper, and `into_config`'s overlay parameter. `HostSources`,
+`resolve_host` and the four-source ranking are unchanged, so
+`bombyx.local.toml` still supplies a host for one project and
+step 2 (#23) is what deletes the file.
+
+Four unit tests went with the merge they described. One
+replaces them: a project key in the overlay is now an unknown
+field, and `deny_unknown_fields` refuses it naming the file and
+the key. It was written first and seen to fail, applying
+`project = "other"` before the fields came out.
+
+The `overrides` notice is gone, as decided above. Its
+integration test is replaced by one asserting the opposite: an
+empty `bombyx.local.toml` makes bombyx say nothing about that
+file at all. That test was seen to fail with the notice put
+back.
+
+Documents carrying the merge: `README.md` (the section is now
+"A different machine for one project"), `llms.txt`,
+`bombyx.toml.sample`, `docs/usage.md`, `docs/tutorial.md` and
+the class diagram in `docs/architecture.md`. Two doc comments
+in `config/host.rs` justified themselves by naming
+`with_overlay` and had to be rewritten rather than deleted.
 
 ### 2026-09-04 -- chunks 2 and 3 re-split into seven steps
 

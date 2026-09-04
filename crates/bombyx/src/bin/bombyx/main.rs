@@ -293,21 +293,7 @@ fn run() -> Result<Ran> {
                 .context(format!("loading {}", cli.config.display())),
         })?;
 
-    // Say when the committed config is not the one in force.
-    // A typo in the override's *filename* silently falls back
-    // to the committed values, and one line on stderr makes the
-    // two states distinguishable without reading either file.
-    if let Some(local) = bombyx::config::local_config_path(&cli.config)
-        && local.is_file()
-    {
-        eprintln!(
-            "bombyx: {} overrides {}",
-            local.display(),
-            cli.config.display()
-        );
-    }
-
-    // And say which source the host came from, using the winner
+    // Say which source the host came from, using the winner
     // the library reports rather than re-testing the sources
     // here. Re-deriving it duplicated the precedence rule in the
     // one place no library test could reach, so a change to the
@@ -316,10 +302,10 @@ fn run() -> Result<Ran> {
     //
     // Printed unless it came from the per-developer file, which
     // is the ordinary case and would be noise on every command.
-    // That also covers the gap the notice above leaves: an
-    // overlay setting only `remote_root` prints "overrides", and
-    // the host it does *not* set is reported here instead of
-    // being silently attributed to that file.
+    // A `bombyx.local.toml` supplies nothing but the host, so
+    // this one line reports everything that file can do. When
+    // that file wins, this line names it. When it does not win,
+    // it changed nothing and bombyx says nothing about it.
     if host_origin != HostOrigin::UserFile {
         eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }

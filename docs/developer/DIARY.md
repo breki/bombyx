@@ -48,6 +48,59 @@ on one branch and the reviewers spent 17 of 58 findings on
 prose that had nothing to do with the config. Splitting it out
 is what this branch is.
 
+**`bombyx.local.toml` carries a host and nothing else**
+
+Step 1 of seven in moving the project config off the repo, and
+the largest of them. `Overlay` had five fields and now has one.
+Gone with the other four: `Config::with_overlay`, the `replace`
+helper, and `into_config`'s overlay parameter.
+
+The reason to delete the overlay depends on the rest of the
+move -- once the base config is the operator's own private
+file, an overlay over a file only its owner can edit buys
+nothing. The work does not depend on the move at all, which is
+why it goes first. `bombyx.local.toml` still supplies a VM host
+for one project, and step 2 is what deletes the file.
+
+We also deleted the `bombyx: <local> overrides <config>` line
+on stderr, which #22 did not ask for. With the overlay reduced
+to a host, that line described something the file can no longer
+do, and the host provenance line beneath it already names
+`bombyx.local.toml` whenever that file wins. An empty overlay
+file now prints nothing at all, which is the honest report: it
+changed nothing.
+
+Four unit tests described the merge and went with it. Writing
+their replacement first was worth it: a project key in the
+overlay is now an unknown field, and the test failed by
+applying `project = "other"` before the fields came out.
+
+One deleted test carried a guard that outlived it. It asserted
+that a half-stated `[vm]` cannot parse, and the reason it gave
+was that nothing enforces this except `Vm`'s fields all being
+required -- a `#[serde(default)]` added later would turn a
+partial table into a silent default. That risk belongs to the
+project file, not the overlay, so the guard came back aimed at
+`Config::parse` and enumerating all four fields one at a time.
+Defaulting `memory` turns it red and the message names the
+field.
+
+Two doc comments in `config/host.rs` justified themselves by
+naming `with_overlay`. `resolve_host` still takes the overlay
+by `&mut` and empties the host it finds, and the reason it gave
+was that this made `with_overlay` ignoring the field safe
+rather than merely intended. The mechanism is worth keeping and
+the sentence is not, so it now says that no later reader can
+find a value two higher-precedence sources outrank.
+
+Also found: `cargo xtask todo done` always writes the Done
+entry as a link to `issues/<slug>.md`, and its comment says why
+that is safe -- `/implement` is the only caller and writes that
+document first. `/issue` is a second caller now, and an item
+split out of a shared plan has no document of its own, so
+completing this one wrote a link to a file that does not exist.
+Captured as `todo-done-link` rather than fixed here.
+
 **`/issue` works a GitHub issue end to end**
 
 Ported from the mutrack project, where the same command was
