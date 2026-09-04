@@ -37,6 +37,9 @@ that module, so the narrowing is free to go ahead. Only the
 alternative fix, resolving the path in `main.rs`, would need
 `local_config_path` to stay `pub`.
 
+**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
+nothing in bombyx reaches the code this describes.
+
 ### rt-2026-09-04-a-malformed-overlay-defeats-the-host-flag
 
 **Category:** The documented escape hatch stops working
@@ -65,6 +68,9 @@ goes unreported whenever a higher-precedence source won.
 Deferred by the operator: step 2 (#23) deletes the file and the
 branch.
 
+**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
+nothing in bombyx reaches the code this describes.
+
 ### rt-2026-09-04-overlay-and-local-config-path-are-pub
 
 **Category:** Public surface nothing public consumes
@@ -85,6 +91,9 @@ rustdoc refuses a public page pointing at a private item.
 
 Nothing blocks this. Step 2 (#23) makes it moot if that lands
 first, which is the likely outcome.
+
+**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
+nothing in bombyx reaches the code this describes.
 
 ### rt-2026-09-04-a-committed-overlay-redirects-every-ssh
 
@@ -108,6 +117,9 @@ Candidate fixes: refuse an overlay that `git` tracks, or
 require the file outside the checkout. Step 2 (#23) deletes the
 file, which closes this too -- so the value here is the record
 of why the file must not come back.
+
+**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
+nothing in bombyx reaches the code this describes.
 
 ### rt-2026-09-03-round-three-findings-have-no-durable-home
 

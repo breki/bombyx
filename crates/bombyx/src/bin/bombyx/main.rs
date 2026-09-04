@@ -302,10 +302,9 @@ fn run() -> Result<Ran> {
     //
     // Printed unless it came from the per-developer file, which
     // is the ordinary case and would be noise on every command.
-    // A `bombyx.local.toml` supplies nothing but the host, so
-    // this one line reports everything that file can do. When
-    // that file wins, this line names it. When it does not win,
-    // it changed nothing and bombyx says nothing about it.
+    // What is left is `--host` and the environment variable, and
+    // both are worth naming: each one redirects this run to a
+    // machine the operator's own config does not point at.
     if host_origin != HostOrigin::UserFile {
         eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }

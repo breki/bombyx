@@ -125,21 +125,18 @@ and this project adheres to
   functions. doctor::host_findings composes them and is the supported entry
   point; making the two pub(crate) is what stops a caller assembling a report
   with no provider row.
-- **BREAKING:** `bombyx.local.toml` no longer overrides project fields. It
-  carries `host` and nothing else; `project`, `remote_root`, `[vm]` and
-  `[source]` in that file are now unknown keys and bombyx refuses them, naming
-  the file and the key. Every setting other than the VM host comes from
-  `bombyx.toml`, so a project's values are read in one file rather than merged
-  from two.
-- **BREAKING:** The `bombyx: bombyx.local.toml overrides bombyx.toml` line on
-  stderr is gone. With `bombyx.local.toml` reduced to a host, that line
-  described something the file cannot do; the host provenance line already
-  names it whenever it supplies the host. A `bombyx.local.toml` that is present
-  but empty now prints nothing, because it changed nothing.
-- **BREAKING:** The `Config::with_overlay` library method, and `Overlay`'s
-  `project`, `remote_root`, `vm` and `source` public fields. `Overlay` now
-  carries `host` alone, so a downstream that merged project values through it
-  has no replacement: read them from the project file.
+- **BREAKING:** `bombyx.local.toml`. bombyx no longer reads that file, so it
+  can no longer name a VM host for one project. A leftover one is inert: it is
+  never opened, its contents cannot win and cannot fail to parse, and bombyx
+  says nothing about it. Move its `host` line into your own `config.toml`, or
+  pass `--host` for a single run. The VM host now comes from `--host`,
+  `BOMBYX_HOST` or `config.toml`, and every one of those sits outside the
+  checkout -- no file in a project directory can name the machine `destroy`
+  runs `rm -rf` on.
+- **BREAKING:** The `Overlay` and `local_config_path` library items, and the
+  `Config::with_overlay` method. `Config::load` takes the host from
+  `HostSources` alone; a downstream that read project values through an overlay
+  has no replacement and should read them from the project file.
 
 
 ## [0.4.1] - 2026-08-18

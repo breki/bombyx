@@ -1,7 +1,7 @@
 # project-config-off-repo
 
-**Status:** In progress -- chunk 1 landed 2026-09-02, step 1 of
-7 landed 2026-09-04
+**Status:** In progress -- chunk 1 landed 2026-09-02, steps 1
+and 2 of 7 landed 2026-09-04
 
 **Problem**, **Context** and **Open questions** below describe
 the state when this was captured, before chunk 1. **Plan**
@@ -355,6 +355,48 @@ Documents carrying the merge: `README.md` (the section is now
 the class diagram in `docs/architecture.md`. Two doc comments
 in `config/host.rs` justified themselves by naming
 `with_overlay` and had to be rewritten rather than deleted.
+
+### 2026-09-04 -- step 2 landed
+
+`bombyx.local.toml` is gone. `Overlay`, `local_config_path`,
+`HostOrigin::Overlay` and the overlay branch of `resolve_host`
+are all deleted, and `resolve_host` and `host_places` each lost
+the two parameters that carried the file. Host ranking is now
+`--host`, `BOMBYX_HOST`, `config.toml`.
+
+Every source that can name a VM host now sits outside the
+checkout. That is what closes the exposure
+`rt-2026-09-04-a-committed-overlay-redirects-every-ssh`
+described, and three other red-team findings go with it:
+`rt-2026-09-04-provenance-line-names-the-default-filename`,
+`rt-2026-09-04-a-malformed-overlay-defeats-the-host-flag` and
+`rt-2026-09-04-overlay-and-local-config-path-are-pub`. All four
+carry a closing line in `docs/developer/redteam-log.md`.
+
+The operator chose the pure removal over stopping with a
+message when a stray file is found. A leftover
+`bombyx.local.toml` is now an ordinary unread file: bombyx does
+not open it, so its contents cannot win and cannot error. The
+cost is that anyone relying on one gets their `config.toml`
+host with no warning. bombyx is pre-release, so the migration
+is one delete.
+
+Two tests were written first and seen to fail.
+`a_stray_local_config_is_not_read` failed with `my-vmhost`
+winning. The provenance assertion added to
+`the_host_env_var_outranks_the_user_config` failed with the
+`if` in `main.rs` disabled -- it is there because the overlay
+test that used to police that line is one of the five deleted,
+and `--host` alone would have left the environment case
+uncovered.
+
+`cargo xtask validate` passes, coverage 98.1%.
+
+**Not verified against a real VM host.** The change alters
+which host is selected, not the shape of any command bombyx
+emits, and the selection is fully visible in `--dry-run`. The
+VM host was unreachable from this session in any case: its host
+key is not known here.
 
 ### 2026-09-04 -- chunks 2 and 3 re-split into seven steps
 

@@ -4,6 +4,43 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**bombyx.local.toml is gone, and with it the last host source
+inside the checkout**
+
+Step 2 of the config move (#23). The overlay file supplied a VM
+host for one project, and it sat inside the project directory
+with only a `.gitignore` line keeping it out of git. A
+repository that committed one redirected every `ssh` bombyx
+ran, `destroy` included, to a machine of its choosing. That is
+the attack `host` was removed from `bombyx.toml` to prevent,
+and removing it from that file left this route open. Four
+red-team findings tracked it from different angles; all four
+close here, and each carries a closing line in
+`docs/developer/redteam-log.md`.
+
+What went: the `Overlay` type, `local_config_path`,
+`HostOrigin::Overlay`, the overlay branch of `resolve_host`,
+and the two parameters that carried the file through
+`resolve_host` and `host_places`. Host ranking is now
+`--host`, `BOMBYX_HOST`, `config.toml` -- three sources, every
+one of them outside the checkout.
+
+We asked whether a leftover file should stop bombyx with a
+message rather than being ignored, and chose ignoring it.
+bombyx is pre-release, so the migration is one delete, and a
+refusal would have kept a path helper and an error variant
+alive for the five remaining steps to drag along. The cost is
+that anyone relying on such a file gets their `config.toml`
+host with no warning.
+
+Deleting the overlay tests took the provenance line's coverage
+with them. That line is the whole of what bombyx offers against
+a redirected run, and after the deletion only the `--host` half
+had a test -- `BOMBYX_HOST` could have stopped printing and the
+suite would have stayed green. The assertion moved onto the env
+test, and we confirmed it by disabling the `if` in `main.rs`
+and watching it go red.
+
 **canon-check could not see a rule whose bold heading wrapped**
 
 Every markdown file here wraps at 80 columns, so a bold rule
