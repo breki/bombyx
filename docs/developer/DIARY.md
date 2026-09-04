@@ -25,11 +25,19 @@ relative to `docs/`, and omitting it writes no link at all.
 
 `--doc` naming no file is refused, so a dead link cannot be
 written even on purpose. The guard covers the family rather than
-the one case: blank, absolute, a directory, and a path naming
-nothing. Absolute is refused for what it is rather than for
-being missing -- a leading slash in a markdown link resolves
-from the filesystem root on whoever reads it, so
-`/home/you/docs/plan.md` is broken for everyone else.
+the one case: blank, rooted, a directory, and a path naming
+nothing. A rooted path is refused for what it is rather than for
+being missing -- it resolves from the filesystem root on whoever
+reads it, so `/home/you/docs/plan.md` is broken for everyone
+else.
+
+Windows CI found the first version of that check wrong.
+`Path::is_absolute` answers for the machine the code was
+compiled for, and a link is read on every other one: it calls
+`/etc/passwd` relative on Windows and `C:\docs\plan.md`
+relative on Unix, and both are rooted in a link. The rule now
+matches the shapes directly. The Linux run had been green, which
+is the whole argument for the three-platform matrix.
 
 The two entry shapes are not cosmetic and the code now says so.
 With a link the label carries the slug twice and cannot share a

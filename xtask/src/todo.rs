@@ -167,6 +167,27 @@ fn done_cmd(
     Ok(())
 }
 
+/// Whether `rel` would anchor a markdown link to a filesystem
+/// root rather than to `docs/`.
+///
+/// `Path::is_absolute` cannot answer this, because it answers
+/// for the machine the code was compiled for and a link is read
+/// on every other one. It calls `/etc/passwd` relative on
+/// Windows and `C:\docs\plan.md` relative on Unix, and both are
+/// rooted in a link. Windows CI is what surfaced the first of
+/// those. So the shapes are matched directly: a leading
+/// separator, or a drive letter.
+fn is_rooted_link(rel: &str) -> bool {
+    if rel.starts_with('/') || rel.starts_with('\\') {
+        return true;
+    }
+    let mut chars = rel.chars();
+    matches!(
+        (chars.next(), chars.next()),
+        (Some(c), Some(':')) if c.is_ascii_alphabetic()
+    )
+}
+
 /// Refuses a `--doc` that would render a link a reader cannot
 /// follow.
 ///
@@ -177,9 +198,9 @@ fn done_cmd(
 /// against a directory the test chooses.
 ///
 /// Three ways a value fails, and the reason differs each time.
-/// Blank names nothing. An absolute path is root-relative in
-/// markdown, so `/home/you/docs/plan.md` sends every other
-/// reader to a path that does not exist on their machine. And a
+/// Blank names nothing. A rooted path sends every other reader
+/// to a filesystem root rather than to `docs/`, which
+/// [`is_rooted_link`] decides without asking the host. And a
 /// path naming no regular file -- missing, or a directory -- is
 /// the dead link this whole guard exists to stop, which was
 /// written twice before it did.
@@ -187,10 +208,10 @@ fn require_doc(docs: &std::path::Path, rel: &str) -> Result<(), String> {
     if rel.trim().is_empty() {
         return Err("todo --doc is blank; omit it for no link".to_owned());
     }
-    if std::path::Path::new(rel).is_absolute() {
+    if is_rooted_link(rel) {
         return Err(format!(
             "todo --doc '{rel}' must be relative to docs/, because a \
-             leading '/' in a markdown link resolves from the filesystem \
+             rooted path in a markdown link resolves from the filesystem \
              root on whoever reads it"
         ));
     }
@@ -836,12 +857,19 @@ mod tests {
             );
         }
 
-        // An absolute path is refused for what it *is*, not for
-        // being missing -- a leading `/` in a markdown link is
-        // root-relative and breaks for every reader. This one
-        // exists on the test machine when it exists at all.
-        let err = require_doc(&docs, "/etc/passwd").unwrap_err();
-        assert!(err.contains("relative"), "got: {err}");
+        // Absoluteness is judged as a *markdown link*, not by
+        // the host filesystem, and the two disagree in both
+        // directions. `Path::is_absolute` says no to
+        // `/etc/passwd` on Windows and no to `C:\x` on Unix,
+        // yet each is root-anchored in a link and breaks for
+        // every reader. Windows CI caught the first of these.
+        for rooted in ["/etc/passwd", "/docs/plan.md", "C:\\docs\\plan.md"] {
+            let err = require_doc(&docs, rooted).unwrap_err();
+            assert!(
+                err.contains("relative"),
+                "{rooted} must be refused as rooted, not as missing: {err}"
+            );
+        }
     }
 
     #[test]
