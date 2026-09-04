@@ -4,6 +4,62 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**A project may keep to its own machine, and the flag that did
+that is now scheduled for deletion**
+
+Step 4 of seven in project-config-off-repo (#25). A
+`[projects.<name>]` table gains an optional `host`, ranked above
+the file-wide one, so one project can run on a machine of its
+own. That is the one thing `bombyx.local.toml` did that nothing
+else could, and it returns as a key in the file the operator
+already owns.
+
+The issue asked for the key and nothing else. The operator asked
+for more: tie the host to the project and delete `--host`,
+`BOMBYX_HOST` and the file-wide `host` outright, because a
+one-off flag can point `destroy`'s `rm -rf` at a machine the
+project never named. Two of those three answers held and one did
+not. The deletions cannot land here: the binary still loads
+`bombyx.toml`, that file is refused a `host` key outright, and so
+the flag, the variable and the file-wide key are the only three
+sources bombyx has -- removing them now leaves the tool unable to
+find a host at all until steps 5 and 6 land. They go in step 6,
+where `bombyx.toml` dies and every setting comes from the
+registry, and #18 carries them. The file-wide `host` survives as
+a default a project entry overrides, because requiring the key in
+every entry writes one machine name once per project and renaming
+the machine then means editing every one.
+
+`HostOrigin` stopped being `Copy`. The notice saying which host
+is in force exists because `destroy` runs `rm -rf` on the winner,
+and a project's host and the file-wide host now come out of the
+same file -- so "from config.toml" no longer says which of the
+two won. The variant carries the project name, and the name is
+the map key as the file spells it, taken from `get_key_value`
+rather than re-parsed, because the lookup has already proved it
+legal. Two call sites changed, both one line.
+
+Self-review caught the defect the reviewers would have. The
+wording for the new source existed twice, in `Display` and again
+in the error path in `Config::load`, which is the drift that
+`host_problem` was written to prevent for the host *rules*. Both
+now call one `HostOrigin::describe`, which takes the registry's
+path when the caller knows it.
+
+`Registry::project_host` runs no checks, the way `Registry::host`
+runs none, and it also skips `Project::validate`. An entry whose
+`cpus` is zero still supplies its host: refusing would quietly
+demote that project to the file-wide host and boot its VM on the
+wrong machine, and the broken value is reported anyway the moment
+anything asks for the entry itself.
+
+Nine tests. The ranking was proven by inverting it in
+`resolve_host` and watching three of them fail, one of which was
+the error naming the wrong table. Nothing in the binary reads the
+key yet -- `project` is `None` until `--project` exists -- so a
+dry run still emits the file-wide host and the argv is
+unchanged.
+
 **Three reviewers on the registry table: three guard gaps, and
 nine comments claiming more than the code did**
 

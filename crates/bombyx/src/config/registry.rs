@@ -88,6 +88,24 @@ pub struct Project {
     #[serde(default = "default_remote_root")]
     pub remote_root: String,
 
+    /// The VM host this one project runs on, when it does not
+    /// run on the machine the file-wide `host` names.
+    ///
+    /// Optional, and absent from most entries. It exists for
+    /// the operator who keeps one project on a different
+    /// machine: without it they type `--host` on every command
+    /// for that project and rely on remembering to.
+    ///
+    /// A `String` rather than a checked type, and that is the
+    /// second of the three cases `CLAUDE.md` allows: the rules
+    /// live in `super::host::host_problem`, which
+    /// `super::Config::load` runs once the ranking has picked a
+    /// winner, so the error can name whichever source supplied
+    /// the bad value. A type checking it here would report a
+    /// value this entry supplies even on a run that takes its
+    /// host from `--host` and never looks at the key.
+    pub host: Option<String>,
+
     /// The machine to build.
     pub vm: Vm,
 
@@ -213,6 +231,35 @@ impl Registry {
         self.host.as_deref()
     }
 
+    /// Returns the VM host `name`'s entry names, if it has one,
+    /// alongside the map key that carried it.
+    ///
+    /// The key is returned because a caller reporting where the
+    /// host came from wants the table heading as this file
+    /// spells it, and re-parsing `name` into a [`ProjectName`]
+    /// to get one would be checking a value the lookup has
+    /// already proved legal.
+    ///
+    /// **Absence is `None`, never an error.** A name with no
+    /// table, and a name no table key could hold, both answer
+    /// `None`, because asking which host a project prefers is
+    /// not asking for its entry. [`Registry::project`] is what
+    /// reports a missing entry, and it reports it once, with a
+    /// message saying which table to write.
+    ///
+    /// **Unchecked, like [`Registry::host`] and for the same
+    /// reason.** It also runs none of `Project::validate`: an
+    /// entry whose `cpus` is zero still supplies its host here.
+    /// Refusing to would demote that project to the file-wide
+    /// host and boot its VM on the wrong machine, while the
+    /// broken value is reported anyway the moment anything asks
+    /// [`Registry::project`] for the entry itself.
+    #[must_use]
+    pub fn project_host(&self, name: &str) -> Option<(&ProjectName, &str)> {
+        let (key, project) = self.projects.get_key_value(name)?;
+        Some((key, project.host.as_deref()?))
+    }
+
     /// Returns the entry for `name`.
     ///
     /// The error names the file this registry was read from, so
@@ -335,6 +382,11 @@ mod tests {
         parse_at(source, "/home/dev/config.toml").unwrap()
     }
 
+    /// The host `name`'s entry names, without the key beside it.
+    fn host_of<'a>(registry: &'a Registry, name: &str) -> Option<&'a str> {
+        registry.project_host(name).map(|(_key, host)| host)
+    }
+
     /// Writes `source` as the registry inside a fresh directory.
     fn registry_dir(source: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -398,6 +450,56 @@ mod tests {
                 "{to} was accepted"
             );
         }
+    }
+
+    #[test]
+    fn a_project_entry_may_name_its_own_host() {
+        // The one thing the deleted `bombyx.local.toml` did
+        // that nothing else could: point one project at a
+        // different machine.
+        let source = registry_toml().replace(
+            "[projects.myproject]\n",
+            "[projects.myproject]\nhost = \"otherbox\"\n",
+        );
+        let registry = parsed(&source);
+        assert_eq!(host_of(&registry, "myproject"), Some("otherbox"));
+    }
+
+    #[test]
+    fn an_entry_with_no_host_of_its_own_supplies_none() {
+        // The key is optional, so most entries leave the
+        // file-wide `host` to apply.
+        let registry = parsed(&registry_toml());
+        assert_eq!(host_of(&registry, "myproject"), None);
+    }
+
+    #[test]
+    fn a_name_with_no_entry_supplies_no_host() {
+        // Including a name no table key could hold. Asking for
+        // a host is not asking for the entry, so this reports
+        // absence rather than the error `project` raises.
+        let registry = parsed(&registry_toml());
+        for name in ["other", "", "../../etc", "-x"] {
+            assert_eq!(host_of(&registry, name), None, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn a_host_survives_a_broken_value_elsewhere_in_its_entry() {
+        // `project_host` runs no checks, exactly as `host`
+        // runs none. Were it to validate, an entry with a bad
+        // `cpus` would quietly demote its host to the
+        // file-wide one and boot the VM on the wrong machine.
+        // The entry's own error still arrives, from `project`.
+        let source = registry_toml()
+            .replace(
+                "[projects.myproject]\n",
+                "[projects.myproject]\nhost = \"otherbox\"\n",
+            )
+            .replace("cpus = 4", "cpus = 0");
+        let registry = parsed(&source);
+        assert_eq!(host_of(&registry, "myproject"), Some("otherbox"));
+        assert!(registry.project("myproject").is_err());
     }
 
     #[test]

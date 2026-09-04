@@ -240,6 +240,38 @@ commands stay identical, which a dry run can show.
 
 ## Decisions
 
+- **2026-09-04 -- The flag and the environment variable go in
+  step 6, not step 4.** The operator wants the VM host tied to
+  the project, which means `--host` and `BOMBYX_HOST` are
+  deleted: a one-off flag can point `destroy`'s `rm -rf` at a
+  machine the project never named. They cannot go in step 4.
+  The binary still loads `bombyx.toml`, and that file is
+  refused a `host` key outright, so the flag, the variable and
+  the top-level `host` are the only three sources bombyx has --
+  deleting them here leaves the tool unable to find a host at
+  all until steps 5 and 6 land. Step 6 is where `bombyx.toml`
+  dies and every setting comes from the registry, so the
+  deletion goes there, and #18 carries it.
+
+- **2026-09-04 -- The top-level `host` survives as a default.**
+  A project entry's `host` wins when it has one; otherwise the
+  file-wide `host` applies. Requiring the key in every entry
+  writes one machine name once per project, so renaming the
+  machine means editing every entry rather than one line. The
+  coupling the operator asked for is what the per-project key
+  buys, and a default it overrides does not weaken it.
+
+- **2026-09-04 -- `HostOrigin::ProjectEntry` carries the
+  project name.** The startup notice exists so the operator can
+  see which machine `destroy` will run `rm -rf` on. A project's
+  host and the file-wide host come out of the same
+  `config.toml`, so "from config.toml" no longer says which one
+  won, and a placeholder such as `[projects.<name>]` leaves the
+  operator to work it out. Carrying the name costs `HostOrigin`
+  its `Copy`, which is two one-line changes at the call sites.
+  Once step 6 deletes the flag and the variable, this variant
+  is the only one the notice ever prints.
+
 - **2026-09-04 -- `config/registry.rs` owns the registry file.**
   Step 3 adds `[projects.<name>]` to the per-developer
   `config.toml`, and that file had exactly one parse type:

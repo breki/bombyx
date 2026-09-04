@@ -276,6 +276,11 @@ fn run() -> Result<Ran> {
     let sources = bombyx::config::HostSources {
         flag: cli.host.as_deref(),
         env: env_host.as_deref(),
+        // No project is named until `--project` exists, so the
+        // per-project `host` key is skipped and the file-wide
+        // one applies. `project-selection-flag` in
+        // `docs/todo.md` is the work that fills this in.
+        project: None,
         user_config_dir: user_dir.as_deref(),
     };
 
@@ -309,7 +314,7 @@ fn run() -> Result<Ran> {
     // inside a clone -- so staying quiet here also hides a
     // redirect the operator did not choose. `docs/todo.md`
     // tracks it as `config-home-env-provenance`.
-    if host_origin != HostOrigin::UserFile {
+    if !matches!(host_origin, HostOrigin::UserFile) {
         eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }
 
