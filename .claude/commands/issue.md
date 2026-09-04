@@ -112,6 +112,18 @@ describe how bombyx is run:
 - `.claude/agents/*.md`
 - `.github/workflows/ci.yml`
 - clap `///` help in `crates/bombyx/src`
+- `docs/architecture.md`, whose class diagram and
+  "What config values are checked" section are the inventory a
+  reader consults to answer which fields reach `ssh` unchecked
+- `llms.txt`, which inventories types field by field, so an
+  omission there reads as "no such field exists"
+
+The last two are the ones nobody opens. A `/review2` on #25
+found `docs/architecture.md` claiming `Project` had no `host`
+field on the branch that added one, and `llms.txt` listing three
+of `HostSources`' four. Neither was in any snapshot, because
+neither had been touched -- while every earlier step of that
+same series had updated both alongside the code.
 
 Grep for the old form across the repo before you finish. Leave
 the historical records alone: `docs/developer/DIARY.md`, the
