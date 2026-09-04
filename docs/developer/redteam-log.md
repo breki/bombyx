@@ -5,6 +5,97 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-04-doc-cannot-link-a-plans-own-section
+
+**Category:** The fix stops one step short of what it was for
+
+`--doc` refuses a `#fragment`, so a Done entry can link to a
+shared plan but not to the section of it that belongs to that
+step. `docs/issues/project-config-off-repo.md` has seven steps
+and every one of them would link to the same undifferentiated
+file.
+
+That is the weaker half of the improvement this change was made
+for. Deriving `issues/<slug>.md` was wrong because the plan is
+shared; pointing all seven siblings at the same anchor-less path
+is better and still not what a reader wants.
+
+The error no longer claims a fragment is unrenderable --
+`[**slug**](issues/plan.md#step-3)` renders and resolves
+perfectly well -- it now says `--doc` takes a path. So the
+message is honest and the capability is absent.
+
+Candidate fix: split `rel` on the first `#`, run the path half
+through the existing rules, and keep the fragment in the
+rendered destination. Needs a test row per shape and a decision
+about whether a fragment naming no heading should be refused,
+which nothing here can check.
+
+Deferred: raised by red-team in round 3 of the `/review2` on #7,
+which was the three-round ceiling, so it was logged rather than
+fixed and re-reviewed.
+
+### rt-2026-09-04-doc-guard-misses-doubled-and-trailing-slash
+
+**Category:** A path guard short of the family CLAUDE.md names
+
+`DocLink::new` refuses blank, rooted, unrenderable, escaping and
+naming-no-file. `CLAUDE.md` under **Test-Driven Development**
+enumerates what a path guard should cover: "`.`, `..`, empty,
+unrooted, too shallow, doubled and trailing slash". Doubled and
+trailing slash are not covered, and nor is an interior `.`
+segment.
+
+`--doc issues//project-config-off-repo.md` and
+`--doc ./issues/../issues/project-config-off-repo.md` both pass
+every rule. `escapes_repo` skips empty and `.` components
+deliberately, and `Path::join(..).is_file()` normalises the
+doubled separator, so the existence check agrees and the written
+link keeps the odd spelling. The guard's own doc comment claims
+it "refuses every shape that would not survive the trip to
+another reader", which is one claim wider than the code.
+
+Whether a renderer resolves `docs/issues//plan.md` was not
+verified and should not be assumed. What was verified is that
+the check normalises the path and the rendered link does not.
+
+Candidate fix: refuse an empty or `.` component in
+`escapes_repo`, which costs nothing because no real target needs
+one, and add the four rows to the existing table.
+
+Deferred: round 3 of the `/review2` on #7, at the ceiling.
+
+### rt-2026-09-04-doc-existence-check-answers-for-this-machine
+
+**Category:** A link vetted on one machine, dead on another
+
+`DocLink::new` in `xtask/src/todo.rs` ends with
+`docs.join(rel).is_file()`. That call follows symlinks, and on
+Windows and on a default macOS volume it matches
+case-insensitively. So `--doc issues/Plan.md` is accepted on
+those platforms when the file is `plan.md`, and the link is dead
+on GitHub and in every Linux clone.
+
+The same rule refuses a rooted path precisely because it would
+"resolve only on a machine laid out like the author's", and
+`escapes_repo` deliberately counts components rather than
+touching the disk so a missing directory cannot change the
+verdict. The existence check then puts the verdict back on the
+disk. A symlinked target is the other half: it passes
+`escapes_repo`, which is lexical, and `is_file()`, which
+resolves, while pointing outside the repository.
+
+Candidate fix: match the final component against the real
+directory entry with `read_dir` and an exact string compare, and
+refuse a target whose `symlink_metadata` says symlink. Needs a
+failing test first, and a fixture that can only be built on a
+platform where the difference shows.
+
+Deferred: raised by red-team during the `/review2` on #7 and not
+fixed there. Every machine that has run this command is Linux,
+so the case-insensitive half has never fired; the symlink half
+needs somebody to place a symlink under `docs/` deliberately.
+
 ### rt-2026-09-04-config-home-env-chooses-the-host-in-silence
 
 **Category:** A redirect on the path `destroy` uses, with no

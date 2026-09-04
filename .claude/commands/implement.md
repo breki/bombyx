@@ -141,10 +141,17 @@ particular:
    The command moves the bullet to the top of `## Done`
    (newest first) and stamps the date. `--doc` is the
    document the entry links to, relative to `docs/`, and
-   `/implement` always has one because step 2 wrote it.
-   The command refuses a `--doc` naming no file, so the
-   link cannot be dead. Pass `--summary "<text>"` to
-   override the pending summary for the Done entry.
+   `/implement` always has one because Phase 1 step 4
+   wrote it.
+   The command refuses a `--doc` that names no file under
+   `docs/`, which stops the commonest dead link. It does not
+   stop every one -- the check follows symlinks and ignores case
+   on Windows and macOS. That is recorded in
+   `docs/developer/redteam-log.md`, as
+   `rt-2026-09-04-doc-existence-check-answers-for-this-machine`.
+
+   Pass `--summary "<text>"` to override the pending summary
+   for the Done entry.
 
 5. Verify the change manually -- actually run it,
    do not infer from a green suite. For a change to

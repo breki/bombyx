@@ -4,6 +4,52 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**Reviewing `todo done` found two ways to corrupt the file it
+edits, and one that destroyed text**
+
+`/review2` on the `--doc` change. Five rounds across three
+reviewers, 35 findings, 32 fixed.
+
+The one nobody was looking for: completing a two-line entry
+destroyed its summary. `move_to_done` read the summary from the
+bullet's first line, and `add --issue` writes it on a
+continuation line underneath -- so the read returned empty and
+the continuation was then spliced away with the rest of the
+block. Not misread, deleted. `parse_section` had scanned the
+whole block correctly all along; the two disagreed and nothing
+made them agree. They now share `block_summary`.
+
+Then two injections, both demonstrated against the real file
+before either was fixed. A newline in `--date` or in `--slug`
+fabricates a bullet that the parser accepts as a genuine entry,
+so `todo list --done` reports work nobody did and
+`check_slug_free` reserves that slug for ever. We had just
+written a careful guard for `--doc` and left the three
+arguments beside it untouched. `CLAUDE.md` under **Coding
+Standards** already says why: a rule protects a primitive, not
+a field name, and every value that reaches the same primitive
+needs it. The primitive here is text spliced into
+`docs/todo.md`. `Slug` and `DoneDate` now sit beside `DocLink`.
+
+The interesting part was the review going non-convergent. Round
+2 found two defects in round 1's own fixes, which is the
+condition `/review` under **When it stops converging** exists
+for, so the loop stopped and the chain went to the operator.
+Both had the same diagnosis, and it was the commonest one on
+that list: the rule had no single home. What a link target may
+contain was written in five places, each a slightly different
+subset, and each round fixed one copy while the next round
+found another. The operator chose the root fix over a third
+patch -- state the set that is *allowed* rather than maintain a
+list of what is banned. Round 3's loop check came back clean,
+which is the first evidence that stop rule earns its place.
+
+`fresh-reader` then found that eight of the comments written
+during those rounds narrated the rounds themselves -- "twice in
+two review rounds", "the previous design". `target/*.findings`
+is not committed, so the story was unfindable, and the
+present-tense reason stood alone in every case anyway.
+
 **`todo done` stopped guessing which document an entry links to**
 
 It always rendered `- [**slug**](issues/<slug>.md)`, deriving the
@@ -24,12 +70,23 @@ say which document it means. `done` now takes `--doc <path>`
 relative to `docs/`, and omitting it writes no link at all.
 
 `--doc` naming no file is refused, so a dead link cannot be
-written even on purpose. The guard covers the family rather than
-the one case: blank, rooted, a directory, and a path naming
-nothing. A rooted path is refused for what it is rather than for
-being missing -- it resolves from the filesystem root on whoever
-reads it, so `/home/you/docs/plan.md` is broken for everyone
-else.
+written even on purpose. Five rules: blank, rooted,
+unrenderable, escaping the repository, and naming no file.
+Three of the five were added by reviewers after the first cut,
+and two are worth the words.
+
+Escaping the repository is the one an existence check cannot
+see. `../../../../etc/passwd` is not rooted and does name a
+file on this machine, so it passed. It is now decided by
+counting components rather than by resolving on disk, and one
+`..` stays legal because `docs/todo.md` linking to
+`../README.md` reaches the repository root.
+
+Unrenderable was written twice as a list of banned characters
+and fell behind the code both times. It is now the set that is
+*allowed* -- letters, digits, `-`, `_`, `.` and `/`. One
+sentence, nothing to keep in step, and it refuses `#`, `?` and
+a control character without anyone having had to think of them.
 
 Windows CI found the first version of that check wrong.
 `Path::is_absolute` answers for the machine the code was

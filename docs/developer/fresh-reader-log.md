@@ -9,6 +9,31 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-04-todo-help-hides-four-of-five-doc-rules
+
+**Category:** The program's own help is thinner than its rules
+
+`cargo xtask todo done --help` describes `--doc` as "A path
+naming no file is an error". That is one of five rules. The
+allowed character set is the one that produces the most
+surprising refusal -- a perfectly ordinary-looking
+`issues/plan.md#step-3` is rejected -- and `--help` says nothing
+about it, so an operator has to read `xtask/src/todo.rs` to find
+out why their path was refused.
+
+The same block still says `add --issue` renders "a link to
+`issues/<slug>.md>`", which is now the only place in the tool
+that derives a path from a slug. Nothing in the help says
+`done` deliberately stopped doing that, so the two subcommands
+look inconsistent for no stated reason.
+
+Not fixed here: this is clap `///` help, which is program
+output rather than documentation, and `/review2` bars stage 3
+from editing it. The limit is why it was not fixed, not a
+judgement that it does not matter.
+
+Raised by fresh-reader in the `/review2` on #7.
+
 ### fr-2026-09-04-canon-rs-assumes-the-review-vocabulary
 
 **Category:** Terms used before they are introduced
