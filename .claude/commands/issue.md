@@ -1,23 +1,20 @@
 ---
 description: Work a GitHub issue end to end -- verify it is still real, settle the approach, implement with TDD, review, and open a PR that says what was not verified
 argument-hint: "<issue number>"
-allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(cargo xtask*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review)
+allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(todo)
 ---
 
 Work the GitHub issue given as the argument, from reading it to
 reporting back on it.
 
-This command does not review and does not commit. `/review`
-owns the rounds and `/commit` owns the save-point, and
-`CLAUDE.md` under **Reviewing is its own process** says why the
-two are separate here.
+Committing happens through `/commit`, and a review is offered
+rather than assumed -- step 8 says who decides. This command
+reimplements neither, and `CLAUDE.md` under **Reviewing is its
+own process** says why they are separate here.
 
 ## Steps
 
-**Order.** Step 8 describes how the review rounds fit around the
-commits, and it runs after step 9 has made one. The sequence is
-1-7, then 9, 10, then 8 and its rounds, then 11 and 12. It is
-numbered where it is read, not where it runs.
+**Order.** The steps run in the order they are numbered.
 
 ### 1. Read the issue, then verify it against the tree
 
@@ -32,8 +29,9 @@ before planning any work:
 - Has the work already landed? `git log --oneline -20`, and
   grep for the symbol or the string the issue says is missing.
 - Are the numbers still current? Counts, versions and file
-  sizes all decay. Re-measure with the command that produces
-  them.
+  sizes all decay. Re-measure rather than repeating the
+  figure: `Grep` counts matches, `Read` gives line numbers,
+  and `wc -l` and `grep -c` are granted for the rest.
 
 The bombyx backlog issues cite a slug in `docs/todo.md` and
 often a planning document under `docs/issues/`. Read both. The
@@ -129,42 +127,39 @@ Definition of Done item 4 and no reviewer replaces it.
 
 ### 8. The review rounds
 
-`/review` owns the loop, the snapshot, the reviewers and the
-stopping rule, and `.claude/commands/code-reviewers.md` owns
-which reviewers run and what each is handed. Do not restate
-either here. A second copy drifts, and the parts most expensive
-to lose are the ones a summary drops first.
+`/review` owns the loop, the snapshot, the reviewers, the
+stopping rule and what happens to a finding nobody fixes.
+`.claude/commands/code-reviewers.md` owns which reviewers run
+and what each is handed. Read those rather than working from a
+summary here.
 
-What is specific to working an issue:
+**The operator decides whether a review happens.**
+`CLAUDE.md` under **Reviewing is its own process** leaves the
+choice to them: offer it, and spawn the reviewers only when
+asked.
 
-**The rounds run after step 9's commit**, and again after the
-fix commits from a round land. Step 9 owns committing; this
-step owns what happens around it.
+Three things are specific to working an issue.
 
-**Reviewers read a snapshot of the working tree, and their
-fixes stay separate from the change they correct.** Commit a
-round's fixes on their own, so a bad fix reverts without taking
-the original work with it.
+**The rounds run before step 9's commit.** `/review` snapshots
+`git diff HEAD`, so it wants the work still in the tree.
+Committing first hands the reviewers an empty diff, and they
+will report a clean sheet on a change nobody read.
 
-**A fix is new code and nobody has reviewed it.** Review round
-one's fixes. This is the step most easily skipped and the one
-that pays.
+**A round after the PR is open reviews the fixes, not the
+branch.** When a comment asks for one, make the edits it asks
+for and leave them in the tree, then run `/review` -- it still
+snapshots `git diff HEAD`, so what it reads is those edits and
+nothing else. Commit them on their own rather than amending, so
+a bad fix reverts without taking the original work with it.
 
-**Verify a finding's premise before acting on it.** The
-findings are usually right; the reasoning and the proposed
-remedy are not always. `CLAUDE.md` under **Print the variable
-before claiming what it holds** binds a review suggestion the
-same as anything else.
-
-**Stop when we would not fix anything a round found.** That
-rule and the three-round cap are `/review` under **Stop, or go
-again**. Capture the substantive findings you are not fixing
-with `/todo`, and link them from the PR.
-
-**Three failures in one place is a design signal, not a fourth
-patch.** When the same mechanism is wrong in consecutive
-rounds, replace the mechanism instead of patching the next
-case.
+**The PR body must list the findings nobody fixed.** `/review`
+logs the deferred ones under `docs/developer/`, which a reader
+of the branch will not think to open. A finding it *declined*
+is logged nowhere, and `target/review-<n>.findings` is not
+committed, so copy that one into the PR body while the round's
+report is still in front of you. Do not send either kind to
+`/todo`; that is for a problem you found yourself while
+implementing.
 
 ### 9. Commit
 
@@ -182,14 +177,14 @@ entry written earlier records decisions that later reverse.
 ### 10. Keep the PR open from the first push
 
 Open the PR as soon as the first commit is pushed, with
-`gh pr create` and `Closes #<n>`. Do not hold it back until the
-review rounds finish. CI starts on the first push rather than
-at the end, review comments attach to the commit that caused
-them, and the work is visible while it is still moving.
+`gh pr create` and `Closes #<n>`. CI then starts on the first
+push rather than at the end, and the work is visible while it
+is still moving.
 
-Then update the title and the body as the branch grows: after
-each review round, and whenever the scope changes. A title that
-still describes the first commit misdescribes the branch.
+Then update the title and the body as the branch grows:
+whenever the scope changes, and after a round that a PR comment
+asked for. A title that still describes the first commit
+misdescribes the branch.
 
 The body carries what a reviewer cannot get from the diff:
 
@@ -215,9 +210,15 @@ letting it read as a regression.
 ### 12. Report back on the issue
 
 Comment on the issue with the outcome: what was fixed, the
-commit, the verification, and what remains unverified. Close it
-only once the work is merged, or when step 1 established that
-it was already satisfied.
+commit, the verification, and what remains unverified.
+
+**The operator merges the PR, so this command ends here.**
+Closing the issue waits on that merge, and so does moving its
+entry in `docs/todo.md` to `## Done` -- `cargo xtask todo done`
+is the command for it and nothing calls it on your behalf. Say
+in the report that both are outstanding. The one exception is
+an issue step 1 established was already satisfied: close that
+one there and then, with the evidence.
 
 ## Rules
 
@@ -225,7 +226,8 @@ it was already satisfied.
 - Never work an issue on `main`.
 - No behaviour change without a failing test first.
 - A regression test nobody has seen fail does not count.
-- Re-review round one's fixes; `/review` bounds the rest.
+- Offer the review before the commit; `/review` owns the
+  loop.
 - Never report a gate as passing on the strength of a
   document. Run it.
 - Say what you did not verify.
