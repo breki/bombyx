@@ -61,6 +61,17 @@ the user's words into a slug and a summary.
    Keep the user's wording -- do not paraphrase or
    expand.
 
+   **When a GitHub issue already holds the detail, the
+   body is a pointer, not a copy.** Give the issue
+   number, what the item depends on, and one sentence
+   saying what it is. Restating the issue puts the same
+   prose in two places that nothing keeps in step, and
+   `docs/todo.md` is the copy that goes stale, because
+   an edit on GitHub never reaches it. The entries for
+   issues #22 to #27 are the shape to match. A planning
+   doc under `docs/issues/` is a pointer target the same
+   way.
+
 3. Confirm: print the slug the command reported. Mention
    `/implement <slug>` as the next step. Do not start
    implementing.

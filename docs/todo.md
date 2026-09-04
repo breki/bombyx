@@ -132,18 +132,10 @@ plan, decisions, and outcome.
   commits over two days and the review flagged the churn.
 
 - **project-selection-flag** -- `--project` names the project explicitly
-  Step 6 of 7 in the re-split of project-config-off-repo; GitHub issue #18.
-  Depends on registry-config-load. The only step that changes behaviour, the
-  only breaking one, and the largest. `--project <name>` becomes a required
-  global argument for every VM subcommand, `--config` names the registry and
-  defaults to config.toml in the user config directory, and main.rs calls the
-  registry loader. ProjectFile, reject_host_key, ConfigError::HostInProjectFile
-  and the old Config::load are deleted with the switch. Inferring the project
-  from the working directory git remote was rejected: naming it explicitly
-  means bombyx reads nothing at all from the project directory. This commit
-  carries every document, because the prose describes user-facing behaviour and
-  cannot land before it changes -- docs/tutorial.md is the heaviest at 14
-  mentions of the file that goes away. The decisions live in
+  Step 6 of 7 in the project-config-off-repo re-split; GitHub issue #18.
+  Depends on registry-config-load. The switch: `--project` becomes required,
+  `--config` names the registry, and the project file is deleted. The only
+  breaking step, and it carries every document. Decided in
   `docs/issues/project-config-off-repo.md`.
 
 - **self-update-resolves-tar-late** -- two downloads before it notices no tar
@@ -199,62 +191,28 @@ plan, decisions, and outcome.
   Raised by the workflow retrospective, 2026-09-03.
 
 - **overlay-drop-project-overrides** -- the overlay drops its project fields
-  Step 1 of 7 in the re-split of project-config-off-repo; GitHub issue #22. Pure
-  removal, and the larger half of that work: of the 52 references in config.rs
-  to the types the effort removes, 41 are the overlay and 11 are ProjectFile.
-  Remove project, remote_root, vm and source from Overlay, and delete
-  Config::with_overlay, the replace helper and into_config's overlay parameter.
-  bombyx.local.toml survives as a host-only file until #23. Between this and the
-  config move an operator cannot override a committed bombyx.toml locally; with
-  one operator whose host already comes from config.toml, that gap is
-  acceptable.
+  Step 1 of 7 in the project-config-off-repo re-split; GitHub issue #22. Pure
+  removal, and the larger half of that work. Decided in
+  `docs/issues/project-config-off-repo.md`.
 
 - **overlay-drop-host-source** -- delete bombyx.local.toml entirely
   Step 2 of 7; GitHub issue #23. Depends on overlay-drop-project-overrides.
-  Second pure removal: Overlay, read::local_config_path, HostOrigin::Overlay,
-  its branch in resolve_host, its entry in host_places, its arm in the origin
-  match inside InvalidHost, and the overrides notice in main.rs. Host ranking
-  becomes flag, environment, config.toml. The one capability lost is a different
-  VM host for one project, which registry-project-host restores.
+  Pure removal.
 
 - **registry-projects-table** -- config.toml gains a projects table
-  Step 3 of 7; GitHub issue #24. Pure addition, tests the only caller. Parse
-  [projects.<name>] in the per-developer config.toml and look one up by name. A
-  project table carries remote_root, [vm] and [source] -- what bombyx.toml holds
-  today, minus project, which becomes the table key. A missing entry is an error
-  naming the file and the keys the entry needs; bombyx writes nothing on the
-  operator's behalf, which is how a missing bombyx.toml behaves today. Decided:
-  remote_root stays per-project rather than becoming a top-level default with an
-  override, because one place to look for the value beats two.
+  Step 3 of 7; GitHub issue #24. Pure addition, tests the only caller.
 
 - **registry-project-host** -- an optional host key per project
-  Step 4 of 7; GitHub issue #25. Depends on registry-projects-table and restores
-  what overlay-drop-host-source removes. Pure addition, still no caller.
-  [projects.<name>] gains an optional host, ranked between the environment and
-  the registry's top-level host, so the full order is --host, BOMBYX_HOST, the
-  project's host, the top-level host. HostOrigin gains a variant for it, so the
-  notice saying which host is in force keeps naming its source.
+  Step 4 of 7; GitHub issue #25. Depends on registry-projects-table, and
+  restores what overlay-drop-host-source removes. Pure addition.
 
 - **registry-config-load** -- load a Config from the registry by name
   Step 5 of 7; GitHub issue #26. Depends on registry-projects-table and
-  registry-project-host. Last of the three additions, still with no production
-  caller. A loader taking a project name and HostSources and returning a full
-  Config plus the winning HostOrigin -- the registry counterpart of
-  Config::load. Config::parse and Config::for_tests move onto it here: both
-  build from a bombyx.toml string today and every test module uses for_tests, so
-  moving them early keeps step 6 a deletion. Decided: a sibling of Config::load,
-  not a rewrite, so the switch and the new loading path stay in different
-  commits.
+  registry-project-host. Pure addition, the last before the switch.
 
 - **destroy-confirmation-shape** -- what destroy's positional becomes
-  Step 7 of 7; GitHub issue #27. Depends on project-selection-flag.
-  VmCmd::Destroy takes a positional project today, which is not selection: it
-  exists so the operator types the name of the thing being destroyed. Once
-  --project selects, the positional is either redundant or a typed confirmation.
-  Two shapes, undecided: keep it, so bombyx --project myproj destroy myproj
-  reads as the confirmation it already is, or drop it and confirm some other
-  way. Split out of project-selection-flag so a design question does not sit
-  inside the commit that switches the tool over.
+  Step 7 of 7; GitHub issue #27. Depends on project-selection-flag. One design
+  question, undecided.
 
 ## Done
 
