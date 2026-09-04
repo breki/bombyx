@@ -81,7 +81,7 @@ pub struct HostSources<'a> {
 /// value that name answers the operator's question, "which key
 /// do I edit?". For `host` it does not, because the value may
 /// have come from `--host`, from an environment variable, or
-/// from either of two files. The useful answer there is the
+/// from the per-developer `config.toml`. The useful answer is the
 /// *source*, which [`super::Config::load`] knows and attaches.
 pub(crate) enum HostProblem {
     /// Blank, so no host at all.
@@ -287,15 +287,16 @@ pub(crate) fn resolve_host(
         }
     }
     Err(ConfigError::HostMissing {
-        places: host_places(sources),
+        place: host_place(sources),
     })
 }
 
-/// Names the file that can carry a host, for an error message.
+/// Names the one file that can carry a host, for an error
+/// message.
 ///
 /// It is a path the operator can act on, so it is printed in
 /// full rather than described.
-pub(crate) fn host_places(sources: &HostSources) -> String {
+pub(crate) fn host_place(sources: &HostSources) -> String {
     match sources.user_config_dir.map(|d| d.join(USER_CONFIG_FILE)) {
         Some(user) => user.display().to_string(),
         // No home directory in the environment, so there is

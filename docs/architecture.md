@@ -102,7 +102,7 @@ probe commands, `doctor` decides what their output means.
 |--------|------|
 | `plan` | which commands run, and in what order |
 | `config` | `bombyx.toml`, and the `Config` every command reads |
-| `config::read` | reading a config file: symlinks, size, overlay path |
+| `config::read` | reading a config file: symlinks, size, TOML errors |
 | `config::error` | `ConfigError` for a file, `FieldError` for a value |
 | `config::guards` | the rules more than one field shares |
 | `config::host` | where the VM host name comes from, and its shape |
@@ -383,9 +383,11 @@ another module is the one a new field gets added without.
 
 ## Quality gates
 
-`cargo xtask validate` runs nine. The dependency cooldown goes
-first so nothing compiles a too-new crate; after that they run
-cheapest first: formatting, duplication, licences, clippy, doc
-links, tests, coverage, security audit. `CLAUDE.md` has the detail,
-including why `audit` degrades to a warning inside `validate`
-and errors when run alone.
+`cargo xtask validate` runs every gate in one pass. The
+dependency cooldown goes first so nothing compiles a too-new
+crate; after that they run cheapest first, ending with the
+network audit. `CLAUDE.md` under **Definition of Done** lists
+them in run order and is the one place that does, so this
+paragraph does not repeat the list -- two copies of it drifted
+apart once already. It also says why `audit` degrades to a
+warning inside `validate` and errors when run alone.

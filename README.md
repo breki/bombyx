@@ -15,7 +15,7 @@ agent works inside it.
 - [Configure](#configure)
   - [Why `host` is not in `bombyx.toml`](#why-host-is-not-in-bombyxtoml)
   - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
-  - [A different machine for one project](#a-different-machine-for-one-project)
+  - [Which host a command is about to use](#which-host-a-command-is-about-to-use)
 - [Use](#use)
 - [Updating bombyx](#updating-bombyx)
   - [A version number is the only thing
@@ -171,11 +171,11 @@ on whatever host is in force.
 
 Refusing it also keeps the value out of reach of a cloned
 repo. `host` is handed to `ssh` as its first argument, and
-`ssh` reads a leading `-` as an option -- so a repo shipping
-`host = "-oProxyCommand=..."` used to be able to run code on
-your workstation from a bare `bombyx status`. The charset check
-that stopped that is still there, but the value no longer
-arrives from the repo at all.
+`ssh` reads a leading `-` as an option, so a value such as
+`-oProxyCommand=...` runs code on your workstation from a bare
+`bombyx status`. bombyx refuses any host beginning with `-`,
+whichever source supplied it. Refusing the key in `bombyx.toml`
+removes the repo from that list of sources.
 
 ### Where bombyx looks for the host
 
@@ -204,7 +204,10 @@ environment names:
 | `XDG_CONFIG_HOME` | `$XDG_CONFIG_HOME/bombyx/config.toml` |
 | `HOME` | `$HOME/.config/bombyx/config.toml` |
 
-`BOMBYX_CONFIG_HOME` is there for keeping two setups apart.
+`BOMBYX_CONFIG_HOME` is there for keeping two setups apart. It
+is also the one host source a per-directory environment tool
+can redirect from inside a clone, which "Which host a command
+is about to use" below returns to.
 `%APPDATA%` is consulted **only** on Windows: it is often
 exported under WSL and Wine too, and honouring it there would
 read a Windows config directory in preference to
@@ -231,10 +234,16 @@ bombyx: host vmhost-b from --host
 
 Your own `config.toml` gets no such line. It is the ordinary
 case, and a line on every command is noise nobody reads. So
-the rule is: silence means the host came from your own file,
-and a line means something overrode it. Either way the host
-that `destroy` would run `rm -rf` on is visible without
-reasoning about precedence.
+silence means the host came from a `config.toml`, and a line
+means the flag or the variable overrode it.
+
+Note what silence does *not* promise. It says the host came
+from a `config.toml`, not that it came from *yours*:
+`BOMBYX_CONFIG_HOME` chooses which config directory bombyx
+reads, and a per-directory environment tool such as `direnv`
+can set it from inside a clone. `destroy` is the command that
+shows the host regardless, in the `host:directory` line it asks
+you to confirm.
 
 There is no way yet to give one project a host of its own
 permanently -- `--host` covers a single run, and nothing
