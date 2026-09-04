@@ -69,6 +69,70 @@ _None yet._
 
 ## Suggestions to flow back to the template
 
+### tf-2026-09-04-todo-done-should-take-its-link-target -- todo done should take its link target
+
+**Supersedes `tf-2026-08-10-todo-done-writes-dangling-issue-links`.**
+That entry described the defect correctly and proposed two fixes.
+Both were tried against the cases that actually occur and both
+are wrong for the commonest one. bombyx shipped a third in
+`0501500` and `a442513`; the template still has the original
+behaviour.
+
+`move_to_done` in `xtask/src/todo.rs` derives the link from the
+slug, always rendering `- [**slug**](issues/<slug>.md)`. Three
+shapes of completed item turn up in practice:
+
+1. An item worked through `/implement`, which writes
+   `docs/issues/<slug>.md` before finalising. The derived link
+   resolves.
+2. One step of a plan shared with its siblings. It has no
+   document of its own, and the link the reader wants is the
+   shared plan.
+3. An item with no document at all.
+
+The earlier entry's two fixes -- omit the link when
+`docs/issues/<slug>.md` is absent, or have `/implement`
+guarantee the doc -- both handle 1 and 3 and get 2 wrong,
+leaving the plan unreachable from the entry. Case 2 is not
+hypothetical: in bombyx it fired on `overlay-drop-project-overrides`
+and again on `overlay-drop-host-source` the same day, and both
+links were corrected by hand to point at the shared plan. Five
+more steps of that plan were queued behind them.
+
+So the caller has to be able to name the document. `done` now
+takes `--doc <path>`, written relative to `docs/`, and omitting
+it writes no link at all. `move_to_done` stays pure over the
+markdown: it renders the target it was handed, and the caller
+checks that the file exists.
+
+Two facts the template does not have to rediscover.
+
+**`Path::is_absolute` is the wrong predicate for a link.** The
+guard refusing a rooted `--doc` used it, and Windows CI failed
+while Linux stayed green. It answers for the machine that
+compiled the code, and a markdown link is read on every other
+one: it calls `/etc/passwd` relative on Windows and
+`C:\docs\plan.md` relative on Unix, and both anchor a link to a
+filesystem root. Match the shapes directly -- a leading
+separator, or a drive letter.
+
+**The two entry shapes are not interchangeable, and the
+template's own parser is why.** With a link the label carries
+the slug twice and cannot share a line with the summary, so the
+entry wraps onto a `  -- <summary>` continuation. Without one it
+must *not* wrap: `raw_slug` accepts a bold slug only when the
+` -- ` separator follows it on the same line, so a wrapped plain
+entry parses as nothing, disappears from `todo list --done`, and
+lets `add` mint a duplicate slug. That trap is in the template
+as shipped and had no test.
+
+`add --issue` is the untouched sibling. It derives its path the
+same way and can write the same dead link, and in bombyx it has
+no caller. Guarding it as `done` is now guarded would be wrong,
+because at capture time the spec may legitimately not exist yet
+-- so the open question is whether it should take a path or be
+deleted.
+
 ### tf-2026-08-30-xtask-invocations-in-command-files-are-not-quiet -- xtask invocations in command files are not quiet
 
 Every xtask invocation in the template's `.claude/commands/` files is
