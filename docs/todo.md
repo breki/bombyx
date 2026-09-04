@@ -246,6 +246,16 @@ plan, decisions, and outcome.
   Raised as red-team finding RT-1; the prose claiming otherwise was corrected in
   that change, the code was not.
 
+- **add-issue-flag-unused** -- todo add --issue has no caller
+  The flag renders a pending entry as a link to issues/<slug>.md, derived rather
+  than given, so it can write a dead link the way todo done used to. Nothing
+  calls it: no file under .claude/ mentions it, and /todo documents only --slug,
+  --summary and --body. Guarding it the way done --doc is now guarded would be
+  wrong, because at capture time the spec may legitimately not exist yet. So the
+  question is whether the flag should take a path like done --doc does, or be
+  deleted. Found while fixing #7, and kept out of it: that issue is about done,
+  and this flag has no caller to endanger.
+
 ## Done
 
 - [**overlay-drop-host-source**](issues/project-config-off-repo.md)
