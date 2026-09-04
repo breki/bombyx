@@ -177,10 +177,6 @@ plan, decisions, and outcome.
   as the restart, and the step names already exist in `validate.rs`'s step list.
   Raised by the workflow retrospective, 2026-09-03.
 
-- **registry-project-host** -- an optional host key per project
-  Step 4 of 7; GitHub issue #25. Depends on registry-projects-table, and
-  restores what overlay-drop-host-source removes. Pure addition.
-
 - **registry-config-load** -- load a Config from the registry by name
   Step 5 of 7; GitHub issue #26. Depends on registry-projects-table and
   registry-project-host. Pure addition, the last before the switch.
@@ -238,6 +234,10 @@ plan, decisions, and outcome.
   the body across. Found while using the fixed tool for the first time.
 
 ## Done
+
+- [**registry-project-host**](issues/project-config-off-repo.md)
+  -- an optional host key per project
+  (2026-09-04)
 
 - [**registry-projects-table**](issues/project-config-off-repo.md)
   -- config.toml gains a projects table
