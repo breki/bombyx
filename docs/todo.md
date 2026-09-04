@@ -213,13 +213,33 @@ plan, decisions, and outcome.
   `move_to_done` in `xtask/src/todo.rs` always renders the Done entry as `-
   [**<slug>**](issues/<slug>.md)`, and its doc comment says why that is safe:
   `/implement` is the only caller and it writes that document before finalising.
-  `/issue` is now a second caller, and an item split out of a shared plan has no
-  document of its own -- overlay-drop-project-overrides is one of seven steps
-  whose plan is `docs/issues/project-config-off-repo.md`. Completing it wrote a
-  link to a file that does not exist, and the link had to be corrected by hand.
+  The comment was corrected in `f827993`, so what remains is the behaviour.
+  `/implement` is still the only command that calls `done`, but the operator
+  runs it by hand for an item worked through `/issue`, and an item split out of
+  a shared plan has no document of its own --
+  overlay-drop-project-overrides is one of seven steps whose plan is
+  `docs/issues/project-config-off-repo.md`. Completing it that way wrote a link
+  to a file that does not exist, and the link had to be corrected by hand.
   canon-check does not catch it, because it checks backticked paths and this is
   a markdown link. Either `done` should take the link target, or mirror `add`'s
   `--issue` flag and write a plain bold slug without one.
+
+- **canon-xref-wrapped-bold** -- canon-check cannot see a wrapped bold heading
+  `reference_targets` in `xtask/src/canon.rs` collects a bold-led paragraph as a
+  reference target only when the opening and closing `**` fall on the same line:
+  it calls `between(line, "**", "**")` per line. Every markdown file here wraps
+  at 80 columns, so a bold lead-in longer than about 70 characters spans two
+  lines and becomes invisible to the checker. A valid cross-reference to it then
+  fails the gate with 'names no heading', and the author's only recourse is to
+  point somewhere else. Found while writing `/review2`, which could not cite
+  `CLAUDE.md`'s rule beginning 'Ask before testing something that is not the'
+  because that bold text wraps before 'program.'. This is the wrap hazard
+  `CLAUDE.md` already records under **Do not grep canon prose for a phrase**,
+  and canon-check was fixed for it once in a different check by collapsing
+  whitespace runs. The fix is the same shape: collect targets from the flattened
+  text rather than line by line. Note the inverse risk -- flattening naively
+  would let a bold span cross a paragraph boundary, so join only consecutive
+  non-blank lines.
 
 ## Done
 

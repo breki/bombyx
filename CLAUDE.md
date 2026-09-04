@@ -945,6 +945,7 @@ a fresh empty `[Unreleased]` above it.
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline with stepwise progress |
 | `/review` | Review and fix uncommitted work, committing nothing; independent of `/commit` |
+| `/review2` | The same three reviewers in sequence, red-team looping until behaviour settles |
 | `/commit` | Save-point commit with diary and CHANGELOG (no reviewing, no version bump) |
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |

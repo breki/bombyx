@@ -19,15 +19,35 @@ reporting are here.
 
 Up to three rounds. Step 4 usually stops it sooner.
 
-**This file is frozen until a run against a real code diff has
-exercised it.** The stop rule was edited four times in two days
-and none of those edits was reviewed before it landed; the
-fourth added a stop condition that three reviewers then found
-to be a redundant restatement of step 3's fixing bar, phrased
-so that only a prose finding could satisfy it. Every run so far
-has been against prose. So take a finding about this file to a
-backlog rather than editing it, until there is a code review to
-measure it against.
+**A code diff has now exercised this file, so it is no longer
+frozen.** It was frozen because the stop rule had been edited
+four times in two days with none of those edits reviewed
+before it landed, and because every run until then had been
+against prose -- the fourth edit added a stop condition that
+three reviewers found to be a redundant restatement of step
+3's fixing bar, phrased so only a prose finding could satisfy
+it.
+
+The run that lifted it was the overlay removal, `5d4db0c` and
+`f827993`. Two rounds, three reviewers, 77 findings. What it
+showed:
+
+- **The stopping conditions work, and not the one we
+  expected.** "The round fixed nothing" never fired -- round
+  one fixed 34. The run ended on **Earlier fixes are
+  breaking**, with ten of round two's findings landing inside
+  round one's fixes. That condition had never been tested and
+  it fired correctly the first time.
+- **The three-round cap never bound.** Divergence stopped the
+  run at two rounds, which is what the cap is a backstop for.
+- **Spawning the three together triples some findings.** One
+  stale word was reported by all three reviewers and fixed
+  once; a duplicated fixture by two. `/review2` exists to
+  spend that work once.
+
+So a finding about this file can now be acted on rather than
+logged. Change the stop rule only against a run like that one,
+and say which run.
 
 Three rounds is the cap because the findings stop dropping off.
 One branch ran five rounds and found 60, 42, 36, 37, 33. A

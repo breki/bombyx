@@ -4,6 +4,84 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**`/review2` reviews one reviewer at a time, and reviewing
+itself broke it**
+
+`/review` spawns the three reviewers together, so a defect in
+three places is reported three times and fixed once. On the
+overlay removal the stale word "overrides" came back from all
+three, and the duplicated test fixture from two. `/review2`
+runs them in sequence instead: `artisan`, then `red-team`
+looping while behaviour still moves, then `fresh-reader` on
+prose alone. Each one reads the previous one's fixes, so a bad
+fix is caught inside the run rather than a round later.
+
+The order is by danger. `artisan` changes types, tests and
+signatures; `red-team` changes logic; `fresh-reader` changes
+only prose. The stage that finds danger runs after the stage
+that creates most of it, and the stage that cannot break the
+program runs last. Each stage also gets one lane, so the same
+reviewer is not asked for everything it has.
+
+Then we ran it against itself, and it broke on the first thing
+it read. Fourteen defects, and the useful part is that they
+were one mistake repeated: **we wrote the lanes as kinds of
+file when they are kinds of defect.** "The source code" for
+stage 1 and "the code" for stage 2 left canon belonging to
+neither, so a canon change routed to the prose stage alone
+while the correctness stage was told to ignore exactly the
+findings `red-team` is best at. On the `/issue` review its
+three most useful results were "this command file contradicts
+itself", all labelled correctness, and the first draft would
+have demoted every one to a wording note.
+
+Three of the fourteen came from the walk, before any reviewer
+was spawned -- for a workflow file `/review` defines the
+artifact run as walking the file against the tree with nothing
+spawned, and that is what it is for. `canon-check` passed on
+the broken version, because a lane naming the wrong category
+is not a heading, a path or a `git` subcommand.
+
+`red-team` then found eleven more, five of them inside fixes
+made minutes earlier. The sharpest was that the loop could
+never iterate: a round was earned only by fixing a behaviour
+defect, and a canon change cannot produce one, so stage 2 was
+always exactly one round. That is the mirror of the stop
+condition `bd52dcd` reverted the day before -- there only a
+prose finding could satisfy it, here only a code finding
+could. Same file family, inverted, one day apart.
+
+The resolution was to scope the command rather than patch it:
+`/review2` reviews changes containing source code, and a
+prose-or-canon-only change goes to `/review`, which already
+handles all three cases. That dissolved four of the six
+root-cause findings and left three bounded ones, all fixed --
+the findings-file paths are named, the snapshot is retaken
+before every stage and round, and the file says which four
+parts of `/review` it inherits and that the round-three rule is
+not among them.
+
+One reviewer conclusion we declined. `red-team` said the
+justification for stage 2's lane was contradicted by the record
+and that the lane needed re-arguing. The premise was half
+right: the claim was true, but `target/review-2.findings` was
+never written on the previous run, so it was unverifiable from
+disk. The record was incomplete rather than contradictory, and
+acting on the conclusion would have undone a correct decision.
+Writing each stage's findings is mandatory in the new file for
+that reason.
+
+`canon-check` also has a real bug, found by using it. It
+collects a bold heading as a reference target only when both
+`**` land on one line, and every markdown file here wraps at 80
+columns, so a valid pointer at a wrapped rule fails the gate
+with "names no heading". Captured as `canon-xref-wrapped-bold`.
+
+The stop rule has now been written twice and exercised never,
+so the file says so and asks for findings against it to go to a
+backlog until a code review measures it. That is the discipline
+`/review` was held to the day before.
+
 **`/issue` was wrong in ten places by the end of the day**
 
 We wrote the command in the morning and found it wrong by
