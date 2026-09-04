@@ -9,9 +9,9 @@
 //!   slug that already exists (pending or done) and a summary
 //!   that would not fit on one line.
 //! - `done` moves a pending bullet to the top of `## Done`
-//!   (newest first), stamping the date and linking it to
-//!   `issues/<slug>.md` whether or not that file exists -- see
-//!   `move_to_done`.
+//!   (newest first) and stamps the date. `--doc` names the
+//!   document the entry links to, and omitting it writes no
+//!   link -- see `move_to_done` for why the caller decides.
 //!
 //! The command owns *placement and mechanics*; the caller
 //! supplies the *content* (slug, summary, body).
@@ -65,6 +65,13 @@ pub enum TodoAction {
         /// would use UTC and mis-date near midnight).
         #[arg(long)]
         date: String,
+        /// Document the entry links to, written relative to
+        /// `docs/` (`issues/<slug>.md`, or a shared plan such as
+        /// `issues/project-config-off-repo.md`). Omit it and the
+        /// entry carries no link. A path naming no file is an
+        /// error.
+        #[arg(long)]
+        doc: Option<String>,
     },
 }
 
@@ -87,7 +94,8 @@ pub fn todo(action: TodoAction) -> Result<(), String> {
             slug,
             summary,
             date,
-        } => done_cmd(&slug, summary.as_deref(), &date),
+            doc,
+        } => done_cmd(&slug, summary.as_deref(), &date, doc.as_deref()),
     }
 }
 
@@ -147,11 +155,52 @@ fn done_cmd(
     slug: &str,
     summary: Option<&str>,
     date: &str,
+    doc: Option<&str>,
 ) -> Result<(), String> {
+    if let Some(rel) = doc {
+        require_doc(&workspace_root().join("docs"), rel)?;
+    }
     let content = read_todo()?;
-    let updated = move_to_done(&content, slug, date, summary)?;
+    let updated = move_to_done(&content, slug, date, summary, doc)?;
     write_todo(&updated)?;
     println!("Moved '{slug}' to Done ({date}).");
+    Ok(())
+}
+
+/// Refuses a `--doc` that would render a link a reader cannot
+/// follow.
+///
+/// `rel` is written relative to `docs/`, because that is where
+/// `docs/todo.md` sits and a markdown link resolves against the
+/// file holding it. `docs` is the directory to resolve against,
+/// passed in rather than read here so the check is exercised
+/// against a directory the test chooses.
+///
+/// Three ways a value fails, and the reason differs each time.
+/// Blank names nothing. An absolute path is root-relative in
+/// markdown, so `/home/you/docs/plan.md` sends every other
+/// reader to a path that does not exist on their machine. And a
+/// path naming no regular file -- missing, or a directory -- is
+/// the dead link this whole guard exists to stop, which was
+/// written twice before it did.
+fn require_doc(docs: &std::path::Path, rel: &str) -> Result<(), String> {
+    if rel.trim().is_empty() {
+        return Err("todo --doc is blank; omit it for no link".to_owned());
+    }
+    if std::path::Path::new(rel).is_absolute() {
+        return Err(format!(
+            "todo --doc '{rel}' must be relative to docs/, because a \
+             leading '/' in a markdown link resolves from the filesystem \
+             root on whoever reads it"
+        ));
+    }
+    if !docs.join(rel).is_file() {
+        return Err(format!(
+            "todo --doc '{rel}' names no file under docs/; the link would \
+             be dead. Pass the plan the item belongs to, or omit --doc for \
+             no link"
+        ));
+    }
     Ok(())
 }
 
@@ -371,21 +420,34 @@ fn add_pending(content: &str, bullet: Vec<String>) -> Result<String, String> {
 }
 
 /// Move the pending bullet for `slug` to the top of `## Done`,
-/// in the project's Done convention: the issue link alone on the
-/// first line, a `  -- <summary>` continuation, then a trailing
-/// `  (<date>)` line. The entry always links to
-/// `issues/<slug>.md`, whether or not that document exists.
-/// `/implement` calls this and writes that document first, so
-/// its links resolve. Nothing else calls it: an item worked
-/// through `/issue` is completed by hand, and an item split out
-/// of a shared plan has no document of its own, so a link
-/// written that way can dangle. `todo-done-link` in
-/// `docs/todo.md` holds the fix.
+/// stamped with `date`.
+///
+/// `doc` is the document the entry links to, written relative to
+/// `docs/`. The caller supplies it because only the caller knows
+/// which document that is: `/implement` writes `issues/<slug>.md`
+/// and passes it, while an item worked through `/issue` is one
+/// step of a plan shared with its siblings, so its link is that
+/// plan. Deriving `issues/<slug>.md` here instead wrote a link to
+/// a file nobody had created, twice.
+///
+/// The two shapes are not cosmetic. With a `doc` the label
+/// carries the slug twice and cannot share a line with the
+/// summary, so the entry is the label, a `  -- <summary>`
+/// continuation and the date. Without one, `- **slug** -- summary`
+/// fits on one line and *must* stay on one: [`raw_slug`] accepts a
+/// bold slug only when [`SEP`] follows it on the same line, so a
+/// wrapped one parses as nothing, disappears from
+/// `todo list --done`, and lets `add` mint a duplicate slug.
+///
+/// Whether the file `doc` names exists is checked by the caller,
+/// which has the workspace root; this function is pure over the
+/// markdown.
 fn move_to_done(
     content: &str,
     slug: &str,
     date: &str,
     summary: Option<&str>,
+    doc: Option<&str>,
 ) -> Result<String, String> {
     let ends_with_newline = content.ends_with('\n');
     let mut lines = to_owned_lines(content);
@@ -413,8 +475,13 @@ fn move_to_done(
     // Build and insert the Done entry at the top of `## Done`.
     let (d_start, _) = section_body(&lines, "## Done")
         .ok_or("docs/todo.md has no '## Done' section")?;
-    let mut entry = vec![format!("- [**{slug}**](issues/{slug}.md)")];
-    entry.push(continuation_line(&done_summary)?);
+    let mut entry = match doc {
+        Some(doc) => vec![
+            format!("- [**{slug}**]({doc})"),
+            continuation_line(&done_summary)?,
+        ],
+        None => vec![pending_line(&format!("**{slug}**"), &done_summary)?],
+    };
     entry.push(format!("  ({date})"));
     // `d_start` is the line after "## Done"; if it is the
     // customary blank, insert past it so we keep heading + blank.
@@ -564,11 +631,13 @@ mod tests {
 
     #[test]
     fn move_to_done_finds_a_backticked_pending_entry() {
-        let out =
-            move_to_done(MIXED, "hand-written", "2026-08-10", None).unwrap();
+        let out = move_to_done(MIXED, "hand-written", "2026-08-10", None, None)
+            .unwrap();
         assert!(!out.contains("- `hand-written`"));
         assert!(!out.contains("with a continuation line"));
-        assert!(out.contains("  -- typed by a human"));
+        // No `doc`, so the entry is the one-line shape and the
+        // summary sits beside the slug rather than below it.
+        assert!(out.contains("- **hand-written** -- typed by a human"));
         assert!(out.contains("  (2026-08-10)"));
     }
 
@@ -650,8 +719,14 @@ mod tests {
 
     #[test]
     fn move_to_done_moves_multiline_block_and_stamps_date() {
-        let out =
-            move_to_done(SAMPLE, "alpha-task", "2026-07-23", None).unwrap();
+        let out = move_to_done(
+            SAMPLE,
+            "alpha-task",
+            "2026-07-23",
+            None,
+            Some("issues/alpha-task.md"),
+        )
+        .unwrap();
         // Gone from Pending (including its body line).
         assert!(!out.contains("- **alpha-task** -- do alpha"));
         assert!(!out.contains("more about alpha"));
@@ -674,14 +749,105 @@ mod tests {
             "beta-task",
             "2026-07-23",
             Some("a curated done summary"),
+            Some("issues/beta-task.md"),
         )
         .unwrap();
         assert!(out.contains("  -- a curated done summary\n  (2026-07-23)"));
     }
 
     #[test]
+    fn move_to_done_without_a_doc_writes_no_link() {
+        // The case that has fired twice: an item completed
+        // through `/issue` whose plan is shared with six other
+        // steps, so `issues/<slug>.md` names nothing.
+        let out = move_to_done(SAMPLE, "alpha-task", "2026-07-23", None, None)
+            .unwrap();
+        assert!(
+            !out.contains("[**alpha-task**]"),
+            "no link may be written: {out}"
+        );
+        // One line, not the two-line label-plus-continuation
+        // shape. `raw_slug` requires ` -- ` on the same line as a
+        // bold slug, so splitting it here would make the entry
+        // invisible to `todo list --done` and let `todo add`
+        // mint a duplicate.
+        assert!(
+            out.contains(
+                "## Done\n\n- **alpha-task** -- do alpha\n  (2026-07-23)"
+            ),
+            "{out}"
+        );
+        // Read back by the file's own parser, which is the
+        // property the shape exists for.
+        let done = parse_section(&out, "## Done");
+        assert!(
+            done.iter().any(|(slug, _)| slug == "alpha-task"),
+            "parser must find it: {done:?}"
+        );
+    }
+
+    #[test]
+    fn move_to_done_links_the_document_it_is_given() {
+        // A shared plan, not `issues/<slug>.md`.
+        let out = move_to_done(
+            SAMPLE,
+            "alpha-task",
+            "2026-07-23",
+            None,
+            Some("issues/project-config-off-repo.md"),
+        )
+        .unwrap();
+        assert!(
+            out.contains(
+                "- [**alpha-task**](issues/project-config-off-repo.md)\n  -- do alpha\n  (2026-07-23)"
+            ),
+            "{out}"
+        );
+        let done = parse_section(&out, "## Done");
+        assert!(
+            done.iter().any(|(slug, _)| slug == "alpha-task"),
+            "parser must find it: {done:?}"
+        );
+    }
+
+    #[test]
+    fn require_doc_accepts_only_a_file_a_reader_can_follow() {
+        // The family, not just the case that prompted the work.
+        // Checked against the real `docs/`, so the fixture cannot
+        // drift from the tree the links actually resolve in.
+        let docs = workspace_root().join("docs");
+
+        // The shared plan that prompted this: a real file.
+        assert!(
+            require_doc(&docs, "issues/project-config-off-repo.md").is_ok()
+        );
+
+        for (rel, why) in [
+            ("issues/no-such-plan.md", "names no file"),
+            ("", "empty"),
+            ("issues", "a directory, not a file"),
+            ("/etc/passwd", "absolute"),
+            ("   ", "blank"),
+        ] {
+            let err = require_doc(&docs, rel).unwrap_err();
+            assert!(
+                err.contains("--doc"),
+                "{why}: the error must name the flag: {err}"
+            );
+        }
+
+        // An absolute path is refused for what it *is*, not for
+        // being missing -- a leading `/` in a markdown link is
+        // root-relative and breaks for every reader. This one
+        // exists on the test machine when it exists at all.
+        let err = require_doc(&docs, "/etc/passwd").unwrap_err();
+        assert!(err.contains("relative"), "got: {err}");
+    }
+
+    #[test]
     fn move_to_done_errors_on_unknown_slug() {
-        let err = move_to_done(SAMPLE, "nope", "2026-07-23", None).unwrap_err();
+        let err =
+            move_to_done(SAMPLE, "nope", "2026-07-23", None, None).unwrap_err();
         assert!(err.contains("nope"));
     }
 

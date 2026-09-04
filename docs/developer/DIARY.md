@@ -4,6 +4,46 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**`todo done` stopped guessing which document an entry links to**
+
+It always rendered `- [**slug**](issues/<slug>.md)`, deriving the
+path from the slug. That is right for an item worked through
+`/implement`, which writes that document before finalising. It is
+wrong for an item worked through `/issue`, because those are
+usually one step of a plan shared with their siblings and have no
+document of their own. `overlay-drop-project-overrides` hit it,
+and `overlay-drop-host-source` hit it again the same day. Both
+links were corrected by hand.
+
+The issue offered two fixes and neither got the case right.
+Omitting the link when `docs/issues/<slug>.md` is absent leaves
+the plan unreachable from the entry; so does copying `add`'s
+boolean `--issue`. What the two hand-corrections actually wrote
+was a link to the shared plan, so the caller has to be able to
+say which document it means. `done` now takes `--doc <path>`
+relative to `docs/`, and omitting it writes no link at all.
+
+`--doc` naming no file is refused, so a dead link cannot be
+written even on purpose. The guard covers the family rather than
+the one case: blank, absolute, a directory, and a path naming
+nothing. Absolute is refused for what it is rather than for
+being missing -- a leading slash in a markdown link resolves
+from the filesystem root on whoever reads it, so
+`/home/you/docs/plan.md` is broken for everyone else.
+
+The two entry shapes are not cosmetic and the code now says so.
+With a link the label carries the slug twice and cannot share a
+line with the summary, so the entry wraps. Without one it must
+*not* wrap: `raw_slug` accepts a bold slug only when ` -- `
+follows on the same line, so a wrapped plain entry parses as
+nothing, vanishes from `todo list --done`, and lets `add` mint a
+duplicate slug. That failure mode was already written down in
+the backlog; the test now holds it.
+
+Both fixes were driven by tests written first and watched to
+fail, and both paths were then exercised through the real
+command line rather than only the unit tests.
+
 **Three reviewers in sequence, and the worst finding was a
 security claim we had written**
 

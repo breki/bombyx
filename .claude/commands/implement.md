@@ -134,12 +134,16 @@ particular:
    mechanically (do not hand-edit the file):
 
    ```
-   cargo xtask todo done <slug> --date <today's date>
+   cargo xtask todo done <slug> --date <today's date> \
+     --doc issues/<slug>.md
    ```
 
    The command moves the bullet to the top of `## Done`
-   (newest first), stamps the date, and links the slug
-   to `issues/<slug>.md`. Pass `--summary "<text>"` to
+   (newest first) and stamps the date. `--doc` is the
+   document the entry links to, relative to `docs/`, and
+   `/implement` always has one because step 2 wrote it.
+   The command refuses a `--doc` naming no file, so the
+   link cannot be dead. Pass `--summary "<text>"` to
    override the pending summary for the Done entry.
 
 5. Verify the change manually -- actually run it,
