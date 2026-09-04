@@ -46,11 +46,21 @@ is the same problem heard rather than seen: `1c5360e` read out
 is noise.
 
 Prefer whole words to symbols: "about" rather than `~`, "to"
-rather than `->`, "and" rather than `&`. Keep sentences short
-and end each with a full stop, because the synthesizer splits
-on those, and a missing one runs two sentences together into a
-single breath. Bold and italics are stripped as well, so
-emphasis has to live in the word choice.
+rather than `->`, "and" rather than `&`.
+
+Numbers are the exception: write them as digits. "22", not
+"twenty-two"; "56 lines", not "fifty six lines". A synthesizer
+pronounces a digit correctly, so nothing is lost to the ear,
+and spelling a number out spends budget while making the reader
+assemble it. This covers counts and issue numbers. It readmits
+nothing the paragraph above ruled out: a commit hash, a line
+number and a version string stay out of the summary whichever
+way they are written.
+
+Keep sentences short and end each with a full stop, because the
+synthesizer splits on those, and a missing one runs two
+sentences together into a single breath. Bold and italics are
+stripped as well, so emphasis has to live in the word choice.
 
 None of this loosens the budget. Forty words still holds, and
 naming a thing in words rather than in backticks usually costs

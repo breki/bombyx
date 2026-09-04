@@ -175,6 +175,8 @@ In practice:
   the synthesizer splits on those and glues everything
   before the next one into a single breath. Bold and italics
   vanish too, so emphasis has to be in the word choice.
+  Numbers are the exception to preferring words: write "22",
+  not "twenty-two".
 
 ## Working directory
 
