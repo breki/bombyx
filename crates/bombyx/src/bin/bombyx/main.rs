@@ -300,13 +300,17 @@ fn run() -> Result<Ran> {
 
     // Say which source the host came from, using the winner
     // the library reports rather than re-testing the sources
-    // here. Re-deriving it duplicated the precedence rule in the
-    // one place no library test could reach, so a change to the
-    // ranking would have left this line naming the old winner --
-    // and `destroy` runs `rm -rf` on whichever host really won.
+    // here. Re-deriving it would put a second copy of the
+    // precedence rule where no library test reaches, so a
+    // change to the ranking would leave this line naming the
+    // wrong winner -- and `destroy` runs `rm -rf` on whichever
+    // host really won.
     //
-    // Printed unless it came from a `config.toml`, which is the
-    // ordinary case and would be noise on every command.
+    // Silent only for the *file-wide* `host`, which is the
+    // ordinary case and would be noise on every command. A
+    // project's own `host` key sits in the same `config.toml`
+    // and is printed, because the two keys share a file and the
+    // line has to say which of them won.
     //
     // That exemption has a cost worth knowing at this line.
     // `BOMBYX_CONFIG_HOME` decides *which* config directory gets
@@ -314,7 +318,7 @@ fn run() -> Result<Ran> {
     // inside a clone -- so staying quiet here also hides a
     // redirect the operator did not choose. `docs/todo.md`
     // tracks it as `config-home-env-provenance`.
-    if !matches!(host_origin, HostOrigin::UserFile) {
+    if host_origin != HostOrigin::UserFile {
         eprintln!("bombyx: host {} from {host_origin}", cfg.host);
     }
 

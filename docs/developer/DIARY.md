@@ -4,6 +4,64 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**Three reviewers on the per-project host: one unguarded value,
+and two claims in the commit message that were not true**
+
+`/review2` on #25, run after the commit rather than before it.
+Four reading rounds, 32 findings, 28 fixed, one logged, three
+declined. Stage 2 stopped on the converging rule rather than a
+clean sheet: two of its round-1 fixes carried a defect of their
+own, both of them ours.
+
+Two findings were defects in shipped code and both concern one
+value. `host` reaches `ssh` as its first positional argument and
+`ssh` honours no `--` separator, so a leading `-` is read as an
+option. `Registry::project` hands out an entry and its own test
+says holding one is proof the values passed -- and `host` was in
+neither the type-checked group nor the list `Project::validate`
+runs. `Project::validate` now calls `host_problem`. Beside it,
+`Registry::project_host` was `pub`, so the unchecked value was
+exported past the one place that checks it; it is `pub(crate)`
+now. Its sibling `Registry::host` has the same shape, is
+pre-existing from step 3, and went to the red-team backlog
+rather than into this change.
+
+Both guard arms are tested, and each was proven by breaking the
+arm rather than by reading it. The empty case had no test at
+all, which is what `CLAUDE.md` under **Test-Driven Development**
+asks for under "enumerate the family first" -- the family, not
+the case that prompted the work.
+
+Two corrections are to the record and both are ours. Dropping
+`Copy` from `HostOrigin` cost nothing at the call sites: `!=`
+autoborrows both operands, so `main.rs` compiles unchanged. We
+wrote that it cost two one-line changes, rewrote `main.rs` to
+`matches!` on the strength of it, and put the claim in the plan
+document, the diary, the commit message and the pull request.
+red-team checked it against `rustc`. The rewrite is reverted and
+the commit message is the one copy that cannot be fixed, so the
+plan document says so.
+
+The second is `docs/architecture.md`. It is the inventory a
+reader consults to answer which fields reach `ssh` unchecked,
+and it said `Project` carries the same values "less `host`". It
+was in no snapshot because we never touched it, while every
+earlier step of this series updated it in the same commit as the
+code.
+
+The rest was drift between files that state the same rule. Four
+documents and three module headers disagreed about how many
+sources supply the VM host, `llms.txt` was made to say four one
+sentence before pointing at a README that says three and calls
+itself authoritative, and a doc comment cited a backlog item as
+the work that closes a gap the item does not mention. red-team
+named the cause twice without being asked: `resolve_host` has
+been rewritten in five commits in two days, and the cost lands
+on a different file each round. The README now carries the
+half-built fourth source in full -- ranked, parsed, reached by
+no command, do not write it expecting an effect -- and everyone
+else points there.
+
 **A project may keep to its own machine, and the flag that did
 that is now scheduled for deletion**
 
@@ -37,7 +95,10 @@ same file -- so "from config.toml" no longer says which of the
 two won. The variant carries the project name, and the name is
 the map key as the file spells it, taken from `get_key_value`
 rather than re-parsed, because the lookup has already proved it
-legal. Two call sites changed, both one line.
+legal. Dropping `Copy` cost nothing at the call sites -- `!=`
+autoborrows both operands, so `main.rs` compiles unchanged. The
+commit message says two call sites changed, and red-team checked
+that against `rustc` and found it false.
 
 Self-review caught the defect the reviewers would have. The
 wording for the new source existed twice, in `Display` and again
@@ -53,12 +114,13 @@ demote that project to the file-wide host and boot its VM on the
 wrong machine, and the broken value is reported anyway the moment
 anything asks for the entry itself.
 
-Nine tests. The ranking was proven by inverting it in
-`resolve_host` and watching three of them fail, one of which was
-the error naming the wrong table. Nothing in the binary reads the
-key yet -- `project` is `None` until `--project` exists -- so a
-dry run still emits the file-wide host and the argv is
-unchanged.
+Eight tests, plus a row in the table that asserts a looked-up
+entry has had its values checked. The ranking was proven by
+inverting it in `resolve_host` and watching three of them fail,
+one of which was the error naming the wrong table. Nothing in
+the binary reads the key yet -- `project` is `None` until
+`--project` exists -- so a dry run still emits the file-wide
+host and the argv is unchanged.
 
 **Three reviewers on the registry table: three guard gaps, and
 nine comments claiming more than the code did**

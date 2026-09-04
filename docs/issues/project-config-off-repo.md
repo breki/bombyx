@@ -1,7 +1,13 @@
 # project-config-off-repo
 
 **Status:** In progress -- chunk 1 landed 2026-09-02, steps 1
-to 3 of 7 landed 2026-09-04
+to 4 of 7 landed 2026-09-04
+
+The Status line and the **Progress log** are written when a step
+is committed, so they lead `docs/todo.md`: an entry there moves
+from **Pending** to **Done** when its pull request is merged,
+which is later. A step named here and still pending there is on
+a branch, not lost.
 
 This document uses two words for two things. **Chunks** are the
 original three, and **Plan** below still describes them. **Steps**
@@ -241,7 +247,8 @@ commands stay identical, which a dry run can show.
 ## Decisions
 
 - **2026-09-04 -- The flag and the environment variable go in
-  step 6, not step 4.** The operator wants the VM host tied to
+  step 6 (`project-selection-flag`), not step 4
+  (`registry-project-host`).** The operator wants the VM host tied to
   the project, which means `--host` and `BOMBYX_HOST` are
   deleted: a one-off flag can point `destroy`'s `rm -rf` at a
   machine the project never named. They cannot go in step 4.
@@ -251,7 +258,9 @@ commands stay identical, which a dry run can show.
   deleting them here leaves the tool unable to find a host at
   all until steps 5 and 6 land. Step 6 is where `bombyx.toml`
   dies and every setting comes from the registry, so the
-  deletion goes there, and #18 carries it.
+  deletion goes there, and #18 carries it. The seven steps are
+  listed under **2026-09-04 -- chunks 2 and 3 re-split into
+  seven steps** below.
 
 - **2026-09-04 -- The top-level `host` survives as a default.**
   A project entry's `host` wins when it has one; otherwise the
@@ -268,9 +277,11 @@ commands stay identical, which a dry run can show.
   `config.toml`, so "from config.toml" no longer says which one
   won, and a placeholder such as `[projects.<name>]` leaves the
   operator to work it out. Carrying the name costs `HostOrigin`
-  its `Copy`, which is two one-line changes at the call sites.
-  Once step 6 deletes the flag and the variable, this variant
-  is the only one the notice ever prints.
+  its `Copy`, and that cost nothing at the call sites: `!=`
+  autoborrows both operands, so `main.rs` compiles unchanged
+  against a non-`Copy` enum. Once step 6 deletes the flag and
+  the variable, this variant is the only one the notice ever
+  prints.
 
 - **2026-09-04 -- `config/registry.rs` owns the registry file.**
   Step 3 adds `[projects.<name>]` to the per-developer
@@ -447,6 +458,27 @@ which host is selected, not the shape of any command bombyx
 emits, and the selection is fully visible in `--dry-run`. The
 VM host was unreachable from this session in any case: its host
 key is not known here.
+
+### 2026-09-04 -- step 4 landed
+
+A `[projects.<name>]` table may carry an optional `host`, and
+`config/host.rs` ranks it above the file-wide one. Host ranking
+is now `--host`, `BOMBYX_HOST`, the named project's `host`, the
+file-wide `host`. `HostOrigin` gained `ProjectEntry`, which
+carries the project name because both file sources come out of
+one `config.toml` and the notice has to say which won.
+
+`HostSources.project` is `None` on every path in the binary, so
+the key never wins yet. Step 6 supplies the first project name.
+
+Three reviewers ran in sequence on this one, after the commit
+rather than before it, so two of their findings are corrections
+to what the commit says. `Registry::project` handed out an entry
+whose `host` no rule had run on, which `Project::validate` now
+fixes. And the claim that dropping `Copy` cost two call-site
+changes is false -- `!=` autoborrows, so nothing had to change
+-- which the commit message still says and cannot be corrected
+there.
 
 ### 2026-09-04 -- step 3 landed
 

@@ -10,8 +10,9 @@
 //! The two lowest-ranked sources are keys in one file, and
 //! `super::registry` is what reads it. This module asks that
 //! module for the file, then for the named project's own `host`
-//! and the file-wide one, in that order. A project keeping to
-//! its own machine is what the per-project key is for.
+//! and the file-wide one, in that order. An operator writes
+//! `host` inside a project's table when that project runs on a
+//! different machine.
 //!
 //! What is wrong with a host value is decided in one place,
 //! [`host_problem`], and reported two ways: as a *field* problem
@@ -267,19 +268,33 @@ pub enum HostOrigin {
 impl HostOrigin {
     /// Names this source, in the words both callers print.
     ///
-    /// `file` is the registry's path when the caller knows it,
-    /// and the bare file name otherwise. `super::Config::load`
-    /// knows it and passes it, because an operator sent to fix a
-    /// bad value has to find the file; the notice on every run
-    /// does not, because the path is the same one every time and
-    /// would be noise.
+    /// `path` is the registry file when the caller knows where
+    /// it is, and the bare file name stands in otherwise.
+    /// `super::Config::load` passes it, because an operator sent
+    /// to fix a bad value has to find the file.
+    ///
+    /// The startup notice passes `None` and so prints the bare
+    /// name, which is a gap rather than a decision: the
+    /// directory comes from `BOMBYX_CONFIG_HOME`, `APPDATA`,
+    /// `XDG_CONFIG_HOME` or `HOME`, and a per-directory
+    /// environment tool can redirect the first of those from
+    /// inside a clone -- so `config.toml` alone does not say
+    /// whose file won. `config-home-env-provenance` in
+    /// `docs/todo.md` tracks it, and covers two halves: printing
+    /// the line for a file-wide `host` at all, and passing the
+    /// path in here. Doing only the first leaves this rendering
+    /// a directoryless literal.
     ///
     /// One function rather than two, so the notice and the error
     /// cannot come to describe the same source differently. The
     /// wording for a project entry names its table, and that
     /// spelling existing twice is how the two drift apart.
-    pub(crate) fn describe(&self, file: Option<&str>) -> String {
-        let file = file.unwrap_or(USER_CONFIG_FILE);
+    pub(crate) fn describe(&self, path: Option<&Path>) -> String {
+        let file = path.map_or_else(
+            || USER_CONFIG_FILE.to_owned(),
+            super::read::path_display,
+        );
+        let file = file.as_str();
         match self {
             Self::Flag => "--host".to_owned(),
             Self::Env => HOST_ENV.to_owned(),
@@ -346,16 +361,26 @@ pub(crate) fn resolve_host(
     })
 }
 
+/// Where the registry file is, when the environment says.
+///
+/// `None` when it names no config directory, which is a machine
+/// with nothing concrete to point a message at. Both messages
+/// about the file go through this one function, so neither can
+/// name a path the other would not.
+pub(crate) fn registry_path(sources: &HostSources) -> Option<PathBuf> {
+    sources.user_config_dir.map(registry::path)
+}
+
 /// Names the one file that can carry a host, for an error
 /// message.
 ///
 /// It is a path the operator can act on, so it is printed in
 /// full rather than described.
 pub(crate) fn host_place(sources: &HostSources) -> String {
-    match sources.user_config_dir.map(registry::path) {
-        Some(user) => user.display().to_string(),
+    registry_path(sources).map_or_else(
         // No home directory in the environment, so there is
         // nothing concrete to point at.
-        None => format!("a {USER_CONFIG_FILE} in your config directory"),
-    }
+        || format!("a {USER_CONFIG_FILE} in your config directory"),
+        |path| super::read::path_display(&path),
+    )
 }

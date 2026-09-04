@@ -31,10 +31,12 @@ and this project adheres to
   the project asked for.
 - A `[projects.<name>]` table in the per-developer `config.toml` accepts an
   optional `host`, naming the machine that one project runs on. It outranks the
-  file-wide `host` and is outranked by `--host` and `BOMBYX_HOST`. bombyx does
-  not consult it yet: no command names a project.
-- Library API: `Registry::project_host`, a `project` field on `HostSources`, and
-  a `HostOrigin::ProjectEntry` variant carrying the project name.
+  file-wide `host` and is outranked by `--host` and `BOMBYX_HOST`. Its value is
+  refused on the same terms as any other host, so a leading `-` cannot reach
+  `ssh` through it. bombyx does not consult it yet: no command names a
+  project.
+- Library API: a `project` field on `HostSources`, and a
+  `HostOrigin::ProjectEntry` variant carrying the project name.
 
 ### Changed
 
@@ -95,9 +97,9 @@ and this project adheres to
   check so one name cannot be legal in the project file and illegal as a
   registry table key.
 - **BREAKING:** `config::HostOrigin` is no longer `Copy`, and it has a fourth
-  variant. `config::HostSources` has a fourth field. A caller matching the enum
-  exhaustively, relying on the copy, or building the struct without
-  `..Default::default()` must be updated.
+  variant. `config::HostSources` and `config::Project` each have a new public
+  field. A caller matching the enum exhaustively, relying on the copy, or
+  building either struct from a literal must be updated.
 
 ### Fixed
 

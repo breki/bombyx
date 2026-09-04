@@ -9,9 +9,10 @@
 //! **The VM host is not part of it.** Which machine runs the
 //! VMs is a property of the developer, not of the project --
 //! each person has their own hardware on their own network --
-//! so `host` comes from a per-developer file, the environment
-//! or `--host`, and is refused in `bombyx.toml`. See
-//! [`HostSources`] for the order they are consulted in.
+//! so `host` comes from `--host`, the environment or a
+//! per-developer file that can carry two of them, and is
+//! refused in `bombyx.toml`. See [`HostSources`] for the four
+//! sources and the order they are consulted in.
 //!
 //! Because `bombyx.toml` ships *inside a repo*, it is
 //! attacker-controlled data the moment you clone or check out
@@ -86,15 +87,14 @@ pub use host::{
     CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, user_config_dir,
 };
 pub(crate) use host::{
-    HostProblem, host_place, host_problem, is_anchored_dir, resolve_host,
+    HostProblem, host_place, host_problem, is_anchored_dir, registry_path,
+    resolve_host,
 };
 pub use registry::{Project, Registry, USER_CONFIG_FILE};
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
 
-use read::{
-    MAX_CONFIG_BYTES, Symlinks, from_toml, path_display, read_optional,
-};
+use read::{MAX_CONFIG_BYTES, Symlinks, from_toml, read_optional};
 pub(crate) use root::path_segments;
 
 /// Default root on the VM host under which project
@@ -183,17 +183,6 @@ impl ProjectFile {
             source: self.source,
         }
     }
-}
-
-/// The registry file the sources point at, for a message.
-///
-/// `None` when the environment names no config directory, which
-/// leaves nothing concrete to print and sends the caller back to
-/// `Display for HostOrigin`.
-fn registry_path(sources: &HostSources) -> Option<String> {
-    sources
-        .user_config_dir
-        .map(|dir| path_display(&registry::path(dir)))
 }
 
 /// Refuses a project file carrying a `host` key.
@@ -601,32 +590,36 @@ mod tests {
     }
 
     /// Writes a per-developer config naming `host` file-wide,
-    /// plus an entry for `myproject` naming `project_host`.
+    /// plus an entry for `myproject`.
+    ///
+    /// `project_host` is the entry's own `host`, and `None`
+    /// writes an entry with no `host` line at all -- which is
+    /// what most entries look like, and what the fall-back tests
+    /// need.
     ///
     /// The entry carries the `[vm]` and `[source]` tables
     /// because a `[projects.<name>]` table without them does not
     /// parse, and a file that does not parse would fail these
     /// tests for a reason that has nothing to do with ranking.
+    /// They come from [`REQUIRED_TABLES`], renamed into the
+    /// project's namespace, so a field added to `Vm` or `Source`
+    /// does not break a test about precedence.
     fn write_user_file_with_project(
         dir: &Path,
         host: &str,
-        project_host: &str,
+        project_host: Option<&str>,
     ) {
+        let tables = REQUIRED_TABLES
+            .replace("[vm]", "[projects.myproject.vm]")
+            .replace("[source]", "[projects.myproject.source]");
+        let entry_host = project_host
+            .map_or_else(String::new, |h| format!("host = {h:?}\n"));
         std::fs::write(
             dir.join(USER_CONFIG_FILE),
             format!(
                 "host = {host:?}\n\n\
                  [projects.myproject]\n\
-                 host = {project_host:?}\n\n\
-                 [projects.myproject.vm]\n\
-                 provider = \"libvirt\"\n\
-                 box = \"generic/ubuntu2204\"\n\
-                 cpus = 4\n\
-                 memory = 8192\n\n\
-                 [projects.myproject.source]\n\
-                 repo = \"https://github.com/you/myproject\"\n\
-                 ref = \"main\"\n\
-                 script = \"vagrant/provision.sh\"\n"
+                 {entry_host}{tables}"
             ),
         )
         .unwrap();
@@ -714,7 +707,7 @@ mod tests {
         write_user_file_with_project(
             dir.path(),
             "from-user-file",
-            "from-project",
+            Some("from-project"),
         );
 
         let all = HostSources {
@@ -750,15 +743,7 @@ mod tests {
         // host has to reach the file-wide one rather than
         // reporting that no source names a host at all.
         let (dir, base) = project_dir(&minimal());
-        write_user_file_with_project(
-            dir.path(),
-            "from-user-file",
-            "from-project",
-        );
-        let source = std::fs::read_to_string(dir.path().join(USER_CONFIG_FILE))
-            .unwrap()
-            .replace("host = \"from-project\"\n", "");
-        std::fs::write(dir.path().join(USER_CONFIG_FILE), source).unwrap();
+        write_user_file_with_project(dir.path(), "from-user-file", None);
 
         let sources = HostSources {
             project: Some("myproject"),
@@ -776,7 +761,7 @@ mod tests {
         write_user_file_with_project(
             dir.path(),
             "from-user-file",
-            "from-project",
+            Some("from-project"),
         );
         let sources = HostSources {
             project: Some("nosuchproject"),
@@ -824,7 +809,7 @@ mod tests {
         write_user_file_with_project(
             dir.path(),
             "from-user-file",
-            "from-project",
+            Some("from-project"),
         );
         let sources = HostSources {
             project: Some("myproject"),
@@ -854,7 +839,7 @@ mod tests {
         write_user_file_with_project(
             dir.path(),
             "good-host",
-            "-oProxyCommand=x",
+            Some("-oProxyCommand=x"),
         );
         let sources = HostSources {
             project: Some("myproject"),
