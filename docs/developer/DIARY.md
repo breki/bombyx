@@ -4,6 +4,34 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-04
 
+**The registry file grew project tables, and got a module of its
+own**
+
+Step 3 of seven in `project-config-off-repo`. The per-developer
+`config.toml` now parses a `[projects.<name>]` table carrying
+`remote_root`, `[vm]` and `[source]` -- the values a
+`bombyx.toml` holds today, minus `project`, which is the table
+key. `Registry::project` looks one up by name and reports a
+missing entry with a message naming the file and every key the
+entry needs. Nothing reads a project table yet: the tests are
+the only caller, which is what makes the step safe to land on
+its own.
+
+The file needed one owner. `config/host.rs` held the only struct
+that parsed it, carrying `host` alone under
+`deny_unknown_fields` -- so the first `[projects.x]` table made
+every bombyx command fail with "unknown field `projects`". That
+was the red test. Two structs over one file would each refuse
+the other's keys, so the type moved to `config/registry.rs`,
+named after the file, and `host.rs` shrank to the ranking
+between `--host`, `BOMBYX_HOST` and that file. Steps 4 and 5 add
+to the new module rather than growing one whose header is about
+the VM host.
+
+The lookup was proven to bite before it was trusted. Made to
+return the first entry whatever name it was given, it failed the
+test that asks for a project nobody wrote a table for.
+
 **Reviewing `todo done` found two ways to corrupt the file it
 edits, and one that destroyed text**
 

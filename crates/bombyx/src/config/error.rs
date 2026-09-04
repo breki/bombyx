@@ -6,8 +6,9 @@
 //!
 //! [`ConfigError`] belongs to *loading* a config: the file was
 //! missing, unreadable, not TOML, carried a forbidden key, or
-//! named no VM host. It has ten variants, and most of them are
-//! about a file.
+//! named no VM host, or has no entry for the project asked
+//! for. It has eleven variants, and most of them are about a
+//! file.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a
@@ -26,8 +27,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::MAX_CONFIG_BYTES;
 use super::host::HOST_ENV;
+use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
 
 /// A single configuration value broke its own rule.
 ///
@@ -183,6 +184,26 @@ pub enum ConfigError {
     HostMissing {
         /// The file that would supply one.
         place: String,
+    },
+
+    /// The registry has no table for the named project.
+    ///
+    /// bombyx writes nothing on the operator's behalf, so the
+    /// message names the file and every key the entry needs.
+    /// Guessing a repository address and a provisioning script
+    /// would boot a VM the operator did not describe.
+    #[error(
+        "no `[projects.{name}]` in {} -- add that table with \
+         `[projects.{name}.vm]` and `[projects.{name}.source]`, \
+         and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
+         where this project belongs",
+        .path.display()
+    )]
+    ProjectNotFound {
+        /// Project name that was looked up.
+        name: String,
+        /// The registry file that has no table for it.
+        path: PathBuf,
     },
 
     /// The winning source supplied an unusable host.

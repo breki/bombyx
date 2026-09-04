@@ -234,6 +234,17 @@ commands stay identical, which a dry run can show.
 
 ## Decisions
 
+- **2026-09-04 -- `config/registry.rs` owns the registry file.**
+  Step 3 adds `[projects.<name>]` to the per-developer
+  `config.toml`, and that file had exactly one parse type:
+  `UserFile` in `config/host.rs`, carrying `host` alone. Two
+  structs deserializing the same file would drift, and
+  `deny_unknown_fields` on either would refuse the other's keys.
+  So the type moves to a module named after the file, `host.rs`
+  keeps the ranking between `--host`, `BOMBYX_HOST` and the
+  file, and steps 4 and 5 add to `registry.rs` rather than
+  growing a module whose header is about the VM host.
+
 - **2026-09-04 -- Delete the "overrides" notice in step 1.**
   Once the overlay carries only `host`, the line
   `bombyx: bombyx.local.toml overrides bombyx.toml` describes

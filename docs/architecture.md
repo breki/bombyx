@@ -106,6 +106,7 @@ probe commands, `doctor` decides what their output means.
 | `config::error` | `ConfigError` for a file, `FieldError` for a value |
 | `config::guards` | the rules more than one field shares |
 | `config::host` | where the VM host name comes from, and its shape |
+| `config::registry` | the operator's `config.toml` and its project tables |
 | `config::root` | what `remote_root` may be, and why it is strict |
 | `config::source` | `[source]`, and the two checked types it holds |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
@@ -178,6 +179,15 @@ classDiagram
 `Config` is what bombyx runs with. `host` is the one field never
 read from `bombyx.toml`, because a VM host belongs to a person
 rather than a project.
+
+`Registry` and `Project` are a second pair of config types, and
+they parse the operator's own `config.toml` rather than
+`bombyx.toml`: a top-level `host`, and one `[projects.<name>]`
+table per project carrying `remote_root`, `[vm]` and `[source]`.
+`config::host` reads the `host` key out of that file today.
+Nothing reads a project table yet -- the work that makes bombyx
+load a `Config` from one is `registry-config-load` in
+`docs/todo.md`.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
