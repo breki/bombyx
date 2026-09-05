@@ -342,16 +342,10 @@ impl HostOrigin {
             Self::Flag => "--host".to_owned(),
             Self::Env => HOST_ENV.to_owned(),
             Self::ProjectEntry(name) => {
-                // The name is printed quoted, so the heading is
-                // `[projects."myproject"].host`. A project name
-                // may contain a `.`, and TOML reads a bare dot
-                // in a heading as nesting -- so the unquoted
-                // spelling names a table the operator's file
-                // does not contain, and writing it would refuse
-                // the whole file. `ConfigError::ProjectNotFound`
-                // quotes it for the same reason and says more
-                // about why.
-                format!("[projects.{:?}].host in {file}", name.as_str())
+                // `.host` sits outside the brackets, so the
+                // heading and the key are separate here.
+                let table = registry::heading(name.as_str(), "");
+                format!("{table}.host in {file}")
             }
             Self::UserFile => file.to_owned(),
         }

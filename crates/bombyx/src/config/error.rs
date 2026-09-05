@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::host::HOST_ENV;
+use super::registry::heading;
 use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
 
 /// A single configuration value broke its own rule.
@@ -196,15 +197,8 @@ pub enum ConfigError {
     /// Guessing a repository address and a provisioning script
     /// would boot a VM the operator did not describe.
     ///
-    /// **The name is printed quoted**, so the heading is
-    /// `[projects."myproject"]`. A project name may contain a
-    /// `.` -- `name::check_segment` allows one after the first
-    /// character -- and TOML reads a bare dot in a heading as
-    /// nesting, so `[projects.a.b]` declares `b` inside
-    /// `projects.a` and `deny_unknown_fields` refuses the whole
-    /// file. Quoting is valid TOML for every name the check
-    /// accepts, so one spelling serves them all rather than the
-    /// message guessing which names need it.
+    /// `super::registry::heading` spells the heading, so this
+    /// message and the two others showing one cannot differ.
     ///
     /// The tables, not every key inside them. `[vm]` and
     /// `[source]` require seven keys between them, and listing
@@ -213,11 +207,13 @@ pub enum ConfigError {
     /// in turn, which is the same information delivered where
     /// the operator is already editing.
     #[error(
-        "no `[projects.{name:?}]` in {} -- add that table with \
-         `[projects.{name:?}.vm]` and `[projects.{name:?}.source]`, \
+        "no `{}` in {} -- add that table with `{}` and `{}`, \
          and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
          where this project belongs",
-        .path.display()
+        heading(.name, ""),
+        .path.display(),
+        heading(.name, ".vm"),
+        heading(.name, ".source")
     )]
     ProjectNotFound {
         /// Project name that was looked up.
@@ -236,17 +232,14 @@ pub enum ConfigError {
     /// create the file *and* know what to put in it, so the
     /// message says both.
     ///
-    /// The name is printed quoted, for the reason
-    /// [`ConfigError::ProjectNotFound`] gives.
-    ///
     /// `place` is a `String` rather than a `PathBuf` because a
     /// machine whose environment names no config directory has
     /// no path to print. `config::host::registry_place` decides
     /// the wording for both cases and is where it is written
     /// down.
     #[error(
-        "no registry file -- create {place} with a \
-         `[projects.{name:?}]` table"
+        "no registry file -- create {place} with a `{}` table",
+        heading(.name, "")
     )]
     RegistryNotFound {
         /// Project name that was looked up.

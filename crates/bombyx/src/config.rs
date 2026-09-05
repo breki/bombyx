@@ -115,6 +115,10 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
 /// parse. Renaming rather than writing them out again means a
 /// field added to [`Vm`] or [`Source`] does not break a test
 /// about something else.
+///
+/// The heading is written out rather than asked of
+/// `registry::heading`: a fixture and the message checked
+/// against it must not come from the same code.
 #[cfg(test)]
 fn test_entry(name: &str, project_host: Option<&str>) -> String {
     let tables = REQUIRED_TABLES

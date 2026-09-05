@@ -61,27 +61,6 @@ prints, so it wants a failing test and a round nobody is in.
 Found as RT-11 in the `/review2` on registry-config-load
 (#26).
 
-### rt-2026-09-05-project-heading-spelling-has-no-owner
-
-**Category:** Duplication with a correctness cost
-
-Three messages format a project name into a TOML heading an
-operator is meant to act on: `ConfigError::ProjectNotFound` and
-`ConfigError::RegistryNotFound` in `config/error.rs`, and
-`HostOrigin::describe` in `config/host.rs`. The name has to be
-quoted, because TOML reads a bare `.` in a heading as nesting
-and a project name may contain one. All three quote it now, and
-each learned that separately: the first two in one review round
-and the third in the next, after the second round found the copy
-the first had missed.
-
-Deferred as a consolidation, which `/review` says is escalated
-and never applied in the round that finds it: one function
-owning the spelling, with all three messages asking it, so a
-fourth message cannot get it wrong. Wants its own commit.
-Found as RT-10's root cause in the `/review2` on
-registry-config-load (#26).
-
 ### rt-2026-09-04-registry-host-is-pub-and-unchecked
 
 **Category:** Public surface nothing public consumes

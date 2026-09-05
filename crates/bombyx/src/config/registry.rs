@@ -371,6 +371,19 @@ pub(super) fn path(dir: &Path) -> PathBuf {
     dir.join(USER_CONFIG_FILE)
 }
 
+/// One project's table heading, as an operator must write it.
+///
+/// `tail` goes inside the brackets, so `""` gives
+/// `[projects."x"]` and `".vm"` gives `[projects."x".vm]`.
+///
+/// The name is quoted because it may contain a `.`, which TOML
+/// reads as nesting. `docs/architecture.md` under **The heading
+/// spelling has one owner** says why every message asks this
+/// rather than spelling it.
+pub(super) fn heading(name: &str, tail: &str) -> String {
+    format!("[projects.{name:?}{tail}]")
+}
+
 /// Parses `source` as the registry read from `path`.
 ///
 /// The only way to build a [`Registry`], so the path in an
@@ -827,6 +840,33 @@ mod tests {
         let text = err.to_string();
         assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
         assert!(text.contains("[projects.\"other\"].host"), "{text}");
+    }
+
+    #[test]
+    fn every_message_spells_a_project_heading_the_same_way() {
+        // The heading is quoted in one place, `heading`, and
+        // these are the three messages that show one to an
+        // operator. A fourth that spelled it itself would pass
+        // its own test and fail this one.
+        let name = "web.api";
+        let want = "[projects.\"web.api\"]";
+        let key = ProjectName::parse(name).unwrap();
+        let messages = [
+            ConfigError::ProjectNotFound {
+                name: name.to_owned(),
+                path: PathBuf::from("/home/dev/config.toml"),
+            }
+            .to_string(),
+            ConfigError::RegistryNotFound {
+                name: name.to_owned(),
+                place: "/home/dev/config.toml".to_owned(),
+            }
+            .to_string(),
+            super::super::HostOrigin::ProjectEntry(key).to_string(),
+        ];
+        for text in messages {
+            assert!(text.contains(want), "want {want} in: {text}");
+        }
     }
 
     #[test]

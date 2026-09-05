@@ -386,6 +386,44 @@ inside bombyx does that -- both loaders take the host from the
 ranking -- so this is a trap for a future caller rather than a
 live hole.
 
+### The heading spelling has one owner
+
+Three error messages quote a project name back at the operator
+inside a TOML table heading: `ConfigError::ProjectNotFound`,
+`ConfigError::RegistryNotFound`, and `HostOrigin::describe` when
+a project entry supplied the host. All three ask
+`config::registry::heading` for it, and that function is the only
+place the spelling exists.
+
+The spelling is not obvious, which is why it needs an owner. A
+project name may contain a `.` -- `name::check_segment` allows
+one after the first character -- and TOML reads a bare dot in a
+heading as nesting. So `[projects.a.b]` declares `b` inside
+`projects.a`, `deny_unknown_fields` refuses the whole file, and
+an operator who follows that advice breaks every project rather
+than fixing one. Quoting is valid TOML for every name the check
+accepts, so `[projects."a.b"]` is right for all of them and the
+message never has to guess which names need it.
+
+It took three review rounds to find all three copies. The first
+round found a missing name check, the second found two messages
+spelling the heading unquoted and fixed those two, and the third
+found the last one -- in the message that this work had just made
+reachable. That is `/review`'s "the rule has no single home"
+pattern, and the consolidation was deliberately left out of the
+round that found it.
+
+`every_message_spells_a_project_heading_the_same_way` in
+`config/registry.rs` is what holds it: it asserts one spelling
+across all three messages, so a fourth message spelling the
+heading itself would pass whatever test it brought and fail that
+one. Unquoting `heading` fails nine tests.
+
+The test fixtures write their headings out rather than calling
+`heading`. That is deliberate: a fixture and the message checked
+against it must not come from the same code, or a wrong spelling
+agrees with itself and every test still passes.
+
 ### Two traps a reader cannot see from the code
 
 Both of these were code comments once, and `CLAUDE.md` under
