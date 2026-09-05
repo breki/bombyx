@@ -373,6 +373,38 @@ dull is as exposed as one whose rules are sharp. `validate` is
 also private, so a library caller cannot even choose to call
 it.
 
+`Project` is the sharpest case of that, because the guarantee
+about its `host` belongs to a different type. It is holding a
+`Registry` that proves every host in the file passed, since
+`config::registry::parse` is the only way to build one. Holding
+a `&Project` proves the same thing only when
+`Registry::project` handed it over. `Project` is public,
+re-exported from the crate root, derives `Deserialize` and has
+a public `host`, so a library consumer can deserialize one from
+any text at all and read a `host` no rule has touched. Nothing
+inside bombyx does that -- both loaders take the host from the
+ranking -- so this is a trap for a future caller rather than a
+live hole.
+
+### Two traps a reader cannot see from the code
+
+Both of these were code comments once, and `CLAUDE.md` under
+**Code comments** now says a trap aimed at a future editor lives
+here instead. Neither is visible at the place it matters.
+
+The first is the one above: the `Project` guarantee is a
+property of `Registry`, not of `Project`.
+
+The second is an ordering. `config::host::caller_supplied`
+answers with `--host` or `BOMBYX_HOST` when either names a host,
+and `resolve_host` asks it *before* opening the registry -- that
+is what makes `--host` work on a machine whose registry is
+missing or broken. So the order those two sources sit in does
+not only decide which value wins; it decides whether the file is
+read at all. Reordering them, or adding a source above them,
+silently changes which runs check the registry.
+
+
 Three things keep that survivable meanwhile. `render` escapes
 for Ruby whatever it is handed. `bootstrap.sh` passes `--`
 before the ref. And inside this crate the only two places that

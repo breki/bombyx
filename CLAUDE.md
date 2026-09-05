@@ -527,7 +527,11 @@ re-deriving a style.
 ## Code comments
 
 Extends **Documentation style** to every comment in the code,
-`///` and `//` alike, not only the module-level ones.
+`///` and `//` alike, not only the module-level ones -- with one
+exception, stated in the length bullet below. That section
+trades length for comprehensibility, and a comment does not get
+that trade: it sits in the reader's way, where a document waits
+to be opened.
 
 - **Write for a capable junior.** Assume Rust and general
   programming. Assume nothing about this codebase, `git`
@@ -549,10 +553,72 @@ Extends **Documentation style** to every comment in the code,
   one somebody forgets" needs no story about the version that
   put it there. Commit messages and
   `docs/developer/DIARY.md` are where history belongs.
-- **Length is not what is being minimised.** **Voice** governs
-  word choice here as everywhere. It does not govern whether
-  to explain, and a comment that is short and leaves the
-  reader stuck has failed.
+- **Two or three lines, unless the comment earns more.** Ten
+  comments were each offered three shorter forms and the
+  option to keep them; none was kept, and eight of the ten
+  landed at two or three lines. So length *is* being minimised
+  here, and this is where **Code comments** stops extending
+  **Documentation style**.
+
+  Two things earn more room, and both were chosen at length
+  deliberately. A list beats a paragraph when the thing being
+  described is a list -- `config.rs`'s header names its two
+  loaders as two items. And an absence needs stating and then
+  locating: `host` is missing from `Project::validate` on
+  purpose, so the comment says so and says where the rule went
+  instead.
+- **One reason, not the chain.** Give the reason the code sits
+  where it does, and stop. The reader reaches the consequence
+  without being walked through it. A guard placed before a
+  file is opened says "the errors below quote this name back
+  as a table heading" -- not what a bad heading then does to
+  the file, and not that another function runs the same rule.
+- **State the invariant, not the disaster.** "The host and the
+  settings always come from the same entry" was chosen over
+  "otherwise this VM boots on that project's machine". The
+  dramatised version reads as a warning to be checked rather
+  than a fact to be relied on.
+- **Never inventory your callers.** Who calls a function is
+  what `grep` answers, and a list of them in prose is stale
+  the next time one is added. Two comments carried such a list
+  and both were cut, eight lines from one of them.
+- **No hypotheticals, and no case for future work.** What
+  would break if a precedence were reordered, why a field
+  wants a newtype some backlog item owns, what a library
+  caller who does not exist should watch for: all cut. A
+  comment describes the code as it is. The backlog and `docs/`
+  hold the rest.
+- **Say what looks wrong and is not.** The two comments that
+  survived nearest their length are the two marking a
+  deliberate oddity -- a field absent from a validate, a
+  validation run twice. Both kept the marker and lost the
+  argument behind it, which is the shape: name the surprise,
+  point at where it is handled, do not argue the case.
+- **Reasoning belongs in `docs/`, not in a comment.** This is
+  the rule the five above follow from. Every paragraph cut in
+  that exercise was reasoning, and every one already existed
+  somewhere else: the `ssh` mechanism on the function holding
+  the rule, the operator's argument under **Decisions** in the
+  plan document, the newtype case in `docs/todo.md`, the
+  four-source precedence on the function that ranks it. A
+  comment states the local fact and lets the reader follow a
+  name to the argument.
+
+  **A shared explanation is not owned by a comment.** A review
+  found one such explanation stated in five places and
+  escalated the consolidation. Under this rule the question
+  does not arise: no comment holds the reasoning, so there is
+  no copy to reconcile.
+
+  **This costs something, so put it somewhere.** Two warnings
+  cut in that exercise were aimed at a future editor rather
+  than a reader, and neither is visible from the code:
+  reordering the host precedence changes whether the registry
+  is read at all, and `Project` being public with public
+  fields lets an outside caller hold an unchecked `host`. A
+  trap a reader cannot see and a comment may no longer carry
+  goes in `docs/architecture.md`, which is where both of those
+  now are.
 
 ## Coding Standards
 

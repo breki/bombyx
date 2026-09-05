@@ -4,6 +4,58 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**Ten comments, three shorter forms each, and a canon rule
+reversed**
+
+An experiment the operator ran on this branch. Ten comments the
+work had added were each put to them with three shorter
+alternatives and the option to keep them as written. None was
+kept. Eight of the ten landed at two or three lines, three took
+the shortest form offered, and the exercise removed 125 comment
+lines and added 31.
+
+`CLAUDE.md` under **Code comments** said "Length is not what is
+being minimised" and inherited "prefer comprehensibility over
+brevity" from **Documentation style**. That pair is what made a
+thirty-line doc comment on one field defensible, and it is what
+the ten choices contradict. The bullet is now a length budget,
+with five more bullets under it: one reason rather than the
+chain, the invariant rather than the disaster, no inventory of a
+function's own callers, no hypotheticals and no case for future
+work, and a marker on anything that looks like a mistake and is
+not.
+
+The sixth is the one the others follow from, and it reverses
+advice a reviewer had given the day before. `/review2`'s
+comprehension stage said `config/registry.rs`'s header should
+*own* the reasoning for the read-time host rule, with the other
+four copies shrinking to the local fact. The operator chose the
+two-line form with no heading, which owns it nowhere in the
+code. So: reasoning lives in `docs/`, a comment carries the
+local fact. Every paragraph cut in the exercise was reasoning,
+and every one already existed elsewhere -- the `ssh` mechanism on
+the function holding the rule, the operator's argument under
+**Decisions** in the plan, the newtype case in `docs/todo.md`.
+It also dissolves the consolidation that review escalated: no
+comment may hold the paragraph there were five copies of, so
+there is nothing left to reconcile.
+
+Two warnings were genuinely lost rather than shortened, both
+aimed at a future editor and neither visible from the code:
+reordering the two caller-supplied host sources changes whether
+the registry is read at all, and `Project` being public with
+public fields lets an outside caller hold an unchecked `host`.
+The second had been a review fix earlier the same day, and the
+exercise cut it. They are now a section of
+`docs/architecture.md`, **Two traps a reader cannot see from the
+code**, and the new rule names that file as where such a thing
+goes -- so the next cut of this kind has somewhere to put what
+it removes.
+
+A local HTML report holds the evidence table and the reasoning.
+It is on the operator's machine rather than in the repo, which
+is why this entry carries the argument.
+
 **Three reviewers in sequence on the registry loader, and one
 rule that had to be found three times**
 
