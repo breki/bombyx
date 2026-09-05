@@ -97,6 +97,21 @@ remote_root = "~/vms"
 # instead. See `provider-configured-not-selected` in
 # bombyx's own docs/todo.md.
 provider = "libvirt"          # libvirt or hyperv
+
+# The base image vagrant starts the machine from.
+#
+# It has to have `git` installed. The guest clones the project
+# itself, so the first thing bombyx's provisioning script does
+# inside the VM is look for `git`, and without it the script
+# stops there -- after the box download, the machine creation
+# and the boot have all already happened.
+#
+# bombyx cannot tell you sooner than that, because finding out
+# what a box contains means starting it.
+#
+# The name will not tell you which boxes carry it. Two that do
+# not are `cloud-image/debian-13` and `debian/bookworm64`; the
+# value below does. Booting the box is the only way to be sure.
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192                 # MiB

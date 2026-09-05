@@ -25,12 +25,16 @@ can no longer locate.
 > your own first `bombyx up` as the real test.
 >
 > **One route has since been exercised end to end.** On
-> 2026-09-05, `doctor`, `up` and `destroy` were run on frosti
-> with `host` naming frosti itself, so the local route is
-> verified short of a guest actually booting --
+> 2026-09-05, the whole sequence was run on frosti with `host`
+> naming frosti itself -- `doctor`, `up`, `status`, `shell`,
+> `down`, `provision`, `scratch`, `discard` and `destroy` --
+> against a guest that booted and provisioned to completion.
+> So the local route is verified, guest included.
 > **Running bombyx against your own machine** carries the
-> detail. The `ssh`-route transcripts below are still written
-> from the code.
+> detail, and
+> [the run record](issues/registry-run-against-frosti.md) holds
+> what it found. The `ssh`-route transcripts below are still
+> written from the code.
 >
 > The VM host steps are a summary of
 > [vm-host-setup.md](vm-host-setup.md), which records what it
@@ -243,11 +247,11 @@ the fix under **Why the non-interactive PATH causes trouble**.
 ### Running bombyx against your own machine
 
 *Verified on frosti (Ubuntu, vagrant 2.4.9, vagrant-libvirt
-0.12.2) on 2026-09-05: `doctor`, `up` and `destroy` all ran
-through `sh -c`, and the two generated files arrived intact.
-The `up` was stopped at the box download by naming a box that
-does not exist, so a guest booting on this route is still
-unverified.*
+0.12.2) on 2026-09-05: every VM command ran through `sh -c`,
+the two generated files arrived intact, and a guest booted on
+this route and provisioned to completion.
+[The run record](issues/registry-run-against-frosti.md) lists
+what ran and what it did not cover.*
 
 **Read this before you do Part 2, or come back and redo it.**
 This section replaces the SSH alias you wrote in Part 1 and the
@@ -411,9 +415,49 @@ Then change these:
 | Key | This tutorial uses |
 |-----|--------------------|
 | the table key | `myproject` -- names the VM and its directory on the host |
-| `vm.box` | `debian/bookworm64`; `provision.sh` runs `chsh` because of it |
+| `vm.box` | `generic/ubuntu2204` -- it carries `git`; see below |
 | `source.repo` | the URL you push this repository to |
 | `source.ref` | the branch you push, `main` here |
+
+**Do not reach for `debian/bookworm64` here**, which is the
+obvious Debian choice and the box two later passages of this
+tutorial are written around. It has no `git`, so a first `up`
+on it cannot finish. Booting it on frosti on 2026-09-05
+confirmed that: the VM comes up, and then the provisioning
+prints these two lines and exits 1. Vagrant prefixes each with
+`default:`, and the second reaches the terminal as one long
+line.
+
+```
+bombyx: git is not installed in this box.
+bombyx: install it in the box, or choose one with git, so the guest can clone the project.
+```
+
+**Your own `provision.sh` cannot save you here**, and this is
+the part that surprises people. bombyx runs one provisioner in
+the guest, its own bootstrap script, and that script's first
+job is to clone your repository. `provision.sh` lives inside
+that repository. So the `apt-get install ... git` you are
+about to write under **`vagrant/provision.sh`** below never
+runs: `git` is what fetches the file that would have installed
+it.
+
+`generic/ubuntu2204` carries `git`. A guest booted on it on
+2026-09-05 and provisioned to completion, and it is the value
+in `config.toml.sample`. Both boots are recorded under
+`tutorial-box-lacks-git` in `docs/todo.md`.
+
+Two later passages were written for the Debian box and will
+not match what you have, which is why they still mention it.
+The `provision.sh` below runs `chsh` because the Debian box
+gives its user `/bin/sh`; on `generic/ubuntu2204` that user
+already has `/bin/bash`, so the line does nothing and you can
+leave it in. And the arrow-key entry in
+**When something goes wrong** describes the same Debian
+behaviour, so it will not happen to you.
+
+Keeping the Debian box means installing `git` into it and
+repackaging it, which this tutorial does not cover.
 
 The table key is the project name, so nothing inside the table
 repeats it. `--project myproject` on every command is what picks
@@ -522,15 +566,16 @@ if [ ! -f /swapfile ]; then
 fi
 sudo swapon --all
 
-# Record which machine this VM is running on. (Unverified -- see
-# the *(unverified)* note in the header.) Nothing inside the
-# guest can work that out: `hostname` here answers `myproject`,
-# and the guest's DMI describes the emulated machine (`QEMU`),
-# not the host -- there is nothing to read at any privilege
-# level. The two variables reach this script because the
-# Vagrantfile above passes them in; bombyx put them on the
-# `vagrant` process out on the host. A VM booted by a bare
-# `vagrant up` sees neither, which is what the defaults are for.
+# Record which machine this VM is running on. (The hand-off was
+# seen working in a guest on 2026-09-05; see **What this was
+# checked against** in the header.) The guest cannot work that
+# out for itself: `hostname` here answers `myproject`, and the
+# guest's DMI describes the emulated machine (`QEMU`), not the
+# host -- there is nothing to read at any privilege level. The
+# two variables reach this script because the Vagrantfile
+# above passes them in; bombyx put them on the `vagrant`
+# process out on the host. A VM booted by a bare `vagrant up`
+# sees neither, which is what the defaults are for.
 sudo mkdir -p /etc/bombyx
 printf 'host=%s\nhostname=%s\n' \
   "${BOMBYX_VM_HOST:-unknown}" "${BOMBYX_VM_HOSTNAME:-unknown}" \

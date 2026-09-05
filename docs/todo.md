@@ -315,7 +315,27 @@ plan, decisions, and outcome.
   project, or the sample stops promising more than the directory layout
   delivers.
 
+- **tutorial-box-lacks-git** -- two passages still assume the Debian box
+  Found while working box-must-carry-git, and verified by booting it on frosti
+  on 2026-09-05: debian/bookworm64, which docs/tutorial.md used to tell the
+  reader to use, has no git, so bootstrap.sh refuses and the first up exits 1
+  after the download and the boot. The table in Part 3 now names
+  generic/ubuntu2204, whose guest booted and provisioned to completion the same
+  day, and the paragraphs under it explain the failure and warn readers off the
+  Debian box. What is left is the two passages written around that box, which
+  still mention it: Part 3's provision.sh runs chsh because the Debian box gives
+  its user /bin/sh, and When something goes wrong explains the arrow-key
+  behaviour the same box causes. Both are currently handled by telling the
+  reader they will not apply, which is an explanation where a rewrite belongs.
+  Doing this properly means running the tutorial end to end, which has never
+  happened -- its header already marks the Part 3 and Part 4 transcripts
+  unverified.
+
 ## Done
+
+- [**tutorial-local-route-now-booted**](issues/registry-run-against-frosti.md)
+  -- a guest has booted on the local route
+  (2026-09-05)
 
 - [**registry-run-against-frosti**](issues/registry-run-against-frosti.md)
   -- drive the new CLI against a real VM host
