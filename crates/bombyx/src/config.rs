@@ -20,11 +20,17 @@
 //! the guest and a typo there is worth reporting where the
 //! operator is editing.
 //!
-//! Two of them are checked by their *type* and cannot be built
-//! wrong at all: see [`RepoUrl`]. The rest are checked by
-//! `Config::validate`, which the loading path runs. `Config`
-//! has public fields, so a value that has been through
-//! `validate` can still be edited afterwards and nothing
+//! Four of them are checked by their *type* and cannot be built
+//! wrong at all: `remote_root`, `host`, `repo` and `script`.
+//! See [`RepoUrl`] for how the pattern works. Three of the four
+//! run their rules as serde reads the file; `host` runs its own
+//! as the two `host` keys are ranked, and `config::host` says
+//! why it differs.
+//!
+//! The rest -- `project`, `box`, `ref`, `cpus` and `memory` --
+//! are checked by `Config::validate`, which the loading path
+//! runs. `Config` has public fields, so a value that has been
+//! through `validate` can still be edited afterwards and nothing
 //! re-checks it. That is a gap rather than a decision, argued
 //! once in `docs/architecture.md` under "What config values
 //! are checked". (`validate` is named rather than linked because
@@ -165,9 +171,7 @@ const DEFAULT_REMOTE_ROOT: &str = "~/vms";
 ///
 /// The constant goes through [`RemoteRoot::parse`] like every
 /// other value, so an edit to `DEFAULT_REMOTE_ROOT` that breaks
-/// a rule fails rather than being wrapped unchecked.
-/// `the_default_root_passes_its_own_rules` runs that path, so
-/// the panic is caught by the test suite and not by an operator.
+/// a rule is refused rather than wrapped unchecked.
 fn default_remote_root() -> RemoteRoot {
     RemoteRoot::parse(DEFAULT_REMOTE_ROOT)
         .expect("DEFAULT_REMOTE_ROOT must pass the rules in `config::root`")
@@ -206,8 +210,8 @@ pub struct Config {
     /// Root directory on the VM host under which project
     /// directories are created.
     ///
-    /// A [`RemoteRoot`], so the six rules in `config::root` have
-    /// run against whatever is in here. bombyx joins the project
+    /// A [`RemoteRoot`], so every rule in `config::root` has run
+    /// against whatever is in here. bombyx joins the project
     /// name onto this and deletes the result on teardown, and
     /// this field being public is why the rules belong to a type
     /// rather than to a function somebody has to call.
@@ -451,8 +455,9 @@ impl Config {
     /// Returns the project directory on the VM host, e.g.
     /// `~/vms/myproject`.
     ///
-    /// A trailing slash on `remote_root` is ignored so the
-    /// result never contains a doubled separator.
+    /// The result never contains a doubled separator, because
+    /// `RemoteRoot`'s constructor has already dropped any
+    /// trailing slash from the value.
     #[must_use]
     pub fn remote_project_dir(&self) -> String {
         format!("{}/{}", self.root(), self.project)
@@ -470,9 +475,10 @@ impl Config {
         format!("{}/scratch/{}/{name}", self.root(), self.project)
     }
 
-    /// Returns `remote_root` without any trailing slash.
+    /// Returns `remote_root`, which arrives with no trailing
+    /// slash: `RemoteRoot`'s constructor drops one.
     fn root(&self) -> &str {
-        self.remote_root.trimmed()
+        self.remote_root.as_str()
     }
 }
 

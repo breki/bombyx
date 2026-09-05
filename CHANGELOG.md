@@ -63,6 +63,9 @@ and this project adheres to
 - `bombyx snapshot` saves the project VM's `fresh-install` snapshot, replacing
   one that is already there. It is how you move the point `reset` returns to,
   and how a VM created before bombyx took snapshots gets a correct one.
+- Library API: `config::RemoteRoot` and `config::HostName`, the checked types
+  behind `remote_root` and `host`. `RemoteRoot` also drops a trailing slash, so
+  the value is always in the form a path join needs.
 
 ### Changed
 
@@ -123,8 +126,9 @@ and this project adheres to
 - Reading the `config.toml` now checks every `host` in it -- the file-wide key
   and every `[projects.<name>].host` -- and refuses the file if any is a value
   `ssh` would misread, naming the table it came from. So a typo in a project you
-  were not asking about is reported while you have the file open. That one pass
-  is the only place the rule runs; nothing downstream re-checks the winner.
+  were not asking about is reported while you have the file open. That pass is
+  what reports a typo you did not ask about; the host a command actually uses
+  is checked again as it is picked, so neither pass depends on the other.
 - **BREAKING:** Every VM subcommand now requires `--project <name>`, naming the
   `[projects.<name>]` table it acts on. bombyx reads nothing out of the
   project's own directory, so it cannot work the project out from where you ran
@@ -140,9 +144,9 @@ and this project adheres to
   compiles outside the crate; use `Config::load_project`. This stops a caller
   choosing the route, which is the point -- the route is derived from `host`
   and is not a setting. It does not stop a caller assigning to `host` on a
-  loaded `Config`, so the two can still be made to disagree that way; the
-  public fields are a known gap, tracked as
-  `newtype-remaining-config-fields`.
+  loaded `Config`, so the two can still be made to disagree that way. The
+  value assigned is now a `HostName` and so has passed the host rule; what
+  nothing re-derives is the route beside it.
 - `up` now takes the `fresh-install` snapshot that `reset` restores, so the
   reset cycle works without anyone taking it by hand. It saves only when the
   machine does not already hold that name, leaving every later `up` free to run
@@ -153,6 +157,11 @@ and this project adheres to
 - A bad `remote_root` in `config.toml` is now refused while the file parses, so
   the message names the line and column of the offending key rather than only
   the field. The rules themselves are unchanged.
+- **BREAKING:** `Config::host` is a `config::HostName` and `Config::remote_root`
+  and `config::Project::remote_root` are a `config::RemoteRoot`, where all three
+  were a `String`. Each type's constructor holds every rule its field has, so a
+  value that exists has passed them. Code reading a field needs `.as_str()`;
+  code assigning one needs the constructor, which returns a `Result`.
 
 ### Fixed
 

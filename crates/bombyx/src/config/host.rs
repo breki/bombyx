@@ -8,16 +8,13 @@
 //!
 //! `super::registry` reads the file; [`rank`] picks between the
 //! two keys in a copy it is handed, and builds the winner into a
-//! [`HostName`]. Both keys have already been checked by then:
-//! `super::registry`'s parse applies [`refuse_if_bad`] to every
-//! `host` in the file as it reads it, whether or not the run
-//! turns out to want that one, and its header says why. So
-//! holding a `Registry` is the proof that every host in it
-//! passed.
+//! [`HostName`]. The rule runs in both places, and
+//! `docs/architecture.md` under **The host rule runs in two
+//! places, and this is the owner** says why.
 //!
-//! What a host value may be is decided in one place,
-//! [`HostName::parse`], so the message an operator gets does not
-//! depend on which key carried the value.
+//! What a host value may be is decided in one place, the
+//! private `check` below, so the message an operator gets does
+//! not depend on which key carried the value.
 //!
 //! # Why the config directory is decided here
 //!
@@ -81,8 +78,9 @@ pub struct HostName(String);
 impl HostName {
     /// Applies the three rules to `raw` and wraps it.
     ///
-    /// All three come from `super::guards`, so widening one
-    /// there widens it here too.
+    /// The rules are the private `check` below. All three come
+    /// from `super::guards`, so widening one there widens it
+    /// here too.
     ///
     /// The leading-dash rule is the one worth spelling out.
     /// `host` reaches `ssh` as its first positional argument,
@@ -99,14 +97,7 @@ impl HostName {
     /// a character outside the allowed set: letters, digits,
     /// `.`, `_`, `-` and `@`.
     pub fn parse(raw: &str) -> Result<Self, FieldError> {
-        guards::check_not_empty("host", raw)?;
-        guards::check_not_an_option("host", raw, "ssh")?;
-        guards::check_charset(
-            "host",
-            raw,
-            is_host_char,
-            "letters, digits, `.`, `_`, `-` or `@`",
-        )?;
+        check(raw)?;
         Ok(Self(raw.to_owned()))
     }
 
@@ -129,19 +120,50 @@ impl AsRef<str> for HostName {
     }
 }
 
-/// Builds a [`HostName`] from `value`, naming its source rather
-/// than a field when it is refused.
+/// Every rule a host value must pass, in one place.
+///
+/// Private, and reached two ways: [`HostName::parse`] wraps a
+/// value that passes, and [`refuse_if_bad`] checks one it has no
+/// use for.
+fn check(value: &str) -> Result<(), FieldError> {
+    guards::check_not_empty("host", value)?;
+    guards::check_not_an_option("host", value, "ssh")?;
+    guards::check_charset(
+        "host",
+        value,
+        is_host_char,
+        "letters, digits, `.`, `_`, `-` or `@`",
+    )
+}
+
+/// Re-labels a host error with the key that supplied the value.
 ///
 /// [`FieldError`] carries a field name, and for every other
 /// config value that name answers the operator's question,
 /// "which key do I edit?". For `host` it does not: the registry
 /// has a `host` key per project and one more below them all, so
 /// `host` identifies none of them. The useful answer is the
-/// source, which the caller supplies as a [`HostOrigin`], so
-/// the name is dropped here and the origin put in its place.
+/// source, which the caller supplies as a [`HostOrigin`], so the
+/// name is dropped here and the origin put in its place.
 ///
 /// [`FieldError::Empty`] carries only a field name and no
 /// reason, so a fixed sentence stands in for one.
+fn with_origin(
+    err: FieldError,
+    origin: &HostOrigin,
+    path: Option<&Path>,
+) -> ConfigError {
+    ConfigError::InvalidHost {
+        origin: origin.describe(path),
+        reason: match err {
+            FieldError::Empty { .. } => "must not be empty".to_owned(),
+            FieldError::Invalid { reason, .. } => reason,
+        },
+    }
+}
+
+/// Builds a [`HostName`] from `value`, naming the key that
+/// supplied it when the value is refused.
 ///
 /// # Errors
 ///
@@ -152,17 +174,11 @@ pub(crate) fn checked(
     origin: &HostOrigin,
     path: Option<&Path>,
 ) -> Result<HostName, ConfigError> {
-    HostName::parse(value).map_err(|err| ConfigError::InvalidHost {
-        origin: origin.describe(path),
-        reason: match err {
-            FieldError::Empty { .. } => "must not be empty".to_owned(),
-            FieldError::Invalid { reason, .. } => reason,
-        },
-    })
+    HostName::parse(value).map_err(|err| with_origin(err, origin, path))
 }
 
-/// Refuses `value` if it is not a legal host, throwing the
-/// [`HostName`] away.
+/// Refuses `value` if it is not a legal host, without building
+/// one.
 ///
 /// `super::registry`'s parse checks every `host` in the file,
 /// including the ones no run will want, and has nowhere to keep
@@ -171,13 +187,14 @@ pub(crate) fn checked(
 ///
 /// # Errors
 ///
-/// Whatever [`checked`] returns.
+/// Returns [`ConfigError::InvalidHost`], naming the source and
+/// the reason.
 pub(crate) fn refuse_if_bad(
     value: &str,
     origin: &HostOrigin,
     path: Option<&Path>,
 ) -> Result<(), ConfigError> {
-    checked(value, origin, path).map(|_| ())
+    check(value).map_err(|err| with_origin(err, origin, path))
 }
 
 /// Whether an environment-supplied directory is safe to use.
@@ -357,19 +374,21 @@ impl HostOrigin {
 /// file edited between two reads could supply a project host and
 /// a file-wide host that never coexisted.
 ///
-/// This is where the winner becomes a [`HostName`]. Both values
-/// arrive checked -- `super::registry`'s parse is what checked
-/// them -- so [`refuse_if_bad`] here is the second of two
-/// passes and cannot fail today. It runs anyway, because this
-/// function would otherwise depend on a rule applied in another
-/// module, and a `Registry` built some future way would hand an
-/// unchecked name straight to `ssh`.
+/// This is where the winner becomes a [`HostName`], and the rule
+/// runs here as well as in `super::registry`'s parse.
+/// `docs/architecture.md` under **The host rule runs in two
+/// places, and this is the owner** holds the argument for both.
 ///
 /// # Errors
 ///
 /// Returns [`ConfigError::HostMissing`] when neither key names a
-/// host, and [`ConfigError::InvalidHost`] if a value reaches
-/// here that `super::registry`'s parse did not refuse.
+/// host.
+///
+/// [`ConfigError::InvalidHost`] is in the signature and cannot
+/// occur through `super::registry::Registry::read`, which is the
+/// only production route to a `Registry`: its parse refuses a
+/// bad host before one exists. No test reaches that branch, and
+/// no `config.toml` produces it.
 pub(crate) fn rank(
     registry: &registry::Registry,
     name: &str,

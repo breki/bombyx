@@ -184,9 +184,9 @@ What a project declares:
 ```mermaid
 classDiagram
   class Config {
-    +String host
+    +HostName host
     +String project
-    +String remote_root
+    +RemoteRoot remote_root
     -Transport transport
   }
   class Vm {
@@ -206,6 +206,12 @@ classDiagram
   class ScriptPath {
     +String value
   }
+  class RemoteRoot {
+    +String value
+  }
+  class HostName {
+    +String value
+  }
   class Provider {
     <<enumeration>>
     Libvirt
@@ -215,7 +221,7 @@ classDiagram
     +Option~String~ host
   }
   class Project {
-    +String remote_root
+    +RemoteRoot remote_root
     +Option~String~ host
   }
   class HostOrigin {
@@ -429,12 +435,12 @@ inside one. Either way the values are then repo-supplied.
 So the allowlist is a boundary rather than a typo check. Each
 of those rules is what stops a repo-supplied value reaching
 `ssh` or `rm -rf`, so none of them is there to catch a typo.
-Six values reach the generated files and so the guest --
-`box`, `repo`, `ref`, `script`, `cpus` and `memory` -- and
-`remote_root` reaches
-`rm -rf` on the VM host. A registry out of a clone with
-`remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
-is `RemoteRoot`'s depth floor doing the work it exists for.
+Six values reach the generated files and so the guest -- `box`,
+`repo`, `ref`, `script`, `cpus` and `memory` -- and
+`remote_root` reaches `rm -rf` on the VM host. A registry out of
+a clone with `remote_root = "/etc"` gets `rm -rf /etc/<project>`
+there, which is `RemoteRoot`'s depth floor doing the work it
+exists for.
 
 What the guards do *not* stop is the redirect itself: bombyx
 opens no file in a project's directory of its own accord, and it
@@ -450,45 +456,56 @@ or by a library caller. For the first three, serde runs the
 constructor while deserializing, so a bad value is refused
 before a `Config` exists and the error identifies the line.
 
-`HostName` is the exception, and it has no
-`#[serde(try_from = "String")]`. The registry carries a `host`
-key per project and one more below them all, so the field name
-`host` does not tell an operator which line to edit. Instead
-`config::host::checked` takes a `HostOrigin` and names the
-source, and serde cannot supply one because it does not know
-which key it is reading. Trading that answer for a line number
-would be the worse deal, so the host rule runs where the origin
-is known.
+`HostName` is the exception, and it has no `#[serde(try_from =
+"String")]`. The registry carries a `host` key per project and
+one more below them all, so the field name `host` does not tell
+an operator which line to edit. Instead `config::host::checked`
+takes a `HostOrigin` and names the source, and serde cannot
+supply one because it does not know which key it is reading.
+Trading that answer for a line number would be the worse deal,
+so the host rule runs where the origin is known.
 
 The remaining four -- `box`, `ref`, `cpus` and `memory` -- are
 only *checked* after parsing, in `vm::validate` and
 `source::validate`, and so is `project` in `Config::validate`.
-`Vm`, `Source` and `Config` all have public fields, so a
-hand-built one never reaches those functions. **That is a gap,
-not a decision we would make again**, and issue #43 is the work
-that closes it.
+`Vm`, `Source` and `Config` all have public fields, so a hand-
+built one never reaches those functions. **That is a gap, not a
+decision we would make again**, and issue #43 is the work that
+closes it.
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`, which is its table key.
+
+### The host rule runs in two places, and this is the owner
+
+The argument lives here. `config::host`, `config::registry` and
+`llms.txt` each state the local fact and point at this heading,
+so there is one copy to correct rather than five.
 
 **Every `host` in the registry is checked as the file is read**,
 by `config::registry::parse` -- the file-wide one and every
 project's, not only the one a command turns out to want. This is
 the file where the operator writes host names, so a value bombyx
 would refuse is a mistake to report while they are looking at
-it; checking only the winner leaves a typo in an unused line
+it. Checking only the winner leaves a typo in an unused line
 until the day that line wins.
 
-Holding a `Registry` is therefore the proof that every host in it
-passed. `config::host::rank` then builds the winner into a
-`HostName`, and the check it runs there is the second of two:
-it cannot fail on a `Registry` that came through `parse`, and it
-runs so that `rank` does not depend on a rule applied in another
-module. `Registry::host` and `Registry::project_host` hand raw
-values out without re-running it, and neither
-`Project::validate` nor `Config::validate` checks `host`.
-`host` is the one field absent from both, which looks like an
-omission and is not.
+`config::host::rank` then runs the rule again on the one value
+it is about to hand on, and builds it into a `HostName`. The two
+passes divide by job. The first exists to report a value nobody
+asked about. The second exists so that `rank` produces a
+`HostName` without depending on where the value came from.
+
+The second pass cannot fail on a `Registry` that came through
+`parse`, because `parse` refused every bad host before the
+`Registry` existed, and `parse` is the only production route to
+one. `rank`'s doc comment says so rather than implying an error
+an operator could provoke.
+
+`Registry::host` and `Registry::project_host` hand raw values
+out without running the rule, and neither `Project::validate`
+nor `Config::validate` checks `host`. `host` is the one field
+absent from both, which looks like an omission and is not.
 
 `Config::load_project` then runs `Config::validate` over the
 value it assembles, so an entry's fields are checked twice. That
@@ -496,23 +513,30 @@ is deliberate rather than an oversight: `validate` is what every
 path building a `Config` calls, so a field added to `Config`
 without a matching check on the entry is still refused.
 
-Four values in an entry are checked before any lookup: the
+Five values in an entry are checked before any lookup: the
 project name, because it is the table key and a `ProjectName`;
-`repo` and `script`, because their types refuse a bad value; and
-`host`, by the pass described above. The rest are checked when
-`Registry::project` hands the entry out, so a rule broken in one
-project's table is reported when that project is asked for. A
-table that does not *parse* is not like that: the whole file
-fails, whichever project it belongs to.
+`remote_root`, `repo` and `script`, because their types refuse a
+bad value while the table parses; and `host`, by the pass
+described above. The rest are checked when `Registry::project`
+hands the entry out, so a rule broken in one project's table is
+reported when that project is asked for. A table that does not
+*parse* is not like that: the whole file fails, whichever
+project it belongs to.
 
 A type promises that its rules *ran*. A checking function
-promises only that they ran on the paths that call it.
-`Config`, `Vm`, `Source` and `Project` all have public fields,
-so any code can build one by hand and reach the guest without
-`validate` ever being called -- and a field whose rules are
-dull is as exposed as one whose rules are sharp. `validate` is
-also private, so a library caller cannot even choose to call
-it.
+promises only that they ran on the paths that call it. `Vm`,
+`Source` and `Project` have nothing but public fields, so any
+code can build one by hand and reach the guest without
+`validate` ever being called -- and a field whose rules are dull
+is as exposed as one whose rules are sharp. `validate` is also
+private, so a library caller cannot even choose to call it.
+
+`Config` is one step better and not two. Its private
+`transport` field stops a struct literal outside this crate, so
+a `Config` has to come from `Config::load_project`. Every other
+field is public, so a caller can still assign to one on the
+`Config` it was handed, and only the fields with types refuse a
+bad value when they do.
 
 `Project` is the sharpest case of that, because the guarantee
 about its `host` belongs to a different type. It is holding a
@@ -607,10 +631,10 @@ whole argument for the remaining types: a type carries its proof
 to every use site, and a checking function carries it only to
 the paths that call it.
 
-`remote_root` and `host` were the two worth doing first, and
-they are done. `remote_root` reaches `rm -rf` and `host` reaches
-`ssh`, and both now hold their rules in a constructor:
-`RemoteRoot` in `config::root` and `HostName` in `config::host`.
+The two sharpest values already have their types. `remote_root`
+reaches `rm -rf` and `host` reaches `ssh`, and each holds its
+rules in a constructor: `RemoteRoot` in `config::root` and
+`HostName` in `config::host`.
 
 | Field | Refused | Because |
 |-------|---------|---------|
@@ -625,13 +649,12 @@ they are done. `remote_root` reaches `rm -rf` and `host` reaches
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
-`project` and `remote_root` have rules of their own in the same
-places: `Config::validate` for `project`, and `config::root` for
-every rule `remote_root` must pass. `remote_root`'s run twice,
-once as `Registry::project` hands the entry out and again over
-the assembled `Config`.
-`project` must be one path segment, because it becomes one
-directory name on the VM host.
+`project` and `remote_root` have rules of their own beyond the
+table above, and they run in different places. `project`'s run
+in `Config::validate`, and it must be one path segment, because
+it becomes one directory name on the VM host. `remote_root`'s
+run once, in `RemoteRoot`'s constructor, which serde calls while
+the table parses.
 
 `remote_root` has the strictest rules of the three, because
 bombyx runs `rm -rf` on a path derived from it. All of them live

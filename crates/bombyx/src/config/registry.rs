@@ -103,6 +103,13 @@ pub struct Project {
     /// The VM host this one project runs on, when it is not the
     /// machine the file-wide `host` names. Absent from most
     /// entries.
+    ///
+    /// A `String` rather than a [`super::HostName`], which is
+    /// the one primitive here that is argued for. An entry keeps
+    /// the value as the table spelled it, because a bad host is
+    /// reported by the key that carried it and this struct
+    /// cannot say which key that was. `super::host::rank` builds
+    /// the winner into a `HostName`.
     pub host: Option<String>,
 
     /// The machine to build.
@@ -265,8 +272,7 @@ impl Registry {
     ///
     /// **Already checked.** `parse` applies the host rule to
     /// every `host` key in the file as it is read, so holding a
-    /// [`Registry`] is the proof this value passed and there is
-    /// nothing left for this method to run.
+    /// [`Registry`] is the proof this value passed.
     ///
     /// The rules themselves live in `super::host`, which is
     /// where they are written down.

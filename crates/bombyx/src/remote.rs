@@ -453,13 +453,14 @@ pub fn save_snapshot_if_absent(
 /// This is the widest-reaching command bombyx emits: its blast
 /// radius is bounded by a path rather than by Vagrant's notion
 /// of a machine. Nothing is checked here, deliberately --
-/// `Config::validate` rejects a `remote_root` that is
-/// unrooted, contains a `.` or `..` segment, or is too shallow,
+/// `RemoteRoot`'s constructor refuses a root that is unrooted,
+/// contains a `.` or `..` segment, or is shallower than one
+/// segment. bombyx then joins the project name onto that root,
 /// so every path derived from a loaded `Config` is already at
-/// least two real segments deep. Validating once at the layer
-/// that owns `remote_root` is what keeps the write path
-/// (`mkdir`, then the heredocs) and this removal path agreeing about
-/// which roots are usable.
+/// least two real segments deep. A type running the rules once
+/// is what
+/// keeps the write path (`mkdir`, then the heredocs) and this
+/// removal path agreeing about which roots are usable.
 ///
 /// The `debug_assert` catches a caller that builds a path some
 /// other way; it is not the safety mechanism.

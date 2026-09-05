@@ -8,7 +8,7 @@
 //! Every rule is enforced in one function, the private `check`
 //! below, and [`RemoteRoot`] is the only thing that calls it. So
 //! a value reaches the rest of bombyx as a [`RemoteRoot`] or not
-//! at all, and holding one is the proof that all six rules ran.
+//! at all, and holding one is the proof that every rule ran.
 
 use std::fmt;
 
@@ -47,6 +47,11 @@ pub struct RemoteRoot(String);
 impl RemoteRoot {
     /// Checks `raw` against every rule here and wraps it.
     ///
+    /// The value stored is not always the value passed in: a
+    /// trailing `/` is dropped, so `/srv/vms/` comes back out of
+    /// [`RemoteRoot::as_str`] as `/srv/vms`. `normalized` below
+    /// says why.
+    ///
     /// Takes `&str` so a caller holding a borrowed value need
     /// not copy it. Serde arrives owning a `String` and hands
     /// that straight to [`RemoteRoot::try_from`] instead, which
@@ -56,27 +61,33 @@ impl RemoteRoot {
     ///
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
     /// [`FieldError::Invalid`] naming `remote_root` when it
-    /// breaks any of the five other rules `check` holds.
+    /// breaks any other rule `check` holds.
     pub fn parse(raw: &str) -> Result<Self, FieldError> {
         check(raw)?;
-        Ok(Self(raw.to_owned()))
+        Ok(Self(normalized(raw)))
     }
 
-    /// The value, as the VM host's shell sees it.
+    /// The value, ready to have a `/` and a name joined onto it.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
 
-    /// The value with any trailing `/` removed.
-    ///
-    /// `super::Config` joins a project name onto this with a
-    /// `/` of its own, and `/srv/vms/` would otherwise give
-    /// `/srv/vms//myproject`.
-    #[must_use]
-    pub fn trimmed(&self) -> &str {
-        self.0.trim_end_matches('/')
-    }
+/// A checked root in the one form the rest of bombyx uses.
+///
+/// Drops a trailing `/`, because `super::Config` joins the
+/// project name on with a `/` of its own and `/srv/vms/` would
+/// give `/srv/vms//myproject`. Doing it here rather than at the
+/// join is what stops a new call site getting it wrong: there is
+/// no second spelling of a `RemoteRoot` to pick the wrong one
+/// of.
+///
+/// `check` runs first and refuses anything with no real segment
+/// in it, so `/` and `~/` never reach this and it cannot strip a
+/// value down to nothing.
+fn normalized(checked: &str) -> String {
+    checked.trim_end_matches('/').to_owned()
 }
 
 impl fmt::Display for RemoteRoot {
@@ -95,12 +106,11 @@ impl TryFrom<String> for RemoteRoot {
     type Error = FieldError;
 
     /// What serde calls. It already owns the `String`, so the
-    /// rules run against a borrow of it and the value moves into
-    /// the newtype -- no copy on the path a config load actually
-    /// takes.
+    /// rules run against a borrow of it rather than against a
+    /// second copy.
     fn try_from(raw: String) -> Result<Self, Self::Error> {
         check(&raw)?;
-        Ok(Self(raw))
+        Ok(Self(normalized(&raw)))
     }
 }
 
@@ -144,9 +154,7 @@ fn invalid(reason: impl Into<String>) -> FieldError {
 /// Checks a `remote_root` value against every rule here.
 ///
 /// Private, and called only by [`RemoteRoot::parse`] and
-/// [`RemoteRoot::try_from`]. A second caller could run these
-/// rules on a value and then keep the value as a `String`,
-/// which is the arrangement the newtype replaced.
+/// [`RemoteRoot::try_from`].
 ///
 /// # Errors
 ///
@@ -259,6 +267,30 @@ mod tests {
         refused("~/../..", "`..` segment");
         refused("/vms/~/x", "first character");
         refused("/vms;rm -rf /", "is not allowed");
+    }
+
+    #[test]
+    fn a_trailing_slash_is_dropped_when_the_value_is_wrapped() {
+        // `Config` joins the project name on with a `/` of its
+        // own, so `/srv/vms/` would give `/srv/vms//myproject`.
+        // Dropping the slash here rather than at the join means
+        // a `RemoteRoot` is always in the form a join needs, and
+        // a new call site cannot get it wrong.
+        for (written, kept) in [
+            ("/srv/vms/", "/srv/vms"),
+            ("~/vms/", "~/vms"),
+            ("/srv/vms", "/srv/vms"),
+        ] {
+            let root = RemoteRoot::parse(written).expect("a legal root");
+            assert_eq!(root.as_str(), kept, "{written:?}");
+            assert_eq!(
+                RemoteRoot::try_from(written.to_owned())
+                    .expect("a legal root")
+                    .as_str(),
+                kept,
+                "{written:?} through serde",
+            );
+        }
     }
 
     #[test]

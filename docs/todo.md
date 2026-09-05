@@ -108,8 +108,8 @@ plan, decisions, and outcome.
   for that type and names the key, so a bespoke `Cpus` would buy nothing.
 
   `remote_root` and `host` were the two at the front of this queue and are
-  done, under #17. `remote_root` reaches `rm -rf` and now holds its six
-  rules in `RemoteRoot`; `host` reaches `ssh` as a bare positional argument
+  done, under #17. `remote_root` reaches `rm -rf` and now holds every rule
+  it has in `RemoteRoot`; `host` reaches `ssh` as a bare positional argument
   and now holds its three in `HostName`. `host`'s check had been placed
   twice in two weeks and argued about three times before that, which is what
   a missing type looks like.
@@ -297,6 +297,19 @@ plan, decisions, and outcome.
   Doing this properly means running the tutorial end to end, which has never
   happened -- its header already marks the Part 3 and Part 4 transcripts
   unverified.
+
+- **split-project-out-of-registry** -- registry.rs holds three types
+  registry.rs is 930 lines and defines three types: Project (public, public
+  fields, the serde shape of one project's table), RegistryFile (private serde
+  shape) and Registry (public, private fields, the read/lookup API). Two
+  invariants live in one file, so a reader auditing either one reads past the
+  other, and the module doc now has to explain three different places a field is
+  checked. Split Project and its to_config/validate into
+  config/registry/project.rs, leaving Registry, RegistryFile and parse in
+  registry.rs; the tests split along the same seam. Found by artisan (AQ-7)
+  reviewing the RemoteRoot/HostName branch for #17, which extended the file
+  rather than causing its size. Deferred there because re-cutting a 930-line
+  config module inside that branch is the churn #17 itself warned about.
 
 ## Done
 
