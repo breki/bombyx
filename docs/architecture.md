@@ -381,7 +381,15 @@ all -- it is the operator seeing a working machine.
 snapshots, so the script tests its output rather than its
 status.
 
-Pretty-printed, and with the identity prefix left off each
+**The boot's `vagrant` call carries one variable the others do
+not.** Every project call carries the two `BOMBYX_VM_*` names
+telling the guest which machine it runs on; `vagrant up` also
+carries `VAGRANT_DEFAULT_PROVIDER`, which is how bombyx selects
+a provider rather than merely configuring one. **What config
+values are checked** below holds the argument for both the
+choice and its scope.
+
+Pretty-printed, and with the environment prefix left off each
 `vagrant` call, that script is:
 
 ```sh
@@ -442,15 +450,22 @@ a clone with `remote_root = "/etc"` gets `rm -rf /etc/<project>`
 there, which is `RemoteRoot`'s depth floor doing the work it
 exists for.
 
-`provider` reaches both the generated Vagrantfile and the `ssh`
-command line, where bombyx sets `VAGRANT_DEFAULT_PROVIDER` so
-vagrant uses the named provider rather than choosing one. It is
-absent from the list above because it is not a string. `Provider`
-is an enum, so serde refuses anything but `libvirt` or `hyperv`
-while the file is being read, and the two words it can render
-carry nothing a shell would act on. `remote::vagrant_command`
-quotes it regardless, so the assignment matches every other one
-in the script.
+`provider` reaches both the generated Vagrantfile and the
+command line bombyx hands to `ssh` or to `sh -c`, where bombyx
+sets `VAGRANT_DEFAULT_PROVIDER` so vagrant uses the named
+provider rather than choosing one. Only `vagrant up` carries it;
+`remote::creates_a_machine` holds that rule and
+`remote::PROVIDER_ENV` argues it.
+
+`provider` is absent from the list above because `Provider` is a
+closed enum. Serde admits only the two words `libvirt` and
+`hyperv` while the file is being read, so no operator text
+reaches the shell or the guest, and there is nothing left for a
+guard to check. `cpus` and `memory` are in the list although
+they are not strings either, because an operator still chooses
+their values; a floor is what guards those.
+`remote::vagrant_command` quotes the provider regardless, so the
+assignment matches every other one in the script.
 
 What the guards do *not* stop is the redirect itself: bombyx
 opens no file in a project's directory of its own accord, and it

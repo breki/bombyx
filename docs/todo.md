@@ -133,12 +133,12 @@ plan, decisions, and outcome.
   Found by the red-team review of 58099a8 (RT-2), verified by reading
   vagrantfile.rs and plan.rs. The generated Vagrantfile emits
   `config.vm.provider :<name> do |v|`, which configures a provider if vagrant
-  chooses it. It does not choose it. No plan passes `--provider`, and bombyx
-  sets no VAGRANT_DEFAULT_PROVIDER, so vagrant picks whatever the host makes
+  chooses it. It did not choose it. No plan passed `--provider`, and bombyx
+  set no VAGRANT_DEFAULT_PROVIDER, so vagrant picked whatever the host made
   available. On a Linux VM host with only vagrant-libvirt installed, a project
-  with provider = "hyperv" boots a libvirt machine. The `:hyperv` settings block
-  never applies, so the cpus and memory in the config are ignored and the VM
-  comes up at vagrant defaults. Nothing reports the mismatch. Until 58099a8 the
+  with provider = "hyperv" booted a libvirt machine. The `:hyperv` settings block
+  never applied, so the cpus and memory in the config were ignored and the VM
+  came up at vagrant defaults. Nothing reported the mismatch. Until 58099a8 the
   libvirt plugin probe caught this by accident: a hyperv project got a red
   doctor row, for the wrong reason. That probe is now conditional and a hyperv
   project gets a skip row instead, so the accident is gone and the defect is
@@ -148,12 +148,29 @@ plan, decisions, and outcome.
   can supply the provider the project asks for, which is the honest version of
   the probe that was removed.
 
-  Two halves, and only one is blocked. Passing the provider to vagrant is
-  verifiable on the libvirt host we already use: `vagrant up --provider hyperv`
-  on a Linux host should refuse instead of substituting *(unverified -- run it
-  once on frosti and record the output here)*, which is the point -- a loud
-  failure rather than a wrong VM. Only making Hyper-V actually work needs a
-  Windows VM host, and Provider::Hyperv is documented as never exercised.
+  **Done on the branch for issue #45**, and the entry moves to `## Done` when
+  that PR merges. bombyx sets VAGRANT_DEFAULT_PROVIDER on `vagrant up`, and on
+  that verb alone. Three things were measured on frosti and settled it. With no
+  machine yet, an unusable provider makes vagrant refuse every verb -- `up`,
+  `status`, `halt` and `destroy` alike, each exiting 1 with "The Hyper-V
+  provider only works on Windows". With a machine already created, vagrant reads
+  the provider it recorded and ignores the variable, so
+  `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status` on a running libvirt machine
+  exits 0 and reports libvirt. And a `hyperv` project run end to end on frosti
+  failed the boot after bombyx had written the directory, then destroyed
+  cleanly, because `destroy` carries no provider and so was not refused as well.
+
+  The doctor half is half done, and calling it finished would overstate it. For
+  a libvirt project the existing probe is the check the entry asked for: it
+  greps `vagrant plugin list` for `vagrant-libvirt`, so a host that cannot
+  supply libvirt gets a red row before `up` runs. For a hyperv project doctor
+  emits a skip row, and a skip is the absence of a check -- on a Linux VM host
+  every row comes back green and `up` then fails. Writing an honest hyperv
+  probe needs a Windows VM host, and Provider::Hyperv is documented as never
+  exercised, so that half stays open under `doctor-checks-hyperv-support`.
+
+  Two limits found by the review rounds have their own entries:
+  `provider-change-on-existing-vm` and `disarm-on-the-ssh-route`.
 
 - **validate-resume-from-step** -- let validate resume at the gate that failed
   `cargo xtask validate` prints `-> iterate with: cargo xtask <cmd>` on a
@@ -310,6 +327,51 @@ plan, decisions, and outcome.
   reviewing the RemoteRoot/HostName branch for #17, which extended the file
   rather than causing its size. Deferred there because re-cutting a 930-line
   config module inside that branch is the churn #17 itself warned about.
+
+- **disarm-on-the-ssh-route** -- the VM host's own environment reaches vagrant
+  `DISARM_VAGRANT_REDIRECTS` is applied only on the local route, on the argument
+  that sshd builds the far side's environment and bombyx's own is not in it.
+  True and incomplete: the threat is an exported variable, and the VM host has
+  its own sources for one. pam_env applies /etc/environment to a non-interactive
+  `ssh host "cmd"`, a zsh login shell reads ~/.zshenv for `zsh -c`, and a bash
+  export placed above the usual non-interactive return guard in ~/.bashrc
+  survives. So VAGRANT_CWD or VAGRANT_VAGRANTFILE on the VM host makes `bombyx
+  destroy` test one project's directory and destroy another machine, and
+  VAGRANT_DEFAULT_PROVIDER=hyperv there gets a refused `vagrant destroy`, which
+  strands the directory because `execute` stops at the first failing step. Found
+  by red-team in round 3 of the review on issue #45, read from the code and from
+  sshd's documented PAM and shell startup, not measured -- the VM host was not
+  reachable from that session. The fix is to prefix DISARM_VAGRANT_REDIRECTS in
+  all three `transport` arms rather than the local one, and cut the comment down
+  to what is really route-specific. It costs one `unset` per remote command. It
+  reverses a decision the test `the_ssh_route_disarms_nothing` records
+  deliberately, which is why it was not folded into #45.
+
+- **provider-change-on-existing-vm** -- a provider edit needs a destroy first
+  Found by red-team in round 3 of the review on issue #45. bombyx sets
+  VAGRANT_DEFAULT_PROVIDER on `vagrant up`, which makes vagrant refuse rather
+  than substitute -- but only for a machine that does not exist yet. Measured on
+  frosti: with a machine already created, vagrant reads the provider it recorded
+  and ignores the variable, so `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status`
+  on a running libvirt machine exits 0 and reports libvirt. So an operator who
+  edits `provider` and re-runs `bombyx up` on an existing project keeps the old
+  provider, the new settings block is never applied, and nothing says so. That
+  is the same silent mismatch #45 closed, surviving on the re-boot path. `bombyx
+  destroy` first is the workaround, and the documents now say so. A real fix
+  would compare the provider recorded under the project's `.vagrant/machines/`
+  against the configured one and refuse, or report the mismatch in `doctor`.
+
+- **doctor-checks-hyperv-support** -- a skip row is not a check
+  Split out of `provider-configured-not-selected` (issue #45) by red-team in
+  round 3 of its review. That entry asked doctor to check the host can supply
+  the provider the project asks for. For libvirt it already does: the probe
+  greps `vagrant plugin list` for `vagrant-libvirt`, so a host missing it gets a
+  red row before `up` runs. For hyperv doctor emits `Outcome::Skip("not checked
+  for hyperv")`, and a skip is the absence of the check, not the check. The
+  concrete gap: on a Linux VM host, `bombyx doctor` for a hyperv project reports
+  every row green plus one skip, and `bombyx up` then fails. Writing the probe
+  honestly needs a Windows VM host, which nobody has, so this is blocked rather
+  than merely unwritten -- the skip row is the honest report until then.
 
 ## Done
 

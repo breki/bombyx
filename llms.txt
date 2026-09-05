@@ -126,8 +126,10 @@ header above it:
 - `[projects.<name>.vm]` — required. `box`, `cpus` and `memory`
   have no defaults; `provider` is optional and defaults to
   `libvirt`. bombyx passes the provider to vagrant as
-  `VAGRANT_DEFAULT_PROVIDER`, so a host that cannot supply it
-  fails the boot. `hyperv` parses and has never been run
+  `VAGRANT_DEFAULT_PROVIDER`, on `vagrant up` only, so a host
+  that cannot supply it fails the boot. Vagrant ignores it once
+  a machine exists, so changing the key needs a destroy first.
+  `hyperv` parses and has never been run
 - `[projects.<name>.source]` — required: `repo`, `ref`,
   `script`, what the guest clones and runs
 

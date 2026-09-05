@@ -349,8 +349,12 @@ comes with a caveat of its own: its provider needs an elevated
 shell, which an SSH session does not have. bombyx does pass the
 provider to vagrant, so setting `hyperv` on a host that cannot
 supply it fails the boot rather than quietly building a libvirt
-machine *(unverified -- nobody has run bombyx against a Windows
-VM host)*.
+machine, as long as the VM does not exist yet -- vagrant
+records the provider it built a machine with and reads that
+back afterwards, so changing the key later needs a
+`bombyx destroy` first. That refusal was run on a Linux host
+and it works. Whether a Windows VM host then boots the machine
+is *(unverified)*: nobody has run bombyx against one.
 
 ### Optional: keep the VM from reaching your home network
 
@@ -663,7 +667,7 @@ $ bombyx --project myproject --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
 ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
-ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
 ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 

@@ -4,6 +4,49 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**Three review rounds, three narrowing versions of one bug**
+
+`/review2` over the provider branch reached its three-round
+ceiling, and the reason is worth writing down: every round found
+a real behaviour defect in the previous round's fix, so the
+stopping rule never fired.
+
+Round one: the variable was on every vagrant call, which broke
+teardown. Round two: it was missing from the `unset` list, so an
+operator's own exported value arrived instead and broke teardown
+the same way from outside. Round three: a fifth vagrant variable,
+`VAGRANT_PREFERRED_PROVIDERS`, ranks the usable providers when
+the first one is unset -- exactly the state bombyx now leaves on
+every verb but the boot. Each defect is narrower than the one
+before it, which is convergence rather than thrashing.
+
+The lesson is the same one **Guarding one field? Check its
+siblings** in `CLAUDE.md` already states, one level up. The
+`unset` list carried four names and no rule, so each round
+checked the list rather than the family and each round found one
+more name. It now states the rule the list has to satisfy: every
+vagrant variable deciding which directory, which machine or which
+provider a command acts on.
+
+The prose did not converge the same way. One sentence in
+`docs/architecture.md` was wrong in two consecutive rounds, and
+the conclusion in `PROVIDER_ENV`'s doc was rewritten in all
+three. `fresh-reader` then found why: that comment had become the
+owner of the whole argument, with four other places pointing at
+it, which is backwards under **Code comments**. Moving it into
+`docs/architecture.md` is logged rather than done -- a
+consolidation is never applied in the round that found it.
+
+Two limits the rounds surfaced are now backlog items rather than
+work on this branch. `bombyx destroy` over `ssh` can still be
+handed a vagrant variable by the VM host's own environment
+(`disarm-on-the-ssh-route`), and editing `provider` on a project
+that already has a VM keeps the old one silently
+(`provider-change-on-existing-vm`), because vagrant reads the
+provider it recorded. `doctor-checks-hyperv-support` is the third:
+a skip row is the absence of a check, so the doctor half of the
+original item is not finished, only blocked on a Windows VM host.
+
 **bombyx now tells vagrant which provider to use**
 
 The generated Vagrantfile carried
@@ -13,18 +56,30 @@ what the host offered, so a project asking for `hyperv` on a
 libvirt-only host got a libvirt machine with the settings block
 unapplied and its `cpus` and `memory` ignored. Nothing said so.
 
-bombyx sets `VAGRANT_DEFAULT_PROVIDER` on every vagrant call it
-builds, in the same prefix that already carries the two
-`BOMBYX_VM_*` variables. The environment variable rather than
-`vagrant up --provider <name>`, because only `up` accepts that
-argument: `halt`, `status`, `destroy` and `snapshot` would
-each keep choosing for themselves.
+bombyx sets `VAGRANT_DEFAULT_PROVIDER` on `vagrant up`, in the
+same prefix that already carries the two `BOMBYX_VM_*`
+variables. The environment variable rather than
+`vagrant up --provider <name>` because the two spell the same
+choice and only `up` accepts the argument.
 
-We checked the part the backlog entry marked unverified, on
-frosti: a bare Vagrantfile under
-`VAGRANT_DEFAULT_PROVIDER=hyperv` exits 1 with "The provider
-'hyperv' ... isn't usable on this system". Vagrant refuses
-rather than substituting, which is the whole point.
+The first cut put it on every vagrant call, and `red-team`
+found what that costs. Three measurements on frosti settled the
+shape. With no machine yet, an unusable provider makes vagrant
+refuse every verb: `up`, `status`, `halt` and `destroy` each
+exit 1 with "The Hyper-V provider only works on Windows". With
+a machine already created, vagrant reads the provider it
+recorded and ignores the variable, so
+`VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status` on a running
+libvirt machine exits 0 and reports libvirt. So the variable
+buys nothing on the other verbs and does harm on one: `up`
+writes the directory before vagrant runs, and `execute` stops
+at the first failing step, so a `destroy` carrying the same
+variable would be refused and `remove_dir` would never run.
+Nothing could then clear the directory.
+
+We ran that case end to end. A `hyperv` project on frosti
+failed the boot with the directory already written, and
+`bombyx destroy` then exited 0 and removed it.
 
 `[vm] provider` is optional now and defaults to libvirt. It is
 the only key in that table with a default, and

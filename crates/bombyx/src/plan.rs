@@ -522,8 +522,7 @@ mod tests {
                  <<'BOMBYX_EOF'",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
-                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
-                 VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'provision'\"",
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'provision'\"",
             ]
         );
     }
@@ -544,14 +543,17 @@ mod tests {
         assert_eq!(up.len(), pr.len() + 1);
         let writes = pr.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
-        let env = env_prefix();
+        // Two prefixes, not one: the boot names the provider
+        // and `provision` does not, which
+        // `only_the_calls_that_create_a_machine_name_the_provider`
+        // states as a rule across every action.
         assert_eq!(
             up[writes].args[1],
-            format!("cd ~/'vms/myproject' && {env} vagrant 'up'")
+            format!("cd ~/'vms/myproject' && {} vagrant 'up'", boot_env())
         );
         assert_eq!(
             pr.last().unwrap().args[1],
-            format!("cd ~/'vms/myproject' && {env} vagrant 'provision'")
+            format!("cd ~/'vms/myproject' && {} vagrant 'provision'", vm_env())
         );
     }
 
@@ -588,7 +590,7 @@ mod tests {
     #[test]
     fn down_only_halts() {
         let cmds = run(&Action::Down);
-        let env = env_prefix();
+        let env = vm_env();
         assert_eq!(cmds.len(), 1);
         assert_eq!(
             cmds[0].args[1],
@@ -599,7 +601,7 @@ mod tests {
     #[test]
     fn status_queries_the_project_dir() {
         let cmds = run(&Action::Status);
-        let env = env_prefix();
+        let env = vm_env();
         assert_eq!(
             cmds[0].args[1],
             format!("cd ~/'vms/myproject' && {env} vagrant 'status'")
@@ -642,7 +644,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
                  '-f' 'fresh-install'",
-                env_prefix()
+                vm_env()
             )
         );
     }
@@ -669,7 +671,7 @@ mod tests {
     #[test]
     fn reset_restores_the_fresh_install_snapshot() {
         let cmds = run(&Action::Reset);
-        let env = env_prefix();
+        let env = vm_env();
         assert_eq!(
             cmds[0].args[1],
             format!(
@@ -697,7 +699,7 @@ mod tests {
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f \
                  Vagrantfile ]; then {} vagrant 'destroy' '-f'; fi",
-                env_prefix()
+                vm_env()
             )
         );
         assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/myproject/pr-1234'");
@@ -712,7 +714,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
-                env_prefix()
+                vm_env()
             )
         );
         assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/myproject'");
@@ -758,82 +760,88 @@ mod tests {
         assert!(!run(&Action::Doctor).is_empty());
     }
 
-    /// The whole prefix every project vagrant call carries.
+    /// The prefix on the boot, which is the one verb that names
+    /// a provider.
     ///
-    /// Separate from [`vm_env`] so the identity test can assert
-    /// the identity alone. Equality assertions want this one.
-    fn env_prefix() -> String {
-        format!("{} {}='libvirt'", vm_env(), remote::PROVIDER_ENV)
+    /// Every other verb carries [`vm_env`] alone;
+    /// `only_the_calls_that_create_a_machine_name_the_provider`
+    /// is what holds the two apart across the actions.
+    fn boot_env() -> String {
+        format!(
+            "{} {}='{}'",
+            vm_env(),
+            remote::PROVIDER_ENV,
+            cfg().vm.provider
+        )
     }
 
-    #[test]
-    fn every_project_vagrant_call_names_the_provider() {
-        // Rendering `config.vm.provider :libvirt` in the
-        // Vagrantfile configures a provider vagrant might pick.
-        // It does not pick it. Without this variable vagrant
-        // chooses whatever the host offers, so a hyperv project
-        // on a libvirt-only host booted a libvirt machine with
-        // the config's cpus and memory ignored.
-        //
-        // Derived from `all_actions` for the reason the identity
-        // test below gives: a hand-written list of call sites
-        // was green while `destroy` carried neither variable.
-        let want = format!("{}='libvirt'", remote::PROVIDER_ENV);
+    /// Every script that runs `vagrant` on a project, paired
+    /// with the action whose plan produced it.
+    ///
+    /// Derived from `all_actions` rather than a hand-written
+    /// list of builders, which once enumerated four call sites
+    /// where there were six. `doctor` is left out: its probes
+    /// inspect the host's vagrant installation rather than a
+    /// project's VM.
+    ///
+    /// The filter matches `" vagrant '"` rather than the bare
+    /// word, because the commands that *write* the generated
+    /// files mention vagrant too -- one carries
+    /// `vagrant/provision.sh` in its payload.
+    ///
+    /// The list is asserted non-empty, so a caller cannot pass
+    /// by matching nothing.
+    fn project_vagrant_scripts() -> Vec<(Action, String)> {
+        let mut found = vec![];
         for action in all_actions() {
             if action == Action::Doctor {
                 continue;
             }
             for cmd in run(&action) {
-                let script = &cmd.args[cmd.args.len() - 1];
-                if !script.contains(" vagrant '") {
-                    continue;
+                let script = cmd.args[cmd.args.len() - 1].clone();
+                if script.contains(" vagrant '") {
+                    found.push((action.clone(), script));
                 }
-                assert!(
-                    script.contains(&want),
-                    "{action:?} runs vagrant without a provider: {script}"
-                );
             }
+        }
+        assert!(!found.is_empty(), "no plan runs vagrant at all");
+        found
+    }
+
+    #[test]
+    fn only_the_calls_that_create_a_machine_name_the_provider() {
+        // `remote::PROVIDER_ENV` holds the argument and the
+        // measurements. The short version: on any verb but the
+        // boot the variable never changes which provider
+        // vagrant uses, and on `destroy` it can refuse the
+        // command that clears the directory a refused boot left
+        // behind.
+        let want = format!("{}='{}'", remote::PROVIDER_ENV, cfg().vm.provider);
+        for (action, script) in project_vagrant_scripts() {
+            let creates = script.contains(" vagrant 'up'");
+            assert_eq!(
+                script.contains(&want),
+                creates,
+                "{action:?}: a provider belongs on the boot and \
+                 nowhere else: {script}"
+            );
         }
     }
 
     #[test]
     fn every_project_vagrant_call_carries_the_vm_host_identity() {
-        // Derived from `all_actions` rather than a hand-written
-        // list of builders. The list version was green while
-        // `destroy` ran `vagrant` with neither variable set: it
-        // enumerated four call sites and there were six, which is
-        // exactly the "per-action list goes stale" failure it
-        // claimed to prevent.
-        //
-        // `doctor` is the one exemption, and it is a real one
-        // rather than a hedge: its probes run in the SSH login
-        // directory, evaluate no Vagrantfile, and inspect the
-        // host's vagrant installation rather than a project's VM.
+        // The guest cannot work out which machine it runs on, so
+        // the two names ride in on the commands that cross the
+        // boundary. Asserted apart from the provider above
+        // because the two answer different readers: the guest
+        // reads these through the Vagrantfile, and vagrant reads
+        // the provider.
         let env = vm_env();
-        for action in all_actions() {
-            if action == Action::Doctor {
-                continue;
-            }
-            for cmd in run(&action) {
-                let script = &cmd.args[cmd.args.len() - 1];
-                // Matches the invocation, not the word. A plain
-                // `contains("vagrant")` also caught the commands
-                // that *write* the generated files, because one
-                // carries `vagrant/provision.sh` in its payload
-                // and the other mentions vagrant in a comment.
-                // Neither runs vagrant, so neither can carry the
-                // identity, and the test failed on code that was
-                // correct. The invocation is always built as
-                // `... vagrant '<arg>'`.
-                if !script.contains(" vagrant '") {
-                    continue;
-                }
-                assert!(
-                    script.contains(&env),
-                    "{action:?} runs vagrant without the identity: \
-                     {script}"
-                );
-            }
+        for (action, script) in project_vagrant_scripts() {
+            assert!(
+                script.contains(&env),
+                "{action:?} runs vagrant without the identity: {script}"
+            );
         }
     }
 

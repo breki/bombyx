@@ -217,12 +217,21 @@ send. The row stays in the report rather than vanishing, because
 an absent row reads as a check that passed, and the summary line
 counts it.
 
-Setting `provider = "hyperv"` does not get you a Hyper-V VM
-today. bombyx writes the settings block for it but never tells
-vagrant which provider to use, so vagrant picks whatever the
-host offers -- on a libvirt host, a libvirt VM at vagrant's
-default size. That is `provider-configured-not-selected` in
-`docs/todo.md`.
+Setting `provider = "hyperv"` still does not get you a Hyper-V
+VM on a Linux host, but it now fails rather than substituting.
+bombyx passes the provider to vagrant on the boot, so
+`bombyx up` stops with `The Hyper-V provider only works on
+Windows` instead of quietly building a libvirt VM at vagrant's
+default size. `bombyx destroy` clears the directory that failed
+boot left behind, because only the boot names the provider.
+
+**Changing `provider` on a project that already has a VM does
+nothing until you destroy it.** Vagrant records the provider it
+built the machine with and reads that back on every later
+command, so a second `bombyx up` boots the machine you already
+have and neither vagrant nor bombyx reports the difference. Run
+`bombyx destroy` first, then `bombyx up`. That gap is
+`provider-change-on-existing-vm` in `docs/todo.md`.
 
 It runs every check rather than stopping at the first failure,
 and exits non-zero if any fails. It **creates, deletes and
@@ -296,7 +305,7 @@ $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
 ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
-ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
 ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 

@@ -9,6 +9,34 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-05-provider-argument-lives-in-a-comment
+
+**Category:** reasoning in a comment rather than in `docs/`
+
+`remote::PROVIDER_ENV`'s doc comment holds the whole case for
+how bombyx selects a provider: what rendering a provider block
+does, why the environment variable rather than
+`vagrant up --provider`, three facts measured on frosti, why
+only the boot carries it, what a refused `destroy` strands, and
+the known limit with its backlog ID. Four other places defer to
+it -- `docs/architecture.md`, `plan.rs`'s test, `probe.rs` and
+`vagrantfile.rs` -- so the argument is owned by a comment and
+pointed at from a document, which is backwards. `CLAUDE.md`
+under **Code comments** says reasoning belongs in `docs/` and
+that a shared explanation is not owned by a comment.
+
+The fix is a subsection in `docs/architecture.md` holding the
+mechanism, the measurements and the consequence, with the
+constant cut back to the local fact and a pointer. Not applied
+in the round that found it, per `/review` under **Review, then
+fix**: a consolidation is never applied in its own round, and
+this prose had already failed to converge over three red-team
+rounds.
+
+Found by `fresh-reader` in stage 3 of the review on issue #45.
+
+---
+
 ### fr-2026-09-05-snapshot-rule-in-eight-places
 
 **Category:** One rule restated in many places, none of them

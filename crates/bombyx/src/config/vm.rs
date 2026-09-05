@@ -38,8 +38,8 @@ use super::guards::check_renderable;
 /// variant: without it serde matches the Rust spelling, and the
 /// operator would have to write `"Libvirt"`.
 ///
-/// `Libvirt` is the default, and it is the only provider bombyx
-/// has ever booted a machine with.
+/// `Libvirt` is the default, so an absent `provider` key means
+/// libvirt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
@@ -52,19 +52,32 @@ pub enum Provider {
     Hyperv,
 }
 
-impl fmt::Display for Provider {
-    /// The lowercase name, which is both what serde parses from
-    /// the config file and what `Vagrant.configure` expects.
+impl Provider {
+    /// The lowercase name, which is what serde parses from the
+    /// config file, what `Vagrant.configure` expects, and what
+    /// bombyx passes to `vagrant` in the environment.
     ///
-    /// One method produces the name for both readers. If a
-    /// separate method produced the Vagrant spelling, the two
+    /// One method produces the name for all three readers. If a
+    /// second method produced the Vagrant spelling, the two
     /// could drift apart, and a config value would stop matching
     /// what gets written into the Vagrantfile.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+    ///
+    /// A borrow rather than a `String`, matching `RepoUrl`,
+    /// `ScriptPath` and `HostName`. Both words are compile-time
+    /// constants, so a caller quoting one for a shell has
+    /// nothing to allocate.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
             Self::Libvirt => "libvirt",
             Self::Hyperv => "hyperv",
-        })
+        }
+    }
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -148,6 +161,11 @@ mod tests {
 
     #[test]
     fn provider_renders_the_name_config_and_vagrant_both_use() {
+        assert_eq!(Provider::Libvirt.as_str(), "libvirt");
+        assert_eq!(Provider::Hyperv.as_str(), "hyperv");
+        // `Display` must not grow a spelling of its own, so it
+        // is asserted against the same two words rather than
+        // trusted to delegate.
         assert_eq!(Provider::Libvirt.to_string(), "libvirt");
         assert_eq!(Provider::Hyperv.to_string(), "hyperv");
     }

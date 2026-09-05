@@ -95,6 +95,10 @@ remote_root = "~/vms"
 # a host that cannot supply it fails the boot rather than
 # quietly building a machine of a different kind.
 #
+# That holds while the machine does not exist yet. Once it does,
+# vagrant reads the provider it recorded and ignores this key,
+# so changing it means `bombyx destroy` first.
+#
 # `hyperv` is accepted and has never been run: it was written
 # from Hyper-V's documentation, and bombyx has only ever booted
 # libvirt machines.

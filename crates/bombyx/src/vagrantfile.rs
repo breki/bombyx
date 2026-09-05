@@ -86,7 +86,7 @@ fn ruby_string(value: &str) -> String {
 /// one.** Vagrant applies it only to the provider it has
 /// chosen, and it chooses from what the host offers. bombyx
 /// makes that choice elsewhere, by setting
-/// [`crate::remote::PROVIDER_ENV`] on every `vagrant` call.
+/// [`crate::remote::PROVIDER_ENV`] on `vagrant up`.
 ///
 /// A provider is the thing that actually runs the VM, libvirt
 /// or Hyper-V. Both of them happen to spell their settings the
