@@ -23,10 +23,11 @@
 //! Two of them are checked by their *type* and cannot be built
 //! wrong at all: see [`RepoUrl`]. The rest are checked by
 //! `Config::validate`, which the loading path runs. `Config`
-//! has public fields, so a hand-built one skips that check.
-//! That is a gap rather than a decision, argued once in
-//! `docs/architecture.md` under "What config values are
-//! checked". (`validate` is named rather than linked because
+//! has public fields, so a value that has been through
+//! `validate` can still be edited afterwards and nothing
+//! re-checks it. That is a gap rather than a decision, argued
+//! once in `docs/architecture.md` under "What config values
+//! are checked". (`validate` is named rather than linked because
 //! it is private, and rustdoc rejects a public page pointing
 //! at a private item.)
 //!
@@ -45,6 +46,8 @@
 //! - `host` -- where the VM host name comes from, and its shape.
 //! - `root` -- every rule `remote_root` must pass.
 //! - `source` -- the `[source]` table and its two checked types.
+//! - `transport` -- whether `host` names this very machine, and
+//!   what bombyx does when it does.
 //! - `vm` -- the `[vm]` table.
 //!
 //! A new field rule belongs in the module that owns the field.
@@ -61,7 +64,10 @@ mod read;
 mod registry;
 mod root;
 mod source;
+mod transport;
 mod vm;
+
+pub use transport::Transport;
 
 /// The `[vm]` and `[source]` tables every project entry needs.
 ///
@@ -191,9 +197,36 @@ pub struct Config {
 
     /// Where the guest clones the project from.
     pub source: Source,
+
+    /// Whether bombyx reaches `host` over `ssh` or runs the
+    /// script here.
+    ///
+    /// Private, unlike every field above it, and read through
+    /// [`Config::transport`]. No key supplies this one:
+    /// `config::transport` derives it from `host` as the config
+    /// loads, and privacy is what stops a caller choosing the
+    /// route for itself.
+    ///
+    /// **It does not make the route and `host` agree.** `host`
+    /// is public, so a caller holding a loaded `Config` can
+    /// assign a new one and nothing re-checks: the route stays
+    /// as it was derived, and `remote::remove_dir` would
+    /// `rm -rf` here while every message named the machine that
+    /// was assigned. That is the public-fields gap
+    /// `newtype-remaining-config-fields` in `docs/todo.md`
+    /// owns, and this field narrows it rather than closing it.
+    transport: Transport,
 }
 
 impl Config {
+    /// How bombyx reaches [`Config::host`].
+    ///
+    /// See the field for why it is read through a function.
+    #[must_use]
+    pub fn transport(&self) -> Transport {
+        self.transport
+    }
+
     /// Loads a project out of a registry given as a string.
     ///
     /// [`Config::load_project`] without the file: `source` is a
@@ -218,7 +251,10 @@ impl Config {
         name: &str,
     ) -> Result<Self, ConfigError> {
         let registry = registry::parse_for_tests(source, path)?;
-        Self::from_registry(&registry, name).map(|(cfg, _origin)| cfg)
+        // `None`, so a test never depends on what the machine
+        // running it is called. A test wanting the local route
+        // sets `Config::transport` itself.
+        Self::from_registry(&registry, name, None).map(|(cfg, _origin)| cfg)
     }
 
     /// The config every module's tests use.
@@ -240,6 +276,23 @@ impl Config {
             "myproject",
         )
         .expect("the shared test config must be valid")
+    }
+
+    /// [`Config::for_tests`] on the local route.
+    ///
+    /// `host` is left as it is, naming a machine this one is
+    /// not. That pairing cannot be loaded from a file, and it
+    /// is what a test of the local route wants: the two values
+    /// stay distinguishable, so an assertion that reads
+    /// `vmhost` in the output has caught the route being
+    /// ignored.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn for_tests_local() -> Self {
+        Self {
+            transport: Transport::Local,
+            ..Self::for_tests()
+        }
     }
 
     /// Loads the settings for one project out of the registry.
@@ -290,7 +343,11 @@ impl Config {
         };
         let path = registry.ok_or_else(missing)?;
         let registry = Registry::read(path)?.ok_or_else(missing)?;
-        Self::from_registry(&registry, name)
+        Self::from_registry(
+            &registry,
+            name,
+            transport::this_machine().as_deref(),
+        )
     }
 
     /// [`Config::load_project`] against a registry already read.
@@ -308,6 +365,7 @@ impl Config {
     fn from_registry(
         registry: &Registry,
         name: &str,
+        this_machine: Option<&str>,
     ) -> Result<(Self, HostOrigin), ConfigError> {
         let project = registry.project(name)?;
 
@@ -315,7 +373,8 @@ impl Config {
         // host and the settings always come from one project.
         let (host, origin) = host::rank(registry, name)?;
 
-        let cfg = project.to_config(name, host);
+        let route = transport::resolve(&host, this_machine);
+        let cfg = project.to_config(name, host, route);
 
         // Deliberately checks the entry's fields a second
         // time: a field added to `Config` with no matching
@@ -969,9 +1028,22 @@ mod load_project_tests {
         source: &str,
         name: &str,
     ) -> Result<(Config, HostOrigin), ConfigError> {
+        load_on(source, name, None)
+    }
+
+    /// [`load`], told what this machine is called.
+    ///
+    /// `load` passes `None` so no test depends on the name of
+    /// the machine running it. This one supplies a name, for the
+    /// tests about which route the loaded config takes.
+    fn load_on(
+        source: &str,
+        name: &str,
+        this_machine: Option<&str>,
+    ) -> Result<(Config, HostOrigin), ConfigError> {
         let registry =
             registry::parse_for_tests(source, Path::new(USER_CONFIG_FILE))?;
-        Config::from_registry(&registry, name)
+        Config::from_registry(&registry, name, this_machine)
     }
 
     /// A registry naming one project and nothing unusual.
@@ -1005,6 +1077,51 @@ mod load_project_tests {
         // The entry names no host of its own, so the file-wide
         // key won.
         assert_eq!(origin, HostOrigin::UserFile);
+    }
+
+    /// The two `host` keys, the entry's outranking the file's.
+    fn ranked() -> String {
+        test_registry("myproject", "file-wide", Some("entry"))
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_route_follows_the_host_that_won_the_ranking() {
+        // The entry's host outranks the file-wide one, and the
+        // route is derived from the winner. Ranking the two and
+        // then deciding the route from the loser would send
+        // `destroy` to `entry` while reporting that it runs
+        // here.
+        //
+        // Not on Windows, where `config::transport` refuses the
+        // local route whatever the names say, so neither case
+        // could tell the winner from the loser. The Windows
+        // property has its own test below.
+        let (cfg, _) = load_on(&ranked(), "myproject", Some("entry")).unwrap();
+        assert_eq!(cfg.transport, Transport::Local);
+
+        let (cfg, _) =
+            load_on(&ranked(), "myproject", Some("file-wide")).unwrap();
+        assert_eq!(cfg.transport, Transport::Ssh);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_loads_the_network_route_even_on_a_name_that_matches() {
+        // The mirror of the test above. A name that would be
+        // the local route anywhere else must still load as
+        // `Ssh` here, so the refusal survives the whole load
+        // path rather than only `config::transport`'s own
+        // tests.
+        let (cfg, _) = load_on(&ranked(), "myproject", Some("entry")).unwrap();
+        assert_eq!(cfg.transport, Transport::Ssh);
+    }
+
+    #[test]
+    fn a_config_loaded_anywhere_else_takes_the_network_route() {
+        // True on every platform: the name does not match.
+        let (cfg, _) = load_on(&plain(), "myproject", Some("laptop")).unwrap();
+        assert_eq!(cfg.transport, Transport::Ssh);
     }
 
     #[test]

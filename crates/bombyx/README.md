@@ -1,16 +1,18 @@
 # bombyx
 
-Drive isolated AI-agent VMs on a remote libvirt host over
-SSH.
+Drive isolated AI-agent VMs on a libvirt host -- usually a
+second machine reached over SSH, or this one when `host` names
+it.
 
 Running an AI coding agent on your daily driver puts your
 password manager, SSH keys, cloud credentials and browser
 profiles one prompt injection away from exfiltration. bombyx
 is the control plane for the alternative: it runs `vagrant`
-on a separate VM host over SSH, so the agent works inside a
-VM with its own kernel, no host filesystem, and none of your
-credentials. A VM that clones a private repository needs a
-credential of its own, and code inside it can read that one --
+on a VM host -- usually a separate machine reached over SSH --
+so the agent works inside a VM with its own kernel, no host
+filesystem, and none of your credentials. A VM that clones a
+private repository needs a credential of its own, and code
+inside it can read that one --
 see `docs/trust-boundary.md` in the repository for what is
 accepted there and why.
 
@@ -36,7 +38,8 @@ bombyx discard pr-1234    # destroy it
 ```
 
 Every command accepts `--dry-run`, which prints the exact
-`ssh` invocations instead of running them.
+invocations instead of running them: `ssh <host> "..."`, or
+`sh -c "..."` when `host` names the machine you are on.
 
 See the [repository](https://github.com/breki/bombyx) for
 configuration, the isolation strategy, and development

@@ -22,9 +22,9 @@
 //! `crate::doctor`.
 
 use super::{RemoteCommand, quote_remote_path, shell_quote};
-use crate::config::Config;
+use crate::config::{Config, Transport};
 
-/// Builds a non-interactive `ssh` probe running `script`.
+/// Builds a non-interactive probe running `script`.
 ///
 /// Each option closes a way a diagnostic can be worse than
 /// useless:
@@ -51,23 +51,38 @@ use crate::config::Config;
 /// Setting them in one place is what makes the guarantee
 /// structural rather than something each builder remembers.
 fn probe(cfg: &Config, script: &str) -> RemoteCommand {
-    RemoteCommand::new(
-        "ssh",
-        &[
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            "-o",
-            "LogLevel=ERROR",
-            "-o",
-            "ServerAliveInterval=5",
-            "-o",
-            "ServerAliveCountMax=3",
-            &cfg.host,
-            script,
-        ],
-    )
+    // The same decision every other builder applies, read from
+    // the same place -- not a second one. `probe` matches here
+    // rather than calling `super::transport` because its `ssh`
+    // arm carries five connection options the wrapper does not
+    // add.
+    //
+    // Every variant named, so a third route is a compile error
+    // here rather than one that quietly takes the `ssh` arm.
+    match cfg.transport() {
+        // Running here, none of the options below has anything
+        // to configure: there is no connection to time out, no
+        // session to keep alive and no banner to suppress. The
+        // script is unchanged, so the shared wrapper builds it.
+        Transport::Local => super::transport(cfg, script, super::Tty::NoPty),
+        Transport::Ssh => RemoteCommand::new(
+            "ssh",
+            &[
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "LogLevel=ERROR",
+                "-o",
+                "ServerAliveInterval=5",
+                "-o",
+                "ServerAliveCountMax=3",
+                &cfg.host,
+                script,
+            ],
+        ),
+    }
 }
 
 /// Builds the probe that proves the host is reachable and key
@@ -80,14 +95,23 @@ pub fn reachable(cfg: &Config) -> RemoteCommand {
 /// Builds the probe reporting where `tool` is on the host's
 /// **non-interactive** `PATH`.
 ///
-/// This is the probe the whole command exists for. bombyx runs
-/// `ssh <host> "cd ... && vagrant ..."`, which is neither an
-/// interactive nor a login shell, so it reads neither
-/// `~/.profile` nor the interactive part of `~/.bashrc`. A
+/// This is the probe the whole command exists for. The shell
+/// that runs bombyx's scripts is neither an interactive nor a
+/// login shell on either route -- `ssh <host> "<script>"`
+/// starts one that is neither, and `sh -c "<script>"` is
+/// neither by definition -- so it reads neither `~/.profile`
+/// nor the interactive part of `~/.bashrc`. A
 /// `vagrant` installed outside the default `PATH` is therefore
 /// invisible to bombyx while working perfectly when the
 /// operator logs in and types it -- and vagrant cannot report
 /// that itself, because it is not running.
+///
+/// That trap belongs to the `ssh` route. Running here, `sh -c`
+/// inherits the `PATH` bombyx was started with, which came
+/// from the operator's own shell, so a `vagrant` they can type
+/// is one bombyx can find. The probe still earns its place on
+/// this route: it reports the `PATH` the scripts will actually
+/// use, which is the question either way.
 #[must_use]
 pub fn command(cfg: &Config, tool: &str) -> RemoteCommand {
     probe(cfg, &format!("command -v {}", shell_quote(tool)))
@@ -225,10 +249,13 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 ///
 /// **Deliberately without the VM-host identity prefix** that
 /// `remote::vagrant_script` puts on every other `vagrant` call.
-/// Probes run in the SSH login directory rather than a project
-/// directory, so this evaluates no `Vagrantfile` and there is
-/// nothing here that could read the variables. Adding them would
-/// suggest doctor is part of that arrangement when it is not.
+/// `vagrant plugin list` evaluates no `Vagrantfile`, so nothing
+/// here could read the variables. That holds wherever the
+/// command starts, which matters because the two routes stand
+/// in different directories: over `ssh` the login directory,
+/// and running here whatever directory bombyx was started in.
+/// Adding the variables would suggest doctor is part of that
+/// arrangement when it is not.
 #[must_use]
 pub fn provider(cfg: &Config) -> RemoteCommand {
     probe(

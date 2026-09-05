@@ -26,10 +26,21 @@ const CONFIG_HOME: &str = "config-home";
 /// would leave this suite green while bombyx exported something
 /// else entirely.
 fn vm_env() -> String {
-    format!(r"{VM_HOST_ENV}='vmhost' {VM_HOSTNAME_ENV}=\$(hostname -s)")
+    format!(r"{VM_HOST_ENV}='vmhost.invalid' {VM_HOSTNAME_ENV}=\$(hostname -s)")
 }
 
-/// A fixture whose registry names `myproject` on `vmhost`.
+/// A fixture whose registry names `myproject` on `vmhost.invalid`.
+///
+/// The `.invalid` suffix is reserved by RFC 2606 and no machine
+/// carries it. That matters here because these tests spawn the
+/// real binary, which asks the operating system what this
+/// machine is called: a fixture host equal to the name of the
+/// machine running the suite would send bombyx down the local
+/// route and fail assertions that have nothing to do with it.
+///
+/// **Every fixture host in this file carries the suffix**, not
+/// only this one. `from-entry`, `flagged`, `otherbox` and
+/// `my-vmhost` are all names a machine could plausibly have.
 ///
 /// The returned guard removes the directory on drop, so a
 /// failing assertion cannot leak it into the system temp dir.
@@ -45,7 +56,7 @@ fn project_dir() -> TempDir {
 fn project_dir_with(keys: &str) -> TempDir {
     let dir = TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
-    write_user_config(&dir, &registry("host = \"vmhost\"\n", keys));
+    write_user_config(&dir, &registry("host = \"vmhost.invalid\"\n", keys));
     dir
 }
 
@@ -61,7 +72,7 @@ fn registry(preamble: &str, keys: &str) -> String {
     format!("{preamble}\n[projects.myproject]\n{keys}{tables}")
 }
 
-/// A `Config` for `myproject` on `vmhost`, built the way the
+/// A `Config` for `myproject` on `vmhost.invalid`, built the way the
 /// binary builds one.
 ///
 /// Through `Config::load_project` against a real file, not a
@@ -69,7 +80,7 @@ fn registry(preamble: &str, keys: &str) -> String {
 /// than the binary uses is testing a path nothing ships.
 fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     let path = dir.join(USER_CONFIG_FILE);
-    std::fs::write(&path, registry("host = \"vmhost\"\n", "")).unwrap();
+    std::fs::write(&path, registry("host = \"vmhost.invalid\"\n", "")).unwrap();
     let (cfg, _) =
         bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
     cfg
@@ -184,12 +195,17 @@ fn up_keeps_the_tilde_expandable() {
 }
 
 #[test]
-fn up_runs_nothing_on_the_workstation() {
+fn up_over_ssh_runs_nothing_on_the_workstation() {
     // Every step is an `ssh`, so no path from this machine
     // reaches a program's argv. That matters on Windows, where a
     // local path starts with a drive letter and any program
     // reading `host:file` -- `scp`, GNU `tar` -- would take the
     // `C` for a host name.
+    //
+    // The name says `over_ssh` because the fixture pins the
+    // route: its `host` ends in `.invalid`, which no machine is
+    // called. Windows never takes the local route anyway, so
+    // the drive-letter hazard this covers lives only here.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
     assert!(programs(&lines).iter().all(|p| *p == "ssh"), "{lines:?}");
@@ -205,7 +221,7 @@ fn a_config_file_in_the_working_directory_is_not_read() {
     // the file, because a parse failure would be an error rather
     // than silence.
     for name in ["bombyx.toml", "bombyx.local.toml"] {
-        for contents in ["host = \"my-vmhost\"\n", "host = "] {
+        for contents in ["host = \"my-vmhost.invalid\"\n", "host = "] {
             let dir = project_dir();
             std::fs::write(dir.path().join(name), contents).unwrap();
 
@@ -217,7 +233,7 @@ fn a_config_file_in_the_working_directory_is_not_read() {
                 String::from_utf8(out.get_output().stdout.clone()).unwrap();
             let stderr =
                 String::from_utf8(out.get_output().stderr.clone()).unwrap();
-            assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
+            assert!(stdout.starts_with("ssh vmhost.invalid "), "{stdout}");
             assert!(!stderr.contains(name), "{stderr}");
         }
     }
@@ -243,7 +259,7 @@ fn the_user_config_host_reaches_the_ssh_command_in_silence() {
         .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
+    assert!(stdout.starts_with("ssh vmhost.invalid "), "{stdout}");
     assert!(stdout.contains("~/'vms/myproject'"), "{stdout}");
     assert!(!stderr.contains("bombyx: host "), "{stderr}");
 }
@@ -325,7 +341,7 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
     assert!(stdout.contains("rm -rf ~/'vms/myproject'"));
     // The target the operator can check against reality.
     assert!(
-        stderr.contains("vmhost:~/vms/myproject"),
+        stderr.contains("vmhost.invalid:~/vms/myproject"),
         "must name the target: {stderr:?}"
     );
 }
@@ -589,16 +605,16 @@ fn an_entrys_own_host_wins_and_the_notice_names_the_entry() {
     // on the winning host, and both `host` keys sit in the same
     // file -- so a notice naming only the file would leave the
     // operator to work out which line is in force.
-    let dir = project_dir_with("host = \"from-entry\"\n");
+    let dir = project_dir_with("host = \"from-entry.invalid\"\n");
     let out = bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
         .success()
         .stderr(predicate::str::contains(
-            "host from-entry from [projects.\"myproject\"].host",
+            "host from-entry.invalid from [projects.\"myproject\"].host",
         ));
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(stdout.starts_with("ssh from-entry "), "{stdout}");
+    assert!(stdout.starts_with("ssh from-entry.invalid "), "{stdout}");
 }
 
 #[test]
@@ -612,7 +628,10 @@ fn the_notice_names_the_file_the_host_really_came_from() {
     let elsewhere = dir.path().join("elsewhere.toml");
     std::fs::write(
         &elsewhere,
-        registry("host = \"vmhost\"\n", "host = \"otherbox\"\n"),
+        registry(
+            "host = \"vmhost.invalid\"\n",
+            "host = \"otherbox.invalid\"\n",
+        ),
     )
     .unwrap();
 
@@ -623,7 +642,7 @@ fn the_notice_names_the_file_the_host_really_came_from() {
         .assert()
         .success();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(stderr.contains("otherbox"), "{stderr}");
+    assert!(stderr.contains("otherbox.invalid"), "{stderr}");
     assert!(
         stderr.contains(&elsewhere.display().to_string()),
         "the notice must name the file it read: {stderr}"
@@ -691,11 +710,12 @@ fn self_update_needs_neither_project_nor_registry() {
 fn the_config_flag_names_the_registry_file() {
     // `--config` takes a path to the file, not to a directory,
     // and it outranks whatever the environment names. The
-    // fixture's own registry names `vmhost`, so a run that reads
+    // fixture's own registry names `vmhost.invalid`, so a run that reads
     // the flagged file has to reach a different host.
     let dir = project_dir();
     let elsewhere = dir.path().join("elsewhere.toml");
-    std::fs::write(&elsewhere, registry("host = \"flagged\"\n", "")).unwrap();
+    std::fs::write(&elsewhere, registry("host = \"flagged.invalid\"\n", ""))
+        .unwrap();
 
     let out = bombyx_in(&dir)
         .args(["--dry-run", "--config"])
@@ -704,7 +724,7 @@ fn the_config_flag_names_the_registry_file() {
         .assert()
         .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(stdout.starts_with("ssh flagged "), "{stdout}");
+    assert!(stdout.starts_with("ssh flagged.invalid "), "{stdout}");
 }
 
 #[test]

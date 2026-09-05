@@ -7,7 +7,7 @@
 
 use super::text::{fail_reason, first_line, sanitize};
 use super::{Finding, Outcome, ProbeResult, Scope};
-use crate::config::{Config, Provider};
+use crate::config::{Config, Provider, Transport};
 use crate::remote::{self, RemoteCommand};
 
 /// A check applied to a probe's stdout when a zero exit is not
@@ -69,21 +69,43 @@ impl HostProbe {
 
 /// The host probes, in order.
 ///
-/// Reachability is first and gates the rest: the probes behind
-/// it would each wait on a dead host and teach nothing the first
-/// failure did not.
+/// Over `ssh`, reachability is first and gates the rest: the
+/// probes behind it would each wait on a dead host and teach
+/// nothing the first failure did not.
+///
+/// Running here nothing gates, because there is no host to be
+/// dead and every remaining probe asks about this machine.
+/// `settled_findings` supplies the two rows this route has
+/// already answered.
 #[must_use]
 pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
-    let mut probes = vec![
-        HostProbe::plain("ssh", remote::probe::reachable(cfg)).gating(),
-        HostProbe::plain("login shell", remote::probe::posix_shell(cfg))
-            .with_verdict(posix_shell_verdict),
+    let mut probes = vec![];
+
+    // Every variant named, for the reason `provider_finding`
+    // below gives: a third route must be a compile error here
+    // rather than a report with rows silently missing.
+    match cfg.transport() {
+        Transport::Ssh => probes.extend([
+            HostProbe::plain("ssh", remote::probe::reachable(cfg)).gating(),
+            HostProbe::plain("login shell", remote::probe::posix_shell(cfg))
+                .with_verdict(posix_shell_verdict),
+        ]),
+        // Two questions the local route has already answered.
+        // There is no host to reach, and the shell is the `sh`
+        // bombyx picked itself rather than whatever the far
+        // side's login shell happens to be. Both probes would
+        // pass every time and report nothing, so
+        // `settled_findings` supplies the rows as skips.
+        Transport::Local => {}
+    }
+
+    probes.extend([
         HostProbe::plain("vagrant", remote::probe::command(cfg, "vagrant")),
         HostProbe::plain(
             "project dir",
             remote::probe::dir_writable(cfg, &cfg.remote_project_dir()),
         ),
-    ];
+    ]);
 
     // The provider probe greps `vagrant plugin list` for
     // `vagrant-libvirt`, which only answers a question a libvirt
@@ -101,6 +123,28 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
         Provider::Hyperv => {}
     }
     probes
+}
+
+/// The rows for questions this route has already settled.
+///
+/// Empty over `ssh`, where both are real probes in the list
+/// above. Running here they are skips, because the rows must
+/// appear either way: an absent row reads as a check that
+/// passed.
+///
+/// Paired with the match in `host_probes`, and the pair is what
+/// produces each row exactly once on every route.
+pub(crate) fn settled_findings(cfg: &Config) -> Vec<Finding> {
+    let skip = |name, reason: &str| {
+        Finding::new(Scope::Host, name, Outcome::Skip(reason.to_owned()))
+    };
+    match cfg.transport() {
+        Transport::Ssh => vec![],
+        Transport::Local => vec![
+            skip("ssh", "not used; the host is this machine"),
+            skip("login shell", "not used; bombyx starts `sh` itself"),
+        ],
+    }
 }
 
 /// The provider row for a project that `host_probes` cannot
@@ -142,9 +186,10 @@ pub fn probe_commands(probes: &[HostProbe]) -> Vec<RemoteCommand> {
 
 /// Every host finding for `cfg`, in report order.
 ///
-/// This runs the probes and appends the rows no probe can
-/// produce. Callers get
-/// this rather than composing the pieces themselves:
+/// This runs the probes and adds the rows no probe can
+/// produce: `settled_findings` in front, `provider_finding`
+/// behind. Callers get this rather than composing the pieces
+/// themselves:
 /// `run_probes` and `provider_finding` are `pub(crate)`, so
 /// this is the only composition a caller outside the crate can
 /// reach. A report with no provider row is the state
@@ -158,7 +203,11 @@ pub fn host_findings<F>(cfg: &Config, run: F) -> Vec<Finding>
 where
     F: FnMut(&HostProbe) -> Outcome,
 {
-    let mut findings = run_probes(&host_probes(cfg), run);
+    // The settled rows come first whichever way they were
+    // produced, so the report reads in the same order on both
+    // routes.
+    let mut findings = settled_findings(cfg);
+    findings.extend(run_probes(&host_probes(cfg), run));
     findings.extend(provider_finding(cfg));
     findings
 }
@@ -242,6 +291,55 @@ mod tests {
         let mut c = cfg();
         c.vm.provider = provider;
         c
+    }
+
+    fn local_cfg() -> Config {
+        Config::for_tests_local()
+    }
+
+    #[test]
+    fn the_reachability_row_is_a_skip_when_there_is_nothing_to_reach() {
+        // `sh -c true` would pass every time and say nothing.
+        // The row still has to appear: an absent one reads as a
+        // check that passed, which is the same trap
+        // `provider_finding` exists to close.
+        let findings =
+            host_findings(&local_cfg(), |_| Outcome::Pass(String::new()));
+        let ssh = findings.first().expect("a first row");
+        assert_eq!(ssh.name, "ssh");
+        let Outcome::Skip(reason) = &ssh.outcome else {
+            panic!("expected a skip, got {:?}", ssh.outcome);
+        };
+        assert!(reason.contains("this machine"), "{reason}");
+    }
+
+    #[test]
+    fn the_rows_that_cannot_fail_here_are_skips() {
+        // Two probes ask a question the local route has already
+        // answered. There is no host to reach, and the shell is
+        // the `sh` bombyx picked itself, so both would pass
+        // every time -- and a row that always passes is the
+        // trap `settled_findings` was written to close.
+        let findings =
+            host_findings(&local_cfg(), |_| Outcome::Pass(String::new()));
+        for name in ["ssh", "login shell"] {
+            let row = findings
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap_or_else(|| panic!("no {name} row"));
+            assert!(
+                matches!(row.outcome, Outcome::Skip(_)),
+                "{name}: {:?}",
+                row.outcome
+            );
+        }
+    }
+
+    #[test]
+    fn the_local_probes_all_run_here() {
+        for p in host_probes(&local_cfg()) {
+            assert_eq!(p.command.program, "sh", "{}", p.name);
+        }
     }
 
     #[test]
@@ -440,6 +538,21 @@ mod tests {
     }
 
     #[test]
+    fn the_local_list_gates_nothing() {
+        // Deliberate, and the opposite of the route above. A
+        // gate exists to stop probes queueing behind a dead
+        // host, and there is no host here to be dead: every
+        // remaining probe answers a question about this machine
+        // and can answer it whatever the others did.
+        let probes = host_probes(&local_cfg());
+        assert!(
+            !probes.iter().any(|p| p.gates_the_rest),
+            "{:?}",
+            probes.iter().map(|p| p.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn probe_labels_are_unique_and_non_empty() {
         // Labels key the report columns.
         let probes = host_probes(&cfg());
@@ -458,13 +571,18 @@ mod tests {
         // change to the list should fail a test in the file that
         // defines it. `readonly` then depends on nothing at all,
         // in production or test code.
-        for p in host_probes(&cfg()) {
-            let script = p.command.args.last().unwrap();
-            assert_eq!(
-                super::super::mutating_token(script),
-                None,
-                "{script:?}"
-            );
+        // Both routes, because the local list is a different
+        // list and its scripts reach a shell on the machine the
+        // operator is sitting at.
+        for cfg in [cfg(), local_cfg()] {
+            for p in host_probes(&cfg) {
+                let script = p.command.args.last().unwrap();
+                assert_eq!(
+                    super::super::mutating_token(script),
+                    None,
+                    "{script:?}"
+                );
+            }
         }
     }
 

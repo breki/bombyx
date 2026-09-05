@@ -116,8 +116,8 @@ impl RemoteCommand {
     }
 }
 
-/// Builds the `ssh` command that writes `contents` into the
-/// file `name`, in the directory `dir`, on the VM host.
+/// Builds the command that writes `contents` into the file
+/// `name`, in the directory `dir`, on the VM host.
 ///
 /// Nothing runs here. Like everything in `remote`, this only
 /// builds the command; `main` is what spawns it. That split is
@@ -149,7 +149,7 @@ pub fn write_file(
     let script = format!(
         "cat > {path} <<'{delimiter}'\n{contents}{newline}{delimiter}\n"
     );
-    RemoteCommand::new("ssh", &[&cfg.host, &script])
+    super::transport(cfg, &script, super::Tty::NoPty)
 }
 
 #[cfg(test)]

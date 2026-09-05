@@ -22,8 +22,17 @@
 # The machine every project runs on, unless its own table says
 # otherwise.
 #
-# It is an SSH alias, resolved through your ~/.ssh/config, so
+# Usually an SSH alias, resolved through your ~/.ssh/config, so
 # bombyx never handles addresses, usernames or keys.
+#
+# One case does not go through ssh at all. If this value names
+# the machine you are running bombyx on, bombyx runs vagrant
+# here and never calls ssh -- see "Running bombyx against your
+# own machine" in bombyx's docs/tutorial.md. That comparison
+# looks only at the name, not at your ~/.ssh/config, so an
+# alias that happens to equal your own machine's name will be
+# taken for this machine even when it points elsewhere. Write
+# it as `user@name` to force the ssh route.
 #
 # Which machine runs the VMs is a property of you rather than of
 # any project: everyone on a team has their own hardware on

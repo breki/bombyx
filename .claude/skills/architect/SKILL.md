@@ -19,11 +19,13 @@ description: Project overview and architecture guide for bombyx -- crate layout,
 
 ## What bombyx Does
 
-Drives isolated AI-agent VMs on a remote libvirt host
-over SSH. The control plane is deliberately thin: bombyx
-generates a Vagrantfile and a bootstrap script, writes them
-onto the VM host and runs `vagrant` there, streaming output
-back.
+Drives isolated AI-agent VMs on a libvirt host, usually a
+second machine reached over SSH. The control plane is
+deliberately thin: bombyx generates a Vagrantfile and a
+bootstrap script, writes them onto the VM host and runs
+`vagrant` there, streaming output back. When `host` names the
+machine bombyx is running on, the same script goes through
+`sh -c` instead.
 
 The key architectural constraint: **neither the workstation
 nor the VM host reads the project's files.** Both generated
@@ -49,7 +51,7 @@ bombyx/
         lib.rs          # crate root, re-exports
         plan.rs         # which commands run, in what order
         config.rs       # config.toml parsing (submodules)
-        remote.rs       # SSH command building (submodules)
+        remote.rs       # command building, either route
         vagrantfile.rs  # renders the two generated files
         doctor.rs       # preflight checks (submodules)
         update.rs       # self-update (submodules)
@@ -132,7 +134,9 @@ caught by `validate`, not by the hook.
 
 1. Write tests first (TDD).
 2. Add the command-building function in `remote.rs`
-   with unit tests asserting the exact argv.
+   with unit tests asserting the exact argv. There are two
+   argv shapes, one per route, so assert both -- see
+   `Config::for_tests_local`.
 3. Add the `VmCmd` variant and its `action_of` arm in
    `main.rs` -- the CLI surface, and nothing else.
 4. Add the `Action` variant and its `plan()` arm in

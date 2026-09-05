@@ -1,7 +1,8 @@
 //! Resolving the external programs bombyx runs.
 //!
-//! bombyx shells out to `ssh` by name, and `self-update` adds
-//! `git`, `curl` and `tar`. Left to the operating system, a
+//! bombyx shells out by name to `ssh`, or to `sh` when the VM
+//! host is this machine, and `self-update` adds `git`, `curl`
+//! and `tar`. Left to the operating system, a
 //! bare name is looked up through a search order that on
 //! Windows includes the **current
 //! directory**. An operator runs bombyx from wherever they

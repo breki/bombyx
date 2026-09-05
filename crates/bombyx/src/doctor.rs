@@ -54,7 +54,8 @@ pub use report::Report;
 pub enum Scope {
     /// On this workstation.
     Local,
-    /// On the VM host, over SSH.
+    /// On the VM host: over SSH, or here when `host` names
+    /// this machine.
     Host,
 }
 
@@ -65,7 +66,11 @@ pub enum Outcome {
     Pass(String),
     /// The precondition does not hold, with the reason.
     Fail(String),
-    /// Not run, because a gating probe already failed.
+    /// Not run. Two reasons produce this, and the string says
+    /// which: a gating probe failed, so the rest would each
+    /// wait on a dead host; or the route makes the question
+    /// meaningless, the way reachability does when the VM host
+    /// is this machine.
     Skip(String),
 }
 
@@ -114,8 +119,9 @@ pub enum VersionAnswer {
     ///
     /// Two ways to arrive here, and only one of them reaches a
     /// verdict. The caller may decide a tool answers nothing
-    /// worth printing, which no tool `doctor` checks does
-    /// today. Or the tool was never found on `PATH`, and then
+    /// worth printing, which is `sh`: it is whatever the system
+    /// links it to, and `dash` has no version flag at all. Or
+    /// the tool was never found on `PATH`, and then
     /// [`local_tool_finding`] fails on the missing path without
     /// reading this at all.
     NotAsked,

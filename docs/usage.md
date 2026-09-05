@@ -179,16 +179,29 @@ provider check runs `vagrant plugin list`, and on a host where
 vagrant has never run as that user, vagrant itself creates
 `~/.vagrant.d`. bombyx disables vagrant's version-checkpoint call
 so the probe neither writes more than that nor stalls on a
-firewalled endpoint. When SSH itself fails the remaining host checks are
-skipped rather than each waiting on a dead host. Locally it does
-execute `ssh` to read its version, so it is not a no-op on your
-workstation.
+firewalled endpoint. On the SSH route, when SSH itself fails the remaining host
+checks are skipped rather than each waiting on a dead host, and
+`ssh` is executed locally to read its version -- so it is not a
+no-op on your workstation.
 
-`ssh` is the only local program `doctor` checks, because it is
-the only one a VM command runs. `bombyx self-update` also needs
-`git`, `curl` and `tar`, and `doctor` deliberately says nothing
-about those: a row that fails for a tool no VM command runs
-teaches operators to ignore the exit code.
+The local route differs in three ways. Nothing gates anything,
+because there is no host to be unreachable and every remaining
+check asks about this machine. `sh` is looked up on the `PATH`
+and not run, since `sh` may be `dash`, which has no version
+flag to ask. And two rows come back as skips rather than
+passes: `ssh`, which is not used, and `login shell`, because
+the shell is the `sh` bombyx started rather than whatever your
+login shell happens to be. A row that passes whatever the state
+of your machine is worse than no row at all.
+
+`doctor` checks one local program, and which one depends on
+the route. Over SSH that is `ssh`. When `host` names this very
+machine bombyx starts `sh` instead, so `sh` is the row you get
+and the `ssh` host row becomes a skip. Either way it is the
+program a VM command actually runs. `bombyx self-update` also
+needs `git`, `curl` and `tar`, and `doctor` deliberately says
+nothing about those: a row that fails for a tool no VM command
+runs teaches operators to ignore the exit code.
 
 The `vagrant` line is the one that earns the command: it asks
 the **non-interactive** shell, which is the one bombyx gets.
@@ -204,8 +217,9 @@ provider` checks vagrant's own exit status and matches an
 anchored plugin name, because `vagrant plugin list` exits zero
 even with nothing installed.
 
-The local line names the directory `ssh` came from. bombyx
-resolves it against `PATH` explicitly rather than leaving it to
+The local line names the directory that program came from.
+bombyx resolves it against `PATH` explicitly rather than
+leaving it to
 the operating system, which on Windows searches the working
 directory first — and you run bombyx from wherever you happen to
 be standing, which is usually a repository whose contents arrive
@@ -213,7 +227,8 @@ with whatever branch you checked out.
 
 Every command resolves what it needs the same way, all of it
 before running any step. So a missing `ssh` stops `up` before it
-has created the directory on the host, rather than after.
+has created the directory on the host, rather than after — and
+on the local route the same holds for a missing `sh`.
 
 See [vm-host-setup.md](vm-host-setup.md) for what to do about
 each failure; `doctor` reports facts and leaves the remedies to
@@ -221,7 +236,7 @@ the guide.
 
 ## Seeing what would run: `--dry-run`
 
-Every command accepts `--dry-run`, which prints the exact `ssh`
+Every command accepts `--dry-run`, which prints the exact
 invocation instead of running it:
 
 ```console
@@ -236,6 +251,12 @@ Each generated file prints as one line naming its heredoc and
 how many lines were dropped. Printing both in full would bury
 the four-step plan they belong to; the host receives the whole
 content regardless.
+
+On a machine that is its own VM host every line reads
+`sh -c "..."` instead, carrying the identical script. Which
+route is in force is decided by comparing `host` against this
+machine's name — **Running bombyx against your own machine** in
+[tutorial.md](tutorial.md) has the rule.
 
 The output is real shell: each argument is printed bare only
 when it is unambiguous, and quoted otherwise, so what you

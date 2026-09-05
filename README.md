@@ -45,8 +45,8 @@ to do it, and code inside the VM can read it. See
 accepted there and why.
 
 bombyx is the control plane for that setup: it runs
-`vagrant` on the VM host over SSH so you can stay on your
-workstation.
+`vagrant` on the VM host -- over SSH, or directly when that
+host is this machine -- so you can stay on your workstation.
 
 ## Model
 

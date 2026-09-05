@@ -188,18 +188,21 @@ they require manual approval every time.**
 
 ## Project Overview
 
-bombyx drives isolated AI-agent VMs on a remote libvirt
-host over SSH. It is the tooling half of the agent-VM
-isolation strategy: bombyx generates the Vagrantfile and a
-bootstrap script from the operator's own `config.toml`, writes
-them onto the VM host and runs `vagrant` there. Neither the
+bombyx drives isolated AI-agent VMs on a libvirt host,
+usually a second machine reached over SSH. It is the tooling
+half of the agent-VM isolation strategy: bombyx generates the
+Vagrantfile and a bootstrap script from the operator's own
+`config.toml`, writes them onto the VM host and runs `vagrant`
+there. When `host` names the machine bombyx is running on, it
+runs the same script through `sh -c` instead of `ssh`. Neither the
 workstation nor the VM host reads a file from the project's
 repository; the guest clones the project itself.
 
 - **Stack**: Rust CLI, no runtime services
 - **Target platforms**: Windows (dev workstation), Linux
-- **Control plane**: SSH wrapper around `vagrant` on the
-  VM host. Deliberately thin -- see `README.md`.
+- **Control plane**: a wrapper around `vagrant` on the VM
+  host, over `ssh` or through `sh -c` when the VM host is this
+  machine. Deliberately thin -- see `README.md`.
 
 ### Workspace Crates
 
