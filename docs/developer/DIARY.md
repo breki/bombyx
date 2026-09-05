@@ -33,8 +33,9 @@ picked `cloud-image/debian-13`, a box already on the machine, and
 only after the download, the domain and the boot. The guest
 inherits whatever disk the box shipped, 9.7 GB from that box and
 a 63 GB root volume from `generic/ubuntu2204`, because the
-Vagrantfile carries `cpus` and `memory` and nothing else. And
-libvirt names a domain after the directory it sits in, so
+generated Vagrantfile's provider block carries `cpus` and
+`memory` only and sets no disk anywhere. And `vagrant-libvirt`
+names a domain after the directory it sits in, so
 `~/vms/scratch/vmtest/probe` became `probe_default` with the
 project nowhere in it -- which contradicts `config.toml.sample`'s
 promise that a scratch name cannot collide across projects.

@@ -37,9 +37,12 @@ Seven steps of `project-config-off-repo` landed after
 `first-real-run`, and `docs/issues/project-config-off-repo.md`
 marks three of them **Not verified against a real VM host**
 and records Definition of Done item 3 as outstanding in a
-fourth place. Every one of those steps was argued from
-`--dry-run`, which proves the argv and nothing about whether
-the far side accepts it.
+fourth place. The reasons differ: one records that frosti was
+unreachable, one that the selection is fully visible in
+`--dry-run`, and one that the emitted commands were untouched.
+A dry run proves the argv and nothing about whether the far
+side accepts it, so none of the three is the run this item
+asks for.
 
 ## What the machine was
 
@@ -231,11 +234,13 @@ second registry whose top-level `host` was
 ```
 bombyx: host FROSTI from [projects."vmtest"].host in
         /.../alt-registry.toml
+bombyx: host FROSTI is this machine; running vagrant here
+        rather than over ssh
 ```
 
-The notice names the table and the file it came from. The
-spelling also confirms the match ignores case: `FROSTI` was
-taken for this machine.
+The first line names the table and the file it came from. The
+second is what shows the match ignores case: `FROSTI` was
+taken for this machine, whose name is `frosti`.
 
 That pair was exercised with `--dry-run`, so what is proven
 is which host wins and what bombyx says about it, not a

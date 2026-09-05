@@ -240,9 +240,11 @@ plan, decisions, and outcome.
   directory, a committed bombyx.toml, and the tar-push. All three are gone.
   Seven steps of project-config-off-repo have landed since, and that plan
   document marks three of them 'Not verified against a real VM host' and records
-  Definition of Done item 3 as outstanding in a fourth place -- every one of
-  them argued from a dry run, which proves the argv and nothing about whether
-  the remote accepts it. So no real host has ever seen the current tool. Two
+  Definition of Done item 3 as outstanding in a fourth place, for three
+  different reasons -- frosti unreachable, the selection visible in a dry run,
+  the emitted commands untouched. A dry run proves the argv and nothing about
+  whether the remote accepts it. So no real host has ever seen the current tool.
+  Two
   things are already known to be in the way. ssh frosti fails from this
   workstation with 'Host key verification failed'. And there is no
   ~/.config/bombyx/ here at all, so the registry every command now requires has
