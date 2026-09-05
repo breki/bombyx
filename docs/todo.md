@@ -235,6 +235,26 @@ plan, decisions, and outcome.
   Either say it in move_to_done's doc comment and the Done clap help, or carry
   the body across. Found while using the fixed tool for the first time.
 
+- **registry-run-against-frosti** -- drive the new CLI against a real VM host
+  first-real-run exercised the old tool: bombyx up from inside a project
+  directory, a committed bombyx.toml, and the tar-push. All three are gone.
+  Seven steps of project-config-off-repo have landed since, and that plan
+  document says 'not verified against a real VM host' six times -- every one of
+  them argued from a dry run, which proves the argv and nothing about whether
+  the remote accepts it. So no real host has ever seen the current tool. Two
+  things are already known to be in the way. ssh frosti fails from this
+  workstation with 'Host key verification failed'. And there is no
+  ~/.config/bombyx/ here at all, so the registry every command now requires has
+  never existed outside a temp directory -- building it by hand from
+  config.toml.sample is itself the first test of that file, since the review
+  only proved the sample loads, not that a person following its comments arrives
+  somewhere useful. What to exercise: the sequence first-real-run covered (up,
+  status, shell, down, scratch, discard, a second up for idempotency) under
+  --project, plus the paths this work added -- --config naming a file elsewhere,
+  an entry host winning and printing the notice, and destroy's refusal and
+  confirmation. reset needs a snapshot nothing creates, which is
+  reset-needs-snapshot, so expect it to fail cleanly and do not fix it here.
+
 ## Done
 
 - [**project-selection-flag**](issues/project-config-off-repo.md)
