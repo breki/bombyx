@@ -315,6 +315,34 @@ plan, decisions, and outcome.
   project, or the sample stops promising more than the directory layout
   delivers.
 
+- **tutorial-local-route-now-booted** -- a guest has booted on the local route
+  Found while working box-must-carry-git. docs/tutorial.md says in its header
+  that the local route is 'verified short of a guest actually booting', and the
+  same claim sits in the section 'Running bombyx against your own machine': 'The
+  up was stopped at the box download by naming a box that does not exist, so a
+  guest booting on this route is still unverified.' registry-run-against-frosti
+  (#37) booted a guest on that route on 2026-09-05 and provisioned it to
+  completion, so both sentences are now false and understate what has been
+  checked. The run record is docs/issues/registry-run-against-frosti.md. Fix is
+  two edits in docs/tutorial.md, and while there, check whether the dated
+  verification header needs the same update.
+
+- **tutorial-box-lacks-git** -- the tutorial's box cannot finish a first up
+  Found while working box-must-carry-git, and verified by booting it on frosti
+  on 2026-09-05: debian/bookworm64, the box docs/tutorial.md tells the reader to
+  use, has no git, so bootstrap.sh refuses and the first up exits 1 after the
+  download and the boot. A warning now sits under the table in Part 2 naming the
+  two ways past it, so nobody walks into it unwarned, but the tutorial still
+  recommends a box that cannot finish. Swapping it is the real fix and it is a
+  rework rather than an edit: Part 3's provision.sh runs chsh because the Debian
+  box gives its user /bin/sh, and When something goes wrong explains the
+  arrow-key behaviour the same box causes, so both stop describing what the
+  reader has. generic/ubuntu2204 is the obvious replacement, since
+  config.toml.sample already names it and a guest booted on it the same day.
+  Doing this properly means running the tutorial end to end, which has never
+  happened -- its header already marks the Part 3 and Part 4 transcripts
+  unverified.
+
 ## Done
 
 - [**registry-run-against-frosti**](issues/registry-run-against-frosti.md)

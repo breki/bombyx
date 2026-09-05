@@ -415,6 +415,24 @@ Then change these:
 | `source.repo` | the URL you push this repository to |
 | `source.ref` | the branch you push, `main` here |
 
+**`debian/bookworm64` has no `git`, so your first `up` will
+stop.** The guest clones the project itself, and bombyx's
+provisioning script looks for `git` before it does anything
+else; without it the script prints
+`bombyx: git is not installed in this box` and exits, after
+the box download and the boot have already happened. Verified
+on frosti on 2026-09-05 by booting that box.
+
+Two ways past it, and neither is written up here yet. Install
+`git` into the box and repackage it, or name a box that
+carries one -- `generic/ubuntu2204`, the value in
+`config.toml.sample`, does, and was booted the same day. Note
+that the rest of this tutorial assumes the Debian box: Part 3's
+`provision.sh` runs `chsh` because of it, and
+**When something goes wrong** explains the arrow-key behaviour
+it causes. Swapping the box means those parts no longer
+describe what you have.
+
 The table key is the project name, so nothing inside the table
 repeats it. `--project myproject` on every command is what picks
 this table: bombyx opens no file in the project's directory, so
