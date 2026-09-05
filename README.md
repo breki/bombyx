@@ -13,7 +13,8 @@ agent works inside it.
 - [Model](#model)
 - [Install](#install)
 - [Configure](#configure)
-  - [Why `host` is not in `bombyx.toml`](#why-host-is-not-in-bombyxtoml)
+  - [Why nothing bombyx reads is
+    committed](#why-nothing-bombyx-reads-is-committed)
   - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
   - [Which host a command is about to use](#which-host-a-command-is-about-to-use)
 - [Use](#use)
@@ -60,20 +61,19 @@ workstation                  vmhost (VM host)
 
 Two rules shape the design:
 
-1. **The VM host holds none of your code.** bombyx sends it
-   two files and generates both: a Vagrantfile from `[vm]` in
-   `bombyx.toml`, and a bootstrap script. Vagrant needs the
-   Vagrantfile before the VM exists, so it cannot come from
-   inside the guest. Once the VM is up, the guest clones the
-   project itself from `[source]`.
+1. **Neither your workstation nor the VM host reads your
+   project's files.** bombyx sends the VM host two files and
+   generates both: a Vagrantfile from your `[vm]` settings, and
+   a bootstrap script. Vagrant needs the Vagrantfile before the
+   VM exists, so it cannot come from inside the guest. Once the
+   VM is up, the guest clones the project itself from
+   `[source]`.
 
-   Your workstation is a different matter. You run bombyx from
-   inside a checkout, because `bombyx.toml` is read from the
-   working directory, so the machine this design exists to
-   protect still has the code on it. Closing that is the work
-   planned in
-   [project-config-off-repo.md](docs/issues/project-config-off-repo.md).
-   The argument, and what it costs, are in
+   Every setting comes out of one file that is yours, in your
+   own config directory, and you name the project you mean on
+   the command line. bombyx opens nothing in the project's own
+   directory, so it needs no checkout on the workstation at
+   all. The argument, and what it costs, are in
    [trust-boundary.md](docs/trust-boundary.md).
 2. **Wrap, don't reimplement.** bombyx composes `ssh` and
    `vagrant`. If it breaks, `ssh vmhost` and `vagrant up` by
@@ -109,26 +109,63 @@ you can open a shell into.
 
 ## Configure
 
-Configuration comes in two pieces, and they are separate for a
-reason. The project file describes the *project*, and it is
-committed. Which machine runs the VMs is yours, so you
-configure it once, outside any repo.
+One file, and it is yours. Copy
+[config.toml.sample](config.toml.sample) to your own config
+directory -- `~/.config/bombyx/config.toml`, or
+`%APPDATA%\bombyx\config.toml` on Windows -- and edit it. That
+file is the one place a full example lives, and a test loads it
+as shipped, so it cannot drift from what bombyx accepts.
 
-Copy [bombyx.toml.sample](bombyx.toml.sample) to `bombyx.toml`
-in the project you want a VM for, and edit it. That file is the
-one place a full example lives, and a test loads it as shipped,
-so it cannot drift from what bombyx accepts.
+It names the machine your VMs run on, then carries one table per
+project:
 
-What it holds:
+```toml
+host = "my-vmhost"
+
+[projects.myproject]
+remote_root = "~/vms"
+
+[projects.myproject.vm]
+provider = "libvirt"
+box = "generic/ubuntu2204"
+cpus = 4
+memory = 8192
+
+[projects.myproject.source]
+repo = "https://github.com/you/myproject"
+ref = "main"
+script = "vagrant/provision.sh"
+```
+
+What a project's table holds:
 
 | Key | |
 |-----|---|
-| `project` | required; the VM's name and its directory on the host |
 | `[vm]` | required; `provider`, `box`, `cpus`, `memory`, no defaults |
 | `[source]` | required; `repo`, `ref`, `script` -- what the guest clones |
-| `remote_root` | optional, `~/vms`; must sit above `[vm]` |
+| `remote_root` | optional, `~/vms`; must sit above the two tables |
+| `host` | optional; only for a project that runs elsewhere |
 
-There is no `host` key, and one there is refused -- see below.
+The table key is the project name, and nothing inside the table
+repeats it. A name containing a `.` has to be quoted --
+`[projects."a.b"]` -- because TOML reads a bare dot as nesting.
+
+`remote_root` has to sit *above* the two tables because TOML
+binds a bare key to the table header above it: written after
+`[projects.myproject.source]` it would parse as
+`projects.myproject.source.remote_root`, and the whole file
+would be refused.
+
+**This file is also called the registry**, in `bombyx --help`
+and in `docs/usage.md`, because it registers one table per
+project. There is only ever the one file.
+
+**Name the project on every command**: `bombyx --project
+myproject up`. bombyx reads nothing out of the project's own
+directory, so it cannot work out which project you mean from
+where you happen to be standing. `--config <path>` reads a
+different registry file, which is how you keep two setups
+apart.
 
 **bombyx writes the Vagrantfile; the project does not.** It is
 generated from `[vm]` and written on the VM host on every `up`,
@@ -148,71 +185,48 @@ A private repository therefore needs a credential inside the
 guest, which is an accepted and unsolved exposure -- see
 [trust-boundary.md](docs/trust-boundary.md).
 
-Then name your own VM host once, in a file outside the repo:
+The `host` line at the top is an SSH alias, resolved through
+your `~/.ssh/config` -- bombyx never handles addresses,
+usernames or keys itself.
 
-```toml
-# ~/.config/bombyx/config.toml
-# Windows: %APPDATA%\bombyx\config.toml
-host = "my-vmhost"
-```
+### Why nothing bombyx reads is committed
 
-`host` is an SSH alias, resolved through your `~/.ssh/config` --
-bombyx never handles addresses, usernames or keys itself.
-
-### Why `host` is not in `bombyx.toml`
-
-**A `host` key in `bombyx.toml` is refused, not ignored.** A
-project is shared; a VM host is not. Every developer has their
-own hardware on their own network, so a committed `host` can
-only ever be right for the person who wrote it, and is wrong
-for everyone who clones after them. That is not a cosmetic
+**No file inside a repository configures bombyx.** A project is
+shared; a VM host is not. Every developer has their own
+hardware on their own network, so a committed `host` could only
+ever be right for the person who wrote it, and would be wrong
+for everyone who cloned after them. That is not a cosmetic
 problem: `bombyx destroy` runs `vagrant destroy` and `rm -rf`
 on whatever host is in force.
 
-Refusing it also keeps the value out of reach of a cloned
-repo. `host` is handed to `ssh` as its first argument, and
-`ssh` reads a leading `-` as an option, so a value such as
-`-oProxyCommand=...` runs code on your workstation from a bare
-`bombyx status`. bombyx refuses any host beginning with `-`,
-whichever source supplied it. Refusing the key in `bombyx.toml`
-removes the repo from that list of sources.
+Keeping the whole config out of the repository also keeps every
+value out of reach of a branch. `host` is handed to `ssh` as its
+first argument, and `ssh` reads a leading `-` as an option, so a
+value such as `-oProxyCommand=...` runs code on your workstation
+from a bare `bombyx status`. bombyx refuses any host beginning
+with `-` wherever it came from, and no clone can supply one in
+the first place.
 
 ### Where bombyx looks for the host
 
-Three sources, first match wins:
+Two keys, and the project's own wins:
 
-| | Source | Use |
-|-|--------|-----|
-| 1 | `--host vmhost-b` | a one-off run |
-| 2 | `BOMBYX_HOST=vmhost-b` | a shell, CI, or an agent |
-| 3 | your `config.toml` | every project -- the usual one |
+| | Key | Use |
+|-|-----|-----|
+| 1 | `host` inside `[projects.<name>]` | the one project you keep elsewhere |
+| 2 | `host` at the top of the file | every other project -- the usual one |
 
-If none of them names a host, bombyx stops and lists all three
-rather than guessing.
-
-**A fourth source is half-built and does nothing yet.** A
-`[projects.<name>]` table in your `config.toml` accepts a `host`
-key of its own, meant for the one project you keep on a
-different machine, and it is ranked between row 2 and row 3.
-No command reaches it, because none of them names a project
-yet -- so bombyx never uses the value, and picks row 3 instead.
-Do not write it expecting an effect.
-
-It is not ignored, though, and that is the one thing it does do:
-reading `config.toml` checks every `host` in the file, including
-this key, and refuses the file if any of them is a value `ssh`
-would misread. So a typo here stops every command that reads the
-file, for every project, even though no command would have used
-the value. `project-selection-flag` in `docs/todo.md` is the
-work that connects it, and this table grows a fourth row when it
-lands.
+Both live in the same file. Writing the machine name once, at
+the top, covers every project; renaming the machine is then one
+line rather than one per project. If neither key names a host,
+bombyx stops and says which line to add rather than guessing.
 
 **This section is the authoritative list** -- the sample config
 and `llms.txt` point here rather than repeating it, so there is
 one place to correct when it changes.
 
-Your `config.toml` lives in the first of these that the
-environment names:
+Unless `--config` names a file outright, your `config.toml`
+lives in the first of these that the environment names:
 
 | Variable | Config file |
 |----------|-------------|
@@ -221,10 +235,10 @@ environment names:
 | `XDG_CONFIG_HOME` | `$XDG_CONFIG_HOME/bombyx/config.toml` |
 | `HOME` | `$HOME/.config/bombyx/config.toml` |
 
-`BOMBYX_CONFIG_HOME` is there for keeping two setups apart. It
-is also the one host source a per-directory environment tool
-can redirect from inside a clone, which "Which host a command
-is about to use" below returns to.
+`BOMBYX_CONFIG_HOME` is another way to keep two setups apart.
+It is also the one thing a per-directory environment tool can
+redirect from inside a clone, which "Which host a command is
+about to use" below returns to.
 `%APPDATA%` is consulted **only** on Windows: it is often
 exported under WSL and Wine too, and honouring it there would
 read a Windows config directory in preference to
@@ -234,43 +248,37 @@ Each of those values must be an anchored path. A blank or
 relative one counts as unset and the next row is tried, because
 a relative path resolves against the working directory -- which
 on this tool means taking the VM host out of whatever repo you
-happen to be in. An exported-but-empty `BOMBYX_HOST` counts as
-unset for the same reason: that is what a shell script means by
-it.
+happen to be in.
 
 ### Which host a command is about to use
 
-Your `config.toml` specifies the VM host you use for
-everything, and `--host` or `BOMBYX_HOST` redirects one run
-somewhere else. Whenever either of those wins, bombyx prints
-one line on stderr naming the source:
+The `host` at the top of your file specifies the VM host you use
+for everything, and a project's own `host` key redirects that
+project. Whenever a project's key wins, bombyx prints one line
+on stderr naming the table and the file it read:
 
 ```
-bombyx: host vmhost-b from --host
+bombyx: host vmhost-b from [projects."myproject"].host in /home/you/.config/bombyx/config.toml
 ```
 
-Your own `config.toml` gets no such line. It is the ordinary
+The top-of-file `host` gets no such line. It is the ordinary
 case, and a line on every command is noise nobody reads. So
-silence means the host came from a `config.toml`, and a line
-means the flag or the variable overrode it.
+silence means the host came from the top of a `config.toml`, and
+a line means one project's own table overrode it.
 
 Note what silence does *not* promise. It says the host came
-from a `config.toml`, not that it came from *yours*:
+from the top of a `config.toml`, not that it came from *yours*:
 `BOMBYX_CONFIG_HOME` chooses which config directory bombyx
 reads, and a per-directory environment tool such as `direnv`
 can set it from inside a clone. `destroy` is the command that
 shows the host regardless, in the `host:directory` line it asks
 you to confirm.
 
-There is no way yet to give one project a host of its own
-permanently -- `--host` covers a single run, and nothing
-records the choice. The half-built fourth source under "Where
-bombyx looks for the host" above is what will, once a command
-names a project.
-
-The host is checked wherever it came from. A value starting
-with `-` is refused rather than handed to `ssh` as an option,
-and the error names the file or the flag that supplied it.
+Every `host` in the file is checked as the file is read, not
+only the one that wins. A value starting with `-` is refused
+rather than handed to `ssh` as an option, and the error names
+the line that carries it -- so a typo in a project you were not
+even asking about is reported while you have the file open.
 
 ## Use
 
@@ -283,6 +291,7 @@ bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
 bombyx down               # halt the VM
 bombyx destroy myproject  # destroy the VM and remove its dir
+                          # (every line above takes --project)
 
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it

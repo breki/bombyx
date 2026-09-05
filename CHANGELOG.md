@@ -23,24 +23,28 @@ and this project adheres to
 - The guest refuses a `source.script` that resolves outside the cloned project.
   `chmod` and `exec` follow symlinks, so a repository could otherwise point the
   script at a system file and have it made executable as root.
-- The per-developer `config.toml` accepts a `[projects.<name>]` table per
-  project, carrying `remote_root`, `[vm]` and `[source]`. bombyx does not load
-  one yet: `bombyx.toml` is still where a project is described.
+- The per-developer `config.toml` carries a `[projects.<name>]` table per
+  project -- `remote_root`, `[vm]` and `[source]` -- and it is the only place a
+  project is described. `--project <name>` picks the table. `[vm]` needs
+  `provider`, `box`, `cpus` and `memory`; `[source]` needs `repo`, `ref` and
+  `script`. None of the seven has a default, so bombyx guesses neither a base
+  image nor a repository to clone.
 - Library API: `config::Registry`, `config::Project` and `name::ProjectName`,
   plus a `ConfigError::ProjectNotFound` variant for a registry with no entry for
   the project asked for.
-- A `[projects.<name>]` table in the per-developer `config.toml` accepts an
-  optional `host`, naming the machine that one project runs on. It outranks the
-  file-wide `host` and is outranked by `--host` and `BOMBYX_HOST`. bombyx does
-  not consult it yet: no command names a project.
-- Library API: a `project` field on `HostSources`, and a
-  `HostOrigin::ProjectEntry` variant carrying the project name.
-- Library API: `Config::load_project(name, sources)` loads a project's settings
-  out of the per-developer `config.toml` -- the registry counterpart of
-  `Config::load`, returning the same `(Config, HostOrigin)` pair -- plus a
-  `ConfigError::RegistryNotFound` variant for a machine with no registry file at
-  all. No command calls it yet: `bombyx.toml` is still where a project is
-  described.
+- A `[projects.<name>]` table accepts an optional `host`, naming the machine
+  that one project runs on. It outranks the file-wide `host`, and bombyx prints
+  a line on stderr naming the table whenever it wins.
+- Library API: a `HostOrigin::ProjectEntry` variant carrying the project name.
+- Library API: `Config::load_project(name, registry)` is the one loader. It
+  reads the `[projects.<name>]` table out of the file `registry` names and
+  returns a `(Config, HostOrigin)` pair. New alongside it:
+  `config::registry_file()`, which is the path bombyx reads when `--config`
+  names none, and a `ConfigError::RegistryNotFound` variant for a machine with
+  no registry file at all.
+- `--project`, `--config` and `--dry-run` are global arguments, so they are
+  accepted after the subcommand as well as before it: `bombyx status --dry-run`
+  works where it used to be an argument error.
 
 ### Changed
 
@@ -48,10 +52,6 @@ and this project adheres to
   project's own Vagrantfile is never read by anything: bombyx does not send it,
   and the guest's clone is not what Vagrant boots from. Vagrant needs that file
   before the VM exists, which is why it cannot come from inside the guest.
-- **BREAKING:** `bombyx.toml` now requires a `[vm]` table (`provider`, `box`,
-  `cpus`, `memory`) and a `[source]` table (`repo`, `ref`, `script`). None of
-  the seven has a default, so every existing config must gain both tables before
-  any command runs.
 - `--dry-run` prints the two generated files as one line each, naming the
   heredoc and how many lines it dropped. The full content is still written to
   the host.
@@ -64,7 +64,7 @@ and this project adheres to
   itself. This used to be the project's job in its own Vagrantfile; since bombyx
   now overwrites that file, a hand-written block would be deleted on the next
   `up`.
-- A bad `repo` or `script` in `bombyx.toml` is now refused while the file is
+- A bad `repo` or `script` in a project's entry is refused while the file is
   being read rather than after, so the message names the line and column as well
   as the field and the reason. The rules themselves are unchanged.
 - Config values are refused when they begin or end with whitespace. `box`,
@@ -88,43 +88,46 @@ and this project adheres to
   next provision. The help previously said the script runs from a "fresh
   clone", which reads as losing everything, and then that untracked files
   survive, which reads as a guarantee.
-- bombyx.toml.sample is the only full config example. README.md,
-  docs/tutorial.md and llms.txt named its keys and pointed at it instead of
-  restating it, so the four copies can no longer disagree -- all four were
-  unloadable at once a week ago. A test loads the sample as shipped.
-- **BREAKING:** The `place` field on `ConfigError::HostMissing` and
-  `ConfigError::HostInProjectFile` was named `places`. Only one file can carry a
-  VM host now, so the plural named something that no longer exists; a caller
-  matching on either variant by field name must rename it.
-- **BREAKING:** A `project` name in `bombyx.toml` is capped at 64 characters,
-  the cap scratch VM names already had. The rule moved into the shared segment
-  check so one name cannot be legal in the project file and illegal as a
-  registry table key.
-- **BREAKING:** `config::HostOrigin` is no longer `Copy`, and it has a fourth
-  variant. `config::HostSources` and `config::Project` each have a new public
-  field. A caller matching the enum exhaustively, relying on the copy, or
-  building either struct from a literal must be updated.
-- Reading the per-developer `config.toml` now checks every `host` in it -- the
-  file-wide key and every `[projects.<name>].host` -- and refuses the file if
-  any is a value `ssh` would misread, naming the table it came from. Nothing
-  released behaved otherwise: `0.4.1` refused a `config.toml` containing a
-  `[projects.<name>]` table at all, so the looser check this replaces was itself
-  never shipped. `--host` and `BOMBYX_HOST` are still checked on their own, and
-  still bypass reading the file altogether for `Config::load`;
-  `Config::load_project` reads it either way, because the file is where the
-  project's settings are.
+- config.toml.sample is the only full config example. README.md,
+  docs/tutorial.md and llms.txt point at it instead of restating it, so the
+  copies can no longer disagree -- four of them were unloadable at once a week
+  ago. A test loads the sample as shipped.
+- **BREAKING:** The `place` field on `ConfigError::HostMissing` was named
+  `places`. Only one file can carry a VM host now, so the plural named something
+  that no longer exists; a caller matching on that variant by field name must
+  rename it.
+- **BREAKING:** A project name is capped at 64 characters, the cap scratch VM
+  names already had. It shares the segment check with scratch names, so one
+  name cannot be legal in one place and illegal in the other.
+- **BREAKING:** `config::HostOrigin` is no longer `Copy`, and it now has two
+  variants rather than four: `ProjectEntry` and `UserFile`. A caller matching it
+  exhaustively or relying on the copy must be updated.
+- Reading the `config.toml` now checks every `host` in it -- the file-wide key
+  and every `[projects.<name>].host` -- and refuses the file if any is a value
+  `ssh` would misread, naming the table it came from. So a typo in a project you
+  were not asking about is reported while you have the file open. That one pass
+  is the only place the rule runs; nothing downstream re-checks the winner.
+- **BREAKING:** Every VM subcommand now requires `--project <name>`, naming the
+  `[projects.<name>]` table it acts on. bombyx reads nothing out of the
+  project's own directory, so it cannot work the project out from where you ran
+  it. `bombyx self-update` needs neither that argument nor a config, as before.
+- **BREAKING:** `--config` now names your registry file and defaults to
+  `config.toml` in your config directory. It used to default to `bombyx.toml` in
+  the working directory.
+- The message when no host is configured asks for a `host` line in the registry,
+  and names that file. It used to list the flag and the environment variable
+  too.
 
 ### Fixed
 
 - A `remote_root` of `~name` was accepted as an absolute path and then sent to
   the VM host as a relative one, resolved against the SSH login directory. It
   must now start with `/` or `~/`.
-- The sample bombyx.toml in README.md, docs/tutorial.md and bombyx.toml.sample
-  could not be loaded. All three wrote remote_root after the [source] table, and
-  TOML binds a bare key to the table above it, so it parsed as
-  source.remote_root and every command failed while reading the file. The sample
-  file also still carried the removed vagrant_dir key and had no [vm] or
-  [source] table.
+- The sample config in README.md, docs/tutorial.md and the sample file could
+  not be loaded. All three wrote remote_root after the [source] table, and TOML
+  binds a bare key to the table above it, so it parsed as source.remote_root and
+  every command failed while reading the file. The sample file also still
+  carried the removed vagrant_dir key and had no [vm] or [source] table.
 - `bombyx doctor` no longer sends the `vagrant-libvirt` probe to a project
   whose provider is `hyperv`. Hyper-V ships inside Vagrant and has no plugin to
   find, so the row reported a missing plugin that project never needed. Such a
@@ -151,9 +154,9 @@ and this project adheres to
   host or in the guest read the pushed files. `bombyx up` is now four `ssh`
   commands instead of seven, and bombyx runs nothing on the workstation.
 - **BREAKING:** the `vagrant_dir` config key. It existed only to tell the push
-  what to archive. Delete the line from `bombyx.toml`: the config refuses
-  unknown keys, so leaving it makes every command fail while loading, with a
-  message naming the line and listing the keys that are valid.
+  what to archive, and there is nowhere left to write it: the config refuses
+  unknown keys, so a `[projects.<name>]` table carrying one makes every command
+  fail while loading, with a message naming the line.
 - `bombyx doctor` checks one local program, `ssh`, and no longer reports on a
   project `Vagrantfile`. The `tar` and `scp` rows are gone, locally and on the
   host: bombyx runs neither for any VM command. `bombyx self-update` still
@@ -164,25 +167,35 @@ and this project adheres to
   functions. doctor::host_findings composes them and is the supported entry
   point; making the two pub(crate) is what stops a caller assembling a report
   with no provider row.
-- **BREAKING:** `bombyx.local.toml`. bombyx no longer reads that file, so it
-  can no longer name a VM host for one project. A leftover one is inert: it is
-  never opened, its contents cannot win and cannot fail to parse, and bombyx
-  says nothing about it. Move its `host` line into your own `config.toml`, or
-  pass `--host` for a single run, and then **delete the file** -- it is no
-  longer gitignored, so a `git add -A` would commit the host name it holds. The
-  VM host now comes from `--host`, `BOMBYX_HOST` or `config.toml`, and bombyx
-  opens no file inside the project directory to find one. That is a rule about
-  files: `BOMBYX_CONFIG_HOME` still chooses which config directory is read, and
-  a per-directory environment tool can set it from inside a clone.
+- **BREAKING:** `bombyx.local.toml`. bombyx no longer reads that file. A
+  leftover one is inert: it is never opened, its contents cannot win and cannot
+  fail to parse, and bombyx says nothing about it. Move its `host` line into
+  the project's own table in your `config.toml`, then **delete the file** -- it
+  is no longer gitignored, so a `git add -A` would commit the host name it
+  holds.
 - **BREAKING:** The `bombyx: bombyx.local.toml overrides bombyx.toml` line on
   stderr is gone with the file. Anything grepping bombyx's stderr for
   `overrides` stops matching.
 - **BREAKING:** The `Overlay` and `local_config_path` library items, the
   `HostOrigin::Overlay` enum variant, and the `Config::with_overlay` method.
   `HostOrigin` is not `#[non_exhaustive]`, so a downstream `match` over it must
-  drop the arm. `Config::load` takes the host from `HostSources` alone; a
-  downstream that read project values through an overlay has no replacement and
-  should read them from the project file.
+  drop the arm. A downstream that read project values through an overlay has no
+  replacement and should read them out of the registry.
+- **BREAKING:** `bombyx.toml`, and the committed project file as a concept.
+  Every setting -- `remote_root`, `[vm]` and `[source]` -- moves into a
+  `[projects.<name>]` table in your own `config.toml`, and the project name
+  becomes the table key rather than a `project` key. `config.toml.sample` is the
+  worked example; the sample file was `bombyx.toml.sample`.
+- **BREAKING:** `--host` and the `BOMBYX_HOST` environment variable. A one-off
+  flag could point `destroy`'s `rm -rf` at a machine the project never named, so
+  the VM host is now tied to the project: the file-wide `host` covers every
+  project and a `host` inside one project's table overrides it for that project
+  alone.
+- **BREAKING:** Library API: `Config::load`, `config::HostSources`,
+  `config::HOST_ENV`, the `HostOrigin::Flag` and `HostOrigin::Env` variants, and
+  the `ConfigError::NotFound` and `ConfigError::HostInProjectFile` variants.
+  `Config::load_project(name, registry)` replaces the loader, and neither error
+  type is `#[non_exhaustive]`, so a downstream `match` must drop those arms.
 
 
 ## [0.4.1] - 2026-08-18

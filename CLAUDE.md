@@ -191,9 +191,10 @@ they require manual approval every time.**
 bombyx drives isolated AI-agent VMs on a remote libvirt
 host over SSH. It is the tooling half of the agent-VM
 isolation strategy: bombyx generates the Vagrantfile and a
-bootstrap script from `bombyx.toml`, writes them onto the VM
-host and runs `vagrant` there. The VM host holds no project
-code; the guest clones the project itself.
+bootstrap script from the operator's own `config.toml`, writes
+them onto the VM host and runs `vagrant` there. Neither the
+workstation nor the VM host reads a file from the project's
+repository; the guest clones the project itself.
 
 - **Stack**: Rust CLI, no runtime services
 - **Target platforms**: Windows (dev workstation), Linux
@@ -512,7 +513,7 @@ re-deriving a style.
   **Test-Driven Development** says why those did not
   work here. Better still, keep one copy of the
   example and have the documents point at it, which is
-  what `bombyx.toml.sample` is.
+  what `config.toml.sample` is.
 - **Say what you have not verified.** Mark untested steps
   *(unverified)* inline, and give environment-dependent
   documents a header naming what they were checked against
@@ -808,7 +809,7 @@ file, so "does this sample load" had a contract behind
 it. No parser exists for a rendered `doctor` report,
 so "does this transcript look right" could not have
 one. That is why the sample-config check survives, as
-one `include_str!` of `bombyx.toml.sample` with no
+one `include_str!` of `config.toml.sample` with no
 document scanning in it, and the other two do not.
 
 Auxiliary code is where this costs the most, because

@@ -35,23 +35,26 @@ use bombyx::update::{self, asset};
 use clap::{Parser, Subcommand};
 use tempfile::TempDir;
 
-/// Default configuration file name, looked up in the
-/// current directory.
-const CONFIG_FILE: &str = "bombyx.toml";
-
 #[derive(Parser)]
 #[command(name = "bombyx", version, about)]
 struct Cli {
-    /// Path to the project config
-    #[arg(short, long, default_value = CONFIG_FILE)]
-    config: PathBuf,
+    /// Which project to act on; required by every subcommand
+    /// except `self-update`
+    ///
+    /// Names a `[projects.<name>]` table in your config file.
+    /// bombyx reads nothing from the project's own directory, so
+    /// it cannot work out which project you mean from where you
+    /// are standing.
+    #[arg(short, long, global = true)]
+    project: Option<String>,
 
-    /// SSH alias of the VM host; outranks every other source
-    #[arg(long)]
-    host: Option<String>,
+    /// Path to your registry; defaults to `config.toml` in your
+    /// config directory
+    #[arg(short, long, global = true)]
+    config: Option<PathBuf>,
 
     /// Print the command that would run, without running it
-    #[arg(long)]
+    #[arg(long, global = true)]
     dry_run: bool,
 
     #[command(subcommand)]
@@ -136,8 +139,16 @@ enum VmCmd {
     /// discards the warm caches the persistent lifecycle
     /// exists to keep.
     Destroy {
-        /// Must match `project` in `bombyx.toml`
-        project: Option<String>,
+        // The clap id is `confirm` rather than `project`
+        // because `--project` is a global argument and clap
+        // requires every argument in one command to have a
+        // distinct id; two called `project` make it panic on
+        // startup. `value_name` keeps the help reading as a
+        // project name. A `///` here would print this
+        // explanation to the operator.
+        /// Must match the `--project` being destroyed
+        #[arg(id = "confirm", value_name = "PROJECT")]
+        confirm: Option<String>,
     },
     /// Boot a throwaway VM for untrusted work
     Scratch {
@@ -254,9 +265,8 @@ fn run() -> Result<Ran> {
     // one subcommand that is not about a VM. Every other command
     // needs a project and a host; `self-update` needs neither,
     // and loading the config first would make updating bombyx
-    // fail in any directory without a `bombyx.toml` -- including
-    // the home directory, which is where someone would naturally
-    // run it.
+    // fail on a machine with no registry -- which is exactly the
+    // machine somebody is trying to install bombyx on.
     //
     // An exhaustive `match`, not a `let ... else`: the point of the
     // `Cmd`/`VmCmd` split is that a third config-less subcommand
@@ -267,35 +277,49 @@ fn run() -> Result<Ran> {
         Cmd::Vm(vm) => vm,
     };
 
-    // The VM host is not in the project file: it belongs to
-    // whoever is driving bombyx, not to the repo. Highest
-    // precedence first -- flag, environment, then the
-    // per-developer `config.toml` that `Config::load` reads.
-    let env_host = std::env::var(bombyx::config::HOST_ENV).ok();
-    let user_dir = bombyx::config::user_config_dir();
-    let sources = bombyx::config::HostSources {
-        flag: cli.host.as_deref(),
-        env: env_host.as_deref(),
-        // No project is named until `--project` exists, so the
-        // per-project `host` key is skipped and the file-wide
-        // one applies. `project-selection-flag` in
-        // `docs/todo.md` is the work that fills this in.
-        project: None,
-        user_config_dir: user_dir.as_deref(),
-    };
+    // clap cannot mark one global argument required for some
+    // subcommands and not others, so the requirement is stated
+    // here instead -- on the far side of the `self-update`
+    // return above, which is the subcommand that must work
+    // without it.
+    let project = cli.project.ok_or_else(|| {
+        anyhow!(
+            "--project is required: name the `[projects.<name>]` \
+             table this command is about"
+        )
+    })?;
 
-    // The `loading <file>` context is added only for errors that
-    // are really about that file. A host error is not: the host
-    // cannot come from the project config at all, so prefixing
-    // `loading bombyx.toml:` would send the operator to edit the
-    // one file that must not carry a host.
+    // `--config` when the operator passed one, and otherwise the
+    // file in whichever config directory the environment names.
+    let registry = cli.config.or_else(bombyx::config::registry_file);
+
+    // `Empty` and `Invalid` are the two variants that name no
+    // file: they come from `FieldError`, and `config::error`
+    // keeps that type free of files. So the file is named here.
+    //
+    // `project` is the exception among them, and it comes first
+    // for that reason. That value arrived on the command line,
+    // and the registry cannot carry a bad one -- a table key is
+    // a `ProjectName`, refused while the file parses. Naming the
+    // file would send the operator to edit the one place the
+    // value is not.
     let (cfg, host_origin) =
-        Config::load(&cli.config, &sources).map_err(|err| match err {
-            e @ (bombyx::config::ConfigError::HostMissing { .. }
-            | bombyx::config::ConfigError::HostInProjectFile { .. }
-            | bombyx::config::ConfigError::InvalidHost { .. }) => anyhow!(e),
-            e => anyhow::Error::new(e)
-                .context(format!("loading {}", cli.config.display())),
+        Config::load_project(&project, registry.as_deref()).map_err(|err| {
+            match err {
+                e @ bombyx::config::ConfigError::Invalid {
+                    field: "project",
+                    ..
+                } => anyhow!(e),
+                e @ (bombyx::config::ConfigError::Empty { .. }
+                | bombyx::config::ConfigError::Invalid { .. }) => {
+                    let file = registry.as_deref().map_or_else(
+                        || "the registry".to_owned(),
+                        |p| p.display().to_string(),
+                    );
+                    anyhow::Error::new(e).context(format!("in {file}"))
+                }
+                e => anyhow!(e),
+            }
         })?;
 
     // Say which source the host came from, using the winner
@@ -318,8 +342,19 @@ fn run() -> Result<Ran> {
     // inside a clone -- so staying quiet here also hides a
     // redirect the operator did not choose. `docs/todo.md`
     // tracks it as `config-home-env-provenance`.
-    if host_origin != HostOrigin::UserFile {
-        eprintln!("bombyx: host {} from {host_origin}", cfg.host);
+    //
+    // `describe` rather than `Display`, so the line names the
+    // file bombyx read. `Display` renders the bare `config.toml`,
+    // and `--config` can point at any path at all.
+    match &host_origin {
+        HostOrigin::ProjectEntry(_) => {
+            eprintln!(
+                "bombyx: host {} from {}",
+                cfg.host,
+                host_origin.describe(registry.as_deref())
+            );
+        }
+        HostOrigin::UserFile => {}
     }
 
     let action = action_of(&vm, &cfg)?;
@@ -577,8 +612,8 @@ fn action_of(cmd: &VmCmd, cfg: &Config) -> Result<Action> {
         VmCmd::Status => Action::Status,
         VmCmd::Reset => Action::Reset,
         VmCmd::Doctor => Action::Doctor,
-        VmCmd::Destroy { project } => {
-            confirm_destroy(project.as_deref(), cfg)?;
+        VmCmd::Destroy { confirm } => {
+            confirm_destroy(confirm.as_deref(), cfg)?;
             Action::Destroy
         }
         VmCmd::Scratch { name } => Action::Scratch(vm_name(name)?),
@@ -599,12 +634,12 @@ fn vm_name(raw: &str) -> Result<ScratchName> {
 /// deliberate act rather than a flag.
 ///
 /// Printing the resolved target is the more important half.
-/// The name alone confirms nothing an attacker could not have
-/// chosen: `project` comes from the same `bombyx.toml` that
-/// decides which directory is deleted, so a repo can name
-/// itself after a VM you care about. What the operator can
-/// check against reality is `<host>:<dir>`, so that is shown on
-/// both the refusal and the confirmed path.
+/// Typing the name back confirms only that the operator can
+/// read their own command line, since `--project` supplied it a
+/// moment earlier. What they can check against reality is
+/// `<host>:<dir>`, so that is shown on both the refusal and the
+/// confirmed path. `destroy-confirmation-shape` in
+/// `docs/todo.md` is where the positional itself is settled.
 fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
     let target = format!("{}:{}", cfg.host, cfg.remote_project_dir());
     match given {
@@ -613,13 +648,18 @@ fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
             Ok(())
         }
         Some(name) => bail!(
-            "{name:?} does not match the project in this directory \
+            "{name:?} does not match the project being destroyed \
              ({:?}); refusing to destroy {target}",
             cfg.project
         ),
+        // Says what to add rather than spelling a whole
+        // command. A reconstructed one drops every other
+        // argument the operator gave -- `--config` above all,
+        // which would send the re-run at a different registry.
         None => bail!(
-            "destroy needs the project name to confirm: run \
-             `bombyx destroy {}` -- target is {target}",
+            "destroy needs the project name to confirm: re-run \
+             the same command with {:?} as its last argument -- \
+             target is {target}",
             cfg.project
         ),
     }

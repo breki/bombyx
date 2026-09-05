@@ -46,33 +46,31 @@ workstation                     VM host
          and bootstrap.sh          clones the repo itself
 
   the project repo:
-    bombyx.toml        the VM to build, and what to clone
     vagrant/           the provisioning script the guest runs
 
   your own machine, outside any repo:
-    config.toml        which VM host is yours
+    config.toml        which VM host is yours, and one table
+                       per project
 ```
 
 - **The workstation** is your daily machine. It holds bombyx,
-  your SSH config, your `config.toml`, and the project repo. It
-  never runs a VM.
+  your SSH config and your `config.toml`. It never runs a VM,
+  and it does not need a checkout of the project either.
 - **The VM host** is usually a different machine, and that is
   what puts your credentials out of reach: an agent that escapes
   its VM lands somewhere holding none of them. It runs libvirt,
   Vagrant and the VMs.
-- **The project** is a directory in your own repo. It holds a
-  `bombyx.toml` naming the project, the VM to build and the
-  repository to clone, and a `vagrant/` directory holding the
-  provisioning script. bombyx never sends that directory
-  anywhere: the guest clones the repository itself and runs the
-  script out of its own clone.
-- **Which host** is deliberately *not* in the project repo. It
-  is personal, so it lives in your own `config.toml` -- Part 1
-  sets that up.
+- **The project** is a repository somewhere the guest can reach.
+  The only thing in it that bombyx cares about is a provisioning
+  script, and even that bombyx never sends: the guest clones the
+  repository itself and runs the script out of its own clone.
+- **Every setting** lives in your own `config.toml`, outside any
+  repository -- the VM host, and one `[projects.<name>]` table
+  per project. Part 1 sets up the file and Part 3 adds a table
+  to it.
 
-bombyx ships neither the config nor the `vagrant/` directory for
-you. Part 3 writes both by hand, once, and after that they live
-in the project's repo like any other file.
+bombyx ships neither that file nor the `vagrant/` directory for
+you. Parts 1 and 3 write both by hand, once.
 
 ## Before you start
 
@@ -140,9 +138,8 @@ Host vmhost
     IdentityFile ~/.ssh/id_ed25519
 ```
 
-The alias is what goes in your own `config.toml`, which Part 1
-sets up below -- never in `bombyx.toml`, which bombyx refuses a
-`host` key outright. Name it whatever you like; `vmhost` is
+The alias is what goes in your own `config.toml`, which the
+next section writes. Name it whatever you like; `vmhost` is
 used throughout this tutorial.
 
 Then prove it works without a password prompt, because that is
@@ -168,14 +165,15 @@ continue until it is silent.
 
 ### Name your VM host, once
 
-bombyx does **not** read the host from the project's
-`bombyx.toml`, and refuses one written there. A project is
-shared and a VM host is not: everyone has their own hardware on
-their own network, so a committed value would be wrong for
-everyone but its author -- and `bombyx destroy` runs
-`vagrant destroy` and `rm -rf` on whatever host is in force.
+bombyx reads no file out of a project's repository at all, and
+the host is the clearest reason why. A project is shared and a
+VM host is not: everyone has their own hardware on their own
+network, so a committed value would be wrong for everyone but
+its author -- and `bombyx destroy` runs `vagrant destroy` and
+`rm -rf` on whatever host is in force.
 
-Write yours once, outside any repo:
+Write yours once, outside any repo. This is the same file Part 3
+adds a project table to, so keep the path:
 
 ```bash
 # Linux / macOS
@@ -189,16 +187,10 @@ New-Item -ItemType Directory -Force "$env:APPDATA\bombyx" | Out-Null
 Set-Content "$env:APPDATA\bombyx\config.toml" 'host = "vmhost"'
 ```
 
-That covers every project on this machine. Two other sources
-override it when you need them. All three, highest first:
-
-| Rank | Source | Use |
-|------|--------|-----|
-| 1 | `--host other` | one run against another machine |
-| 2 | `BOMBYX_HOST=other` | a shell, CI, or an agent |
-| 3 | your `config.toml` | every project -- the one you just wrote |
-
-If none of the three names a host, bombyx stops and lists them
+That covers every project on this machine. A project that runs
+somewhere else gets a `host` of its own inside its table, which
+Part 3 comes back to, and that key wins for that project alone.
+If neither names a host, bombyx stops and says which line to add
 rather than guessing.
 
 ## Part 2: the VM host
@@ -312,37 +304,51 @@ uses a public repository. A private one needs a credential
 inside the VM, and code in the VM can read it -- see
 [trust-boundary.md](trust-boundary.md) for what that costs.
 
-The layout:
+The layout, in two places:
 
 ```
 myproject/                  your project repo
-  bombyx.toml           which VM, and what the guest clones
   .gitignore
   vagrant/              the guest runs this from its own clone
     provision.sh
+
+~/.config/bombyx/
+  config.toml           the host from Part 1, plus the project
+                        table this part adds
 ```
 
-### `bombyx.toml`
+### The project's table in `config.toml`
 
-Copy `bombyx.toml.sample` from bombyx's own repository into your
-project as `bombyx.toml`. Its comments explain every key, and a
-test loads that file as shipped, so it cannot drift from what
-bombyx accepts -- which is worth something, because it has been
-unloadable twice.
+Open `config.toml.sample`. It is at the root of the bombyx
+clone you made in Part 1, and also at
+<https://github.com/breki/bombyx/blob/main/config.toml.sample>.
+Its comments explain every key, and a test loads that file as
+shipped, so it cannot drift from what bombyx accepts -- which is
+worth something, because it has been unloadable twice.
 
-Then change four values:
+Copy the `[projects.myproject]` block out of it and append it to
+the `config.toml` you wrote in Part 1, below the `host` line.
+Then change these:
 
 | Key | This tutorial uses |
 |-----|--------------------|
-| `project` | `myproject` -- names the VM and its directory on the host |
+| the table key | `myproject` -- names the VM and its directory on the host |
 | `vm.box` | `debian/bookworm64`; `provision.sh` runs `chsh` because of it |
 | `source.repo` | the URL you push this repository to |
 | `source.ref` | the branch you push, `main` here |
 
-Leave `provider = "libvirt"`, leave `remote_root` where the
-sample puts it -- above `[vm]`, because a bare key belongs to
-the table header above it, and below `[vm]` this one would
-parse as `vm.remote_root` and the whole file would be refused.
+The table key is the project name, so nothing inside the table
+repeats it. `--project myproject` on every command is what picks
+this table: bombyx opens no file in the project's directory, so
+it cannot work out which project you mean from where you are
+standing.
+
+Leave `provider = "libvirt"`, and leave `remote_root` where the
+sample puts it -- above `[projects.myproject.vm]`, because a
+bare key belongs to the table header above it, and written below
+that header this one would parse as
+`projects.myproject.vm.remote_root` and the whole file would be
+refused.
 
 `[vm]` and `[source]` are required and have no defaults. bombyx
 builds the VM from the first and the guest clones the second,
@@ -350,16 +356,13 @@ so there is nothing sensible for bombyx to guess: a base image
 is a choice, and a repository bombyx invented would be cloned
 into the guest and run as root.
 
-`remote_root` is optional, shown with its default. There
-is no `host` here: it went into your own `config.toml` back in
-Part 1, and bombyx refuses one in this file. This is the file
-you commit, so it should hold only what is true for anyone who
-clones the repo.
+`remote_root` is optional, shown with its default.
 
-If this one project needs a different machine from your usual
-one, pass `--host` on the run that needs it. There is no way to
-record the choice yet; `docs/issues/project-config-off-repo.md`
-plans a per-project entry in your `config.toml`.
+If this one project runs on a different machine from your usual
+one, add a `host` line inside its table, above the two tables.
+It wins for this project, and bombyx prints a line on stderr
+saying so on every command -- because `destroy` runs `rm -rf`
+on whichever host wins.
 
 ### `.gitignore`
 
@@ -489,23 +492,24 @@ Set `source.repo` to that same URL -- the guest clones what
 `repo` names, not whatever `origin` happens to be. Then:
 
 ```bash
-git add bombyx.toml .gitignore vagrant/provision.sh
-git commit -m "add the bombyx VM definition"
+git add .gitignore vagrant/provision.sh
+git commit -m "add the provisioning script the guest runs"
 git push origin main          # the branch named in source.ref
 ```
 
-`bombyx.toml` itself is not read from the repository -- bombyx
-reads it from your working directory -- but committing it is
-how the next person gets the same VM.
+Only the provisioning script goes in the repository. The VM
+description stays in your own `config.toml`, so the next person
+who wants the same VM copies that table rather than cloning it.
 
 ## Part 4: the first boot
 
 ### Check the preconditions
 
-From the project directory:
+From any directory -- bombyx reads nothing out of the project's,
+so where you stand makes no difference:
 
 ```console
-$ bombyx doctor
+$ bombyx --project myproject doctor
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
   vmhost  ssh               ok
   vmhost  login shell       ok    posix
@@ -527,10 +531,10 @@ one a VM command runs.
 ### Look at what `up` would do
 
 ```console
-$ bombyx --dry-run up
+$ bombyx --project myproject --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (265 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -556,8 +560,13 @@ especially `destroy`.
 
 ### Boot it
 
+**Every command from here on takes `--project myproject`.** The
+examples leave it out so the line under discussion stays
+readable; typed without it, bombyx stops and says the argument
+is required.
+
 ```bash
-bombyx up
+bombyx --project myproject up
 ```
 
 The first run downloads the box on the host and takes a while;
@@ -596,10 +605,10 @@ after an agent has made a mess.
 The loop you will actually use:
 
 ```bash
-bombyx shell              # work in the VM
-bombyx down               # halt it when you are done
-bombyx up                 # boot it again, fast, caches warm
-bombyx reset              # roll back to the fresh-install snapshot
+bombyx --project myproject shell   # work in the VM
+bombyx --project myproject down    # halt it when you are done
+bombyx --project myproject up      # boot again, fast, caches warm
+bombyx --project myproject reset   # roll back to the snapshot
 ```
 
 When you change `vagrant/provision.sh`, use `provision`, not
@@ -637,8 +646,9 @@ bombyx destroy myproject
 ```
 
 `destroy` prints the resolved `<host>:<directory>` it is about
-to remove. Read that, not the name you typed -- `project` comes
-from the same `bombyx.toml` that decides what gets deleted.
+to remove. Read that, not the name you typed -- you gave that
+name to `--project` a moment earlier, so typing it again
+confirms only that you can read your own command line.
 
 ## When something goes wrong
 

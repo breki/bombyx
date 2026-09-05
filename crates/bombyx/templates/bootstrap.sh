@@ -37,9 +37,10 @@ set -euo pipefail
 # returns success -- so each line here is a bare check that the
 # variable arrived, with nothing else happening.
 #
-# Vagrant sets these three from bombyx.toml. If one is missing,
-# the reason is a bug in the generated Vagrantfile, and failing
-# here names the variable instead of failing later inside `git`.
+# Vagrant sets these three from the operator's config. If one
+# is missing, the reason is a bug in the generated Vagrantfile,
+# and failing here names the variable instead of failing later
+# inside `git`.
 : "${BOMBYX_REPO:?bombyx: BOMBYX_REPO is not set}"
 : "${BOMBYX_REF:?bombyx: BOMBYX_REF is not set}"
 : "${BOMBYX_SCRIPT:?bombyx: BOMBYX_SCRIPT is not set}"
@@ -81,7 +82,7 @@ fi
 # It compares loosely. The same repository can be written more
 # than one way -- with or without a trailing `.git`, with or
 # without a trailing slash -- and deleting somebody's work over
-# a cosmetic edit to bombyx.toml would be indefensible.
+# a cosmetic edit to the config would be indefensible.
 #
 # And it only acts on a definite mismatch. If `git remote
 # get-url` fails for any reason, that is "cannot tell", not
@@ -109,7 +110,7 @@ if [ -d "$CLONE_DIR/.git" ]; then
             # uncommitted work, and an operator who sees a fresh
             # clone with no explanation has no way to know why.
             echo "bombyx: this VM holds a clone of $current_url" \
-                "but bombyx.toml asks for $BOMBYX_REPO." >&2
+                "but the config asks for $BOMBYX_REPO." >&2
             echo "bombyx: discarding the clone and starting" \
                 "again. Uncommitted work in $CLONE_DIR is lost." >&2
             rm -rf "$CLONE_DIR"
@@ -188,7 +189,7 @@ cd "$CLONE_DIR"
 # does not exist.
 if [ ! -e "$BOMBYX_SCRIPT" ]; then
     echo "bombyx: $BOMBYX_SCRIPT is not in the cloned" \
-        "project. Check \`script\` in bombyx.toml." >&2
+        "project. Check \`script\` in your config." >&2
     exit 1
 fi
 

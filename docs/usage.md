@@ -1,20 +1,28 @@
 # Using bombyx
 
 This is the command reference. It assumes bombyx is installed
-and a `bombyx.toml` exists in the project you are working in --
-[../README.md](../README.md) covers both, and its **Use**
-section is the short version of this page. If none of that is
-set up yet, start with [tutorial.md](tutorial.md), which builds
-a working project from nothing.
+and your `config.toml` has a table for the project you are
+working on -- [../README.md](../README.md) covers both, and its
+**Use** section is the short version of this page. If none of
+that is set up yet, start with [tutorial.md](tutorial.md), which
+builds a working project from nothing.
 
 The examples all use the config from the README: a host alias
 of `vmhost` and a project named `myproject`.
+
+**Every command below takes `--project myproject`**, left out of
+the examples so the line under discussion stays readable.
+bombyx reads nothing out of the project's own directory, so it
+cannot work out which project you mean from where you are
+standing. `--config <path>` names a registry file other than
+the one in your config directory. `self-update` needs neither.
 
 - [Commands](#commands)
 - [Checking a host with doctor](#checking-a-host-with-doctor)
 - [Seeing what would run: --dry-run](#seeing-what-would-run---dry-run)
 - [How the generated files are written](#how-the-generated-files-are-written)
-- [bombyx.toml is untrusted input](#bombyxtoml-is-untrusted-input)
+- [What is checked, and what is
+  not](#what-is-checked-and-what-is-not)
 
 ## Commands
 
@@ -92,26 +100,29 @@ disposable, so the answer there is `discard` followed by
 ### Why `destroy` asks for the project name
 
 `destroy` takes the project name as confirmation and refuses if
-it does not match `project` in `bombyx.toml`. `down` halts a VM
-and `reset` rolls it back; `destroy` throws away the warm caches
-and installed tooling that make a persistent VM worth keeping,
-so it asks for a deliberate act rather than a flag.
+it does not match the `--project` being destroyed. `down` halts
+a VM and `reset` rolls it back; `destroy` throws away the warm
+caches and installed tooling that make a persistent VM worth
+keeping, so it asks for a deliberate act rather than a flag.
 
 **Read the target it prints, not the name you typed.** Both the
 refusal and the confirmation print the resolved
 `<host>:<directory>`:
 
 ```console
-$ bombyx destroy
-bombyx: destroy needs the project name to confirm: run
-`bombyx destroy myproject` -- target is vmhost:~/vms/myproject
+$ bombyx --project myproject destroy
+bombyx: destroy needs the project name to confirm: re-run the
+same command with "myproject" as its last argument -- target is
+vmhost:~/vms/myproject
 ```
 
-The name on its own proves less than it appears to, because
-`project` comes from the same `bombyx.toml` that decides which
-directory is deleted -- a repo you cloned can name itself after
-a VM you care about. The printed target is the part you can
-check against reality.
+The name on its own proves less than it appears to: you typed it
+into `--project` a moment earlier, so repeating it confirms only
+that you can read your own command line. The printed target is
+the part you can check against reality.
+
+Whether the positional stays in this shape is still open --
+`destroy-confirmation-shape` in [todo.md](todo.md) carries it.
 
 ### What teardown removes
 
@@ -195,10 +206,10 @@ even with nothing installed.
 
 The local line names the directory `ssh` came from. bombyx
 resolves it against `PATH` explicitly rather than leaving it to
-the operating system, which on Windows
-searches the working directory first — and bombyx runs inside a
-repository whose contents arrive with whatever branch you
-checked out.
+the operating system, which on Windows searches the working
+directory first — and you run bombyx from wherever you happen to
+be standing, which is usually a repository whose contents arrive
+with whatever branch you checked out.
 
 Every command resolves what it needs the same way, all of it
 before running any step. So a missing `ssh` stops `up` before it
@@ -217,7 +228,7 @@ invocation instead of running it:
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (265 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -270,32 +281,35 @@ Both files are written on every `up`, `provision` and
 `scratch`, so the host's copy cannot drift from what the
 configuration currently says.
 
-## `bombyx.toml` is untrusted input
+## What is checked, and what is not
 
-`bombyx.toml` travels inside a repo, so it is treated as
-untrusted input. Every field is checked against an allowlist:
-`remote_root` must be an anchored path with no traversal, and a
-scratch name must be a single path segment, so `../../etc` is
-refused rather than quoted.
+Your `config.toml` is normally your own file, and every field
+in it is still checked against an allowlist: `remote_root` must
+be an anchored path with no traversal, and a scratch name must
+be a single path segment, so `../../etc` is refused rather than
+quoted.
 
-The field that used to matter most is no longer in the file at
-all. `host` is handed to `ssh` as its first argument, and `ssh`
-reads a leading `-` as an option, so a repo shipping
-`host = "-oProxyCommand=..."` could run code on your
-workstation from a bare `bombyx status`. `host` in
-`bombyx.toml` is now an error, and the value comes from your
-own machine instead -- see **Where bombyx looks for the host**
-in `../README.md`.
+The checks are not only there for your typos. `--config <path>`
+reads whatever file you name, a repository can commit one, and
+`BOMBYX_CONFIG_HOME` needs only to be anchored -- so a
+per-directory environment tool can redirect bombyx from inside a
+clone. A registry that arrived that way chooses `remote_root`,
+which is the value `destroy` builds its `rm -rf` from. Do not
+pass `--config` a path inside a repository you did not write.
 
-The charset check on `host` stays, because the remaining
-sources can still be wrong: your `config.toml`, `BOMBYX_HOST`,
-or a mistyped `--host`. It guards the argv, not one particular
-file.
+`host` gets the sharpest rule, because it is handed to `ssh` as
+its first argument and `ssh` reads a leading `-` as an option:
+`host = "-oProxyCommand=..."` would run code on your
+workstation from a bare `bombyx status`. Every `host` in the
+file is checked as the file is read -- the file-wide one and
+every project's, not only the one this command wants -- so a bad
+value is reported wherever it sits and the error names the line.
 
-Every one of those three sits outside the checkout, and that is
-the property the design turns on: bombyx opens no file inside
-the project directory to find a host. That is a rule about
-files rather than about everything a repository can reach, and
-"Which host a command is about to use" in `../README.md`
-explains what it does and does not promise. Read it before you
-rely on the distinction.
+bombyx opens no file inside the project's directory at all, and
+that is the property the design turns on. It is a rule about
+files rather than about everything a repository can reach: a
+per-directory environment tool can still set
+`BOMBYX_CONFIG_HOME` from inside a clone. "Which host a command
+is about to use" in `../README.md` explains what silence does
+and does not promise. Read it before you rely on the
+distinction.

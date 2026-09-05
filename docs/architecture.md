@@ -9,7 +9,7 @@ works inside a VM and the workstation stays clean. It composes
 ```mermaid
 flowchart LR
   subgraph ws["workstation"]
-    repo["project repo<br/>bombyx.toml"]
+    reg["~/.config/bombyx<br/>config.toml"]
     cli["bombyx"]
   end
 
@@ -25,7 +25,7 @@ flowchart LR
 
   git[("git host")]
 
-  repo --> cli
+  reg --> cli
   cli -- ssh --> vg
   cli -- "heredoc over ssh" --> dir
   vg -- creates --> guest
@@ -50,16 +50,15 @@ separate kernel, no host filesystem, none of your credentials
 covers running the host as a WSL2 distribution on a Windows
 workstation.
 
-The diagram shows today, not the target. The `project repo`
-box and the arrow leaving it are what the design is working to
-remove: the goal is that neither the workstation nor the VM
-host reads **any** file from the project's repo. The VM host
-already reads none -- the push that sent it `vagrant/` is gone.
-The workstation still reads `bombyx.toml` out of the working
-directory, so it still holds a checkout, and
-`project-config-off-repo` is the work that closes that.
-`docs/trust-boundary.md` has the reasoning and the remaining
-steps.
+No box in the diagram is the project's repository, and that is
+the point: neither the workstation nor the VM host reads any
+file from it. The VM host reads none because the push that sent
+it `vagrant/` is gone. The workstation reads none because every
+setting comes out of `config.toml`, which lives in the
+operator's config directory, and `--project` names the project
+rather than the working directory implying it. The workstation
+therefore needs no checkout at all.
+`docs/trust-boundary.md` has the reasoning.
 
 ## Library modules
 
@@ -101,7 +100,7 @@ probe commands, `doctor` decides what their output means.
 | Module | Owns |
 |--------|------|
 | `plan` | which commands run, and in what order |
-| `config` | `bombyx.toml`, and the `Config` every command reads |
+| `config` | the registry, and the `Config` every command reads |
 | `config::read` | reading a config file: symlinks, size, TOML errors |
 | `config::error` | `ConfigError` for a file, `FieldError` for a value |
 | `config::guards` | the rules more than one field shares |
@@ -162,16 +161,8 @@ classDiagram
     +String remote_root
     +Option~String~ host
   }
-  class HostSources {
-    +Option~str~ flag
-    +Option~str~ env
-    +Option~str~ project
-    +Option~Path~ user_config_dir
-  }
   class HostOrigin {
     <<enumeration>>
-    Flag
-    Env
     ProjectEntry
     UserFile
   }
@@ -185,37 +176,26 @@ classDiagram
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
-  HostSources ..> Config : supplies host
-  HostSources ..> HostOrigin : reports which won
+  Registry ..> HostOrigin : ranked to produce one
 ```
 
-`Config` is what bombyx runs with. `host` is the one field never
-read from `bombyx.toml`, because a VM host belongs to a person
-rather than a project.
-
-`Registry` and `Project` are a second pair of config types, and
-they parse the operator's own `config.toml` rather than
-`bombyx.toml`: a top-level `host`, and one `[projects.<name>]`
-table per project carrying `remote_root`, `[vm]`, `[source]` and
-an optional `host` of its own. `config::host` reads both host
-keys out of that file, and ranks the project's above the
-top-level one, so an operator who keeps one project on a
-different machine writes it in that project's table.
+`Config` is what bombyx runs with. `Registry` and `Project`
+parse the file it comes out of: a file-wide `host`, and one
+`[projects.<name>]` table per project carrying `remote_root`,
+`[vm]`, `[source]` and an optional `host` of its own.
 
 `Config::load_project` turns one entry into a `Config`. It reads
-the registry once and takes everything from it: the entry
-supplies every setting but the host, and `config::host::rank`
-ranks the host across `--host`, `BOMBYX_HOST`, that entry's own
-`host` and the file-wide one. One read rather than two, because
-a file edited mid-run could otherwise supply a project host and
-a file-wide host that never coexisted.
+the file once and takes everything from it: the entry supplies
+every setting but the host, and `config::host::rank` picks
+between that entry's own `host` and the file-wide one, the entry
+winning. One read rather than two, because a file edited mid-run
+could otherwise supply a project host and a file-wide host that
+never coexisted.
 
-No command calls it yet. One step stands between here and a
-command that does: `project-selection-flag` in `docs/todo.md`
-adds the `--project` argument that first supplies a name, and
-deletes `Config::load` and `bombyx.toml` with it. The
-per-project `host` key waits on that step too, because nothing
-names a project until it lands.
+An operator who keeps one project on a different machine writes
+`host` in that project's table, and bombyx then prints a line on
+stderr naming the table. That notice exists because both keys
+live in one file and `destroy` runs `rm -rf` on whichever wins.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -279,8 +259,8 @@ sequenceDiagram
   participant guest as guest VM
   participant git as git host
 
-  op->>cli: bombyx up
-  cli->>cli: read bombyx.toml, validate
+  op->>cli: bombyx --project p up
+  cli->>cli: read config.toml, validate
   cli->>host: mkdir -p the project dir
   cli->>host: cat > Vagrantfile (heredoc)
   cli->>host: cat > bootstrap.sh (heredoc)
@@ -307,9 +287,29 @@ first creates a machine.
 
 ## What config values are checked
 
-`bombyx.toml` travels inside a repo, so its values are treated
-as hostile input. Six of them reach the generated files:
-`box`, `repo`, `ref`, `script`, `cpus` and `memory`.
+**The registry is usually the operator's own file, and bombyx
+cannot assume it.** Two arguments point the loader elsewhere.
+`--config <path>` reads any file at all, including one committed
+in a clone. `BOMBYX_CONFIG_HOME` only has to be *anchored*, so
+an absolute path into a clone is accepted, and a per-directory
+environment tool (`direnv`, `mise`, a CI job) sets it from
+inside one. Either way the values are then repo-supplied.
+
+So the allowlist is a boundary rather than a typo check. Each
+of those rules is what stops a repo-supplied value reaching
+`ssh` or `rm -rf`, so none of them is there to catch a typo.
+Six values reach
+the generated files and so the guest -- `box`, `repo`, `ref`,
+`script`, `cpus` and `memory` -- and `remote_root` reaches
+`rm -rf` on the VM host. A registry out of a clone with
+`remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
+is `root::check`'s depth floor doing the work it exists for.
+
+What the guards do *not* stop is the redirect itself: bombyx
+opens no file in a project's directory of its own accord, and it
+opens the one `--config` names without asking where it came
+from. `docs/usage.md` under **What is checked, and what is not**
+is the operator-facing half of this.
 
 Two of those six are enforced by their type. `repo` is a
 `RepoUrl` and `script` is a `ScriptPath`, each a newtype whose
@@ -319,15 +319,14 @@ constructor while deserializing, so a bad value is refused
 before a `Config` exists, and the error identifies the line.
 
 The other four -- `box`, `ref`, `cpus` and `memory` -- are only
-*checked* after parsing. So are `host`, `project` and
-`remote_root`, which never reach the generated files but do
-reach `ssh`. Seven values in all, spread across
-`Config::validate`, `vm::validate` and `source::validate`.
-**That is a gap, not a decision we would make again.**
+*checked* after parsing. So are `project` and `remote_root`,
+which never reach the generated files but do reach `ssh`. Six
+values in all, spread across `Config::validate`, `vm::validate`
+and `source::validate`. **That is a gap, not a decision we would
+make again.**
 
 `Project`, the registry's per-project entry, carries the same
-values less `project`. Its `host` is optional where `Config`'s
-is required, and it reaches `ssh` the same way.
+values less `project`, which is its table key.
 
 **Every `host` in the registry is checked as the file is read**,
 by `config::registry::parse` -- the file-wide one and every
@@ -335,19 +334,15 @@ project's, not only the one a command turns out to want. This is
 the file where the operator writes host names, so a value bombyx
 would refuse is a mistake to report while they are looking at
 it; checking only the winner leaves a typo in an unused line
-until the day that line wins. Holding a `Registry` is therefore
-the proof that every host in it passed, which is why
-`Registry::host` and `Registry::project_host` hand their values
-out without re-running the rule.
+until the day that line wins.
 
-`check_winning_host` still applies the same rule to whatever the
-ranking picked, and after the above that only ever bites a
-`--host` or `BOMBYX_HOST` value -- the one pair that never came
-through the file. One consequence worth knowing: `--host` makes
-`resolve_host` skip reading the registry altogether, so a bad
-host sitting in a file that run never opens is not reported.
-`Config::load_project` has no such gap, because it reads the
-file for the project's settings whatever the flag says.
+Holding a `Registry` is therefore the proof that every host in it
+passed, and that one pass is the *only* place the host rule runs.
+`Registry::host`, `Registry::project_host` and
+`config::host::rank` hand values out without re-running it, and
+neither `Project::validate` nor `Config::validate` checks
+`host`. `host` is the one field absent from both, which looks
+like an omission and is not.
 
 `Config::load_project` then runs `Config::validate` over the
 value it assembles, so an entry's fields are checked twice. That
@@ -382,9 +377,9 @@ a `&Project` proves the same thing only when
 re-exported from the crate root, derives `Deserialize` and has
 a public `host`, so a library consumer can deserialize one from
 any text at all and read a `host` no rule has touched. Nothing
-inside bombyx does that -- both loaders take the host from the
-ranking -- so this is a trap for a future caller rather than a
-live hole.
+inside bombyx does that -- the loader takes the host from
+`config::host::rank`, over a `Registry` -- so this is a trap for
+a future caller rather than a live hole.
 
 ### The heading spelling has one owner
 
@@ -433,21 +428,20 @@ here instead. Neither is visible at the place it matters.
 The first is the one above: the `Project` guarantee is a
 property of `Registry`, not of `Project`.
 
-The second is an ordering. `config::host::caller_supplied`
-answers with `--host` or `BOMBYX_HOST` when either names a host,
-and `resolve_host` asks it *before* opening the registry -- that
-is what makes `--host` work on a machine whose registry is
-missing or broken. So the order those two sources sit in does
-not only decide which value wins; it decides whether the file is
-read at all. Reordering them, or adding a source above them,
-silently changes which runs check the registry.
+The second is that `--project` is required by hand rather than
+by clap. clap cannot mark one global argument required for some
+subcommands and not others, and `self-update` is the subcommand
+that must run on a machine with no registry at all. So `main`
+states the requirement itself, after the `self-update` branch has
+already returned. A third config-less subcommand added to `Cmd`
+gets that for free; one added to `VmCmd` does not, and would
+fail at the requirement rather than at compile time.
 
 
 Three things keep that survivable meanwhile. `render` escapes
 for Ruby whatever it is handed. `bootstrap.sh` passes `--`
-before the ref. And inside this crate the only two places that
-build a `Config` are `ProjectFile::into_config` and
-`Project::to_config`, whose callers both run `validate`
+before the ref. And inside this crate the only place that builds
+a `Config` is `Project::to_config`, whose caller runs `validate`
 immediately -- so for bombyx's own commands the check does run.
 
 A library consumer is not covered by that, and the public fields
@@ -480,7 +474,9 @@ that exists. Captured as `newtype-remaining-config-fields` in
 
 `project` and `remote_root` have rules of their own in the same
 places: `Config::validate` for `project`, and `config::root` for
-every rule `remote_root` must pass.
+every rule `remote_root` must pass. `remote_root`'s run twice,
+once as `Registry::project` hands the entry out and again over
+the assembled `Config`.
 `project` must be one path segment, because it becomes one
 directory name on the VM host.
 
@@ -514,7 +510,7 @@ while resolving to `/etc`.
 
 ```mermaid
 flowchart TD
-  toml["bombyx.toml"]
+  toml["config.toml"]
   val["config::validate"]
   render["vagrantfile::render"]
   write["remote::write_file"]

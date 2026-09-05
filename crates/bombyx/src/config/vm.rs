@@ -1,4 +1,4 @@
-//! The `[vm]` table of `bombyx.toml`: what machine to build.
+//! A project entry's `[vm]` table: what machine to build.
 //!
 //! What the guest clones into that machine is the `[source]`
 //! table, in `super::source`. The two tables have one function
@@ -50,7 +50,7 @@ pub enum Provider {
 
 impl fmt::Display for Provider {
     /// The lowercase name, which is both what serde parses from
-    /// `bombyx.toml` and what `Vagrant.configure` expects.
+    /// the config file and what `Vagrant.configure` expects.
     ///
     /// One method produces the name for both readers. If a
     /// separate method produced the Vagrant spelling, the two
@@ -64,7 +64,7 @@ impl fmt::Display for Provider {
     }
 }
 
-/// The machine bombyx builds, as `[vm]` in `bombyx.toml`.
+/// The machine bombyx builds, as a project's `[vm]` table.
 ///
 /// Every field is required. None of them has a defensible
 /// default: the base image is the one thing bombyx cannot

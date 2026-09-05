@@ -10,13 +10,12 @@
 //! the VMs run on, and a `[projects.<name>]` table per project
 //! carries the settings that describe one VM.
 //!
-//! Both can name a host, and `super::host` ranks all four
-//! sources: `--host`, the `BOMBYX_HOST` environment variable,
-//! the named project's own `host` key, then the top-level one.
-//! An operator who keeps one project on a different machine
-//! writes `host` inside that project's table. The example below
-//! shows an entry without one, which is what most entries look
-//! like:
+//! Both can name a host, and `super::host` ranks the two: the
+//! named project's own `host` key wins, and the top-level one is
+//! the default below it. An operator who keeps one project on a
+//! different machine writes `host` inside that project's table.
+//! The example below shows an entry without one, which is what
+//! most entries look like:
 //!
 //! ```toml
 //! host = "vmhost"
@@ -56,8 +55,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::{
-    ConfigError, Source, Symlinks, Vm, default_remote_root, from_toml,
-    read_optional,
+    ConfigError, Source, Vm, default_remote_root, from_toml, read_optional,
 };
 use crate::name::{ProjectName, check_segment};
 
@@ -67,9 +65,9 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 
 /// One project's settings, exactly as its table parses.
 ///
-/// These are the values a `bombyx.toml` carries today, minus
-/// `project`: the table key supplies that name, so a project
-/// cannot disagree with itself about what it is called.
+/// Everything that describes one project except its name: the
+/// table key supplies that, so a project cannot disagree with
+/// itself about what it is called.
 ///
 /// The fields are checked in three different places, and which
 /// one depends on what carries the rule.
@@ -146,9 +144,9 @@ struct RegistryFile {
     /// `remote_root`.
     ///
     /// A file with no `[projects.*]` table at all parses to an
-    /// empty map. A registry naming only a host is a legitimate
-    /// file: an operator who never asks bombyx for a project
-    /// entry still needs somewhere to put `host`.
+    /// empty map, so a file part-way through being written gets
+    /// the error naming the table to add rather than a TOML
+    /// error about a missing one.
     #[serde(default)]
     projects: BTreeMap<ProjectName, Project>,
 }
@@ -181,8 +179,8 @@ impl Project {
     /// name itself, so a project cannot disagree with itself
     /// about what it is called.
     ///
-    /// `host` comes from the caller because four sources can
-    /// supply one and this entry is only the third of them.
+    /// `host` comes from the caller because two keys can supply
+    /// one and this entry carries only the first.
     /// `super::Config::load_project` ranks them and passes the
     /// winner.
     ///
@@ -222,31 +220,41 @@ impl Project {
 }
 
 impl Registry {
-    /// Reads the registry from `dir`, if there is one.
+    /// Reads the registry from `path`, if the file is there.
     ///
-    /// Absence is `None`: an operator who passes `--host` and
-    /// names no project needs no such file. Anything else --
-    /// unreadable, not a plain file, not TOML -- is an error,
-    /// because a file that exists and cannot be understood is a
-    /// mistake to report rather than a reason to carry on with
-    /// different settings.
+    /// Absence is `None` so that the caller can word the
+    /// message: `super::Config::load_project` names the project
+    /// whose table the operator has to write, which this
+    /// function does not know. Anything else -- unreadable, not
+    /// a plain file, not TOML -- is an error, because a file
+    /// that exists and cannot be understood is a mistake to
+    /// report rather than a reason to carry on with different
+    /// settings.
     ///
-    /// Symlinks are followed. `super::read`'s `Symlinks` type
-    /// owns that argument and is where it is written down; do
-    /// not restate it here, because the copy in this module
-    /// would then have to be corrected too.
+    /// Symlinks are followed. `super::read::read_optional` owns
+    /// that decision and is where it is written down; do not
+    /// restate it here, because the copy in this module would
+    /// then have to be corrected too.
     ///
     /// # Errors
     ///
     /// Returns [`ConfigError::Read`], [`ConfigError::NotAFile`],
     /// [`ConfigError::TooLarge`] or [`ConfigError::Parse`], each
     /// naming the registry file.
-    pub fn read(dir: &Path) -> Result<Option<Self>, ConfigError> {
-        let path = path(dir);
-        let Some(source) = read_optional(&path, Symlinks::Follow)? else {
+    pub fn read(path: &Path) -> Result<Option<Self>, ConfigError> {
+        let Some(source) = read_optional(path)? else {
             return Ok(None);
         };
-        Ok(Some(parse(&source, &path)?))
+        Ok(Some(parse(&source, path)?))
+    }
+
+    /// The file this registry was read from.
+    ///
+    /// Every message naming the file asks for it here rather
+    /// than being handed a path separately, so no message can
+    /// name a file these settings did not come from.
+    pub(super) fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Returns the VM host this file names, if it names one.
@@ -257,9 +265,7 @@ impl Registry {
     /// nothing left for this method to run.
     ///
     /// The rules themselves live in `super::host`, which is
-    /// where they are written down. The ranking across all four
-    /// sources still applies its own check, because `--host` and
-    /// the environment variable never came through this file.
+    /// where they are written down.
     #[must_use]
     pub fn host(&self) -> Option<&str> {
         self.host.as_deref()
@@ -320,16 +326,6 @@ impl Registry {
     /// does not parse fails the whole file, whichever project
     /// was asked for, and so does a bad `host` anywhere in it.
     ///
-    /// Whether a broken table can stop a run that got its host
-    /// from `--host` depends on the loader.
-    /// `super::Config::load` reaches this file only through
-    /// `super::resolve_host`, which does not open it when the
-    /// flag or the environment names a host -- so for that
-    /// loader a broken table is skipped along with the file.
-    /// `super::Config::load_project` has no such exemption: it
-    /// reads the file for the project's settings whatever the
-    /// flag says, and calls this before ranking anything.
-    ///
     /// What waits is whatever `Project::validate` runs. The
     /// project name waits for nothing: it is a map key, and
     /// serde builds the map before any code here runs, so
@@ -361,14 +357,6 @@ impl Registry {
         project.validate()?;
         Ok(project)
     }
-}
-
-/// The registry file inside `dir`.
-///
-/// One spelling of the join, so an error message and the file
-/// actually opened cannot name different paths.
-pub(super) fn path(dir: &Path) -> PathBuf {
-    dir.join(USER_CONFIG_FILE)
 }
 
 /// One project's table heading, as an operator must write it.
@@ -403,9 +391,9 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
     let file: RegistryFile = from_toml(source, path)?;
 
     // Every `host` in the file, not only the one a later
-    // command turns out to want. This module's header says why,
-    // under "Every host in the file is checked as the file is
-    // read", and is the one place that reasoning lives.
+    // command turns out to want: a typo in a project nobody
+    // asked about is reported while the operator has the file
+    // open. `docs/architecture.md` carries the argument.
     if let Some(host) = &file.host {
         super::host::refuse_if_bad(
             host,
@@ -498,11 +486,17 @@ mod tests {
         registry.project_host(name).map(|(_key, host)| host)
     }
 
-    /// Writes `source` as the registry inside a fresh directory.
-    fn registry_dir(source: &str) -> tempfile::TempDir {
+    /// Writes `source` as a registry file in a fresh directory,
+    /// and returns the directory and the file inside it.
+    ///
+    /// The directory comes back too, because dropping a
+    /// `TempDir` deletes the tree: keeping only the path would
+    /// hand the test a file that no longer exists.
+    fn registry_file(source: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(path(dir.path()), source).unwrap();
-        dir
+        let path = dir.path().join(USER_CONFIG_FILE);
+        std::fs::write(&path, source).unwrap();
+        (dir, path)
     }
 
     #[test]
@@ -573,10 +567,8 @@ mod tests {
 
     #[test]
     fn a_project_entry_may_name_its_own_host() {
-        // An operator who keeps one project on another
-        // machine has no other way to record that choice:
-        // `--host` covers a single run and nothing else
-        // remembers it.
+        // An operator who keeps one project on another machine
+        // has no other way to record that choice.
         let source = registry_toml().replace(
             "[projects.myproject]\n",
             "[projects.myproject]\nhost = \"otherbox\"\n",
@@ -722,8 +714,8 @@ mod tests {
 
     #[test]
     fn a_registry_with_no_projects_at_all_still_parses() {
-        // A registry naming only a host is a legitimate file,
-        // so the projects table has to be optional.
+        // A file part-way through being written has to parse,
+        // so the projects table is optional.
         let registry = parsed("host = \"vmhost\"\n");
         assert_eq!(registry.host.as_deref(), Some("vmhost"));
         assert!(registry.projects.is_empty());
@@ -732,13 +724,14 @@ mod tests {
     #[test]
     fn a_missing_registry_file_is_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(Registry::read(dir.path()).unwrap().is_none());
+        let path = dir.path().join(USER_CONFIG_FILE);
+        assert!(Registry::read(&path).unwrap().is_none());
     }
 
     #[test]
-    fn read_parses_the_file_in_the_directory() {
-        let dir = registry_dir(&registry_toml());
-        let registry = Registry::read(dir.path()).unwrap().unwrap();
+    fn read_parses_the_file_it_is_pointed_at() {
+        let (_dir, path) = registry_file(&registry_toml());
+        let registry = Registry::read(&path).unwrap().unwrap();
         assert!(registry.project("myproject").is_ok());
     }
 
@@ -746,19 +739,16 @@ mod tests {
     fn a_miss_names_the_file_the_registry_was_read_from() {
         // The registry carries its own path, so no caller can
         // hand the error a different one.
-        let dir = registry_dir(&registry_toml());
-        let registry = Registry::read(dir.path()).unwrap().unwrap();
+        let (_dir, path) = registry_file(&registry_toml());
+        let registry = Registry::read(&path).unwrap().unwrap();
         let err = registry.project("other").unwrap_err().to_string();
-        assert!(
-            err.contains(&path(dir.path()).display().to_string()),
-            "{err}"
-        );
+        assert!(err.contains(&path.display().to_string()), "{err}");
     }
 
     #[test]
     fn a_registry_that_is_not_toml_names_the_file() {
-        let dir = registry_dir("host = \n");
-        let err = Registry::read(dir.path()).unwrap_err();
+        let (_dir, path) = registry_file("host = \n");
+        let err = Registry::read(&path).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
         assert!(err.to_string().contains(USER_CONFIG_FILE), "{err}");
     }
@@ -862,7 +852,8 @@ mod tests {
                 place: "/home/dev/config.toml".to_owned(),
             }
             .to_string(),
-            super::super::HostOrigin::ProjectEntry(key).to_string(),
+            super::super::HostOrigin::ProjectEntry(key)
+                .describe(Some(Path::new("/home/dev/config.toml"))),
         ];
         for text in messages {
             assert!(text.contains(want), "want {want} in: {text}");

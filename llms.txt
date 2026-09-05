@@ -9,13 +9,13 @@ Cargo workspace, CLI only:
 
 - `crates/bombyx` — core library and CLI binary (paths below
   are `src/`-relative unless written in full)
-  - `config.rs` — `Config` itself, and the two loaders: one
-    for `bombyx.toml`, one for the registry
+  - `config.rs` — `Config` itself and `Config::load_project`,
+    the one loader
   - `config/registry.rs` — the operator's own `config.toml`:
     the VM host, and a `[projects.<name>]` table per project
   - `config/host.rs` — where the VM host name comes from, the
-    ranking between the four sources, and the shape a host may
-    take
+    ranking between the registry's two `host` keys, the shape a
+    host may take, and which directory the registry lives in
   - `name.rs` — validated `ScratchName` (one path segment)
   - `remote.rs` — ssh command construction (pure)
   - `remote/probe.rs` — the read-only `doctor` probe scripts
@@ -41,12 +41,13 @@ subsystem — those were removed from the template.
 ## Model
 
 bombyx never manages VMs directly. It generates a
-Vagrantfile and a bootstrap script from `bombyx.toml`,
-writes both onto the VM host over SSH, and runs `vagrant`
-there. The VM host's own filesystem holds no project file;
-the guest clones the repository itself once it is running.
-The workstation still holds a checkout, because
-`bombyx.toml` is read from the working directory.
+Vagrantfile and a bootstrap script from the operator's own
+`config.toml`, writes both onto the VM host over SSH, and runs
+`vagrant` there. The VM host's own filesystem holds no project
+file; the guest clones the repository itself once it is
+running. The workstation reads nothing out of the project's
+directory either, which is why `--project` names the project
+rather than being worked out from where bombyx was run.
 
 ## Commands
 
@@ -67,47 +68,54 @@ bombyx self-update        # replace the binary; needs git, curl, tar
 `destroy` requires the project name as confirmation.
 `destroy` and `discard` both `rm -rf` the host directory after
 destroying the VM; `remote_root` therefore rejects `..`, and
-`Config::validate` is the only check on `remote_root`;
-`remote::remove_dir` carries a `debug_assert` that is a
-backstop for a hand-built path, not the guard.
+`Project::validate` and `Config::validate` are the only checks
+on `remote_root`; `remote::remove_dir` carries a
+`debug_assert` that is a backstop for a hand-built path, not
+the guard.
 
-Global flags: `--config <path>` (default `bombyx.toml`),
-`--host <alias>`, `--dry-run` (print the argv instead of
-running it).
+Global flags: `--project <name>` (required by every subcommand
+but `self-update`), `--config <path>` (the registry file;
+defaults to `config.toml` in the config directory), `--dry-run`
+(print the argv instead of running it).
 
 ## Configuration
 
-`bombyx.toml` in the project root. Committed, and carries
-**no `host`** -- one there is an error, not a warning.
+One file, and it is the operator's own: `config.toml` in the
+config directory, called **the registry** because it carries a
+table per project. `--config <path>` reads a different file
+instead. Nothing is committed and nothing in the project's
+directory is opened.
 
-`bombyx.toml.sample` in the repository root is the only full
-example, and a test loads it as shipped. Keys:
+`config.toml.sample` in the repository root is the only full
+example, and a test loads it as shipped. The keys, in the order
+a real file needs them, because a bare key binds to the table
+header above it:
 
-- `project` — required; VM name and directory on the host
-- `[vm]` — required, no defaults: `provider`, `box`, `cpus`,
-  `memory`. Use `libvirt`; `hyperv` is written but bombyx does
-  not tell vagrant to select it (`docs/todo.md`)
-- `[source]` — required: `repo`, `ref`, `script`, what the
-  guest clones and runs
-- `remote_root` — optional, `~/vms`. Must sit above the tables:
-  a bare key after `[source]` binds to that table
+- `host` (file-wide) — the machine every project runs on unless
+  its own table says otherwise
+- `[projects.<name>]` — one per project. The table key is the
+  project name, so no key inside repeats it. A name containing
+  a `.` must be quoted, since TOML reads a bare dot as nesting
+- `remote_root` (in a project's table) — optional, `~/vms`.
+  Written below either table beneath it, this binds to that
+  table instead and the whole file is refused
+- `host` (in a project's table) — optional, for a project that
+  runs on a machine of its own. It outranks the file-wide key
+- `[projects.<name>.vm]` — required, no defaults: `provider`,
+  `box`, `cpus`, `memory`. Use `libvirt`; `hyperv` is written
+  but bombyx does not tell vagrant to select it
+  (`docs/todo.md`)
+- `[projects.<name>.source]` — required: `repo`, `ref`,
+  `script`, what the guest clones and runs
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a
-committed value is wrong for everyone but its author -- and
-`destroy` runs `rm -rf` on whatever host is in force. It is
-resolved from `--host`, `BOMBYX_HOST` and a per-developer
-`config.toml` -- called **the registry** from here on, because
-it also carries a table per project -- in that order; see
-"Where bombyx looks for the host" in `README.md` for the
-authoritative list, and `resolve_host` in `config/host.rs` for
-the code.
-
-`resolve_host` ranks a fourth source the CLI cannot reach: a
-`host` key inside a `[projects.<name>]` table, between
-`BOMBYX_HOST` and the file-wide `host`. `HostSources.project` is
-`None` on every path today, so the key never wins. The README
-section above says the same and is where the count is kept.
+committed value would be wrong for everyone but its author --
+and `destroy` runs `rm -rf` on whatever host is in force. Two
+keys can name it, the project entry's own `host` and the
+file-wide one, and the entry wins. See "Where bombyx looks for
+the host" in `README.md` for the authoritative statement, and
+`config::host::rank` for the code.
 
 Every `host` in the registry is checked while the file is being
 read, by `config::registry::parse` -- the file-wide key and
@@ -115,59 +123,43 @@ every project's, not only the one a command wants. A host value
 is `ssh`'s first positional argument, and this is the file the
 operator writes host names in, so a value bombyx would refuse is
 reported while they are looking at that file. Holding a
-`Registry` is the proof every host in it passed;
-`Registry::host` and `Registry::project_host` therefore run no
-rule of their own, and `Project::validate` does not check
-`host`. `--host` and `BOMBYX_HOST` are checked separately, by
-`check_winning_host` on whichever source won. Note that `--host`
-makes `resolve_host` skip reading the registry, so a bad host in
-a file that run never opens goes unreported;
-`Config::load_project` always reads the file and has no such
-gap.
+`Registry` is the proof every host in it passed, so
+`Registry::host`, `Registry::project_host`, `config::host::rank`
+and both `validate` functions run no host rule of their own.
 
 The ranking itself is `config::host::rank`, which takes the
-registry already read rather than opening it. `resolve_host`
-reads the file and calls it; `Config::load_project` reads the
-file for the project's settings and calls it with that same
-copy, so a file edited mid-run cannot supply a project host and
-a file-wide host that never coexisted.
+registry already read rather than opening it, because
+`Config::load_project` needs the same copy of the file for the
+project's other settings: a file edited between two reads could
+supply a project host and a file-wide host that never
+coexisted.
 
-`Config::load_project(name, sources)` is the registry
-counterpart of `Config::load`: it takes a project name instead
-of a path to a `bombyx.toml`, reads the `[projects.<name>]`
-table for every setting but the host, and returns the same
-`(Config, HostOrigin)` pair. It ranks the host for the project
-it loads whatever `HostSources.project` says, so the settings
-and the host always come from one entry. No command calls it
-yet -- `project-selection-flag` in `docs/todo.md` is the step
-that switches the binary over and deletes `Config::load`.
-The one error it adds is `RegistryNotFound`, for a machine with
-no registry file at all; `ProjectNotFound` already existed. An
-illegal project name is refused before the file is looked for,
-so no message ever advises a `[projects.<name>]` heading that
-the parser would reject.
+`Config::load_project(name, registry)` is the only loader.
+`registry` is the file to read -- `--config` when the operator
+passed one, `config::registry_file()` otherwise, and `None`
+when the environment names no config directory at all. It reads
+the `[projects.<name>]` table for every setting but the host,
+ranks the host across the two keys, and returns a
+`(Config, HostOrigin)` pair so the binary reports the winner
+rather than re-deriving the rule. Its errors include
+`RegistryNotFound` for a machine with no registry file,
+`ProjectNotFound` for a file with no table for `name`, and
+`HostMissing` when neither `host` key names one. An illegal
+project name is refused before the file is looked for, so no
+message ever advises a `[projects.<name>]` heading that the
+parser would reject.
 
-`Config::load` returns an error naming the config file, plus
-`--host` and `BOMBYX_HOST`, when no source supplies a host. It
-takes a `HostSources` carrying the flag, the env value, the
-project name and the config dir, and returns the winning
-`HostOrigin`, so precedence is unit-testable without mutating
-the process environment and the binary reports the winner rather
-than re-deriving it; the binary is the only thing that reads
-`std::env`. A config dir from the environment must be an
-anchored path -- a relative one would resolve against the
-working directory and take the host out of the repo.
+The binary is the only thing that reads `std::env`. A config
+directory from the environment must be an anchored path -- a
+relative one would resolve against the working directory and
+take the host out of the repository.
 
-Every host source sits outside the checkout: bombyx opens no
-file in the project directory to find a host. That is a rule
-about files and not about everything a repository can reach. A
-per-directory environment tool (`direnv`, `mise`, a CI job)
-reads its settings from inside the clone, and a
+bombyx opens no file in the project's directory at all. That is
+a rule about files and not about everything a repository can
+reach. A per-directory environment tool (`direnv`, `mise`, a CI
+job) reads its settings from inside the clone, and a
 `BOMBYX_CONFIG_HOME` set that way redirects bombyx to another
-`config.toml` without printing a provenance line. The
-per-project `host` key described above does not close this: no
-command reaches it yet, so `--host` still covers one run and
-nothing else records the choice.
+`config.toml` without printing a provenance line.
 
 `remote_root` must be anchored (`/` or `~/`)
 and name at least one directory below that anchor. bombyx
@@ -206,9 +198,10 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
   coverage, so code there ships untested
 - `remote.rs` builds commands but never spawns processes,
   which is what keeps it testable without a VM host
-- `bombyx.toml` ships inside a repo, so it is untrusted:
-  every field is validated against an allowlist. `host`
-  reaching `ssh` as `-oProxyCommand=...` would be local RCE
+- the registry is the operator's own file rather than a
+  committed one, and every field is still validated against an
+  allowlist. `host` reaching `ssh` as `-oProxyCommand=...`
+  would be local RCE
 - Remote paths go through `quote_remote_path`, which leaves
   a leading `~` outside the quotes — a POSIX shell does not
   expand `~` inside single quotes

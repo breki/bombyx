@@ -1,29 +1,31 @@
 //! Where the VM host name comes from, and what shape it may take.
 //!
-//! The host is the one setting that is deliberately **not** in the
-//! project file: it belongs to whoever drives bombyx, not to the
-//! repo. So it has four possible sources with a ranking between
-//! them, a charset rule and a provenance answer -- a
-//! self-contained subject, which is why it is a module of its own
-//! rather than part of parsing `bombyx.toml`.
+//! Two keys in the operator's registry can name it: the project
+//! entry's own `host`, and the file-wide one below it. The entry
+//! wins, so one project can run on a machine of its own. An
+//! operator writes `host` inside a project's table for exactly
+//! that.
 //!
-//! The two lowest-ranked sources are keys in one file, and
-//! `super::registry` is what reads it. This module asks that
-//! module for the file, then for the named project's own `host`
-//! and the file-wide one, in that order. An operator writes
-//! `host` inside a project's table when that project runs on a
-//! different machine.
+//! `super::registry` reads the file; [`rank`] picks between the
+//! two keys in a copy it is handed. Both keys have already been
+//! checked by then: `super::registry`'s parse applies
+//! [`refuse_if_bad`] to every `host` in the file as it reads it,
+//! whether or not the run turns out to want that one, and its
+//! header says why. So holding a `Registry` is the proof that
+//! every host in it passed, and nothing downstream runs the
+//! rule again.
 //!
 //! What is wrong with a host value is decided in one place,
-//! [`host_problem`], and reported three ways. As a *field*
-//! problem by `super::Config::validate`. As a problem with a
-//! *source* by `super::check_winning_host`, which names
-//! `--host` or the file the value came from. And by
-//! [`refuse_if_bad`] for every `host` key in the registry as
-//! that file is read, whether or not the run would have used
-//! the value -- `super::registry` owns that rule and its header
-//! says why. Deciding what is wrong in one place is what keeps
-//! the three messages from drifting apart.
+//! [`host_problem`], so the message an operator gets does not
+//! depend on which key carried the value.
+//!
+//! # Why the config directory is decided here
+//!
+//! [`user_config_dir`] answers where the registry file lives,
+//! and it sits in this module because the host is what the
+//! answer protects: a relative `BOMBYX_CONFIG_HOME` would take
+//! the VM host out of whatever repository bombyx was run in,
+//! which is the one thing this design removes.
 
 use std::path::{Path, PathBuf};
 
@@ -40,9 +42,6 @@ pub(crate) fn is_host_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@')
 }
 
-/// Environment variable naming the VM host directly.
-pub const HOST_ENV: &str = "BOMBYX_HOST";
-
 /// Environment variable relocating the per-developer config
 /// directory.
 ///
@@ -51,57 +50,16 @@ pub const HOST_ENV: &str = "BOMBYX_HOST";
 /// of the real one.
 pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
 
-/// Where a VM host name may come from, highest precedence
-/// first.
-///
-/// The binary fills this in from its command line and
-/// environment; tests construct it directly, which is why the
-/// environment is a field rather than something read in place.
-#[derive(Debug, Clone, Default)]
-pub struct HostSources<'a> {
-    /// `--host`, for a one-off run against another machine.
-    pub flag: Option<&'a str>,
-
-    /// The [`HOST_ENV`] environment variable.
-    pub env: Option<&'a str>,
-
-    /// Which project's entry to consult, when the caller knows.
-    ///
-    /// The entry lives in the same file as the file-wide `host`
-    /// and outranks it, so one project can run on a machine of
-    /// its own. `None` skips that source entirely, which is what
-    /// every command does until `--project` exists.
-    ///
-    /// A `&str` rather than a [`ProjectName`]: a name of any
-    /// shape simply matches no table key, and the caller is not
-    /// asking for the entry, so there is nothing here to refuse.
-    /// `super::registry::Registry::project` is what checks a
-    /// requested name, once, when the entry itself is wanted.
-    ///
-    /// **`super::Config::load_project` ignores this field** and
-    /// ranks for the name it was passed. It is the loader that
-    /// reads a project's whole entry, so letting this field name
-    /// a second project would rank the host for one project and
-    /// take every other setting from another. Only
-    /// `super::Config::load` reads the field, and the step that
-    /// deletes that function takes the field with it.
-    pub project: Option<&'a str>,
-
-    /// Directory holding [`USER_CONFIG_FILE`], usually from
-    /// [`user_config_dir`].
-    pub user_config_dir: Option<&'a Path>,
-}
-
 /// What is wrong with a host value.
 ///
 /// This type deliberately carries no field name.
 /// [`FieldError`] does carry one, and for every other config
 /// value that name answers the operator's question, "which key
-/// do I edit?". For `host` it does not, because the value may
-/// have come from `--host`, from an environment variable, or
-/// from the per-developer `config.toml`. The useful answer is
-/// the *source*, which `super::check_winning_host` knows and
-/// attaches.
+/// do I edit?". For `host` it does not: the registry has a
+/// `host` key per project and one more below them all, so the
+/// field name identifies none of them. The useful answer is the
+/// *source*, which [`refuse_if_bad`] takes as a [`HostOrigin`]
+/// and attaches.
 pub(crate) enum HostProblem {
     /// Blank, so no host at all.
     Empty,
@@ -151,8 +109,8 @@ pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
 }
 
 /// Refuses `value` if [`host_problem`] finds anything wrong,
-/// naming its source rather than a field -- four sources, four
-/// answers to "which key do I edit?".
+/// naming its source rather than a field -- two keys, two
+/// answers to "which line do I edit?".
 ///
 /// # Errors
 ///
@@ -274,21 +232,16 @@ where
     Some(Path::new(&home).join(".config").join("bombyx"))
 }
 
-/// Which source supplied [`super::Config::host`].
+/// Which key supplied [`super::Config::host`].
 ///
-/// Returned by [`super::Config::load`], and by
-/// `Config::load_project` alongside it, so a caller can *report*
-/// the winner instead of re-deriving it. A binary that re-tested
-/// the flag and the environment for itself would hold a second
-/// copy of the precedence rule below, in code no library test can
-/// reach -- so reordering the sources here would leave its
-/// message naming the wrong one.
+/// Returned by [`super::Config::load_project`], so a caller can
+/// *report* the winner instead of re-deriving it. A binary that
+/// re-read the registry for itself would hold a second copy of
+/// the precedence rule below, in code no library test can reach
+/// -- so swapping the two keys here would leave its message
+/// naming the wrong one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostOrigin {
-    /// The `--host` flag.
-    Flag,
-    /// The [`HOST_ENV`] environment variable.
-    Env,
     /// One project's entry in the per-developer
     /// [`USER_CONFIG_FILE`].
     ///
@@ -310,37 +263,30 @@ impl HostOrigin {
     /// Names this source, in the words every message and the
     /// startup notice print.
     ///
-    /// `path` is the registry file when the caller knows where
-    /// it is, and the bare file name stands in otherwise. Both
-    /// loaders pass it, through `super::check_winning_host`, and
-    /// so does `super::registry`'s own parse, because an
-    /// operator sent to fix a bad value has to find the file.
+    /// `path` is the registry file, and every caller with one
+    /// passes it: the operator is being sent to that file to fix
+    /// or check a value, and `--config` means the name alone
+    /// does not identify it.
     ///
-    /// The startup notice passes `None` and so prints the bare
-    /// name, which is a gap rather than a decision: the
-    /// directory comes from `BOMBYX_CONFIG_HOME`, `APPDATA`,
-    /// `XDG_CONFIG_HOME` or `HOME`, and a per-directory
-    /// environment tool can redirect the first of those from
-    /// inside a clone -- so `config.toml` alone does not say
-    /// whose file won. `config-home-env-provenance` in
-    /// `docs/todo.md` tracks it, and covers two halves: printing
-    /// the line for a file-wide `host` at all, and passing the
-    /// path in here. Doing only the first leaves this rendering
-    /// a directoryless literal.
+    /// `None` renders the bare [`USER_CONFIG_FILE`], for a
+    /// caller that has no path at all.
+    ///
+    /// **There is deliberately no `Display` impl.** `--config`
+    /// means the winning key can sit at any path, so no default
+    /// rendering can be right; requiring the argument makes the
+    /// caller answer rather than guess.
     ///
     /// One function rather than two, so the notice and the error
     /// cannot come to describe the same source differently. The
     /// wording for a project entry names its table, and that
     /// spelling existing twice is how the two drift apart.
-    pub(crate) fn describe(&self, path: Option<&Path>) -> String {
+    pub fn describe(&self, path: Option<&Path>) -> String {
         let file = path.map_or_else(
             || USER_CONFIG_FILE.to_owned(),
             super::read::path_display,
         );
         let file = file.as_str();
         match self {
-            Self::Flag => "--host".to_owned(),
-            Self::Env => HOST_ENV.to_owned(),
             Self::ProjectEntry(name) => {
                 // `.host` sits outside the brackets, so the
                 // heading and the key are separate here.
@@ -352,134 +298,68 @@ impl HostOrigin {
     }
 }
 
-impl std::fmt::Display for HostOrigin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.describe(None))
-    }
-}
-
-/// The two host sources that come from the caller rather than a
-/// file.
-fn caller_supplied(sources: &HostSources) -> Option<(String, HostOrigin)> {
-    if let Some(host) = sources.flag {
-        return Some((host.to_owned(), HostOrigin::Flag));
-    }
-    // A blank variable counts as unset: an exported-but-empty
-    // `BOMBYX_HOST` is how a shell says "no value", and falling
-    // through to the file is more use than an empty-field error.
-    let host = sources.env.filter(|v| !v.trim().is_empty())?;
-    Some((host.to_owned(), HostOrigin::Env))
-}
-
-/// Reads the registry if one is needed, then ranks the sources.
+/// Picks between the two `host` keys the registry can carry.
 ///
-/// The reading half of [`rank`], which holds the precedence rule
-/// itself. `super::Config::load` calls this because it has no
-/// registry of its own; `super::Config::load_project` reads the
-/// file for the project entry and calls [`rank`] with the copy
-/// it already has.
+/// The project entry's own `host` wins; the file-wide `host`
+/// applies when the entry has none. One machine name written
+/// once covers every project, and a project that runs elsewhere
+/// says so in its own table.
 ///
-/// The file is read *last* and only if it is needed, so `--host`
-/// works on a machine whose registry is absent or broken.
-///
-/// # Errors
-///
-/// Returns whatever `super::registry::Registry::read` reports
-/// for an unreadable or unparsable file, and whatever [`rank`]
-/// reports.
-pub(crate) fn resolve_host(
-    sources: &HostSources,
-) -> Result<(String, HostOrigin), ConfigError> {
-    if let Some(found) = caller_supplied(sources) {
-        return Ok(found);
-    }
-    let registry = match sources.user_config_dir {
-        Some(dir) => registry::Registry::read(dir)?,
-        None => None,
-    };
-    rank(sources, registry.as_ref())
-}
-
-/// Finds the VM host, highest-precedence source first.
-///
-/// Four sources, in order: `--host`, [`HOST_ENV`], the named
-/// project's own `host` key, and the file-wide `host`. The last
-/// two share one file, and the entry wins so that one project
-/// can run on a machine of its own.
-///
-/// `registry` is that file, already read. It is a parameter
+/// `registry` is the file, already read. It is a parameter
 /// rather than something this function opens because
 /// `super::Config::load_project` needs the same file for the
 /// project's other settings, and it must be the same *copy*: a
 /// file edited between two reads could supply a project host and
-/// a file-wide host that never coexisted. `None` means the
-/// caller has no registry -- because none exists, or because the
-/// flag or the variable made reading one unnecessary.
+/// a file-wide host that never coexisted.
 ///
-/// The top two sources are [`caller_supplied`]'s business,
-/// including what it does with a blank [`HOST_ENV`].
+/// Both values arrive checked, and `super::registry`'s parse is
+/// what checked them. Nothing here runs the rule again.
 ///
 /// # Errors
 ///
-/// Returns [`ConfigError::HostMissing`] when no source names a
+/// Returns [`ConfigError::HostMissing`] when neither key names a
 /// host.
 pub(crate) fn rank(
-    sources: &HostSources,
-    registry: Option<&registry::Registry>,
+    registry: &registry::Registry,
+    name: &str,
 ) -> Result<(String, HostOrigin), ConfigError> {
-    if let Some(found) = caller_supplied(sources) {
-        return Ok(found);
+    if let Some((key, host)) = registry.project_host(name) {
+        return Ok((host.to_owned(), HostOrigin::ProjectEntry(key.clone())));
     }
-    if let Some(registry) = registry {
-        if let Some(name) = sources.project
-            && let Some((key, host)) = registry.project_host(name)
-        {
-            return Ok((
-                host.to_owned(),
-                HostOrigin::ProjectEntry(key.clone()),
-            ));
-        }
-        if let Some(host) = registry.host() {
-            return Ok((host.to_owned(), HostOrigin::UserFile));
-        }
+    if let Some(host) = registry.host() {
+        return Ok((host.to_owned(), HostOrigin::UserFile));
     }
     Err(ConfigError::HostMissing {
-        place: registry_place(sources),
+        place: super::read::path_display(registry.path()),
     })
 }
 
-/// Where the registry file is, when the environment says.
+/// The registry file bombyx reads when `--config` names none.
 ///
-/// `None` when it names no config directory, which is a machine
-/// with nothing concrete to point a message at.
-///
-/// Every message that names the registry file gets its path from
-/// here, so no two of them can name different paths for the same
-/// file. No count of those messages: one lands most times this
-/// module is touched.
-pub(crate) fn registry_path(sources: &HostSources) -> Option<PathBuf> {
-    sources.user_config_dir.map(registry::path)
+/// [`user_config_dir`] decides the directory and
+/// [`USER_CONFIG_FILE`] is the name inside it. `None` when the
+/// environment names no config directory, which is a machine
+/// bombyx cannot guess about.
+#[must_use]
+pub fn registry_file() -> Option<PathBuf> {
+    user_config_dir().map(|dir| dir.join(USER_CONFIG_FILE))
 }
 
 /// Names the registry file, for an error message.
 ///
-/// Three messages use it, and each sends the operator to this
-/// file: [`ConfigError::HostMissing`], because that is where a
-/// host belongs; [`ConfigError::HostInProjectFile`], because
-/// that is where the key the project file may not carry belongs
-/// instead; and [`ConfigError::RegistryNotFound`], because the
-/// file is not there yet. Wording it once means all three name
-/// the same file.
+/// [`ConfigError::RegistryNotFound`] is what needs it, and it is
+/// the one message about a file bombyx did not open. Every other
+/// message asks the `Registry` for the path it was read from.
 ///
 /// It is a path the operator can act on, so it is printed in
 /// full rather than described. Only a machine whose environment
 /// names no config directory at all gets the description, and
 /// then there is no path to print.
-pub(crate) fn registry_place(sources: &HostSources) -> String {
-    registry_path(sources).map_or_else(
-        // No home directory in the environment, so there is
+pub(crate) fn registry_place(path: Option<&Path>) -> String {
+    path.map_or_else(
+        // No config directory in the environment, so there is
         // nothing concrete to point at.
         || format!("a {USER_CONFIG_FILE} in your config directory"),
-        |path| super::read::path_display(&path),
+        super::read::path_display,
     )
 }

@@ -4,6 +4,47 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**`--project` names the project, and the committed project file
+is gone**
+
+Step 6 of seven in `project-config-off-repo`, and the one that
+switches the tool over. `bombyx.toml` is deleted -- as a struct,
+as a loader, as a concept -- and every setting now comes out of
+one `[projects.<name>]` table in the operator's own
+`config.toml`. `--project <name>` is required by every
+subcommand but `self-update`, and `--config` names the registry
+file rather than a project file in the working directory.
+
+`docs/trust-boundary.md` states two rules, and both are now
+reached in the code: the guest is the only machine holding the
+project's source, and neither the workstation nor the VM host
+reads a file from its repository. The workstation needs no
+checkout at all.
+
+The operator's scope decision took `--host` and `BOMBYX_HOST`
+with it, and that turned out to simplify more than it cost. Two
+host sources remain, both keys in the registry, and
+`config::registry`'s parse already checks every `host` in that
+file as it reads it. So `check_winning_host` had nothing left to
+do, `Config::validate` stopped checking `host`, `HostSources`
+collapsed to one field and was deleted, and `read::Symlinks`
+went too -- one caller, one variant. `Config::load_project` now
+takes the registry path directly.
+
+One clap trap is worth knowing. `--project` is a global
+argument, and `destroy`'s positional was also called `project`;
+two arguments with one id make clap panic at startup rather than
+fail to compile. The positional is now `confirm` with
+`value_name = "PROJECT"`, so the help text is unchanged.
+
+Verified with `cargo xtask validate` -- ten gates, coverage
+98.4% -- and by running the built binary against a hand-written
+registry for the notice, the missing-argument refusal, an
+unknown project, a missing registry and a bad `remote_root`.
+**Not verified against a real VM host.** The emitted `ssh`
+commands are byte-for-byte what they were; what changed is
+where bombyx reads them from.
+
 **`/issue` reviews after the push, and `/review2` learned a
 base**
 

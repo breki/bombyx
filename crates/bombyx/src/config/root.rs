@@ -3,16 +3,14 @@
 //! `remote_root` names a directory on the VM host. bombyx joins
 //! the project name onto it and *deletes* the result on
 //! teardown, so a mistake here is a mistake with `rm -rf` behind
-//! it. `bombyx.toml` travels inside a repo, which makes this
-//! attacker-controlled input rather than a typo risk.
+//! it.
 //!
 //! Every rule is enforced in one function, called from
-//! `Config::validate` for a `bombyx.toml` and from
-//! `Project::validate` for a registry entry, so a `remote_root`
-//! from either file gets the same rules and every command
-//! agrees on which roots are usable. Gating only the removal
-//! would leave `up` free to write into `/etc` while teardown
-//! refused to touch it.
+//! `Project::validate` as an entry is handed out and again from
+//! `Config::validate` on the assembled value, so both agree on
+//! which roots are usable. Gating only the removal would leave
+//! `up` free to write into `/etc` while teardown refused to
+//! touch it.
 
 use super::error::FieldError;
 use super::guards;

@@ -252,6 +252,28 @@ commands stay identical, which a dry run can show.
 
 ## Decisions
 
+- **2026-09-05 -- `--config` names the registry file, and
+  `HostSources` goes with the flag.** The operator chose a file
+  path over a directory path and over dropping the switch. So
+  `--config` takes the path to `config.toml` and defaults to the
+  one in the config directory, which is what this document and
+  `docs/todo.md` already promised.
+
+  Three things follow inside the library. `Registry::read` takes
+  the file rather than the directory holding it, and
+  `config::registry_file` does the join once for the binary's
+  default. `registry_place` takes that same optional path, so a
+  machine whose environment names no config directory still gets
+  the message describing the file instead of a path.
+
+  And `HostSources` is deleted. Step 6 removes `--host`,
+  `BOMBYX_HOST` and `Config::load`, which leaves the struct
+  carrying one field, `user_config_dir`, that every caller fills
+  in the same way -- and `from_registry` already overwrites
+  `project` rather than reading it. A struct wrapping one value
+  its owner ignores is worse than the value: `load_project` now
+  takes `Option<&Path>` directly.
+
 - **2026-09-05 -- Every `host` in the registry is checked as the
   file is read.** The operator's rule, given during the review
   of step 5: all hosts in the file are checked when the file is

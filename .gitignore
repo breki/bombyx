@@ -38,3 +38,15 @@ coverage.json
 # `cargo xtask licenses`. Not committed: it is derived from
 # Cargo.lock and would drift the moment a dependency moved.
 THIRD-PARTY-LICENSES
+
+# A real registry, if one is ever created at the repo root.
+# `config.toml.sample` says to copy it outside any repository,
+# and this catches the case where somebody does not: the file
+# holds the SSH alias of their VM host and a table per project
+# they drive. Anchored, so `.cargo/config.toml` is unaffected.
+/config.toml
+
+# An old `bombyx.local.toml` left on disk holds the operator's
+# VM host name, and `git add -A` would commit it. bombyx never
+# opens the file any more, so no command warns about it.
+bombyx.local.toml

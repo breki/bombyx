@@ -1,11 +1,11 @@
 //! Reading a configuration file off disk, and reporting what
 //! went wrong with it.
 //!
-//! Everything here is about the *file*: whether the path may be
-//! a symlink, how large a file may be, and how a TOML error is
-//! summarised. What the values inside
-//! the file must look like is `super::guards` and the field
-//! modules beside it.
+//! Everything here is about the *file*: what counts as one that
+//! may be read at all, how large it may be, and how a TOML
+//! error is summarised. What the values inside the file must
+//! look like is `super::guards` and the field modules beside
+//! it.
 
 use std::path::Path;
 
@@ -13,9 +13,9 @@ use super::ConfigError;
 
 /// Largest configuration file that will be read.
 ///
-/// Generous for a handful of keys, and small enough that a file
-/// committed to a repo cannot make bombyx read it into memory
-/// without bound.
+/// Generous for a handful of keys, and small enough that a
+/// mistyped `--config` cannot make bombyx read an arbitrary file
+/// into memory without bound.
 pub(super) const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 
 /// A path as it appears in a message.
@@ -73,64 +73,29 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
-/// Whether a config file may be a symlink.
-///
-/// Named rather than a bare `bool` so the two call sites read as
-/// a policy choice instead of a flag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Symlinks {
-    /// Judge the path as itself: a symlink is refused. For the
-    /// project config, which arrives inside a clone.
-    Refuse,
-    /// Follow the link, still requiring a regular file at the
-    /// end. For the operator's own dotfile.
-    Follow,
-}
-
 /// Reads a config file that is allowed not to exist.
 ///
 /// Absence is `None`. Anything else is an error rather than a
 /// fallback: a config that exists but cannot be read is a
 /// problem to report, not a reason to quietly send commands to
-/// the host the operator meant to override.
+/// a host the operator did not name.
 ///
 /// Anything that is not a regular file is rejected -- pointed at
 /// `/dev/zero` or a FIFO, reading would hang or allocate without
 /// bound -- and the size cap bounds an ordinary large file.
 ///
-/// `symlinks` decides how the path itself is judged, and the two
-/// answers are not arbitrary:
-///
-/// - [`Symlinks::Refuse`] for `bombyx.toml`. That file sits
-///   inside the clone, so a repository can commit a symlink at
-///   its name and choose which file bombyx opens -- a private
-///   key, say. What such a file's contents would do to the
-///   error message is already handled: `toml_summary` above
-///   keeps the position and the reason and never puts a source
-///   line in the message. So this is the second of two
-///   independent precautions, and it is the stronger one,
-///   because a file that is never opened cannot leak through
-///   an error path somebody adds later.
-/// - [`Symlinks::Follow`] for the per-developer `config.toml`.
-///   Nothing in a clone can create or retarget a file in the
-///   operator's own config directory, so the refusal buys nothing
-///   there. It costs plenty: dotfile managers (`stow`,
-///   `chezmoi`, a hand-made `ln -s`) symlink exactly this kind of
-///   file into place, and refusing one would fail every
-///   subcommand with a message about regular files that never
-///   mentions symlinks.
+/// **A symlink is followed**, and still has to end at a regular
+/// file. The one file bombyx reads is the operator's own, and
+/// dotfile managers (`stow`, `chezmoi`, a hand-made `ln -s`)
+/// symlink exactly this kind of file into place; refusing one
+/// would fail every subcommand with a message about regular
+/// files that never mentions symlinks.
 pub(super) fn read_optional(
     path: &Path,
-    symlinks: Symlinks,
 ) -> Result<Option<String>, ConfigError> {
     use std::io::Read as _;
 
-    let stat = match symlinks {
-        Symlinks::Refuse => std::fs::symlink_metadata,
-        Symlinks::Follow => std::fs::metadata,
-    };
-
-    let meta = match stat(path) {
+    let meta = match std::fs::metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(None);
