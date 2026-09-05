@@ -293,6 +293,52 @@ plan, decisions, and outcome.
   read from the gate, so renaming a report column cannot leave the report naming
   a column that does not exist".
 
+- **vm-disk-size-unset** -- no disk key, so the guest gets the box's own size
+  Found by registry-run-against-frosti (#37), driving the CLI against frosti.
+  The generated Vagrantfile writes cpus and memory and nothing else
+  (crates/bombyx/src/vagrantfile.rs, render). There is no disk key in
+  config.toml, so the guest inherits the box's own partitioning. That is a wide
+  range in practice. cloud-image/debian-13 gave the guest a 9.7 GB root;
+  generic/ubuntu2204 gave a 128 GiB disk whose root logical volume is 63 GB,
+  with another 63 GB unallocated in the volume group. kozmotic's own
+  hand-written Vagrantfile carries DISK_GB = 30 with the comment that the box
+  default of about 10 GB is too small for a Rust target directory plus two
+  cargo-installed tools and a coverage run, so a project that needs a size has
+  no way to ask bombyx for one. Options: add an optional disk key under the vm
+  table that the Vagrantfile writes as the provider's disk setting, or state in
+  config.toml.sample that the box's own disk is what you get and that choosing
+  the box is how you choose the size.
+
+- **box-must-carry-git** -- the git requirement surfaces after the boot
+  Found by registry-run-against-frosti (#37). bootstrap.sh refuses when git is
+  absent, with a clear message naming the fix: install it in the box, or choose
+  one with git. The refusal itself is right. What costs time is when it arrives.
+  It runs inside the guest as the first provisioner, so the operator has already
+  downloaded the box, created the domain and waited for the boot before learning
+  the box cannot work. Both boxes already on frosti are cloud images without
+  git, so this is the ordinary case rather than a corner. Neither
+  config.toml.sample nor doctor mentions the requirement, and the sample's own
+  box value, generic/ubuntu2204, does carry git, so a reader following the
+  sample never meets the problem and never learns the rule. Options: say it in
+  config.toml.sample next to the box key, which costs nothing and is honest
+  about being unenforced; or have doctor check the box, which it cannot do
+  without booting something and so probably does not belong there.
+
+- **scratch-domain-name-collides** -- one libvirt domain for two scratches
+  Found by registry-run-against-frosti (#37). config.toml.sample claims that
+  scratch VMs land in remote_root/scratch/project/name, so the same scratch name
+  in two projects cannot collide. The directories indeed cannot. The libvirt
+  domain names can. vagrant-libvirt derives the domain name from the directory
+  the Vagrantfile sits in, and every domain on frosti matches that rule:
+  ~/vms/jutro gave jutro_default, ~/vms/vmtest gave vmtest_default, and
+  ~/vms/scratch/vmtest/probe gave probe_default. The project name is nowhere in
+  the last one, so a probe scratch in a second project would ask libvirt for
+  probe_default as well. The collision itself was not booted, so treat the
+  mechanism as evidenced by three domains and not as demonstrated. The claim in
+  the sample is what needs settling either way: either the domain name gains the
+  project, or the sample stops promising more than the directory layout
+  delivers.
+
 ## Done
 
 - **local-host-execution** -- run vagrant directly when this machine is the host

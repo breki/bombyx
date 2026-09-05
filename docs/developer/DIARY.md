@@ -4,6 +4,45 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**The new CLI has now met a real VM host**
+
+`registry-run-against-frosti` (#37) is the Definition of Done
+item 3 that seven landed commits owed. `first-real-run` is the
+last time bombyx touched a real host and it drove a tool that no
+longer exists, so every step of `project-config-off-repo` rested
+on `--dry-run`. The record is
+`docs/issues/registry-run-against-frosti.md`.
+
+It ran on frosti, which is the laptop and the VM host both, so
+this is also the first use of `local-host-execution`: with
+`host = "frosti"` bombyx runs `vagrant` here and `ssh` carries
+nothing. Building `~/.config/bombyx/config.toml` by hand from
+`config.toml.sample` was itself part of the test, since the
+review on #18 proved only that the sample loads. It loaded first
+try and no comment needed rereading.
+
+Fourteen commands ran. `up`, `status`, `shell`, `down`, `up`
+again, `provision`, `scratch`, `discard` and all three `destroy`
+paths behaved. `reset` failed cleanly on the missing snapshot,
+which is #6. `destroy` left the hand-written `~/vms/jutro` alone,
+which was the outcome most worth checking.
+
+Three things the dry runs could not have shown. The first `up`
+picked `cloud-image/debian-13`, a box already on the machine, and
+`bootstrap.sh` refused it for having no `git` -- correctly, but
+only after the download, the domain and the boot. The guest
+inherits whatever disk the box shipped, 9.7 GB from that box and
+a 63 GB root volume from `generic/ubuntu2204`, because the
+Vagrantfile carries `cpus` and `memory` and nothing else. And
+libvirt names a domain after the directory it sits in, so
+`~/vms/scratch/vmtest/probe` became `probe_default` with the
+project nowhere in it -- which contradicts `config.toml.sample`'s
+promise that a scratch name cannot collide across projects.
+
+All three went to `docs/todo.md` rather than into a fix, so the
+run's result stays readable: `box-must-carry-git`,
+`vm-disk-size-unset` and `scratch-domain-name-collides`.
+
 **bombyx notices when it is its own VM host**
 
 Answering `local-host-execution` (#38), which #37 was parked on.
