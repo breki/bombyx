@@ -281,23 +281,6 @@ plan, decisions, and outcome.
   config.toml.sample that the box's own disk is what you get and that choosing
   the box is how you choose the size.
 
-- **box-must-carry-git** -- the git requirement surfaces after the boot
-  Found by registry-run-against-frosti (#37). bootstrap.sh refuses when git is
-  absent, with a clear message naming the fix: install it in the box, or choose
-  one with git. The refusal itself is right. What costs time is when it arrives.
-  It runs inside the guest as the first provisioner, so the operator has already
-  downloaded the box, created the domain and waited for the boot before learning
-  the box cannot work. The two boxes already on frosti when the run started were
-  cloud-image/debian-13 and cloud-image/ubuntu-24.04. Only the first was booted,
-  and it had no git; the second was not tested, so treat "cloud images tend not
-  to ship git" as the expectation it is rather than as a measurement. Neither
-  config.toml.sample nor doctor mentions the requirement, and the sample's own
-  box value, generic/ubuntu2204, does carry git, so a reader following the
-  sample never meets the problem and never learns the rule. Options: say it in
-  config.toml.sample next to the box key, which costs nothing and is honest
-  about being unenforced; or have doctor check the box, which it cannot do
-  without booting something and so probably does not belong there.
-
 - **scratch-domain-name-collides** -- one libvirt domain for two scratches
   Found by registry-run-against-frosti (#37). config.toml.sample claims that
   scratch VMs land in remote_root/scratch/project/name, so the same scratch name
@@ -332,6 +315,10 @@ plan, decisions, and outcome.
   unverified.
 
 ## Done
+
+- [**box-must-carry-git**](issues/registry-run-against-frosti.md)
+  -- the git requirement surfaces after the boot
+  (2026-09-05)
 
 - [**tutorial-local-route-now-booted**](issues/registry-run-against-frosti.md)
   -- a guest has booted on the local route
