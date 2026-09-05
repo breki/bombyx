@@ -20,20 +20,6 @@ plan, decisions, and outcome.
 - `agent-vlan` -- isolate VMs on a VLAN with an egress allowlist.
   Enforced at the router.
 
-- **reset-needs-snapshot** -- reset depends on a snapshot nothing creates
-  bombyx reset runs vagrant snapshot restore fresh-install, but no bombyx
-  command ever creates that snapshot. On a freshly booted VM the command fails
-  with 'The snapshot name fresh-install was not found for the virtual machine
-  default' and exit 1. The failure is clean and well surfaced -- verified live
-  on frosti during first-real-run -- so this is a workflow gap rather than a
-  bug. README.md and docs/tutorial.md both now say the snapshot has to be
-  taken by hand first, so what is left is the command itself. Options: add a
-  bombyx
-  command that takes the snapshot (snapshot save fresh-install) so the reset
-  cycle is self-contained, or document that taking it is a manual step after the
-  first successful up. The first is more useful: the snapshot should be taken at
-  a known-good point, which is exactly after up completes.
-
 - **host-network-isolation** -- apply and verify the nftables rules on frosti
   docs/vm-host-setup.md now documents an nftables ruleset that keeps agent VMs
   off the home LAN, the tailnet, Docker and the VM host's own services, while
@@ -315,6 +301,10 @@ plan, decisions, and outcome.
   unverified.
 
 ## Done
+
+- [**reset-needs-snapshot**](issues/registry-run-against-frosti.md)
+  -- reset depends on a snapshot nothing creates
+  (2026-09-05)
 
 - [**box-must-carry-git**](issues/registry-run-against-frosti.md)
   -- the git requirement surfaces after the boot
