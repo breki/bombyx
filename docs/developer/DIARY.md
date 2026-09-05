@@ -4,6 +4,97 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**The review rounds found one real defect and 26 false claims**
+
+`/review2` over the newtype branch: three stages, 27 findings,
+26 fixed. The split is the thing worth recording. One finding
+was about the code, and 26 were about what the files say.
+
+The code one was `artisan`'s. `RemoteRoot` accepted a trailing
+slash and offered two readers, `as_str()` raw and `trimmed()`,
+with only `Config::root()` calling the second. That is the
+checking-function pattern one level down: holding the type
+proved the rules ran, and proved nothing about the value being
+in the form a path join needs, so a new call site joining
+`as_str()` with a `/` would produce `/srv/vms//myproject` and
+nothing would catch it. `parse` and `try_from` normalize now and
+`trimmed()` is gone.
+
+The other 26 are the cost of moving a rule. `red-team` found six
+places still saying `Config::validate` and `Project::validate`
+check `remote_root`, including the paragraph in
+`docs/architecture.md` that is the safety argument for `rm -rf`
+and the class diagram that still declared `+String host`. It
+also found the CHANGELOG recording only the error-shape change:
+`pub host: String` and `pub remote_root: String` shipped in
+v0.4.1, so the field types are a breaking change to released
+public API, and nothing said so.
+
+`fresh-reader` then found the same argument written out in five
+places -- `host.rs` twice, `registry.rs`, `docs/architecture.md`
+and `llms.txt` -- each in different words, with no copy
+authoritative. That is the shape `heading` already solved, so
+the argument now lives under one heading in
+`docs/architecture.md` and the four others state the local fact
+and point at it.
+
+The lesson is the one **After removing a capability, re-grep for
+it** already holds, widened: moving a rule is a removal from
+wherever it was, and the prose describing the old home is what
+the compiler cannot find. Two of the three stages spent most of
+their output on it.
+
+**`remote_root` and `host` are types now, and one of the two
+could not take the usual shape**
+
+Issue #17 asked for types on seven config values. We split it:
+`remote_root` and `host` here, the other five under #43. Those
+two are the ones the backlog put first, because `remote_root`
+reaches `rm -rf` on the VM host and `host` becomes `ssh`'s first
+positional argument.
+
+`RemoteRoot` is the ordinary shape and took an afternoon of
+mechanical work. Its constructor wraps `config::root::check`,
+which already held every rule in one function, and
+`#[serde(try_from = "String")]` runs that constructor while the
+TOML parses. So a bad root is now refused before a `Project`
+holding it exists, and the message gained a line and column. The
+old check in `Config::validate` and the one in
+`Project::validate` are both gone: there is one construction
+point, so there is nothing left for either to run.
+
+`HostName` could not have the attribute, and that is the part
+worth writing down. A bad host does not get told which key to
+edit by its field name, because the registry carries a `host`
+key per project and one more below them all. `config::host`
+answers with a `HostOrigin` instead --
+`[projects."demo"].host in <file>` -- and serde cannot supply
+one, since it has no idea which key it is deserializing. Giving
+`HostName` a `try_from` would have traded that answer for a line
+number. So `registry::parse` keeps checking every host in the
+file, and `host::rank` builds the winner where the origin is
+already in hand.
+
+That supersedes `f442bfd`, which moved the host check into
+`registry::parse` and wrote "Nothing here runs the rule again"
+into `rank`'s doc comment. `rank` runs it again now. The check
+had been placed three times by then -- `b534bb1` left it to the
+ranking, `59dd110` put it in `Project::validate`, `f442bfd`
+moved it to the parse -- and each move reversed the reasoning
+written down for the one before it. A type is the terminus for
+that: the two passes now divide by job rather than by argument,
+with `registry::parse` reporting typos in entries no run wants
+and `rank` checking the one value it hands on.
+
+`HostProblem` and `host_problem` came out in the process. Both
+existed only to drop the field name a guard attaches, and the
+one caller left can match on `FieldError` directly.
+
+The test that had set `cfg.host = "a b; rm -rf /"` to prove the
+alias gets shell-quoted no longer compiles, which is the point
+of the change. It now asserts the wiring on a legal alias, and
+`remote::quote` keeps the hostile strings.
+
 **Two rounds of the snapshot review found the tests, not the code**
 
 `/review2` over the snapshot work: three stages, 26 findings, 22

@@ -20,11 +20,17 @@
 //! the guest and a typo there is worth reporting where the
 //! operator is editing.
 //!
-//! Two of them are checked by their *type* and cannot be built
-//! wrong at all: see [`RepoUrl`]. The rest are checked by
-//! `Config::validate`, which the loading path runs. `Config`
-//! has public fields, so a value that has been through
-//! `validate` can still be edited afterwards and nothing
+//! Four of them are checked by their *type* and cannot be built
+//! wrong at all: `remote_root`, `host`, `repo` and `script`.
+//! See [`RepoUrl`] for how the pattern works. Three of the four
+//! run their rules as serde reads the file; `host` runs its own
+//! as the two `host` keys are ranked, and `config::host` says
+//! why it differs.
+//!
+//! The rest -- `project`, `box`, `ref`, `cpus` and `memory` --
+//! are checked by `Config::validate`, which the loading path
+//! runs. `Config` has public fields, so a value that has been
+//! through `validate` can still be edited afterwards and nothing
 //! re-checks it. That is a gap rather than a decision, argued
 //! once in `docs/architecture.md` under "What config values
 //! are checked". (`validate` is named rather than linked because
@@ -141,9 +147,12 @@ fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
 }
 
 pub use error::{ConfigError, FieldError};
-pub use host::{CONFIG_DIR_ENV, HostOrigin, registry_file, user_config_dir};
+pub use host::{
+    CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
+};
 pub(crate) use host::{is_anchored_dir, registry_place};
 pub use registry::{Project, Registry, USER_CONFIG_FILE};
+pub use root::RemoteRoot;
 pub use source::{RepoUrl, ScriptPath, Source};
 pub use vm::{Provider, Vm};
 
@@ -159,8 +168,13 @@ const DEFAULT_REMOTE_ROOT: &str = "~/vms";
 /// `#[serde(default = "...")]` names a function rather than a
 /// constant, so `config::registry`'s `remote_root` reaches the
 /// value through this.
-fn default_remote_root() -> String {
-    DEFAULT_REMOTE_ROOT.to_owned()
+///
+/// The constant goes through [`RemoteRoot::parse`] like every
+/// other value, so an edit to `DEFAULT_REMOTE_ROOT` that breaks
+/// a rule is refused rather than wrapped unchecked.
+fn default_remote_root() -> RemoteRoot {
+    RemoteRoot::parse(DEFAULT_REMOTE_ROOT)
+        .expect("DEFAULT_REMOTE_ROOT must pass the rules in `config::root`")
 }
 
 /// A resolved bombyx configuration.
@@ -181,7 +195,13 @@ pub struct Config {
     /// their own network, and a value inside the repository
     /// could name only one of them -- pointing everyone else's
     /// `destroy` at a colleague's host.
-    pub host: String,
+    ///
+    /// A [`HostName`], so the three rules in `config::host` have
+    /// run against whatever is in here. The value becomes
+    /// `ssh`'s first positional argument, and this field is
+    /// public, so the rules belong to a type rather than to a
+    /// function a caller has to remember.
+    pub host: HostName,
 
     /// Project name. Doubles as the directory name on the
     /// VM host.
@@ -189,7 +209,13 @@ pub struct Config {
 
     /// Root directory on the VM host under which project
     /// directories are created.
-    pub remote_root: String,
+    ///
+    /// A [`RemoteRoot`], so every rule in `config::root` has run
+    /// against whatever is in here. bombyx joins the project
+    /// name onto this and deletes the result on teardown, and
+    /// this field being public is why the rules belong to a type
+    /// rather than to a function somebody has to call.
+    pub remote_root: RemoteRoot,
 
     /// The machine to build. Rendered into the Vagrantfile
     /// bombyx writes on the VM host.
@@ -209,12 +235,11 @@ pub struct Config {
     ///
     /// **It does not make the route and `host` agree.** `host`
     /// is public, so a caller holding a loaded `Config` can
-    /// assign a new one and nothing re-checks: the route stays
-    /// as it was derived, and `remote::remove_dir` would
-    /// `rm -rf` here while every message named the machine that
-    /// was assigned. That is the public-fields gap
-    /// `newtype-remaining-config-fields` in `docs/todo.md`
-    /// owns, and this field narrows it rather than closing it.
+    /// assign a new one: the value assigned has passed the host
+    /// rule, because it is a [`HostName`], but the route stays
+    /// as it was derived. `remote::remove_dir` would `rm -rf`
+    /// here while every message named the machine that was
+    /// assigned.
     transport: Transport,
 }
 
@@ -373,7 +398,7 @@ impl Config {
         // host and the settings always come from one project.
         let (host, origin) = host::rank(registry, name)?;
 
-        let route = transport::resolve(&host, this_machine);
+        let route = transport::resolve(host.as_str(), this_machine);
         let cfg = project.to_config(name, host, route);
 
         // Deliberately checks the entry's fields a second
@@ -386,39 +411,27 @@ impl Config {
     /// Rejects values that are empty or outside their allowed
     /// shape.
     ///
-    /// **`host` is not among them**, on purpose.
-    /// `config::registry`'s parse checks every `host` key as it
-    /// reads the file, so there is nothing left to run here.
+    /// **`host` and `remote_root` are not among them**, on
+    /// purpose. `config::registry`'s parse checks every `host`
+    /// key as it reads the file, and `remote_root` is a
+    /// [`RemoteRoot`], whose constructor holds every rule it
+    /// has. Neither leaves anything to run here.
     fn validate(&self) -> Result<(), ConfigError> {
-        // Each field specifies the program it will reach.
-        //
-        // `project` is checked here; `remote_root` gets the same
-        // two rules inside `root::check` below, along with its
-        // own four.
-        //
-        // **For both the rule is a precaution, not a live hole.**
-        // Only `host` is handed to a program as a bare argument
-        // that a leading `-` could turn into an option. `project`
-        // and `remote_root` go through `quote_remote_path` into a
-        // shell script that `ssh` runs, so they arrive quoted.
-        // The rule is kept anyway, because each of those
-        // protections lives in a different file from the value,
-        // and either could be rewritten by somebody who does not
-        // know it is what makes the value safe.
+        // `project` reaches `ssh`, and the leading-dash rule
+        // here is a precaution rather than a live hole: the
+        // value goes through `quote_remote_path` into the shell
+        // script `ssh` runs, so it arrives quoted. The rule is
+        // kept because that protection lives in another file,
+        // where somebody may rewrite it without knowing it is
+        // what makes this value safe.
         guards::check_not_empty("project", &self.project)?;
         guards::check_not_an_option("project", &self.project, "ssh")?;
-        guards::check_not_empty("remote_root", &self.remote_root)?;
 
         // `project` becomes one directory name on the host.
         check_segment(&self.project).map_err(|e| ConfigError::Invalid {
             field: "project",
             reason: e.to_string(),
         })?;
-
-        // Every `remote_root` rule lives in `config::root`,
-        // because bombyx deletes the directory it derives from
-        // that value. See the module for what each rule stops.
-        root::check(&self.remote_root)?;
 
         self.validate_generated()
     }
@@ -442,8 +455,9 @@ impl Config {
     /// Returns the project directory on the VM host, e.g.
     /// `~/vms/myproject`.
     ///
-    /// A trailing slash on `remote_root` is ignored so the
-    /// result never contains a doubled separator.
+    /// The result never contains a doubled separator, because
+    /// `RemoteRoot`'s constructor has already dropped any
+    /// trailing slash from the value.
     #[must_use]
     pub fn remote_project_dir(&self) -> String {
         format!("{}/{}", self.root(), self.project)
@@ -461,9 +475,10 @@ impl Config {
         format!("{}/scratch/{}/{name}", self.root(), self.project)
     }
 
-    /// Returns `remote_root` without any trailing slash.
+    /// Returns `remote_root`, which arrives with no trailing
+    /// slash: `RemoteRoot`'s constructor drops one.
     fn root(&self) -> &str {
-        self.remote_root.trim_end_matches('/')
+        self.remote_root.as_str()
     }
 }
 
@@ -558,11 +573,16 @@ mod tests {
     #[test]
     fn an_entry_may_state_its_own_remote_root() {
         let cfg = parse("remote_root = \"/srv/vms\"\n").unwrap();
-        assert_eq!(cfg.remote_root, "/srv/vms");
+        assert_eq!(cfg.remote_root.as_str(), "/srv/vms");
     }
 
     #[test]
-    fn a_bad_remote_root_surfaces_as_a_field_error() {
+    fn a_bad_remote_root_is_refused_while_the_file_parses() {
+        // `remote_root` is a `RemoteRoot`, and serde runs its
+        // constructor, so a bad value is refused before the
+        // `Project` holding it exists -- a parse error rather
+        // than a field error out of `validate`.
+        //
         // Every `remote_root` rule, and the tests enumerating
         // the family it refuses, live in `config::root`. What
         // this covers is the seam: a value refused there has to
@@ -577,20 +597,21 @@ mod tests {
         ] {
             let err =
                 parse(&format!("remote_root = \"{root}\"\n")).unwrap_err();
-            assert!(
-                matches!(
-                    &err,
-                    ConfigError::Empty {
-                        field: "remote_root"
-                    } | ConfigError::Invalid {
-                        field: "remote_root",
-                        ..
-                    }
-                ),
-                "remote_root {root:?} must be refused, got {err:?}"
-            );
-            assert!(err.to_string().contains(want), "{root:?}: {err}");
+            let ConfigError::Parse { summary, .. } = &err else {
+                panic!("remote_root {root:?} must be refused, got {err:?}");
+            };
+            assert!(summary.contains("remote_root"), "{root:?}: {summary}");
+            assert!(summary.contains(want), "{root:?}: {summary}");
         }
+    }
+
+    #[test]
+    fn the_default_root_passes_its_own_rules() {
+        // `default_remote_root` panics on a constant that breaks
+        // a rule, and nothing else would notice: no config file
+        // carries the default, so the panic sits on a path only
+        // an omitted key reaches.
+        assert_eq!(default_remote_root().as_str(), DEFAULT_REMOTE_ROOT);
     }
 
     #[test]
@@ -774,7 +795,7 @@ mod tests {
 
         let (cfg, _origin) =
             Config::load_project("myproject", Some(&link)).unwrap();
-        assert_eq!(cfg.host, "vmhost");
+        assert_eq!(cfg.host.as_str(), "vmhost");
     }
 
     /// Creates a file symlink, or `false` where not permitted.
@@ -1065,9 +1086,9 @@ mod load_project_tests {
         // The table key becomes the project name: the entry does
         // not carry one, so the two cannot disagree.
         assert_eq!(cfg.project, "myproject");
-        assert_eq!(cfg.host, "vmhost");
+        assert_eq!(cfg.host.as_str(), "vmhost");
         // Absent from the entry, so the default applies.
-        assert_eq!(cfg.remote_root, DEFAULT_REMOTE_ROOT);
+        assert_eq!(cfg.remote_root.as_str(), DEFAULT_REMOTE_ROOT);
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
         assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus, 2);
@@ -1128,7 +1149,7 @@ mod load_project_tests {
     fn the_entrys_own_host_outranks_the_file_wide_one() {
         let source = test_registry("myproject", "file-wide", Some("entry"));
         let (cfg, origin) = load(&source, "myproject").unwrap();
-        assert_eq!(cfg.host, "entry");
+        assert_eq!(cfg.host.as_str(), "entry");
         assert_eq!(origin, entry_origin());
     }
 
@@ -1158,7 +1179,7 @@ mod load_project_tests {
             test_entry("other", Some("theirs"))
         );
         let (cfg, origin) = load(&source, "myproject").unwrap();
-        assert_eq!(cfg.host, "mine");
+        assert_eq!(cfg.host.as_str(), "mine");
         assert_eq!(origin, entry_origin());
     }
 
@@ -1215,7 +1236,7 @@ mod load_project_tests {
         let (cfg, origin) =
             Config::load_project("myproject", Some(&path)).unwrap();
         assert_eq!(cfg.project, "myproject");
-        assert_eq!(cfg.host, "vmhost");
+        assert_eq!(cfg.host.as_str(), "vmhost");
         assert_eq!(origin, HostOrigin::UserFile);
     }
 

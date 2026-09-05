@@ -55,7 +55,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::{
-    ConfigError, Source, Vm, default_remote_root, from_toml, read_optional,
+    ConfigError, RemoteRoot, Source, Vm, default_remote_root, from_toml,
+    read_optional,
 };
 use crate::name::{ProjectName, check_segment};
 
@@ -72,19 +73,18 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// The fields are checked in three different places, and which
 /// one depends on what carries the rule.
 ///
-/// `repo` and `script` are checked by their own types as the
-/// table parses: `repo` is a [`super::RepoUrl`] and `script` a
-/// [`super::ScriptPath`], so a bad value fails the parse and
-/// names the line.
+/// `remote_root`, `repo` and `script` are checked by their own
+/// types as the table parses: they are a [`super::RemoteRoot`],
+/// a [`super::RepoUrl`] and a [`super::ScriptPath`], so a bad
+/// value fails the parse and names the line.
 ///
 /// The optional `host` is checked by `parse`, once the table
 /// has parsed and before any `Registry` exists, along with every
 /// other `host` in the file.
 ///
-/// The rest -- `remote_root`, and `box`, `cpus`, `memory` and
-/// `ref` inside the two tables -- are checked by
-/// `Project::validate`, which [`Registry::project`] calls before
-/// handing an entry out.
+/// The rest -- `box`, `cpus`, `memory` and `ref` inside the two
+/// tables -- are checked by `Project::validate`, which
+/// [`Registry::project`] calls before handing an entry out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -94,21 +94,22 @@ pub struct Project {
     /// Per project rather than a top-level default with an
     /// override, so there is one place to look for the value.
     ///
-    /// A `String` rather than a type enforcing the rules that
-    /// `super::root::check` holds, and that is a gap rather than
-    /// a decision. It stays a `String` here because
-    /// `super::Config::remote_root` is one too, and a type
-    /// introduced on one of the two would have to be unwrapped
-    /// again to build the other. `newtype-remaining-config-
-    /// fields` in `docs/todo.md` is the work that gives both of
-    /// them one. Until then `Project::validate` runs the
-    /// rules.
+    /// A [`super::RemoteRoot`], whose constructor holds every
+    /// rule the value has, so serde refuses a bad one while the
+    /// table is parsing and the message names the line.
     #[serde(default = "default_remote_root")]
-    pub remote_root: String,
+    pub remote_root: RemoteRoot,
 
     /// The VM host this one project runs on, when it is not the
     /// machine the file-wide `host` names. Absent from most
     /// entries.
+    ///
+    /// A `String` rather than a [`super::HostName`], which is
+    /// the one primitive here that is argued for. An entry keeps
+    /// the value as the table spelled it, because a bad host is
+    /// reported by the key that carried it and this struct
+    /// cannot say which key that was. `super::host::rank` builds
+    /// the winner into a `HostName`.
     pub host: Option<String>,
 
     /// The machine to build.
@@ -193,7 +194,7 @@ impl Project {
     pub(super) fn to_config(
         &self,
         name: &str,
-        host: String,
+        host: super::HostName,
         transport: super::Transport,
     ) -> super::Config {
         super::Config {
@@ -206,9 +207,12 @@ impl Project {
         }
     }
 
-    /// Runs the rules no type on these fields carries:
-    /// `super::root::check` for `remote_root`, then the `[vm]`
-    /// and `[source]` checks.
+    /// Runs the rules no type on these fields carries: the
+    /// `[vm]` and `[source]` checks.
+    ///
+    /// **`remote_root` is not among them.** It is a
+    /// [`super::RemoteRoot`], so serde ran every rule it has
+    /// while the table parsed.
     ///
     /// **`host` is not among them.** [`parse`] applies that rule
     /// to every key in the file as it is read, so by the time
@@ -220,7 +224,6 @@ impl Project {
     /// [`ConfigError::Invalid`], naming the field that broke its
     /// rule.
     fn validate(&self) -> Result<(), ConfigError> {
-        super::root::check(&self.remote_root)?;
         super::vm::validate(&self.vm)?;
         super::source::validate(&self.source)?;
         Ok(())
@@ -269,8 +272,7 @@ impl Registry {
     ///
     /// **Already checked.** `parse` applies the host rule to
     /// every `host` key in the file as it is read, so holding a
-    /// [`Registry`] is the proof this value passed and there is
-    /// nothing left for this method to run.
+    /// [`Registry`] is the proof this value passed.
     ///
     /// The rules themselves live in `super::host`, which is
     /// where they are written down.
@@ -511,7 +513,7 @@ mod tests {
     fn an_entry_carries_the_settings_that_describe_one_vm() {
         let registry = parsed(&registry_toml());
         let project = registry.project("myproject").unwrap();
-        assert_eq!(project.remote_root, "~/vms");
+        assert_eq!(project.remote_root.as_str(), "~/vms");
         assert_eq!(project.vm.provider, Provider::Libvirt);
         assert_eq!(project.vm.cpus, 4);
         assert_eq!(project.vm.memory, 8192);
@@ -547,15 +549,15 @@ mod tests {
         // passed, the way holding a `Config` is. Each of these
         // breaks a rule owned by a different module.
         //
-        // `host` is not in the table, and its absence is the
-        // point: it is refused earlier, when the file is read,
-        // so a registry carrying a bad one never becomes a
-        // `Registry` for anything to look an entry up in.
-        // `reading_the_file_refuses_a_bad_host_in_an_entry`
-        // covers it. Between the two tests every value in an
-        // entry is checked before a caller can act on it.
+        // `host` and `remote_root` are not in the table, and
+        // their absence is the point: both are refused earlier,
+        // while the file is read, so a registry carrying a bad
+        // one never becomes a `Registry` for anything to look an
+        // entry up in. `reading_the_file_refuses_a_bad_host_in_an_entry`
+        // and `reading_the_file_refuses_a_bad_remote_root` cover
+        // them. Between the three tests every value in an entry
+        // is checked before a caller can act on it.
         for (from, to) in [
-            ("remote_root = \"~/vms\"", "remote_root = \"/\""),
             ("cpus = 4", "cpus = 0"),
             ("memory = 8192", "memory = 0"),
             (
@@ -571,6 +573,28 @@ mod tests {
                 "{to} was accepted"
             );
         }
+    }
+
+    #[test]
+    fn reading_the_file_refuses_a_bad_remote_root() {
+        // `remote_root` is a `RemoteRoot`, and serde runs its
+        // constructor, so the value is refused while the table
+        // parses rather than by `Project::validate`. An entry
+        // holding one never exists.
+        //
+        // The whole family of bad roots is enumerated in
+        // `super::root`. What this covers is the seam: the
+        // reason has to reach the operator naming the field and
+        // the line to edit.
+        let source = registry_toml()
+            .replace("remote_root = \"~/vms\"", "remote_root = \"/\"");
+        let err = parse_at(&source, "/home/dev/config.toml").unwrap_err();
+        let ConfigError::Parse { summary, .. } = &err else {
+            panic!("must be refused by the parser, got {err:?}");
+        };
+        assert!(summary.contains("remote_root"), "{summary}");
+        assert!(summary.contains("at least 1 directory"), "{summary}");
+        assert!(summary.contains("line "), "{summary}");
     }
 
     #[test]
@@ -766,7 +790,7 @@ mod tests {
     /// One table, used for the file-wide key and for a project's
     /// key, so the two cannot come to disagree about what a
     /// legal host looks like. The reasons come from
-    /// `super::host::host_problem`, which is where the rules
+    /// `super::host::HostName::parse`, which is where the rules
     /// are; this only asserts that reading the file applies
     /// them.
     const BAD_HOSTS: [(&str, &str); 4] = [

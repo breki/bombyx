@@ -5,15 +5,114 @@
 //! teardown, so a mistake here is a mistake with `rm -rf` behind
 //! it.
 //!
-//! Every rule is enforced in one function, called from
-//! `Project::validate` as an entry is handed out and again from
-//! `Config::validate` on the assembled value, so both agree on
-//! which roots are usable. Gating only the removal would leave
-//! `up` free to write into `/etc` while teardown refused to
-//! touch it.
+//! Every rule is enforced in one function, the private `check`
+//! below, and [`RemoteRoot`] is the only thing that calls it. So
+//! a value reaches the rest of bombyx as a [`RemoteRoot`] or not
+//! at all, and holding one is the proof that every rule ran.
+
+use std::fmt;
+
+use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards;
+
+/// A directory on the VM host that bombyx may create project
+/// directories under, and delete them from.
+///
+/// This is a *newtype*: a struct wrapping one `String`, where
+/// the `String` inside is private. You cannot build one
+/// directly. You have to call [`RemoteRoot::parse`], which runs
+/// the private `check` first. So if you are holding a
+/// `RemoteRoot`, every rule in this module has run against it,
+/// and the compiler is what promises you that.
+///
+/// A checking function on its own would promise less.
+/// `super::Config` and `super::registry::Project` both have
+/// public fields, so any code can assign a `String` to a field
+/// and never call the checker. A type cannot be skipped that
+/// way, and `remote_root` is the field where skipping it means
+/// `rm -rf` against a directory nobody vetted.
+///
+/// `#[serde(try_from = "String")]` is what connects the type to
+/// the config file. It tells serde to read a plain string and
+/// hand it to [`RemoteRoot::try_from`], which may refuse it.
+/// Without the attribute serde would assign the private field
+/// directly and skip every rule, so the attribute is what makes
+/// the promise hold for a value that came out of TOML.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct RemoteRoot(String);
+
+impl RemoteRoot {
+    /// Checks `raw` against every rule here and wraps it.
+    ///
+    /// The value stored is not always the value passed in: a
+    /// trailing `/` is dropped, so `/srv/vms/` comes back out of
+    /// [`RemoteRoot::as_str`] as `/srv/vms`. `normalized` below
+    /// says why.
+    ///
+    /// Takes `&str` so a caller holding a borrowed value need
+    /// not copy it. Serde arrives owning a `String` and hands
+    /// that straight to [`RemoteRoot::try_from`] instead, which
+    /// runs the same private `check`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError::Empty`] when `raw` is blank, and
+    /// [`FieldError::Invalid`] naming `remote_root` when it
+    /// breaks any other rule `check` holds.
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        check(raw)?;
+        Ok(Self(normalized(raw)))
+    }
+
+    /// The value, ready to have a `/` and a name joined onto it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A checked root in the one form the rest of bombyx uses.
+///
+/// Drops a trailing `/`, because `super::Config` joins the
+/// project name on with a `/` of its own and `/srv/vms/` would
+/// give `/srv/vms//myproject`. Doing it here rather than at the
+/// join is what stops a new call site getting it wrong: there is
+/// no second spelling of a `RemoteRoot` to pick the wrong one
+/// of.
+///
+/// `check` runs first and refuses anything with no real segment
+/// in it, so `/` and `~/` never reach this and it cannot strip a
+/// value down to nothing.
+fn normalized(checked: &str) -> String {
+    checked.trim_end_matches('/').to_owned()
+}
+
+impl fmt::Display for RemoteRoot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for RemoteRoot {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for RemoteRoot {
+    type Error = FieldError;
+
+    /// What serde calls. It already owns the `String`, so the
+    /// rules run against a borrow of it rather than against a
+    /// second copy.
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        check(&raw)?;
+        Ok(Self(normalized(&raw)))
+    }
+}
 
 /// Fewest real segments `remote_root` must contain.
 ///
@@ -54,6 +153,9 @@ fn invalid(reason: impl Into<String>) -> FieldError {
 
 /// Checks a `remote_root` value against every rule here.
 ///
+/// Private, and called only by [`RemoteRoot::parse`] and
+/// [`RemoteRoot::try_from`].
+///
 /// # Errors
 ///
 /// Returns [`FieldError::Empty`] when the value is blank, and
@@ -62,7 +164,7 @@ fn invalid(reason: impl Into<String>) -> FieldError {
 /// holds a character outside the allowed set, does not start
 /// with `~` or `/`, contains a `.` or `..` segment, is not deep
 /// enough, or spells `~` anywhere but first.
-pub(super) fn check(value: &str) -> Result<(), FieldError> {
+fn check(value: &str) -> Result<(), FieldError> {
     // The blank and leading-dash rules are here rather than at
     // the call site, so this module really does own every rule
     // the field has and a second caller cannot get half of them.
@@ -165,6 +267,30 @@ mod tests {
         refused("~/../..", "`..` segment");
         refused("/vms/~/x", "first character");
         refused("/vms;rm -rf /", "is not allowed");
+    }
+
+    #[test]
+    fn a_trailing_slash_is_dropped_when_the_value_is_wrapped() {
+        // `Config` joins the project name on with a `/` of its
+        // own, so `/srv/vms/` would give `/srv/vms//myproject`.
+        // Dropping the slash here rather than at the join means
+        // a `RemoteRoot` is always in the form a join needs, and
+        // a new call site cannot get it wrong.
+        for (written, kept) in [
+            ("/srv/vms/", "/srv/vms"),
+            ("~/vms/", "~/vms"),
+            ("/srv/vms", "/srv/vms"),
+        ] {
+            let root = RemoteRoot::parse(written).expect("a legal root");
+            assert_eq!(root.as_str(), kept, "{written:?}");
+            assert_eq!(
+                RemoteRoot::try_from(written.to_owned())
+                    .expect("a legal root")
+                    .as_str(),
+                kept,
+                "{written:?} through serde",
+            );
+        }
     }
 
     #[test]

@@ -78,7 +78,7 @@ fn probe(cfg: &Config, script: &str) -> RemoteCommand {
                 "ServerAliveInterval=5",
                 "-o",
                 "ServerAliveCountMax=3",
-                &cfg.host,
+                cfg.host.as_str(),
                 script,
             ],
         ),
@@ -218,7 +218,7 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 /// checkpoint endpoint would hang the probe for vagrant's own
 /// timeout with no ceiling anywhere in `doctor`.
 ///
-/// Three details are load-bearing:
+/// Three details each stop a specific wrong answer:
 ///
 /// - `vagrant plugin list` exits zero and prints "No plugins
 ///   installed." when there are none, so its exit status alone
