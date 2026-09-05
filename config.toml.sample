@@ -86,17 +86,23 @@ remote_root = "~/vms"
 # `projects.myproject.vm.remote_root` and the whole file would
 # be refused.
 
-# bombyx builds the machine from this table. All four keys are
-# required: bombyx cannot guess a base image, and any size it
-# picked would be wrong on either a laptop or a workstation.
+# bombyx builds the machine from this table. `box`, `cpus` and
+# `memory` are required: bombyx cannot guess a base image, and
+# any size it picked would be wrong on either a laptop or a
+# workstation. `provider` is optional and defaults to libvirt.
 [projects.myproject.vm]
-# Use libvirt. bombyx does not yet tell vagrant which provider
-# to use -- it only writes the settings block -- so `hyperv`
-# configures a provider that vagrant will not select, and on a
-# libvirt host you get a libvirt VM at vagrant's default size
-# instead. See `provider-configured-not-selected` in
-# bombyx's own docs/todo.md.
-provider = "libvirt"          # libvirt or hyperv
+# The virtualization backend. bombyx passes this to vagrant, so
+# a host that cannot supply it fails the boot rather than
+# quietly building a machine of a different kind.
+#
+# That holds while the machine does not exist yet. Once it does,
+# vagrant reads the provider it recorded and ignores this key,
+# so changing it means `bombyx destroy` first.
+#
+# `hyperv` is accepted and has never been run: it was written
+# from Hyper-V's documentation, and bombyx has only ever booted
+# libvirt machines.
+provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 
 # The base image vagrant starts the machine from.
 #

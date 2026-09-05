@@ -191,7 +191,12 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
     probe(cfg, &script)
 }
 
-/// Builds the probe that checks Vagrant has a libvirt provider.
+/// Builds the probe that checks Vagrant has the **libvirt**
+/// plugin.
+///
+/// It asks about libvirt whatever the project's `provider` says,
+/// so `doctor` sends it only for a libvirt project and reports a
+/// skip row for any other -- `doctor::probes` holds that.
 ///
 /// A missing provider is the one host-provisioning gap worth
 /// probing: everything bombyx itself needs can be present, so
@@ -247,10 +252,13 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 /// `tail` subshell instead reported an empty reason, because a
 /// `PATH` broken enough to hide `vagrant` can hide `tail` too.
 ///
-/// **Deliberately without the VM-host identity prefix** that
-/// `remote::vagrant_script` puts on every other `vagrant` call.
+/// **Deliberately without either environment prefix.**
+/// `remote::vagrant_script` puts the two VM-host identity
+/// variables on every other project call, and the provider
+/// selection on `vagrant up` alone. This probe gets neither:
 /// `vagrant plugin list` evaluates no `Vagrantfile`, so nothing
-/// here could read the variables. That holds wherever the
+/// here could read the identity, and it creates no machine, so
+/// it asks vagrant for no provider. That holds wherever the
 /// command starts, which matters because the two routes stand
 /// in different directories: over `ssh` the login directory,
 /// and running here whatever directory bombyx was started in.

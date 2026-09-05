@@ -849,14 +849,15 @@ mod tests {
     }
 
     #[test]
-    fn every_vm_and_source_field_is_required() {
+    fn every_vm_and_source_field_but_provider_is_required() {
         // A table present but incomplete must be an error, not
         // a VM built from a mix of stated and invented values.
-        // Nothing enforces this except every field of `Vm` and
-        // `Source` being required: a `#[serde(default)]` added
-        // to one of them later would turn a half-stated table
-        // into a silent default, and the operator would read one
-        // value in the file while the guest ran with another.
+        // Nothing enforces this except every remaining field of
+        // `Vm` and `Source` carrying no `#[serde(default)]`. One
+        // added to another of them would turn a half-stated
+        // table into a silent default, and the operator would
+        // read one value in the file while the guest ran with
+        // another.
         //
         // Both tables, because the rule protects a required
         // serde field with no default rather than a table name,
@@ -867,7 +868,17 @@ mod tests {
         // partial table, so a failure names the field that
         // stopped being required instead of only reporting that
         // something did.
-        for (_, omitted, _) in TABLE_FIELDS {
+        //
+        // `provider` is the one exception, and it is checked
+        // here rather than skipped so this list stays the single
+        // record of which fields carry a default. `Provider`
+        // implements `Default`, so an absent key is libvirt.
+        for (owner, omitted, _) in TABLE_FIELDS {
+            if (owner, omitted) == ("vm", "provider") {
+                let cfg = parse_whole(&entry_without(omitted)).unwrap();
+                assert_eq!(cfg.vm.provider, Provider::Libvirt);
+                continue;
+            }
             let err = parse_whole(&entry_without(omitted)).unwrap_err();
             let text = err.to_string();
             assert!(

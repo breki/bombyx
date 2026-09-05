@@ -6,20 +6,20 @@
 
 use assert_cmd::Command;
 use bombyx::config::{CONFIG_DIR_ENV, USER_CONFIG_FILE};
-use bombyx::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
+use bombyx::remote::{PROVIDER_ENV, VM_HOST_ENV, VM_HOSTNAME_ENV};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 /// Name of the per-developer config directory inside a fixture.
 const CONFIG_HOME: &str = "config-home";
 
-/// The VM-host identity prefix, as `--dry-run` prints it.
+/// The two variables telling the guest which machine it is
+/// running on, as `--dry-run` prints them.
 ///
-/// Every vagrant invocation carries it so the guest can find out
-/// which machine it is running on. The command substitution
-/// appears escaped here because that is what makes the printed
-/// line honest: pasted into a shell it asks the *host* for its
-/// name, which is the whole point of the variable.
+/// The command substitution appears escaped here because that is
+/// what makes the printed line honest: pasted into a shell it
+/// asks the *host* for its name, which is the whole point of
+/// the variable.
 ///
 /// Built from the library's own constants, for the same reason
 /// [`write_user_config`] uses them: renamed, a hardcoded copy
@@ -27,6 +27,17 @@ const CONFIG_HOME: &str = "config-home";
 /// else entirely.
 fn vm_env() -> String {
     format!(r"{VM_HOST_ENV}='vmhost.invalid' {VM_HOSTNAME_ENV}=\$(hostname -s)")
+}
+
+/// The prefix on `vagrant up`, which also names the provider.
+///
+/// Only the boot carries it; `remote::PROVIDER_ENV` in the
+/// library says why. `libvirt` is written out here because
+/// [`REQUIRED_TABLES`] writes it into every fixture registry,
+/// and the two have to agree for the assertion to mean
+/// anything.
+fn boot_env() -> String {
+    format!("{vm} {PROVIDER_ENV}='libvirt'", vm = vm_env())
 }
 
 /// A fixture whose registry names `myproject` on `vmhost.invalid`.
@@ -174,7 +185,7 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     assert!(
         lines[3].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'up'\"",
-            vm_env()
+            boot_env()
         )),
         "{}",
         lines[3]
@@ -323,7 +334,7 @@ fn scratch_writes_into_a_project_scoped_dir() {
     assert!(
         lines[3].ends_with(&format!(
             "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up'\"",
-            vm_env()
+            boot_env()
         )),
         "{}",
         lines[3]

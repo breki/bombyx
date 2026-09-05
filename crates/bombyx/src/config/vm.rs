@@ -37,39 +37,56 @@ use super::guards::check_renderable;
 /// `provider = "libvirt"` in the TOML select the `Libvirt`
 /// variant: without it serde matches the Rust spelling, and the
 /// operator would have to write `"Libvirt"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+///
+/// `Libvirt` is the default, so an absent `provider` key means
+/// libvirt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     /// libvirt via `vagrant-libvirt`. The only provider bombyx
     /// has ever booted a machine with.
+    #[default]
     Libvirt,
     /// Hyper-V. **Never exercised** -- written from the
     /// provider's documented options, not from a run.
     Hyperv,
 }
 
-impl fmt::Display for Provider {
-    /// The lowercase name, which is both what serde parses from
-    /// the config file and what `Vagrant.configure` expects.
+impl Provider {
+    /// The lowercase name, which is what serde parses from the
+    /// config file, what `Vagrant.configure` expects, and what
+    /// bombyx passes to `vagrant` in the environment.
     ///
-    /// One method produces the name for both readers. If a
-    /// separate method produced the Vagrant spelling, the two
+    /// One method produces the name for all three readers. If a
+    /// second method produced the Vagrant spelling, the two
     /// could drift apart, and a config value would stop matching
     /// what gets written into the Vagrantfile.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+    ///
+    /// A borrow rather than a `String`, matching `RepoUrl`,
+    /// `ScriptPath` and `HostName`. Both words are compile-time
+    /// constants, so a caller quoting one for a shell has
+    /// nothing to allocate.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
             Self::Libvirt => "libvirt",
             Self::Hyperv => "hyperv",
-        })
+        }
+    }
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
 /// The machine bombyx builds, as a project's `[vm]` table.
 ///
-/// Every field is required. None of them has a defensible
-/// default: the base image is the one thing bombyx cannot
-/// invent, and a size bombyx chose would be wrong on both a
-/// laptop and a workstation.
+/// Every field but `provider` is required. None of the other
+/// three has a defensible default: the base image is the one
+/// thing bombyx cannot invent, and a size bombyx chose would be
+/// wrong on both a laptop and a workstation.
 ///
 /// `#[serde(deny_unknown_fields)]` makes a key serde does not
 /// recognise an error instead of something quietly ignored. It
@@ -78,7 +95,9 @@ impl fmt::Display for Provider {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Vm {
-    /// Virtualization backend.
+    /// Virtualization backend. Defaults to
+    /// [`Provider::Libvirt`] when the key is absent.
+    #[serde(default)]
     pub provider: Provider,
     /// Vagrant box the VM boots from, e.g.
     /// `generic/ubuntu2204`.
@@ -142,6 +161,11 @@ mod tests {
 
     #[test]
     fn provider_renders_the_name_config_and_vagrant_both_use() {
+        assert_eq!(Provider::Libvirt.as_str(), "libvirt");
+        assert_eq!(Provider::Hyperv.as_str(), "hyperv");
+        // `Display` must not grow a spelling of its own, so it
+        // is asserted against the same two words rather than
+        // trusted to delegate.
         assert_eq!(Provider::Libvirt.to_string(), "libvirt");
         assert_eq!(Provider::Hyperv.to_string(), "hyperv");
     }

@@ -26,9 +26,10 @@ and this project adheres to
 - The per-developer `config.toml` carries a `[projects.<name>]` table per
   project -- `remote_root`, `[vm]` and `[source]` -- and it is the only place a
   project is described. `--project <name>` picks the table. `[vm]` needs
-  `provider`, `box`, `cpus` and `memory`; `[source]` needs `repo`, `ref` and
-  `script`. None of the seven has a default, so bombyx guesses neither a base
-  image nor a repository to clone.
+  `box`, `cpus` and `memory`, and takes an optional `provider`; `[source]`
+  needs `repo`, `ref` and `script`. Of those seven keys only `provider` has a
+  default, `libvirt`, so bombyx guesses neither a base image nor a repository
+  to clone.
 - Library API: `config::Registry`, `config::Project` and `name::ProjectName`,
   plus a `ConfigError::ProjectNotFound` variant for a registry with no entry for
   the project asked for.
@@ -55,10 +56,13 @@ and this project adheres to
   loopback still takes the `ssh` route, and an alias named exactly what this
   machine is named is believed; write that one as `user@name` to force `ssh`.
   Windows never takes the local route, since it cannot run libvirt. On the
-  local route bombyx clears `VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and
-  `VAGRANT_DOTFILE_PATH` before each script, since `sh -c` inherits the
-  environment where `ssh` would not and all three redirect which machine
-  vagrant acts on. The local route is announced on stderr on every command, and
+  local route bombyx clears `VAGRANT_CWD`, `VAGRANT_VAGRANTFILE`,
+  `VAGRANT_DOTFILE_PATH`, `VAGRANT_DEFAULT_PROVIDER` and
+  `VAGRANT_PREFERRED_PROVIDERS` before each script, since `sh -c` inherits the
+  environment where `ssh` would not and all five redirect which machine or
+  which provider vagrant acts on. The `ssh` route clears none of them; the VM
+  host's own environment reaching vagrant is `disarm-on-the-ssh-route` in
+  `docs/todo.md`. The local route is announced on stderr on every command, and
   `bombyx doctor` shows its `ssh` and `login shell` rows as skips.
 - `bombyx snapshot` saves the project VM's `fresh-install` snapshot, replacing
   one that is already there. It is how you move the point `reset` returns to,
@@ -66,6 +70,20 @@ and this project adheres to
 - Library API: `config::RemoteRoot` and `config::HostName`, the checked types
   behind `remote_root` and `host`. `RemoteRoot` also drops a trailing slash, so
   the value is always in the form a path join needs.
+- bombyx passes the project's provider to vagrant as `VAGRANT_DEFAULT_PROVIDER`
+  on the boot. Rendering a provider block in the generated Vagrantfile only
+  configures that provider; vagrant chooses one itself, from what the host
+  offers. So a project asking for `hyperv` on a libvirt-only host got a libvirt
+  machine with its `cpus` and `memory` ignored, and nothing said so. A host that
+  cannot supply the named provider now fails the boot instead. Only the boot
+  carries the variable: vagrant reads an existing machine's recorded provider
+  and ignores it, and setting it on `destroy` would strand the directory a
+  refused boot left behind.
+- Library API: `remote::PROVIDER_ENV`, the name of the environment variable
+  bombyx sets on `vagrant up` to select the provider;
+  `config::Provider::as_str`, which borrows the lowercase name instead of
+  allocating one; and `impl Default for Provider`, which is `Libvirt` and is
+  what makes an absent `provider` key mean libvirt.
 
 ### Changed
 

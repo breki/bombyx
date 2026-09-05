@@ -345,11 +345,16 @@ you elsewhere. Hyper-V is the other way to run VMs there, and
 bombyx accepts it as a `provider` value -- `libvirt` and
 `hyperv` are the two it takes, and VirtualBox is not one of
 them. It does not give you the local route, though, and it
-comes with two caveats of its own. Its provider needs an
-elevated shell, which an SSH session does not have. And bombyx
-does not yet tell vagrant which provider to use, so setting
-`hyperv` today gets you whatever the host chooses. See
-`provider-configured-not-selected` in [todo.md](todo.md).
+comes with a caveat of its own: its provider needs an elevated
+shell, which an SSH session does not have. bombyx does pass the
+provider to vagrant, so setting `hyperv` on a host that cannot
+supply it fails the boot rather than quietly building a libvirt
+machine, as long as the VM does not exist yet -- vagrant
+records the provider it built a machine with and reads that
+back afterwards, so changing the key later needs a
+`bombyx destroy` first. That refusal was run on a Linux host
+and it works. Whether a Windows VM host then boots the machine
+is *(unverified)*: nobody has run bombyx against one.
 
 ### Optional: keep the VM from reaching your home network
 
@@ -465,18 +470,22 @@ this table: bombyx opens no file in the project's directory, so
 it cannot work out which project you mean from where you are
 standing.
 
-Leave `provider = "libvirt"`, and leave `remote_root` where the
-sample puts it -- above `[projects.myproject.vm]`, because a
-bare key belongs to the table header above it, and written below
-that header this one would parse as
-`projects.myproject.vm.remote_root` and the whole file would be
-refused.
+Leave `provider = "libvirt"`. Deleting the line gets you the
+same thing, since libvirt is what bombyx assumes when the key
+is absent.
 
-`[vm]` and `[source]` are required and have no defaults. bombyx
-builds the VM from the first and the guest clones the second,
-so there is nothing sensible for bombyx to guess: a base image
-is a choice, and a repository bombyx invented would be cloned
-into the guest and run as root.
+Leave `remote_root` where the sample puts it, above
+`[projects.myproject.vm]`. A bare key belongs to the table
+header above it, so written below that header this one would
+parse as `projects.myproject.vm.remote_root` and the whole file
+would be refused.
+
+`[vm]` and `[source]` are required, and every key in them
+except `provider` is required too. bombyx builds the VM from
+the first and the guest clones the second, so there is nothing
+sensible for bombyx to guess: a base image is a choice, and a
+repository bombyx invented would be cloned into the guest and
+run as root.
 
 `remote_root` is optional, shown with its default.
 
@@ -658,7 +667,7 @@ $ bombyx --project myproject --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
 ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
-ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
 ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
