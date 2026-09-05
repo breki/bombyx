@@ -319,6 +319,12 @@ for tools that are not present:
   lines) whole produced 66KB that overflowed into a persisted
   file, and every fact the session actually used came from
   the greps that followed it.
+
+  **Use `Read` for a range you are about to edit.** `Edit`
+  refuses a file the session has only read through Bash, so a
+  range opened with `sed -n` and then edited gets read twice.
+  Four ranges of `config.rs` went through that in one sitting.
+  `sed -n` stays right for a range you only want to look at.
 - **Edit YAML and doc-comment neighbourhoods with `Edit`, not a
   slurp-mode regex.** `perl -0pi -e 's/.../.../'` over a whole
   file has no idea which block it landed in. One substitution
