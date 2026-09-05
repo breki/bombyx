@@ -1079,6 +1079,12 @@ mod load_project_tests {
         assert_eq!(origin, HostOrigin::UserFile);
     }
 
+    /// The two `host` keys, the entry's outranking the file's.
+    fn ranked() -> String {
+        test_registry("myproject", "file-wide", Some("entry"))
+    }
+
+    #[cfg(not(windows))]
     #[test]
     fn the_route_follows_the_host_that_won_the_ranking() {
         // The entry's host outranks the file-wide one, and the
@@ -1086,18 +1092,34 @@ mod load_project_tests {
         // then deciding the route from the loser would send
         // `destroy` to `entry` while reporting that it runs
         // here.
-        let source = test_registry("myproject", "file-wide", Some("entry"));
-
-        let (cfg, _) = load_on(&source, "myproject", Some("entry")).unwrap();
+        //
+        // Not on Windows, where `config::transport` refuses the
+        // local route whatever the names say, so neither case
+        // could tell the winner from the loser. The Windows
+        // property has its own test below.
+        let (cfg, _) = load_on(&ranked(), "myproject", Some("entry")).unwrap();
         assert_eq!(cfg.transport, Transport::Local);
 
         let (cfg, _) =
-            load_on(&source, "myproject", Some("file-wide")).unwrap();
+            load_on(&ranked(), "myproject", Some("file-wide")).unwrap();
+        assert_eq!(cfg.transport, Transport::Ssh);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_loads_the_network_route_even_on_a_name_that_matches() {
+        // The mirror of the test above. A name that would be
+        // the local route anywhere else must still load as
+        // `Ssh` here, so the refusal survives the whole load
+        // path rather than only `config::transport`'s own
+        // tests.
+        let (cfg, _) = load_on(&ranked(), "myproject", Some("entry")).unwrap();
         assert_eq!(cfg.transport, Transport::Ssh);
     }
 
     #[test]
     fn a_config_loaded_anywhere_else_takes_the_network_route() {
+        // True on every platform: the name does not match.
         let (cfg, _) = load_on(&plain(), "myproject", Some("laptop")).unwrap();
         assert_eq!(cfg.transport, Transport::Ssh);
     }
