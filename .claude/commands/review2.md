@@ -1,15 +1,29 @@
 ---
-description: Review uncommitted source-code work with the three reviewers in sequence, each in one lane -- artisan on the code, red-team on what is unsafe or wrong, fresh-reader on the prose. Commits nothing
+description: Review source-code work with the three reviewers in sequence, each in one lane -- artisan on the code, red-team on what is unsafe or wrong, fresh-reader on the prose. Commits nothing
+argument-hint: "[base commit]"
 ---
 
-Review the working tree with one reviewer at a time, fixing
+Review the change with one reviewer at a time, fixing
 what each finds before the next one reads. Like `/review`, this
 command **never commits**: it leaves the tree edited, reports
 what happened, and the developer decides when the work becomes
 a commit.
 
-It takes no arguments and always reviews the whole tree against
-`HEAD`.
+## What the reviewers read
+
+The argument is the commit the working tree is compared
+against, and it defaults to `HEAD`. With the default the
+reviewers read what is not committed yet, which is what a run
+from the developer's own shell wants.
+
+Pass a base when the work is already committed. `/issue` does
+that after it pushes the branch: it passes
+`$(git merge-base main HEAD)`, so the diff holds every commit
+on the branch plus anything still uncommitted, rather than the
+empty diff `HEAD` produces the moment the work is committed.
+
+Call the value `BASE` below. Everything else in this file is
+the same either way.
 
 **This command is for a change containing source code** --
 `.rs`, `.toml`, `.sh`, `.ps1`, a template under
@@ -89,6 +103,16 @@ warning in that recipe applies: name the untracked paths
 rather than sweeping them, subtract the backlogs, and report
 the intent-to-add entries left in the index.
 
+That recipe writes `HEAD` into both of its `git diff` commands.
+Put `BASE` there instead, and everything else in it stands:
+
+```bash
+OUT=target/review2-1
+git diff "$BASE" -- . "$EXCL" > "$OUT.diff"
+git diff --name-only --diff-filter=d "$BASE" -- . "$EXCL" \
+  > "$OUT.files"
+```
+
 **Run the artifacts**, per `/review` under **Run it before
 anyone reads it**. Once here, and afterwards only for an
 artifact a fix has touched. This is where a walk of a changed
@@ -102,7 +126,8 @@ the previous stage's fixes, so a stale snapshot hides exactly
 what the sequence exists to catch. The `.files` list matters as
 much as the diff: `fresh-reader` is handed the list, and a file
 created by an earlier stage's fix reaches it only if that
-re-snapshot ran `git add -N` on it.
+re-snapshot ran `git add -N` on it. Every re-snapshot uses the
+same `BASE` as the first one.
 
 **Each stage writes its findings** to
 `target/review2-<stage>-<n>.findings` before the next spawn,

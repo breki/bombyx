@@ -4,6 +4,32 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**`/issue` reviews after the push, and `/review2` learned a
+base**
+
+Working an issue no longer offers a review and waits for an
+answer: `/review2` runs on every issue, and it runs after the
+implementation commit is pushed and the PR is open. The old
+step 8 asked the operator first and ran before the commit.
+
+Running it after the commit breaks the thing `/review2` was
+built on. It snapshots `git diff HEAD`, and a committed branch
+has nothing there, so the reviewers would have read an empty
+diff and reported a clean sheet on work nobody looked at. So
+`/review2` now takes an optional base commit, defaulting to
+`HEAD`, and `/issue` passes `git merge-base main HEAD` -- the
+commit the branch started from. The diff then holds every
+commit on the branch plus anything still uncommitted.
+
+Both bases stay in use. A round asked for by a PR comment wants
+the default: make the edits, leave them uncommitted, and
+`/review2` with no argument reads those edits and nothing else.
+`/review2` still commits nothing either way, so its fixes come
+back to `/commit` as their own commits rather than an amend.
+
+We have not run this yet. The next issue worked with `/issue`
+is what exercises it.
+
 **Ten comments, three shorter forms each, and a canon rule
 reversed**
 

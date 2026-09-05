@@ -1,16 +1,17 @@
 ---
 description: Work a GitHub issue end to end -- verify it is still real, settle the approach, implement with TDD, review, and open a PR that says what was not verified
 argument-hint: "<issue number>"
-allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(todo)
+allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(git merge-base:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(review2), Skill(todo)
 ---
 
 Work the GitHub issue given as the argument, from reading it to
 reporting back on it.
 
-Committing happens through `/commit`, and a review is offered
-rather than assumed -- step 8 says who decides. This command
-reimplements neither, and `CLAUDE.md` under **Reviewing is its
-own process** says why they are separate here.
+Committing happens through `/commit`, and reviewing through
+`/review2`, which every issue gets once the branch is pushed --
+step 10 holds it. This command reimplements neither, and
+`CLAUDE.md` under **Reviewing is its own process** says why
+they are separate here.
 
 ## Steps
 
@@ -152,48 +153,12 @@ is.
 Read your own diff before it becomes a commit. This is
 Definition of Done item 4 and no reviewer replaces it.
 
-### 8. The review rounds
-
-`/review` owns the loop, the snapshot, the reviewers, the
-stopping rule and what happens to a finding nobody fixes.
-`.claude/commands/code-reviewers.md` owns which reviewers run
-and what each is handed. Read those rather than working from a
-summary here.
-
-**The operator decides whether a review happens.**
-`CLAUDE.md` under **Reviewing is its own process** leaves the
-choice to them: offer it, and spawn the reviewers only when
-asked.
-
-Three things are specific to working an issue.
-
-**The rounds run before step 9's commit.** `/review` snapshots
-`git diff HEAD`, so it wants the work still in the tree.
-Committing first hands the reviewers an empty diff, and they
-will report a clean sheet on a change nobody read.
-
-**A round after the PR is open reviews the fixes, not the
-branch.** When a comment asks for one, make the edits it asks
-for and leave them in the tree, then run `/review` -- it still
-snapshots `git diff HEAD`, so what it reads is those edits and
-nothing else. Commit them on their own rather than amending, so
-a bad fix reverts without taking the original work with it.
-
-**The PR body must list the findings nobody fixed.** `/review`
-logs the deferred ones under `docs/developer/`, which a reader
-of the branch will not think to open. A finding it *declined*
-is logged nowhere, and `target/review-<n>.findings` is not
-committed, so copy that one into the PR body while the round's
-report is still in front of you. Do not send either kind to
-`/todo`; that is for a problem you found yourself while
-implementing.
-
-### 9. Commit
+### 8. Commit
 
 Commit through `/commit`. It stages explicitly, writes the
 diary entry and the `[Unreleased]` bullet, and adds the
 `AI-Generated:` footer. It bumps no version and cuts no tag.
-Then push and open the PR, which is step 10.
+Then push and open the PR, which is step 9.
 
 State in the commit body what was verified and what was not.
 
@@ -201,7 +166,7 @@ State in the commit body what was verified and what was not.
 work where it should be written: the decisions have settled. An
 entry written earlier records decisions that later reverse.
 
-### 10. Keep the PR open from the first push
+### 9. Keep the PR open from the first push
 
 Open the PR as soon as the first commit is pushed, with
 `gh pr create` and `Closes #<n>`. CI then starts on the first
@@ -224,6 +189,56 @@ The body carries what a reviewer cannot get from the diff:
 - **Not done**: what is unexercised, unreviewed or deferred
 - **Review rounds**: which round you stopped after, and the
   findings carried forward
+
+### 10. The review rounds, on the pushed branch
+
+`/review2` owns the loop, the snapshots, the reviewers, the
+stopping rule and what happens to a finding nobody fixes.
+`.claude/commands/code-reviewers.md` owns which reviewers run
+and what each is handed. Read those rather than working from a
+summary here.
+
+**Every issue gets one.** `CLAUDE.md` under **Reviewing is its
+own process** leaves the choice to the developer in general.
+Working an issue is where we have already made it: run
+`/review2` here without asking, and report what it found even
+when it found nothing.
+
+`/review2` reviews source code, and refuses a change that has
+none. An issue answered entirely in documents or canon goes to
+`/review` instead, which is the only substitution allowed here.
+
+**Hand it the branch point.** The work is committed by now, so
+a diff against `HEAD` holds nothing. `git merge-base main HEAD`
+gives the commit the branch started from, and that value is the
+argument:
+
+```bash
+git merge-base main HEAD     # pass the result to /review2
+```
+
+`/review2` under **What the reviewers read** describes what it
+does with it.
+
+**Its fixes become their own commits.** `/review2` edits the
+tree and commits nothing, so when a stage changes something,
+commit through `/commit` and push again. Commit those edits
+separately rather than amending the implementation, so a bad
+fix reverts without taking the work with it. Then update the PR
+body, per step 9.
+
+**A round asked for by a PR comment reviews the fixes, not the
+branch.** Make the edits the comment asks for, leave them
+uncommitted, and run `/review2` with no argument -- against
+`HEAD` it reads those edits and nothing else.
+
+**The PR body must list the findings nobody fixed.** `/review2`
+logs the deferred ones under `docs/developer/`, which a reader
+of the branch will not think to open. A finding it *declined*
+is logged nowhere, and `target/review2-*.findings` is not
+committed, so copy that one into the PR body while the report
+is still in front of you. Do not send either kind to `/todo`;
+that is for a problem you found yourself while implementing.
 
 ### 11. Watch CI, and separate new failures from old
 
@@ -268,7 +283,7 @@ dead link.
 - Never work an issue on `main`.
 - No behaviour change without a failing test first.
 - A regression test nobody has seen fail does not count.
-- Offer the review before the commit; `/review` owns the
+- Always run `/review2` on the pushed branch; it owns the
   loop.
 - Never report a gate as passing on the strength of a
   document. Run it.
