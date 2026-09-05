@@ -150,6 +150,9 @@ and this project adheres to
   snapshot cannot be taken -- a provider with no snapshot support, say -- `up`
   warns on stderr and still succeeds, because a VM that booted correctly has
   not failed.
+- A bad `remote_root` in `config.toml` is now refused while the file parses, so
+  the message names the line and column of the offending key rather than only
+  the field. The rules themselves are unchanged.
 
 ### Fixed
 

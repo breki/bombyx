@@ -821,7 +821,7 @@ fn doctor_run(cfg: &Config) -> Ran {
     }
     report.add_all(doctor::host_findings(cfg, spawn_probe));
 
-    print_lines(&report.render(&cfg.host));
+    print_lines(&report.render(cfg.host.as_str()));
     if report.ok() { Ran::Ok } else { Ran::Failed(1) }
 }
 

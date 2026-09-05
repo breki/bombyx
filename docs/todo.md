@@ -93,28 +93,26 @@ plan, decisions, and outcome.
 
 - **newtype-remaining-config-fields** -- types for the five checked fields
   Five config values carry validation rules and are still bare `String` or
-  `u32`: `host`, `project`, `remote_root`, `box` and `ref`, plus
-  `cpus`/`memory` whose only rule is a floor. `RepoUrl`, `ScriptPath` and
+  `u32`: `project`, `box` and `ref`, plus `cpus`/`memory` whose only rule is
+  a floor. `RemoteRoot`, `HostName`, `RepoUrl`, `ScriptPath` and
   `ScratchName` show the shape. `Config`, `Vm` and `Source` all have public
-  fields, so every one of those five can be set by hand with no check running.
-  The checks for `project` and `remote_root` live in `Config::validate`, and
-  those for `box`, `ref`, `cpus` and `memory` in `vm::validate` and
-  `source::validate`, all of which only the loading path calls. `host` is the
-  exception, and its rule moved to `config::registry::parse` -- see below.
-  `remote_root` is the one to do first: it reaches `rm -rf`, it has six rules,
-  and `config::root` already holds all of them in one function, so the
-  constructor wraps something that exists. Not for the generate-vagrantfile
-  PR: the config modules have been re-cut in four commits over two days and
-  the review flagged the churn.
+  fields, so every one of the five can be set by hand with no check running.
+  The checks for `project` live in `Config::validate`, and those for `box`,
+  `ref`, `cpus` and `memory` in `vm::validate` and `source::validate`, all of
+  which only the loading path calls. GitHub #43.
 
-  `host` belongs beside `remote_root` at the front of the queue. Its check has
-  been placed twice in two weeks and argued about three times: `b534bb1` left
-  the value to the ranking and wrote down why, `59dd110` put a check in
-  `Project::validate` after a review round on #25, and the registry-config-load
-  review moved it again into `config::registry::parse`. Each move reversed the
-  reasoning written down for the one before it, which is the sign of a missing
-  type rather than a missing decision -- a `HostName` cannot be placed in the
-  wrong function.
+  `Config::project` is a field type change rather than a new type:
+  `crate::name::ProjectName` already exists and is what the registry keys
+  its project map by. `cpus` and `memory` become `std::num::NonZeroU32`,
+  decided by the operator while #17 was scoped -- serde already refuses `0`
+  for that type and names the key, so a bespoke `Cpus` would buy nothing.
+
+  `remote_root` and `host` were the two at the front of this queue and are
+  done, under #17. `remote_root` reaches `rm -rf` and now holds its six
+  rules in `RemoteRoot`; `host` reaches `ssh` as a bare positional argument
+  and now holds its three in `HostName`. `host`'s check had been placed
+  twice in two weeks and argued about three times before that, which is what
+  a missing type looks like.
 
 - **self-update-resolves-tar-late** -- two downloads before it notices no tar
   Found by the red-team review of 92c2e74 (RT-7), verified by reading the call

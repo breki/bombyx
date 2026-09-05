@@ -112,7 +112,7 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 fn vm_host_env(cfg: &Config) -> String {
     format!(
         "{VM_HOST_ENV}={host} {VM_HOSTNAME_ENV}=$(hostname -s)",
-        host = shell_quote(&cfg.host),
+        host = shell_quote(cfg.host.as_str()),
     )
 }
 
@@ -274,10 +274,10 @@ fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
         ),
         (Transport::Ssh, Tty::Allocate) => RemoteCommand::new(
             "ssh",
-            &["-t", "-o", "LogLevel=ERROR", &cfg.host, script],
+            &["-t", "-o", "LogLevel=ERROR", cfg.host.as_str(), script],
         ),
         (Transport::Ssh, Tty::NoPty) => {
-            RemoteCommand::new("ssh", &[&cfg.host, script])
+            RemoteCommand::new("ssh", &[cfg.host.as_str(), script])
         }
     }
 }
@@ -766,18 +766,16 @@ mod tests {
 
     #[test]
     fn the_vm_host_alias_is_quoted_in_the_script() {
-        // Second line of defence: `Config::validate` rejects
-        // these characters. The alias is interpolated into a
-        // remote script here, so it is quoted like every other
-        // interpolated value rather than trusted because another
-        // module checked it.
-        let mut cfg = cfg();
-        cfg.host = "a b; rm -rf /".to_owned();
-        let script = vagrant(&cfg, &["up"], Tty::NoPty).args[1].clone();
-        assert!(
-            script.contains("BOMBYX_VM_HOST='a b; rm -rf /'"),
-            "{script}"
-        );
+        // The alias is interpolated into a remote script, so it
+        // goes through `shell_quote` rather than being trusted
+        // because `config::host` checked it. A hostile alias
+        // cannot be assigned to a `HostName`, so what this
+        // asserts is the wiring: delete the `shell_quote` call
+        // in `vm_host_env` and the quotes go missing here.
+        // `remote::quote` tests what quoting does to a value
+        // that needs it.
+        let script = vagrant(&cfg(), &["up"], Tty::NoPty).args[1].clone();
+        assert!(script.contains("BOMBYX_VM_HOST='vmhost'"), "{script}");
     }
 
     #[test]

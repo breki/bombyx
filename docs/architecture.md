@@ -273,8 +273,8 @@ Privacy here stops a caller *choosing* the route, and that is
 all it stops: `host` is public, so a caller holding a loaded
 `Config` can assign a new one, nothing re-checks, and the route
 then names one machine while the commands run on another.
-`newtype-remaining-config-fields` in `docs/todo.md` owns that
-gap. This field narrows it and does not close it.
+`host` is a `HostName`, so the value assigned has passed the
+host rule; what nothing re-derives is the route beside it.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -434,7 +434,7 @@ Six values reach the generated files and so the guest --
 `remote_root` reaches
 `rm -rf` on the VM host. A registry out of a clone with
 `remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
-is `root::check`'s depth floor doing the work it exists for.
+is `RemoteRoot`'s depth floor doing the work it exists for.
 
 What the guards do *not* stop is the redirect itself: bombyx
 opens no file in a project's directory of its own accord, and it
@@ -442,19 +442,31 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Two of those six are enforced by their type. `repo` is a
-`RepoUrl` and `script` is a `ScriptPath`, each a newtype whose
-constructor holds the rules, so an invalid one cannot be built
--- by a config file or by a library caller. serde runs the
+Four values are enforced by their type: `remote_root` is a
+`RemoteRoot`, `repo` a `RepoUrl`, `script` a `ScriptPath` and
+`host` a `HostName`. Each is a newtype whose constructor holds
+the rules, so an invalid one cannot be built -- by a config file
+or by a library caller. For the first three, serde runs the
 constructor while deserializing, so a bad value is refused
-before a `Config` exists, and the error identifies the line.
+before a `Config` exists and the error identifies the line.
 
-The other four -- `box`, `ref`, `cpus` and `memory` -- are only
-*checked* after parsing. So are `project` and `remote_root`,
-which never reach the generated files but do reach `ssh`. Six
-values in all, spread across `Config::validate`, `vm::validate`
-and `source::validate`. **That is a gap, not a decision we would
-make again.**
+`HostName` is the exception, and it has no
+`#[serde(try_from = "String")]`. The registry carries a `host`
+key per project and one more below them all, so the field name
+`host` does not tell an operator which line to edit. Instead
+`config::host::checked` takes a `HostOrigin` and names the
+source, and serde cannot supply one because it does not know
+which key it is reading. Trading that answer for a line number
+would be the worse deal, so the host rule runs where the origin
+is known.
+
+The remaining four -- `box`, `ref`, `cpus` and `memory` -- are
+only *checked* after parsing, in `vm::validate` and
+`source::validate`, and so is `project` in `Config::validate`.
+`Vm`, `Source` and `Config` all have public fields, so a
+hand-built one never reaches those functions. **That is a gap,
+not a decision we would make again**, and issue #43 is the work
+that closes it.
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`, which is its table key.
@@ -468,12 +480,15 @@ it; checking only the winner leaves a typo in an unused line
 until the day that line wins.
 
 Holding a `Registry` is therefore the proof that every host in it
-passed, and that one pass is the *only* place the host rule runs.
-`Registry::host`, `Registry::project_host` and
-`config::host::rank` hand values out without re-running it, and
-neither `Project::validate` nor `Config::validate` checks
-`host`. `host` is the one field absent from both, which looks
-like an omission and is not.
+passed. `config::host::rank` then builds the winner into a
+`HostName`, and the check it runs there is the second of two:
+it cannot fail on a `Registry` that came through `parse`, and it
+runs so that `rank` does not depend on a rule applied in another
+module. `Registry::host` and `Registry::project_host` hand raw
+values out without re-running it, and neither
+`Project::validate` nor `Config::validate` checks `host`.
+`host` is the one field absent from both, which looks like an
+omission and is not.
 
 `Config::load_project` then runs `Config::validate` over the
 value it assembles, so an entry's fields are checked twice. That
@@ -570,32 +585,32 @@ fail at the requirement rather than at compile time.
 
 ### The unchecked-field gap, and what limits it
 
-Three things keep the public fields on `Config` survivable
-until a type replaces them. `render` escapes
-for Ruby whatever it is handed. `bootstrap.sh` passes `--`
-before the ref. And inside this crate the only place that builds
-a `Config` is `Project::to_config`, whose caller runs `validate`
-immediately -- so for bombyx's own commands the check does run.
+Five fields of `Config` and its two tables are still a plain
+`String` or `u32`: `project`, `box`, `ref`, `cpus` and
+`memory`. Every field of `Config` is public except the
+transport, so a caller holding a loaded one can assign any of
+the five and nothing re-checks. Issue #43 is the work that
+gives each of them a type.
 
-A library consumer is not covered by that, and the public
-fields are why. One private field stops a *struct literal*
-outside this crate, and that is a narrower thing than it
-sounds: `load_project` hands the caller an owned `Config`, and
-assigning `cfg.host = "..."` on it compiles and reaches `plan`
-with nothing having checked the new value. No snippet here,
-because the point is the assignment rather than the shape of
-the type.
+Three things keep that survivable in the meantime. `render`
+escapes for Ruby whatever it is handed. `bootstrap.sh` passes
+`--` before the ref. And inside this crate the only place that
+builds a `Config` is `Project::to_config`, whose caller runs
+`validate` immediately -- so for bombyx's own commands the check
+does run.
 
-That is the argument for `newtype-remaining-config-fields`, and
-it is the reason the paragraph above calls the gap a gap. A
-type carries its proof to every use site; a private field on a
-struct whose other fields are public carries it to one.
+A library consumer is not covered by that, and the public fields
+are why. `load_project` hands the caller an owned `Config`, and
+assigning `cfg.project = "..."` on it compiles and reaches
+`plan` with nothing having checked the new value. That is the
+whole argument for the remaining types: a type carries its proof
+to every use site, and a checking function carries it only to
+the paths that call it.
 
-`remote_root` should stop being a `String` first: it reaches
-`rm -rf`, and `config::root` already holds all of its rules in
-a single function, so the constructor would wrap something
-that exists. Captured as `newtype-remaining-config-fields` in
-`docs/todo.md`.
+`remote_root` and `host` were the two worth doing first, and
+they are done. `remote_root` reaches `rm -rf` and `host` reaches
+`ssh`, and both now hold their rules in a constructor:
+`RemoteRoot` in `config::root` and `HostName` in `config::host`.
 
 | Field | Refused | Because |
 |-------|---------|---------|
@@ -605,7 +620,7 @@ that exists. Captured as `newtype-remaining-config-fields` in
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
-| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. For `host` that is live — it is `ssh`'s first positional argument. Running on the VM host itself no argv position holds it, but the rule still applies, because the same `config.toml` carried to another machine takes the `ssh` route. For the other two it is a precaution, since both are shell-quoted before the far shell receives them |
+| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. `host` and `remote_root` carry the rule in their constructors, `project` in `Config::validate`. For `host` it is live — it is `ssh`'s first positional argument. Running on the VM host itself no argv position holds it, but the rule still applies, because the same `config.toml` carried to another machine takes the `ssh` route. For the other two it is a precaution, since both are shell-quoted before the far shell receives them |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |

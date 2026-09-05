@@ -78,7 +78,7 @@ fn probe(cfg: &Config, script: &str) -> RemoteCommand {
                 "ServerAliveInterval=5",
                 "-o",
                 "ServerAliveCountMax=3",
-                &cfg.host,
+                cfg.host.as_str(),
                 script,
             ],
         ),

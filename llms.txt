@@ -53,10 +53,10 @@ name: `ssh <host> "<script>"` when they differ, `sh -c
 either way, because `sh -c` starts the same POSIX shell `ssh`
 would have started on the host. `Config::transport()` reports
 which route is in force. It is the one private field on
-`Config`, which stops a caller choosing the route; `host` is
-still public, so the two can be made to disagree by assigning
-to a loaded `Config`, and that is the gap
-`newtype-remaining-config-fields` owns.
+`Config`, which stops a caller choosing the route. `host` is
+public and is a `HostName`, so an assignment to it carries a
+checked value, but nothing re-derives the route beside it and
+the two can be made to disagree.
 
 The VM host's own filesystem holds no project file; the guest
 clones the repository itself once it is running. The
@@ -146,8 +146,11 @@ is `ssh`'s first positional argument, and this is the file the
 operator writes host names in, so a value bombyx would refuse is
 reported while they are looking at that file. Holding a
 `Registry` is the proof every host in it passed, so
-`Registry::host`, `Registry::project_host`, `config::host::rank`
-and both `validate` functions run no host rule of their own.
+`Registry::host`, `Registry::project_host` and both `validate`
+functions run no host rule of their own. `config::host::rank`
+does run it, once, to build the winner into a `HostName`; on a
+`Registry` that came through `parse` it cannot fail, and it is
+there so `rank` does not rely on a rule applied elsewhere.
 
 The ranking itself is `config::host::rank`, which takes the
 registry already read rather than opening it, because
@@ -189,6 +192,20 @@ and name at least one directory below that anchor. bombyx
 creates, writes into and -- on teardown -- deletes the
 directory it derives from the value, so a root that resolves
 to a top-level directory is refused when the config loads.
+
+Four config values are newtypes rather than strings, and each
+constructor holds every rule its field has: `RemoteRoot` in
+`config/root.rs`, `HostName` in `config/host.rs`, and `RepoUrl`
+and `ScriptPath` in `config/source.rs`. `RemoteRoot`, `RepoUrl`
+and `ScriptPath` carry `#[serde(try_from = "String")]`, so serde
+refuses a bad value while the file parses. `HostName` does not,
+because the message for a bad host names the source key rather
+than the field and serde cannot say which key it is reading;
+`config::host::checked` attaches the `HostOrigin` instead. The
+five values still typed as `String` or `u32` -- `project`,
+`box`, `ref`, `cpus` and `memory` -- are checked after parsing,
+by `Config::validate`, `config::vm::validate` and
+`config::source::validate`.
 
 ## Build Commands
 

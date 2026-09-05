@@ -4,6 +4,46 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**`remote_root` and `host` are types now, and one of the two
+could not take the usual shape**
+
+Issue #17 asked for types on seven config values. We split it:
+`remote_root` and `host` here, the other five under #43. Those
+two are the ones the backlog put first, because `remote_root`
+reaches `rm -rf` on the VM host and `host` becomes `ssh`'s first
+positional argument.
+
+`RemoteRoot` is the ordinary shape and took an afternoon of
+mechanical work. Its constructor wraps `config::root::check`,
+which already held all six rules in one function, and
+`#[serde(try_from = "String")]` runs that constructor while the
+TOML parses. So a bad root is now refused before a `Project`
+holding it exists, and the message gained a line and column. The
+old check in `Config::validate` and the one in
+`Project::validate` are both gone: there is one construction
+point, so there is nothing left for either to run.
+
+`HostName` could not have the attribute, and that is the part
+worth writing down. A bad host does not get told which key to
+edit by its field name, because the registry carries a `host`
+key per project and one more below them all. `config::host`
+answers with a `HostOrigin` instead --
+`[projects."demo"].host in <file>` -- and serde cannot supply
+one, since it has no idea which key it is deserializing. Giving
+`HostName` a `try_from` would have traded that answer for a line
+number. So `registry::parse` keeps checking every host in the
+file, and `host::rank` builds the winner where the origin is
+already in hand.
+
+`HostProblem` and `host_problem` came out in the process. Both
+existed only to drop the field name a guard attaches, and the
+one caller left can match on `FieldError` directly.
+
+The test that had set `cfg.host = "a b; rm -rf /"` to prove the
+alias gets shell-quoted no longer compiles, which is the point
+of the change. It now asserts the wiring on a legal alias, and
+`remote::quote` keeps the hostile strings.
+
 **Two rounds of the snapshot review found the tests, not the code**
 
 `/review2` over the snapshot work: three stages, 26 findings, 22
