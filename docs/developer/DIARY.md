@@ -2,6 +2,75 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-05
+
+**Three reviewers in sequence on the registry loader, and one
+rule that had to be found three times**
+
+`/review2` on #26, run after the commit rather than before it,
+so parts of it correct what that commit says. Three stages, 46
+findings, 36 fixed, four logged, two declined. Stage 2 ran two
+rounds and stopped on non-convergence rather than on a clean
+sheet: round 2 found defects in two of round 1's own fixes,
+which is the stop condition, so no third round ran.
+
+**The operator changed a rule mid-review, and it is the largest
+thing in the commit.** Every `host` in the registry is now
+checked as the file is read -- the file-wide key and every
+`[projects.*].host` -- and refused, whatever the command line
+says, with `--host` and `BOMBYX_HOST` checked separately. The
+reasoning that `Registry::host` and `Registry::project_host`
+carried said the opposite in as many words, so both were
+rewritten, and the host arm left `Project::validate` because one
+place now owns the rule.
+
+That started as a finding about a message. `Project::validate`
+checked the entry's host, so the field-named error beat the
+source-named one and `HostOrigin::ProjectEntry`'s wording --
+which exists to name the table an operator must edit -- was
+unreachable through the new loader. Three options went to the
+operator and they picked a fourth.
+
+**One rule needed finding three times, in three rounds.** A
+project name printed inside a TOML heading has to be quoted,
+because a name may contain a `.` and TOML reads a bare dot as
+nesting -- so the unquoted spelling names a table the operator's
+file does not contain, and writing it refuses the whole file.
+Round 1 of stage 1 found the missing name check. Round 1 of
+stage 2 found two messages interpolating the name unquoted.
+Round 2 found the third, in `HostOrigin::describe`, which this
+work is what made reachable. That is `/review`'s first
+non-convergence category, the rule with no single home, and the
+cure -- one function owning the spelling -- is logged rather
+than applied, because a consolidation inside a round is what the
+command forbids.
+
+Three claims of ours were false and a reviewer produced the
+counter-example for each. "Nothing observable changes in the
+CLI" rested on checking only the file-wide host, which is the
+one case that did not change; a bad host in any entry now fails
+every command that reads the file. A `CLAUDE.md` bullet said
+`Edit` refuses a file read only through Bash, inferred from a
+negative result; the positive probe was then run and the rule
+now cites both. And a citation blamed `b534bb1` for a placement
+that commit declined in writing.
+
+Nothing released is affected by any of it. `v0.4.1` parsed the
+registry with `deny_unknown_fields` on a struct carrying `host`
+alone, so a released bombyx refused any `config.toml` with a
+`[projects.*]` table at all. That is why the CHANGELOG entry
+carries no `**BREAKING:**` marker, and the reasoning is written
+into the decision record so nobody re-argues it.
+
+Every generated command was checked by running the binary rather
+than by reading a format string -- six runs, including both
+spellings of the advised heading, to see which loads and which
+fails with `unknown field b`. `cargo xtask validate --check`
+passes, ten gates, coverage 98.5%.
+
+The red-team backlog now holds 19 open entries. Past ten the
+process says to say so: the backlog has become the problem.
+
 ### 2026-09-04
 
 **A second loader: a `Config` out of the registry, by project
@@ -13,8 +82,7 @@ Step 5 of seven in `project-config-off-repo` (#26).
 setting but the host, ranks the host across the four sources and
 returns the same `(Config, HostOrigin)` pair `Config::load`
 does. Both loaders exist until step 6 (#18) deletes the old one.
-Nothing in the binary calls the new one, so no behaviour
-changed.
+Nothing in the binary calls the new one.
 
 The reason it is a sibling and not a rewrite is in the plan
 document: a rewrite would put the switch and the new loading
@@ -56,10 +124,11 @@ parsing `bombyx.toml` keep testing it through a helper in
 `config.rs`'s own test module, and that helper is deleted with
 them.
 
-Eleven tests cover the loader, and five were proven by removing
-the code they cover: dropping the `sources.project` overwrite
-failed two, dropping the winning-host check failed one, and
-spelling `RegistryNotFound` as `NotFound` failed two. A sixth
+The loader's tests are in `load_project_tests`, and five of them
+were proven by removing the code they cover: dropping the
+`sources.project` overwrite failed two, dropping the
+winning-host check failed one, and spelling `RegistryNotFound`
+as `NotFound` failed two. A sixth
 claim did not survive that treatment. A test said the entry is
 read before the host is ranked, and it passed with the two
 swapped, because with `--host` set both orders reach the same
@@ -67,10 +136,44 @@ error. It now pins the order the only way that can fail: a
 broken entry and no host anywhere, where the order decides which
 of the two problems the operator is told about.
 
+**The review changed the behaviour of the loader that ships.**
+The operator's rule, given during the round: every `host` in the
+registry is checked as the file is read and reported as an
+error, whatever the command line says, with `--host` checked
+separately. So `config::registry::parse` now applies the host
+rule to the file-wide key and to every `[projects.*].host`
+before a `Registry` exists, the host arm left
+`Project::validate`, and `Registry::host` and
+`Registry::project_host` document their values as already
+checked. Their previous doc comments argued the opposite in as
+many words, which is what the operator overruled.
+
+That is a behaviour change and not only an addition: a bad host
+anywhere in the registry now fails every command that reads the
+file, which is every command run without `--host`. We first
+wrote that nothing in the CLI changed, having checked only the
+file-wide `host` -- the one case that did not change. A reviewer
+built both revisions and produced the case that did. Nothing
+released is affected: `v0.4.1` refused any `config.toml` with a
+`[projects.*]` table at all, so the behaviour being changed has
+never shipped.
+
+Two defects in our own review fixes came out of the same round.
+A name check added to `load_project` covered `/` and `..` and
+not `.`, so a project legitimately named `a.b` was advised to
+write `[projects.a.b]` -- which TOML reads as nesting, and serde
+then refuses the whole file. Both messages now quote the name,
+and the advised heading was run through the binary in both
+spellings to confirm which loads. And a sentence in
+`docs/architecture.md` claiming the loaders are the only way a
+`Config` is built was edited without being corrected, four
+sentences below the same document saying every field is public.
+
 `cargo xtask validate` passes, ten gates, coverage 98.4%.
-Definition of Done item 3 does not apply -- the new loader has
+Definition of Done item 3 does not apply -- the loader still has
 no caller, and a dry run against a `bombyx.toml` emits the same
-four commands as before.
+four commands as before, for a registry with no bad host in
+it.
 
 **Three reviewers on the per-project host: one unguarded value,
 and two claims in the commit message that were not true**

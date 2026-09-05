@@ -315,16 +315,23 @@ for tools that are not present:
   `tr '\n' ' ' < FILE | grep -o 'the phrase'`.
 - **Read a large file in pieces.** Over roughly 500 lines,
   `grep -n` for the item you want and then `sed -n` the range
-  around it. Reading `crates/bombyx/src/config.rs` (1747
-  lines) whole produced 66KB that overflowed into a persisted
-  file, and every fact the session actually used came from
-  the greps that followed it.
+  around it. Reading `crates/bombyx/src/config.rs` whole
+  produced 66KB that overflowed into a persisted file, and
+  every fact the session actually used came from the greps that
+  followed it. No line count here on purpose: that file grows
+  every commit, and `config-tests-own-file` in `docs/todo.md`
+  records why a figure in prose costs the next reader a check.
 
-  **Use `Read` for a range you are about to edit.** `Edit`
-  refuses a file the session has only read through Bash, so a
-  range opened with `sed -n` and then edited gets read twice.
-  Four ranges of `config.rs` went through that in one sitting.
-  `sed -n` stays right for a range you only want to look at.
+  **Do not then read the same range again with `Read`.** Four
+  ranges of `config.rs` were read twice in one sitting, on a
+  belief that `Edit` refuses a file the session has read only
+  through Bash. Two probes say it does not. An `Edit` against a
+  file never read at all reported a missing match rather than a
+  missing read, and an `Edit` against `docs/todo.md`, opened
+  that session with `grep` and `sed` and never with `Read`,
+  applied cleanly and was reverted with `git checkout`. So
+  `sed -n` alone is enough before an edit, whatever the tool
+  description gives as the precondition.
 - **Edit YAML and doc-comment neighbourhoods with `Edit`, not a
   slurp-mode regex.** `perl -0pi -e 's/.../.../'` over a whole
   file has no idea which block it landed in. One substitution

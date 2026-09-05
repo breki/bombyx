@@ -15,11 +15,15 @@
 //! different machine.
 //!
 //! What is wrong with a host value is decided in one place,
-//! [`host_problem`], and reported two ways: as a *field* problem
-//! by `super::Config::validate`, and as a problem with a
-//! *source* by `super::check_winning_host`, which names `--host`
-//! or the file the value came from. Deciding it once is what
-//! keeps the two messages from drifting apart.
+//! [`host_problem`], and reported three ways. As a *field*
+//! problem by `super::Config::validate`. As a problem with a
+//! *source* by `super::check_winning_host`, which names
+//! `--host` or the file the value came from. And by
+//! [`refuse_if_bad`] for every `host` key in the registry as
+//! that file is read, whether or not the run would have used
+//! the value -- `super::registry` owns that rule and its header
+//! says why. Deciding what is wrong in one place is what keeps
+//! the three messages from drifting apart.
 
 use std::path::{Path, PathBuf};
 
@@ -73,6 +77,14 @@ pub struct HostSources<'a> {
     /// asking for the entry, so there is nothing here to refuse.
     /// `super::registry::Registry::project` is what checks a
     /// requested name, once, when the entry itself is wanted.
+    ///
+    /// **`super::Config::load_project` ignores this field** and
+    /// ranks for the name it was passed. It is the loader that
+    /// reads a project's whole entry, so letting this field name
+    /// a second project would rank the host for one project and
+    /// take every other setting from another. Only
+    /// `super::Config::load` reads the field, and the step that
+    /// deletes that function takes the field with it.
     pub project: Option<&'a str>,
 
     /// Directory holding [`USER_CONFIG_FILE`], usually from
@@ -136,6 +148,48 @@ pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
         })
         .err()
         .map(HostProblem::from)
+}
+
+/// Refuses `value` if [`host_problem`] finds anything wrong,
+/// naming the source it came from.
+///
+/// The source rather than the field, because `host` arrives from
+/// four places and "which key do I edit?" has four answers.
+/// [`HostOrigin::describe`] holds the wording for each, and
+/// `path` is the registry file when the caller knows where it
+/// is: an operator sent to fix a value has to find the file,
+/// while `--host` and the variable name themselves and ignore
+/// it.
+///
+/// Two callers, and between them they cover every host value
+/// bombyx accepts. `super::registry::parse` calls it for each
+/// `host` key in the registry as the file is read, so a bad one
+/// is reported whether or not this run would have used it.
+/// `super::check_winning_host` calls it for whichever source won
+/// the ranking, which is the only path a `--host` or
+/// [`HOST_ENV`] value can arrive by.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::InvalidHost`], naming the source and
+/// the reason.
+pub(crate) fn refuse_if_bad(
+    value: &str,
+    origin: &HostOrigin,
+    path: Option<&Path>,
+) -> Result<(), ConfigError> {
+    let Some(problem) = host_problem(value) else {
+        return Ok(());
+    };
+    Err(ConfigError::InvalidHost {
+        origin: origin.describe(path),
+        reason: match problem {
+            // `HostProblem` carries no field name, so the empty
+            // case has no reason attached and gets one here.
+            HostProblem::Empty => "must not be empty".to_owned(),
+            HostProblem::Invalid(reason) => reason,
+        },
+    })
 }
 
 /// Whether an environment-supplied directory is safe to use.
@@ -237,7 +291,8 @@ where
 
 /// Which source supplied [`super::Config::host`].
 ///
-/// Returned by [`super::Config::load`] so a caller can *report*
+/// Returned by [`super::Config::load`], and by
+/// `Config::load_project` alongside it, so a caller can *report*
 /// the winner instead of re-deriving it. A binary that re-tested
 /// the flag and the environment for itself would hold a second
 /// copy of the precedence rule below, in code no library test can
@@ -267,12 +322,14 @@ pub enum HostOrigin {
 }
 
 impl HostOrigin {
-    /// Names this source, in the words both callers print.
+    /// Names this source, in the words every message and the
+    /// startup notice print.
     ///
     /// `path` is the registry file when the caller knows where
-    /// it is, and the bare file name stands in otherwise.
-    /// `super::Config::load` passes it, because an operator sent
-    /// to fix a bad value has to find the file.
+    /// it is, and the bare file name stands in otherwise. Both
+    /// loaders pass it, through `super::check_winning_host`, and
+    /// so does `super::registry`'s own parse, because an
+    /// operator sent to fix a bad value has to find the file.
     ///
     /// The startup notice passes `None` and so prints the bare
     /// name, which is a gap rather than a decision: the
@@ -300,7 +357,16 @@ impl HostOrigin {
             Self::Flag => "--host".to_owned(),
             Self::Env => HOST_ENV.to_owned(),
             Self::ProjectEntry(name) => {
-                format!("[projects.{name}].host in {file}")
+                // The name is printed quoted, so the heading is
+                // `[projects."myproject"].host`. A project name
+                // may contain a `.`, and TOML reads a bare dot
+                // in a heading as nesting -- so the unquoted
+                // spelling names a table the operator's file
+                // does not contain, and writing it would refuse
+                // the whole file. `ConfigError::ProjectNotFound`
+                // quotes it for the same reason and says more
+                // about why.
+                format!("[projects.{:?}].host in {file}", name.as_str())
             }
             Self::UserFile => file.to_owned(),
         }
@@ -412,9 +478,12 @@ pub(crate) fn rank(
 /// Where the registry file is, when the environment says.
 ///
 /// `None` when it names no config directory, which is a machine
-/// with nothing concrete to point a message at. Both messages
-/// about the file go through this one function, so neither can
-/// name a path the other would not.
+/// with nothing concrete to point a message at.
+///
+/// Every message that names the registry file gets its path from
+/// here, so no two of them can name different paths for the same
+/// file. No count of those messages: one lands most times this
+/// module is touched.
 pub(crate) fn registry_path(sources: &HostSources) -> Option<PathBuf> {
     sources.user_config_dir.map(registry::path)
 }

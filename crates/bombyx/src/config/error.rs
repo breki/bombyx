@@ -8,8 +8,10 @@
 //! file was missing, unreadable, not TOML, or carried a
 //! forbidden key. No source at all named a VM host -- not the
 //! flag, not the environment, not the registry. Or the registry
-//! has no table for the project asked for. Most of the eleven
-//! variants are about a file.
+//! has no table for the project asked for. Most of the variants
+//! are about a file. No count here: one lands most times this
+//! module is touched, and a stale number costs the next reader a
+//! recount.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a
@@ -194,6 +196,16 @@ pub enum ConfigError {
     /// Guessing a repository address and a provisioning script
     /// would boot a VM the operator did not describe.
     ///
+    /// **The name is printed quoted**, so the heading is
+    /// `[projects."myproject"]`. A project name may contain a
+    /// `.` -- `name::check_segment` allows one after the first
+    /// character -- and TOML reads a bare dot in a heading as
+    /// nesting, so `[projects.a.b]` declares `b` inside
+    /// `projects.a` and `deny_unknown_fields` refuses the whole
+    /// file. Quoting is valid TOML for every name the check
+    /// accepts, so one spelling serves them all rather than the
+    /// message guessing which names need it.
+    ///
     /// The tables, not every key inside them. `[vm]` and
     /// `[source]` require seven keys between them, and listing
     /// all seven turns a one-line error into a config sample.
@@ -201,8 +213,8 @@ pub enum ConfigError {
     /// in turn, which is the same information delivered where
     /// the operator is already editing.
     #[error(
-        "no `[projects.{name}]` in {} -- add that table with \
-         `[projects.{name}.vm]` and `[projects.{name}.source]`, \
+        "no `[projects.{name:?}]` in {} -- add that table with \
+         `[projects.{name:?}.vm]` and `[projects.{name:?}.source]`, \
          and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
          where this project belongs",
         .path.display()
@@ -224,6 +236,9 @@ pub enum ConfigError {
     /// create the file *and* know what to put in it, so the
     /// message says both.
     ///
+    /// The name is printed quoted, for the reason
+    /// [`ConfigError::ProjectNotFound`] gives.
+    ///
     /// `place` is a `String` rather than a `PathBuf` because a
     /// machine whose environment names no config directory has
     /// no path to print. `config::host::registry_place` decides
@@ -231,7 +246,7 @@ pub enum ConfigError {
     /// down.
     #[error(
         "no registry file -- create {place} with a \
-         `[projects.{name}]` table"
+         `[projects.{name:?}]` table"
     )]
     RegistryNotFound {
         /// Project name that was looked up.

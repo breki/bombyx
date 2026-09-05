@@ -327,9 +327,27 @@ reach `ssh`. Seven values in all, spread across
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`. Its `host` is optional where `Config`'s
-is required, and it reaches `ssh` the same way, so
-`Project::validate` runs `host_problem` on it alongside the
-other checkers `Config::validate` calls.
+is required, and it reaches `ssh` the same way.
+
+**Every `host` in the registry is checked as the file is read**,
+by `config::registry::parse` -- the file-wide one and every
+project's, not only the one a command turns out to want. This is
+the file where the operator writes host names, so a value bombyx
+would refuse is a mistake to report while they are looking at
+it; checking only the winner leaves a typo in an unused line
+until the day that line wins. Holding a `Registry` is therefore
+the proof that every host in it passed, which is why
+`Registry::host` and `Registry::project_host` hand their values
+out without re-running the rule.
+
+`check_winning_host` still applies the same rule to whatever the
+ranking picked, and after the above that only ever bites a
+`--host` or `BOMBYX_HOST` value -- the one pair that never came
+through the file. One consequence worth knowing: `--host` makes
+`resolve_host` skip reading the registry altogether, so a bad
+host sitting in a file that run never opens is not reported.
+`Config::load_project` has no such gap, because it reads the
+file for the project's settings whatever the flag says.
 
 `Config::load_project` then runs `Config::validate` over the
 value it assembles, so an entry's fields are checked twice. That
@@ -337,14 +355,14 @@ is deliberate rather than an oversight: `validate` is what every
 path building a `Config` calls, so a field added to `Config`
 without a matching check on the entry is still refused.
 
-Three values in an entry are checked while the file parses: the
+Four values in an entry are checked before any lookup: the
 project name, because it is the table key and a `ProjectName`;
-`repo` and `script`, because their types refuse a bad value.
-Everything else is checked when `Registry::project` hands the
-entry out, so a rule broken in one project's table is reported
-when that project is asked for. A table that does not *parse* is
-not like that: the whole file fails, whichever project it
-belongs to.
+`repo` and `script`, because their types refuse a bad value; and
+`host`, by the pass described above. The rest are checked when
+`Registry::project` hands the entry out, so a rule broken in one
+project's table is reported when that project is asked for. A
+table that does not *parse* is not like that: the whole file
+fails, whichever project it belongs to.
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it.
@@ -357,9 +375,19 @@ it.
 
 Three things keep that survivable meanwhile. `render` escapes
 for Ruby whatever it is handed. `bootstrap.sh` passes `--`
-before the ref. And the two loading
-functions are the only way a `Config` is built today, so in
-practice `validate` does run.
+before the ref. And inside this crate the only two places that
+build a `Config` are `ProjectFile::into_config` and
+`Project::to_config`, whose callers both run `validate`
+immediately -- so for bombyx's own commands the check does run.
+
+A library consumer is not covered by that, and the public fields
+are why: outside the crate, a `Config` built field by field with
+a hostile `host` compiles and reaches `plan` with nothing having
+checked it. No snippet here, because a struct literal for this
+type needs all five fields and a shortened one would not
+compile, which is a distraction from the point. That is the argument for
+`newtype-remaining-config-fields`, and it is the reason the
+paragraph above calls the gap a gap.
 
 `remote_root` should stop being a `String` first: it reaches
 `rm -rf`, and `config::root` already holds all of its rules in
@@ -380,7 +408,9 @@ that exists. Captured as `newtype-remaining-config-fields` in
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
-The older fields have their own rules, in the same place.
+`project` and `remote_root` have rules of their own in the same
+places: `Config::validate` for `project`, and `config::root` for
+every rule `remote_root` must pass.
 `project` must be one path segment, because it becomes one
 directory name on the VM host.
 

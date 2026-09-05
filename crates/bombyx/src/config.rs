@@ -77,10 +77,20 @@ mod vm;
 
 /// The `[vm]` and `[source]` tables every project file needs.
 ///
-/// Every test that needs them reads this one constant. Writing
-/// the eleven lines out per test module would mean editing each
-/// module to add a required field, and a module somebody missed
-/// would fail in a test about something else entirely.
+/// At module scope rather than inside a test module because two
+/// sibling test modules share it, `tests` and
+/// `load_project_tests`, and neither can reach into the other.
+///
+/// Writing the eleven lines out per test module would mean
+/// editing each module to add a required field, and a module
+/// somebody missed would fail in a test about something else
+/// entirely.
+///
+/// **There is a second copy**, `required_tables` in this
+/// module's `tests`, identical line for line. Nothing
+/// distinguishes them and one should go;
+/// `rt-2026-09-05-required-tables-has-two-copies` in
+/// `docs/developer/redteam-log.md` carries it.
 #[cfg(test)]
 const REQUIRED_TABLES: &str = "\n[vm]\n\
      provider = \"libvirt\"\n\
@@ -249,36 +259,25 @@ fn reject_host_key(
 
 /// Refuses the host the ranking picked, if it is unusable.
 ///
-/// The rule itself is `host_problem`'s, and this only decides
-/// how to report a value that breaks it: by naming the *source*
-/// rather than the field, because `host` can arrive from four
-/// places and "which key do I edit?" has four answers.
+/// `config::host::refuse_if_bad` holds the rule and the wording;
+/// this only supplies the registry's path, which the loaders
+/// know and it does not.
 ///
-/// Called by both loaders, so a bad `--host` produces the same
-/// message whichever one ran. It is called while the winning
-/// source is still known, which is why it takes an `origin`
-/// rather than being folded into [`Config::validate`]: that
-/// function sees only the assembled value and would name the
-/// field.
+/// Called by both loaders while the winning source is still
+/// known, which is why it takes an `origin` rather than being
+/// folded into [`Config::validate`]: that function sees only the
+/// assembled value and would name the field.
+///
+/// **A host out of the registry has already passed this rule**,
+/// applied to every key in the file by
+/// `config::registry::parse`. So only a `--host` or
+/// `BOMBYX_HOST` value reaches here unchecked.
 fn check_winning_host(
     host: &str,
     origin: &HostOrigin,
     sources: &HostSources,
 ) -> Result<(), ConfigError> {
-    let Some(problem) = host_problem(host) else {
-        return Ok(());
-    };
-    Err(ConfigError::InvalidHost {
-        // `describe` holds the wording for every source. The
-        // path is passed because an operator sent to fix the
-        // value has to find the file; `--host` and the variable
-        // ignore it and name themselves.
-        origin: origin.describe(registry_path(sources).as_deref()),
-        reason: match problem {
-            HostProblem::Empty => "must not be empty".to_owned(),
-            HostProblem::Invalid(reason) => reason,
-        },
-    })
+    host::refuse_if_bad(host, origin, registry_path(sources).as_deref())
 }
 
 impl Config {
@@ -293,17 +292,23 @@ impl Config {
     /// **Test-only.** Production code calls
     /// [`Config::load_project`].
     ///
+    /// Named for the file it parses rather than `parse`, because
+    /// the project-file helper in this module's test module has
+    /// the same three-argument shape and a third argument
+    /// meaning a host. `parse(src, path, "vmhost")` compiled
+    /// under both and meant different things.
+    ///
     /// # Errors
     ///
     /// Every error [`Config::load_project`] lists except the
     /// ones about reading a file.
     #[cfg(test)]
-    pub(crate) fn parse(
+    pub(crate) fn parse_registry(
         source: &str,
         path: &Path,
         name: &str,
     ) -> Result<Self, ConfigError> {
-        let registry = registry::parse(source, path)?;
+        let registry = registry::parse_for_tests(source, path)?;
         Self::from_registry(&registry, name, &HostSources::default())
             .map(|(cfg, _origin)| cfg)
     }
@@ -324,7 +329,7 @@ impl Config {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn for_tests() -> Self {
-        Self::parse(
+        Self::parse_registry(
             &test_registry("myproject", "vmhost", None),
             Path::new(USER_CONFIG_FILE),
             "myproject",
@@ -418,7 +423,12 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::RegistryNotFound`] if there is no
+    /// Returns [`ConfigError::Invalid`] with `field: "project"`
+    /// if `name` is not a single path segment -- checked before
+    /// anything else, including before the registry is looked
+    /// for, so no message can advise a table heading that the
+    /// parser refuses. Then
+    /// [`ConfigError::RegistryNotFound`] if there is no
     /// registry file, [`ConfigError::ProjectNotFound`] if it has
     /// no table for `name`, [`ConfigError::Read`],
     /// [`ConfigError::NotAFile`], [`ConfigError::TooLarge`] or
@@ -432,6 +442,19 @@ impl Config {
         name: &str,
         sources: &HostSources,
     ) -> Result<(Self, HostOrigin), ConfigError> {
+        // Before the registry is looked for, because the two
+        // errors below quote `name` back inside
+        // `[projects.<name>]` as the table to write. A name with
+        // a `/` or a `..` in it cannot be a table heading -- the
+        // parser refuses the whole file -- so advising it sends
+        // the operator to break every project in the file.
+        // `Registry::project` runs this same rule for the same
+        // reason; this covers the paths that never reach it.
+        check_segment(name).map_err(|e| ConfigError::Invalid {
+            field: "project",
+            reason: e.to_string(),
+        })?;
+
         let missing = || ConfigError::RegistryNotFound {
             name: name.to_owned(),
             place: registry_place(sources),
@@ -444,9 +467,10 @@ impl Config {
     /// [`Config::load_project`] against a registry already read.
     ///
     /// Split out so nothing has to write a file to test the
-    /// assembly: the test-only `Config::parse` parses a string
-    /// literal and calls this. (Named rather than linked: it is
-    /// `#[cfg(test)]`, so the doc build has no page for it.)
+    /// assembly: the test-only `Config::parse_registry` parses a
+    /// string literal and calls this. (Named rather than linked
+    /// because it is `#[cfg(test)]`, so the doc build has no
+    /// page for it.)
     ///
     /// # Errors
     ///
@@ -1449,10 +1473,9 @@ mod tests {
     fn a_bad_remote_root_in_toml_surfaces_as_a_field_error() {
         // Every `remote_root` rule, and the tests enumerating
         // the family it refuses, live in `config::root`. What
-        // this covers is the seam: a value refused there has to
-        // come back out of the project-file parse naming the
-        // field, so
-        // an operator is told which key to edit.
+        // this covers is the seam: a value refused there has
+        // to come back out of the project-file parse naming the
+        // field, so an operator is told which key to edit.
         for (root, want) in [
             ("", "must not be empty"),
             ("vms", "must start with"),
@@ -1728,7 +1751,8 @@ mod load_project_tests {
     use super::*;
 
     /// [`Config::load_project`] against a registry given as
-    /// text, keeping the [`HostOrigin`] `Config::parse` drops.
+    /// text, keeping the [`HostOrigin`] `Config::parse_registry`
+    /// drops.
     ///
     /// No file is written. `Config::load_project`'s own reading
     /// is covered by the two tests that do write one, and every
@@ -1738,7 +1762,8 @@ mod load_project_tests {
         name: &str,
         sources: &HostSources,
     ) -> Result<(Config, HostOrigin), ConfigError> {
-        let registry = registry::parse(source, Path::new(USER_CONFIG_FILE))?;
+        let registry =
+            registry::parse_for_tests(source, Path::new(USER_CONFIG_FILE))?;
         Config::from_registry(&registry, name, sources)
     }
 
@@ -1886,7 +1911,7 @@ mod load_project_tests {
                 .unwrap_err();
         assert!(matches!(err, ConfigError::ProjectNotFound { .. }), "{err}");
         let text = err.to_string();
-        assert!(text.contains("[projects.myproject]"), "{text}");
+        assert!(text.contains("[projects.\"myproject\"]"), "{text}");
     }
 
     #[test]
@@ -1923,7 +1948,7 @@ mod load_project_tests {
         // with only the first leaves the operator with an empty
         // file.
         assert!(text.contains(USER_CONFIG_FILE), "{text}");
-        assert!(text.contains("[projects.myproject]"), "{text}");
+        assert!(text.contains("[projects.\"myproject\"]"), "{text}");
     }
 
     #[test]
@@ -1936,6 +1961,92 @@ mod load_project_tests {
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         assert!(text.contains("config directory"), "{text}");
-        assert!(text.contains("[projects.myproject]"), "{text}");
+        assert!(text.contains("[projects.\"myproject\"]"), "{text}");
+    }
+
+    #[test]
+    fn a_bad_host_in_the_file_is_refused_even_when_the_flag_names_a_good_one() {
+        // The rule the operator asked for: a host written in the
+        // file is checked because it is in the file, not because
+        // this run turned out to want it. A typo in a line
+        // nothing consults is still a typo, and it would
+        // otherwise sit there until the day that line wins.
+        let source =
+            test_registry("myproject", "good", Some("-oProxyCommand=x"));
+        let sources = HostSources {
+            flag: Some("from-flag"),
+            ..HostSources::default()
+        };
+        let err = load(&source, "myproject", &sources).unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
+        // And the message names the table, because an operator
+        // with twenty projects in one file needs the heading to
+        // know which line to edit.
+        assert!(text.contains("[projects.\"myproject\"].host"), "{text}");
+    }
+
+    #[test]
+    fn a_name_with_a_dot_is_advised_as_a_quoted_table() {
+        // `check_segment` allows `.` after the first character,
+        // so `a.b` is a legal project name -- and a bare
+        // `[projects.a.b]` is not the table it looks like. TOML
+        // reads the dot as nesting, so that heading declares
+        // `b` inside `projects.a`, and `deny_unknown_fields`
+        // then refuses the file with `unknown field \`b\``. An
+        // operator following that advice breaks every project in
+        // the file, which is the harm the name check above
+        // exists to prevent -- for `/` and `..` it does, and
+        // this is the member of the family it let through.
+        //
+        // Quoting is what makes one spelling right for every
+        // name `check_segment` accepts.
+        for name in ["a.b", "a-b.c", "myproject"] {
+            for err in [
+                Config::load_project(name, &HostSources::default())
+                    .unwrap_err(),
+                load("host = \"vmhost\"\n", name, &HostSources::default())
+                    .unwrap_err(),
+            ] {
+                let text = err.to_string();
+                assert!(
+                    text.contains(&format!("[projects.{name:?}]")),
+                    "{name:?} must be advised quoted, got {text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_illegal_name_is_refused_before_the_registry_is_looked_for() {
+        // The name rule runs first, so no message ever advises a
+        // table heading the parser would refuse. `[projects...]`
+        // with a `/` or a `..` in it cannot be written down: the
+        // whole file fails to parse, so an operator following
+        // the advice breaks every project rather than fixing
+        // this one.
+        //
+        // The whole family, not the case that prompted it. Each
+        // one is refused for its own reason inside
+        // `name::check_segment`, and the point here is that
+        // `load_project` consults that function at all.
+        for name in ["", ".", "..", "../../etc", "-x", "a/b", "a/"] {
+            // No registry directory, which is the path that had
+            // no check: with one, `Registry::project` runs the
+            // rule before the map lookup.
+            let err = Config::load_project(name, &HostSources::default())
+                .unwrap_err();
+            let text = err.to_string();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::Invalid {
+                        field: "project",
+                        ..
+                    }
+                ),
+                "{name:?} must be refused as a project name, got {text}"
+            );
+        }
     }
 }
