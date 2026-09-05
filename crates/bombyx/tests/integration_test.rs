@@ -165,7 +165,7 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // even if the boot ran before the writes.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
-    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
+    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     // Each generated file prints as one elided line.
     assert!(lines[1].contains("cat > ~/'vms/myproject/Vagrantfile'"));
@@ -178,6 +178,31 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
         )),
         "{}",
         lines[3]
+    );
+    // The snapshot save comes last, so it records a machine that
+    // has finished booting.
+    assert!(
+        lines[4].contains("vagrant 'snapshot' 'save' 'fresh-install'"),
+        "{}",
+        lines[4]
+    );
+}
+
+#[test]
+fn snapshot_replaces_the_snapshot_it_finds() {
+    // The binary's own view of the on-demand command: `-f`, and
+    // one step, so nothing else on the host is touched.
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "snapshot"]);
+    assert_eq!(programs(&lines), vec!["ssh"]);
+    assert!(
+        lines[0].ends_with(&format!(
+            "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
+             '-f' 'fresh-install'\"",
+            vm_env()
+        )),
+        "{}",
+        lines[0]
     );
 }
 

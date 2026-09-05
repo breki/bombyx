@@ -289,6 +289,7 @@ bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
+bombyx snapshot           # save the fresh-install snapshot
 bombyx down               # halt the VM
 bombyx destroy myproject  # destroy the VM and remove its dir
                           # (every line above takes --project)
@@ -566,12 +567,9 @@ command has been driven against a real libvirt host
 `reset`, `destroy`, `scratch` and `discard`, including
 repeat runs for idempotency and a rejected traversal.
 
-Two things are still worth knowing. `reset` restores a
-`fresh-install` snapshot that no bombyx command creates,
-so it fails on a VM you have not snapshotted by hand.
-And `scratch` boots from the same base box as everything
-else, so a throwaway VM costs a full boot until there is
-a pre-baked image.
+One thing is still worth knowing: `scratch` boots from
+the same base box as everything else, so a throwaway VM
+costs a full boot until there is a pre-baked image.
 
 ## Origin
 

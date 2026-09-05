@@ -708,20 +708,33 @@ arrow keys print `^[[A`, the `chsh` step in `provision.sh` did
 not take -- log out and back in, since a shell change applies to
 the next login.
 
-### Take the snapshot that `reset` needs
+### The snapshot that `reset` returns to
 
 `bombyx reset` restores a snapshot named `fresh-install`, and
-**no bombyx command creates it**. Take it by hand now, while the
-VM is exactly as provisioning left it:
+the `up` you ran a moment ago already took it. That happens on
+the first `up` only: bombyx asks the host which snapshots the
+machine has, and saves one just when the name is missing. Every
+later `up` finds it and leaves it alone, so `fresh-install` goes
+on describing the VM as provisioning left it rather than
+whatever an agent has since done to it.
+
+That is the state you want to come back to after an agent has
+made a mess, which is why it must not be overwritten quietly.
+
+When you do want to move it, ask for it:
 
 ```bash
-ssh vmhost "cd ~/vms/myproject && vagrant snapshot save fresh-install"
+bombyx snapshot
 ```
 
-Without it, `reset` fails with `The snapshot name fresh-install
-was not found for the virtual machine`. Taking it now is the
-whole value of it: this is the state you want to come back to
-after an agent has made a mess.
+That replaces the existing snapshot without asking, so the state
+`reset` would have returned to is gone. The VM itself and its
+caches are untouched. Two occasions call for it. One is a VM you
+created before this behaviour existed: its first guarded save
+recorded whatever state it was in, not a fresh install. The
+other is a machine you have brought somewhere worth returning
+to -- a long dependency build finished, say -- and want that to
+be the new starting point.
 
 ## Part 5: living with it
 
@@ -817,8 +830,9 @@ dealt with:
   Part 5.
 - **Arrow keys print `^[[A` inside the VM.** The box created
   its user with dash rather than bash. Part 3.
-- **`reset` says the snapshot was not found.** Nothing ever
-  took the `fresh-install` snapshot. Part 4.
+- **`reset` says the snapshot was not found.** The VM was
+  created before bombyx took snapshots, so no `up` of it ever
+  saved one. Run `bombyx snapshot`. Part 4.
 - **A mount or a host service hangs rather than failing.** The
   nftables rules drop guest-initiated traffic to the host. See
   **What this does and does not buy** in `vm-host-setup.md`.

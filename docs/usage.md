@@ -33,6 +33,7 @@ bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
+bombyx snapshot           # save the fresh-install snapshot
 bombyx down               # halt the VM
 bombyx destroy myproject  # destroy the VM and remove its dir
 
@@ -96,6 +97,41 @@ files before vagrant reports it has nothing to provision, so run
 `provision` targets the project VM only -- a scratch VM is
 disposable, so the answer there is `discard` followed by
 `scratch`.
+
+### Where the snapshot `reset` restores comes from
+
+`reset` rolls the project VM back to a snapshot named
+`fresh-install`, and `up` is what takes it. The save runs after
+the boot, so the snapshot records a machine that has finished
+provisioning rather than one part-way through it.
+
+`up` saves it only when the machine does not already hold that
+name. That is the whole rule, and it exists because "after `up`
+completes" is a known-good moment on the first `up` and on no
+later one: every `up` after the first follows whatever an agent
+has been doing in the VM. Saving unconditionally would quietly
+move the point `reset` returns to, which is the one thing the
+snapshot is for.
+
+So the guard makes the snapshot immovable by accident. To move
+it on purpose, ask:
+
+```bash
+bombyx --project myproject snapshot
+```
+
+That replaces the existing `fresh-install` without asking, and
+the state `reset` would have returned to is gone. The VM, its
+disk and its caches are untouched -- a snapshot is a return
+point, not the machine, which is why this does not ask for the
+project name the way `destroy` does.
+
+Two situations call for it. A VM created before bombyx took
+snapshots has never had a first `up` under the new behaviour, so
+its `fresh-install` either does not exist or records whatever
+state it was in. And a machine you have brought somewhere worth
+returning to -- a long dependency build finished, a toolchain
+installed -- is a better starting point than the original one.
 
 ### Why `destroy` asks for the project name
 

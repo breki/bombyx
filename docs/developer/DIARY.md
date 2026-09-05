@@ -4,6 +4,47 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**`reset` now has a snapshot to restore**
+
+`reset-needs-snapshot` (#6). `reset` has always run `vagrant
+snapshot restore fresh-install` and no bombyx command took that
+snapshot, so it failed on every VM nobody had snapshotted by
+hand -- seen live during #37 the same day. README and
+`docs/tutorial.md` already said to take it yourself, so the
+documentation half was done and the command half was not.
+
+Both halves of the option the issue offered landed. `up` gains
+one step after the boot, and `bombyx snapshot` takes the
+snapshot on demand with `-f`.
+
+The guard is the whole design. "After `up` completes" is a
+known-good moment on the first `up` and on no later one, since
+every `up` after it follows arbitrary use of the machine, so the
+save runs only when the name is missing. `bombyx snapshot` is
+the answer for the two machines that guard cannot serve: one
+already in use before this shipped, whose first guarded save
+records that state, and one somebody has brought somewhere worth
+returning to.
+
+Three facts were measured on frosti before the guard was
+written, and each one moved the design. `vagrant snapshot list`
+exits 0 whether or not the machine has snapshots, so the guard
+reads its output rather than its status. A save over an existing
+name exits 1, and `execute` stops at the first failing step, so
+an unguarded save would have made every second `up` report
+failure. And `vagrant snapshot save` works on a running libvirt
+domain, which the whole arrangement depends on because `up`
+leaves the VM running.
+
+Verified live rather than by dry run. The first `up` saved the
+snapshot; a marker file was made in the guest; the second `up`
+skipped the save and still exited 0; `reset` removed the marker.
+Then `bombyx snapshot` replaced the snapshot without asking and
+a later `reset` returned to the new point, with exactly one
+snapshot on the machine throughout. frosti is the workstation
+and the VM host both, so only the `sh -c` route ran live and the
+`ssh` route rests on the dry run.
+
 **The new CLI has now met a real VM host**
 
 `registry-run-against-frosti` (#37) is the Definition of Done

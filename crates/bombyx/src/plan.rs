@@ -52,6 +52,16 @@ pub enum Action {
     Status,
     /// Restore the project VM's `fresh-install` snapshot.
     Reset,
+    /// Save the project VM's `fresh-install` snapshot, replacing
+    /// one that is already there.
+    ///
+    /// [`Action::Up`] takes the snapshot too, but only when the
+    /// machine has none, so the reset cycle works without anyone
+    /// running this. Two machines need the deliberate save. One
+    /// was already in use before bombyx took snapshots, so its
+    /// first guarded save recorded that state. The other has
+    /// been brought somewhere worth returning to.
+    Snapshot,
     /// Check bombyx's preconditions without changing anything.
     Doctor,
     /// Destroy the project VM and remove its directory.
@@ -89,7 +99,17 @@ pub enum Action {
 #[must_use]
 pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
     match action {
-        Action::Up => write_then(cfg, &cfg.remote_project_dir(), &["up"], tty),
+        // The snapshot save is here rather than inside
+        // `write_then` because `provision` and `scratch` share
+        // that helper and neither wants one: `provision` runs on
+        // a machine already in arbitrary use, and a scratch VM is
+        // discarded rather than reset.
+        Action::Up => {
+            let dir = cfg.remote_project_dir();
+            let mut cmds = write_then(cfg, &dir, &["up"], tty);
+            cmds.push(remote::save_snapshot_if_absent(cfg, tty));
+            cmds
+        }
         Action::Provision => {
             write_then(cfg, &cfg.remote_project_dir(), &["provision"], tty)
         }
@@ -98,9 +118,10 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
         Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
         Action::Reset => vec![remote::vagrant(
             cfg,
-            &["snapshot", "restore", "fresh-install"],
+            &["snapshot", "restore", remote::FRESH_SNAPSHOT],
             tty,
         )],
+        Action::Snapshot => vec![remote::save_snapshot(cfg, tty)],
         // Host probes only. The local checks read this
         // filesystem and spawn a `--version` call, so there is no
         // command line a dry run could print that would describe
@@ -195,18 +216,25 @@ mod tests {
         // only the actions it remembered would leave `destroy`
         // and `discard` silently un-threaded.
         for action in all_actions() {
-            // Doctor is the only action with no tty-bearing
-            // command: its probes are parsed, and a PTY would fold
-            // control characters into text that gets compared.
-            // Every other action ends in exactly one vagrant
-            // invocation -- including teardown, where the
-            // `rm -rf` beside it has no output worth a terminal.
-            let expected = usize::from(action != Action::Doctor);
-            assert_eq!(
-                dash_t_count(&plan_for(&action, Tty::Allocate)),
-                expected,
-                "{action:?} under Allocate"
-            );
+            // The rule is per command: a step gets a terminal
+            // when it runs vagrant, because that is the step with
+            // output to render. The `mkdir`, the two file writes
+            // and the `rm -rf` have none worth one.
+            //
+            // Doctor is the exemption. Its probes are parsed, and
+            // a PTY would fold control characters into the text
+            // being compared.
+            for c in plan_for(&action, Tty::Allocate) {
+                let runs_vagrant =
+                    c.args[c.args.len() - 1].contains(" vagrant '");
+                let want = runs_vagrant && action != Action::Doctor;
+                assert_eq!(
+                    c.args.iter().any(|a| a == "-t"),
+                    want,
+                    "{action:?} under Allocate: {:?}",
+                    c.args
+                );
+            }
 
             // Under NoPty only `shell` keeps its `-t`, because it
             // asks for one regardless of the local stdio.
@@ -276,6 +304,7 @@ mod tests {
             Action::Shell,
             Action::Status,
             Action::Reset,
+            Action::Snapshot,
             Action::Doctor,
             Action::Destroy,
             Action::Scratch(scratch("pr-1")),
@@ -291,6 +320,7 @@ mod tests {
                 | Action::Shell
                 | Action::Status
                 | Action::Reset
+                | Action::Snapshot
                 | Action::Doctor
                 | Action::Destroy
                 | Action::Scratch(_)
@@ -362,6 +392,13 @@ mod tests {
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'up'\"",
+                "ssh vmhost \"cd ~/'vms/myproject' && if ! \
+                 BOMBYX_VM_HOST='vmhost' \
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'snapshot' \
+                 'list' | grep -qx 'fresh-install'; then \
+                 BOMBYX_VM_HOST='vmhost' \
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'snapshot' \
+                 'save' 'fresh-install'; fi\"",
             ]
         );
     }
@@ -387,15 +424,19 @@ mod tests {
         //
         // The directory has to exist first as well, which is what
         // pins `mkdir` at index 0.
-        for action in [
-            Action::Up,
-            Action::Provision,
-            Action::Scratch(scratch("pr-1234")),
+        //
+        // The boot is found by its own vagrant verb rather than
+        // taken as the last step, because `up` has one step after
+        // it: the snapshot save.
+        for (action, verb) in [
+            (Action::Up, "vagrant 'up'"),
+            (Action::Provision, "vagrant 'provision'"),
+            (Action::Scratch(scratch("pr-1234")), "vagrant 'up'"),
         ] {
             let s = scripts(&action);
             let vagrantfile = only_at(&s, "/Vagrantfile'");
             let bootstrap = only_at(&s, "/bootstrap.sh'");
-            let boot = s.len() - 1;
+            let boot = only_at(&s, verb);
             assert_eq!(only_at(&s, "mkdir -p"), 0, "{action:?}");
             assert!(
                 vagrantfile < boot,
@@ -462,17 +503,23 @@ mod tests {
 
     #[test]
     fn provision_and_up_take_the_same_shape() {
-        // The invariant the shared helper exists to keep: the
-        // two differ in their last step and nowhere else. A
-        // `provision` that grew its own file-writing logic could
-        // boot against a stale Vagrantfile on the host.
+        // The invariant the shared helper exists to keep: the two
+        // write the same three commands, and differ only in the
+        // vagrant call that follows them. A `provision` that grew
+        // its own file-writing logic could boot against a stale
+        // Vagrantfile on the host.
+        //
+        // `up` then has one step neither shares, the snapshot
+        // save, so the comparison stops at the vagrant call
+        // rather than at the end of the plan.
         let up = run(&Action::Up);
         let pr = run(&Action::Provision);
-        assert_eq!(up.len(), pr.len());
-        assert_eq!(up[..up.len() - 1], pr[..pr.len() - 1]);
+        assert_eq!(up.len(), pr.len() + 1);
+        let writes = pr.len() - 1;
+        assert_eq!(up[..writes], pr[..writes]);
         let env = vm_env();
         assert_eq!(
-            up.last().unwrap().args[1],
+            up[writes].args[1],
             format!("cd ~/'vms/myproject' && {env} vagrant 'up'")
         );
         assert_eq!(
@@ -483,13 +530,23 @@ mod tests {
 
     #[test]
     fn scratch_and_up_take_the_same_shape() {
-        // The two lifecycles must not drift apart again.
+        // The two lifecycles must not drift apart again in how
+        // they write and boot. They differ in one step and the
+        // difference is deliberate: `up` ends by saving the
+        // snapshot `reset` restores, and a scratch VM has no
+        // `reset` -- it is discarded instead.
         let up = run(&Action::Up);
         let sc = run(&Action::Scratch(scratch("x")));
         let names = |cmds: &[RemoteCommand]| -> Vec<String> {
             cmds.iter().map(|c| c.program.clone()).collect()
         };
-        assert_eq!(names(&up), names(&sc));
+        assert_eq!(up.len(), sc.len() + 1);
+        assert_eq!(names(&up[..sc.len()]), names(&sc));
+        assert!(
+            up.last().unwrap().args[1].contains("vagrant 'snapshot' 'save'"),
+            "{:?}",
+            up.last().unwrap().args
+        );
     }
 
     #[test]
@@ -520,6 +577,64 @@ mod tests {
             cmds[0].args[1],
             format!("cd ~/'vms/myproject' && {env} vagrant 'status'")
         );
+    }
+
+    #[test]
+    fn up_takes_the_snapshot_after_booting() {
+        // Order is the assertion. The snapshot has to record a
+        // machine that has finished booting, so the save is the
+        // last step and never an earlier one.
+        let cmds = run(&Action::Up);
+        let env = vm_env();
+        assert_eq!(
+            cmds.last().unwrap().args[1],
+            format!(
+                "cd ~/'vms/myproject' && if ! {env} vagrant 'snapshot' \
+                 'list' | grep -qx 'fresh-install'; then {env} vagrant \
+                 'snapshot' 'save' 'fresh-install'; fi"
+            )
+        );
+        assert!(
+            cmds[cmds.len() - 2].args[1].ends_with("vagrant 'up'"),
+            "the boot should come directly before the save: {:?}",
+            cmds[cmds.len() - 2].args
+        );
+    }
+
+    #[test]
+    fn snapshot_replaces_the_snapshot_without_consulting_the_listing() {
+        // The on-demand command exists to re-take, so it must
+        // overwrite. Sharing `up`'s guard would make it do
+        // nothing on exactly the machine an operator runs it on.
+        let cmds = run(&Action::Snapshot);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0].args[1],
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
+                 '-f' 'fresh-install'",
+                vm_env()
+            )
+        );
+    }
+
+    #[test]
+    fn reset_restores_the_name_the_two_saves_write() {
+        // The pairing this action set exists for. Asserted across
+        // the plans rather than inside `remote`, because `plan`
+        // chooses which builder each action gets and could hand
+        // `reset` a different one.
+        let restored = run(&Action::Reset)[0].args[1].clone();
+        assert!(restored.contains("'fresh-install'"), "{restored}");
+        for action in [Action::Up, Action::Snapshot] {
+            let saved = scripts(&action);
+            let save = saved.last().unwrap();
+            assert!(
+                save.contains("vagrant 'snapshot' 'save'"),
+                "{action:?} should end by saving: {save}"
+            );
+            assert!(save.contains("'fresh-install'"), "{action:?}: {save}");
+        }
     }
 
     #[test]

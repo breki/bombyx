@@ -74,11 +74,18 @@ bombyx shell              # shell inside the VM (ssh -t)
 bombyx status             # vagrant status
 bombyx doctor             # check preconditions, read-only
 bombyx reset              # restore fresh-install snapshot
+bombyx snapshot           # save fresh-install snapshot
 bombyx destroy <project>  # destroy the VM, remove its dir
 bombyx scratch <name>     # boot a throwaway VM
 bombyx discard <name>     # destroy a throwaway VM, remove its dir
 bombyx self-update        # replace the binary; needs git, curl, tar
 ```
+
+`up` ends by saving the `fresh-install` snapshot, and only
+when the machine does not already hold it: the listing and the
+save are one shell script with an `if` between them, so bombyx
+reads no output and decides nothing. `snapshot` saves the same
+name with `-f`, replacing whatever is there.
 
 `destroy` requires the project name as confirmation.
 `destroy` and `discard` both `rm -rf` the host directory after

@@ -131,6 +131,19 @@ enum VmCmd {
     Status,
     /// Restore the project VM to its `fresh-install` snapshot
     Reset,
+    /// Save the project VM's `fresh-install` snapshot
+    ///
+    /// `up` already takes this snapshot on a machine that has
+    /// none, so the `reset` cycle works without running this.
+    /// Use it to move the point `reset` returns to, or on a VM
+    /// that was already in use before bombyx took snapshots at
+    /// all -- there the snapshot `up` saved records that state
+    /// rather than a fresh install.
+    ///
+    /// Replaces an existing snapshot without asking, which
+    /// discards the state `reset` would have returned to. The VM
+    /// and its caches are untouched.
+    Snapshot,
     /// Check bombyx's preconditions, changing nothing
     Doctor,
     /// Destroy the project VM and remove its directory
@@ -631,6 +644,7 @@ fn action_of(cmd: &VmCmd, cfg: &Config) -> Result<Action> {
         VmCmd::Shell => Action::Shell,
         VmCmd::Status => Action::Status,
         VmCmd::Reset => Action::Reset,
+        VmCmd::Snapshot => Action::Snapshot,
         VmCmd::Doctor => Action::Doctor,
         VmCmd::Destroy { confirm } => {
             confirm_destroy(confirm.as_deref(), cfg)?;

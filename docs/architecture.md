@@ -292,6 +292,7 @@ classDiagram
     Shell
     Status
     Reset
+    Snapshot
     Doctor
     Destroy
     Scratch
@@ -348,13 +349,31 @@ sequenceDiagram
   vg->>guest: run bootstrap.sh
   guest->>git: git clone repo at ref
   guest->>guest: run the script from the clone
+  cli->>vg: vagrant snapshot list
+  vg-->>cli: the names it holds
+  cli->>vg: vagrant snapshot save fresh-install (if absent)
   guest-->>op: VM ready
 ```
 
-Two things matter about the order. The directory is created
-first, because the heredocs write into it. And `vagrant` runs
-last, because it reads the Vagrantfile that the heredocs just
-wrote.
+Three things matter about the order. The directory is created
+first, because the heredocs write into it. `vagrant up` runs
+after them, because it reads the Vagrantfile they just wrote.
+And the snapshot is saved after the boot, so it records a
+machine that has finished provisioning.
+
+The last two steps are one command rather than two: the listing
+and the save are a single shell script with an `if` between
+them, so bombyx never reads the listing and never decides. A
+`vagrant snapshot list` exits 0 whether or not the machine has
+snapshots, so the script tests its output rather than its
+status.
+
+The `if` is what keeps `fresh-install` meaning what it says.
+Only the first `up` finds the name missing; every later one
+follows arbitrary use of the machine and must not overwrite the
+point `reset` returns to. `bombyx snapshot` is the way to
+overwrite it deliberately, and it passes `-f` rather than
+sharing this guard.
 
 Every step is one command, and which command depends on the
 route. Over SSH each step is an `ssh`. Running on the VM host
