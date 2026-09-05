@@ -289,7 +289,7 @@ bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
-bombyx snapshot           # save the fresh-install snapshot
+bombyx snapshot           # replace the fresh-install snapshot
 bombyx down               # halt the VM
 bombyx destroy myproject  # destroy the VM and remove its dir
                           # (every line above takes --project)
@@ -561,11 +561,22 @@ Gates: clippy pedantic with zero warnings, 90% coverage
 ## Status
 
 Early, but no longer untested against reality. Every
-command has been driven against a real libvirt host
-(Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt 0.12.2):
-`doctor`, `up`, `provision`, `shell`, `status`, `down`,
-`reset`, `destroy`, `scratch` and `discard`, including
-repeat runs for idempotency and a rejected traversal.
+command that drives a VM has been run against a real
+libvirt host (Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt
+0.12.2): `doctor`, `up`, `provision`, `shell`, `status`,
+`down`, `reset`, `snapshot`, `destroy`, `scratch` and
+`discard`, including repeat runs for idempotency and a
+rejected traversal. `self-update` is the one command not on
+that list, because it talks to GitHub and replaces this
+binary rather than touching a VM host at all.
+
+Every one of those runs took the local route, where the VM
+host is the workstation and bombyx never calls `ssh`, so
+the `ssh` spelling of all of them rests on `--dry-run`. No
+provider but libvirt has been tried either, and vagrant's
+snapshot support differs by provider.
+`docs/issues/registry-run-against-frosti.md` records that
+run in full, including what it could not reach.
 
 One thing is still worth knowing: `scratch` boots from
 the same base box as everything else, so a throwaway VM

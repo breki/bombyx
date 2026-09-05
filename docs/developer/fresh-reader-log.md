@@ -9,6 +9,51 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-05-snapshot-rule-in-eight-places
+
+**Category:** One rule restated in many places, none of them
+the home.
+
+The rule that `up` saves the `fresh-install` snapshot only when
+the name is absent, while `bombyx snapshot` replaces it with
+`-f`, is now stated in roughly eight places: `README.md`,
+`crates/bombyx/README.md`, `llms.txt`, `docs/usage.md`,
+`docs/tutorial.md`, `docs/architecture.md`, the clap help on
+`VmCmd::Snapshot` and the doc comment on `Action::Snapshot`.
+The reviewer that read the files cold said `docs/usage.md`
+carries the version that answers the question a reader arrives
+with, and everything else restates it.
+
+Deferred rather than fixed. `/review` under **Review, then fix**
+puts a consolidation of three or more copies on the escalate
+list, and says a consolidation is never applied in the round
+that found it: the round carrying twenty-five other edits is
+exactly where one goes wrong. It wants its own commit, after
+this one, with `docs/usage.md` as the home and the rest cut back
+to a pointer.
+
+Two of the copies are not free to move. The clap help is what
+`bombyx --help` prints, so the operator-facing version belongs
+there; `llms.txt` is an inventory and is meant to restate.
+
+### fr-2026-09-05-comments-narrating-bombyx-past
+
+**Category:** Comments telling the story of an earlier version.
+
+`CLAUDE.md` under **Code comments** says not to narrate the
+past, because bombyx is pre-release and nobody is migrating.
+Two comments outside the snapshot work still do:
+`crates/bombyx/src/remote.rs` on `vagrant_command`, which
+recounts that `destroy` once built its own string and ran
+`vagrant` with neither variable set, and a test comment in the
+same file recounting the same episode.
+
+Deferred as out of scope: the snapshot change does not touch
+either, and rewriting comments a change does not otherwise
+reach is churn the next reviewer reads as part of the work. The
+one instance the change *did* introduce, on `Action::Snapshot`,
+was fixed rather than logged.
+
 ### fr-2026-09-05-record-done-while-backlog-says-pending
 
 **Category:** Two documents disagree about whether the work is

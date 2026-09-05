@@ -4,6 +4,41 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**Two rounds of the snapshot review found the tests, not the code**
+
+`/review2` over the snapshot work: three stages, 26 findings, 22
+fixed. Two are worth remembering, and both are the same shape --
+an unescaped interpolation into shell that a test then failed to
+catch.
+
+The first was in the guard. The advisory `||` added to stop a
+snapshot failure failing an `up` also covered the `cd` in front
+of it, because `&&` and `||` associate left at equal precedence.
+A project directory that had gone away reported success, behind
+a message naming a snapshot. Braces fixed it.
+
+The second was in the test written to prevent exactly that. The
+state table's stub `vagrant` printed its listing through a
+double-quoted shell word, and the listing imitates vagrant's
+blurb, which contains backticks. So the backticks were command
+substitution: they ran the stub a second time as `vagrant
+snapshot save`, which created the marker file that says the
+guard saved. The one test asserting a snapshot is ever taken
+passed whether or not anything happened. It was found by
+mutation -- inverting the guard left the test green. The stub
+now writes its listing to a file and `cat`s it, so no shell
+touches the text.
+
+The lesson is the one `CLAUDE.md` already holds under **Input
+guards: enumerate the family first**, and the cost of skipping
+it is now measured: the guard was built one condition per review
+round, and each new condition interacted with the last in a way
+no Rust test could see. Three red-team rounds, the cap, and
+every round found a defect in the previous round's fix. The
+state table exists now, six states against a stub, and both
+fixes above are proven by running a mutant rather than by
+reading the assertion.
+
 **`reset` now has a snapshot to restore**
 
 `reset-needs-snapshot` (#6). `reset` has always run `vagrant

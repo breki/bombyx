@@ -19,6 +19,8 @@ the one in your config directory. `self-update` needs neither.
 
 - [Commands](#commands)
 - [Checking a host with doctor](#checking-a-host-with-doctor)
+- [Where the snapshot reset restores comes
+  from](#where-the-snapshot-reset-restores-comes-from)
 - [Seeing what would run: --dry-run](#seeing-what-would-run---dry-run)
 - [How the generated files are written](#how-the-generated-files-are-written)
 - [What is checked, and what is
@@ -33,7 +35,7 @@ bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
-bombyx snapshot           # save the fresh-install snapshot
+bombyx snapshot           # replace the fresh-install snapshot
 bombyx down               # halt the VM
 bombyx destroy myproject  # destroy the VM and remove its dir
 
@@ -113,8 +115,18 @@ has been doing in the VM. Saving unconditionally would quietly
 move the point `reset` returns to, which is the one thing the
 snapshot is for.
 
-So the guard makes the snapshot immovable by accident. To move
-it on purpose, ask:
+`up` does not fail when it cannot take the snapshot. The step
+warns on stderr and lets the boot stand, because a VM that came
+up correctly has not failed. Two machines meet that on every
+run: a provider with no snapshot support, and one whose listing
+decorates the name so vagrant refuses the unforced save. So a
+`reset` that finds nothing to restore may mean that warning went
+by unread.
+
+### `bombyx snapshot`: moving the point `reset` returns to
+
+The guard makes the snapshot immovable by accident. To move it
+on purpose, ask:
 
 ```bash
 bombyx --project myproject snapshot
@@ -123,15 +135,19 @@ bombyx --project myproject snapshot
 That replaces the existing `fresh-install` without asking, and
 the state `reset` would have returned to is gone. The VM, its
 disk and its caches are untouched -- a snapshot is a return
-point, not the machine, which is why this does not ask for the
-project name the way `destroy` does.
+point, not the machine, which is why it takes no confirmation
+argument the way `destroy` does. Both commands still need
+`--project`, as every command does.
 
-Two situations call for it. A VM created before bombyx took
-snapshots has never had a first `up` under the new behaviour, so
-its `fresh-install` either does not exist or records whatever
-state it was in. And a machine you have brought somewhere worth
-returning to -- a long dependency build finished, a toolchain
-installed -- is a better starting point than the original one.
+It is worth running in two situations. The first is a VM you
+created before this behaviour existed, and which branch you are
+in depends on whether you have run `up` since. If you have, its
+`fresh-install` exists and records the moment of that `up`,
+which was not a fresh install. If you have not, there is no
+snapshot at all. The second is a machine you have brought
+somewhere worth returning to -- a long dependency build
+finished, a toolchain installed -- which makes a better starting
+point than the original one.
 
 ### Why `destroy` asks for the project name
 
@@ -281,12 +297,20 @@ ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
 ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
 Each generated file prints as one line naming its heredoc and
 how many lines were dropped. Printing both in full would bury
-the four-step plan they belong to; the host receives the whole
+the five-step plan they belong to; the host receives the whole
 content regardless.
+
+The fifth line is the snapshot guard, and it is one command
+rather than two: the host's shell runs the listing, tests it and
+saves only when `fresh-install` is missing. The `|| printf` at
+the end is what keeps a snapshot bombyx cannot take from
+failing an `up` whose VM booted correctly -- it warns on stderr
+instead.
 
 On a machine that is its own VM host every line reads
 `sh -c "..."` instead, carrying the identical script. Which

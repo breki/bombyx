@@ -146,7 +146,10 @@ and this project adheres to
 - `up` now takes the `fresh-install` snapshot that `reset` restores, so the
   reset cycle works without anyone taking it by hand. It saves only when the
   machine does not already hold that name, leaving every later `up` free to run
-  without moving the point `reset` returns to.
+  without moving the point `reset` returns to. The step is advisory: when the
+  snapshot cannot be taken -- a provider with no snapshot support, say -- `up`
+  warns on stderr and still succeeds, because a VM that booted correctly has
+  not failed.
 
 ### Fixed
 

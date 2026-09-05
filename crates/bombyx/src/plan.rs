@@ -57,10 +57,8 @@ pub enum Action {
     ///
     /// [`Action::Up`] takes the snapshot too, but only when the
     /// machine has none, so the reset cycle works without anyone
-    /// running this. Two machines need the deliberate save. One
-    /// was already in use before bombyx took snapshots, so its
-    /// first guarded save recorded that state. The other has
-    /// been brought somewhere worth returning to.
+    /// running this. The case for running it deliberately is in
+    /// `docs/usage.md`.
     Snapshot,
     /// Check bombyx's preconditions without changing anything.
     Doctor,
@@ -107,7 +105,7 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
         Action::Up => {
             let dir = cfg.remote_project_dir();
             let mut cmds = write_then(cfg, &dir, &["up"], tty);
-            cmds.push(remote::save_snapshot_if_absent(cfg, tty));
+            cmds.push(remote::save_snapshot_if_absent(cfg, &dir, tty));
             cmds
         }
         Action::Provision => {
@@ -116,12 +114,14 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
         Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
-        Action::Reset => vec![remote::vagrant(
-            cfg,
-            &["snapshot", "restore", remote::FRESH_SNAPSHOT],
-            tty,
-        )],
-        Action::Snapshot => vec![remote::save_snapshot(cfg, tty)],
+        Action::Reset => {
+            let dir = cfg.remote_project_dir();
+            vec![remote::restore_snapshot(cfg, &dir, tty)]
+        }
+        Action::Snapshot => {
+            let dir = cfg.remote_project_dir();
+            vec![remote::save_snapshot(cfg, &dir, tty)]
+        }
         // Host probes only. The local checks read this
         // filesystem and spawn a `--version` call, so there is no
         // command line a dry run could print that would describe
@@ -224,7 +224,8 @@ mod tests {
             // Doctor is the exemption. Its probes are parsed, and
             // a PTY would fold control characters into the text
             // being compared.
-            for c in plan_for(&action, Tty::Allocate) {
+            let allocate = plan_for(&action, Tty::Allocate);
+            for c in &allocate {
                 let runs_vagrant =
                     c.args[c.args.len() - 1].contains(" vagrant '");
                 let want = runs_vagrant && action != Action::Doctor;
@@ -233,6 +234,25 @@ mod tests {
                     want,
                     "{action:?} under Allocate: {:?}",
                     c.args
+                );
+            }
+
+            // The per-command rule above is satisfied by a plan
+            // with no vagrant step in it at all, so it cannot
+            // notice one that lost its boot. The count the old
+            // version of this test asserted is what caught that,
+            // and this is that half kept.
+            //
+            // `doctor` is excluded because its probes spell the
+            // program differently -- `command -v 'vagrant'` and
+            // `vagrant plugin list` -- so none of them matches
+            // the test above.
+            if action != Action::Doctor {
+                assert!(
+                    allocate.iter().any(|c| {
+                        c.args[c.args.len() - 1].contains(" vagrant '")
+                    }),
+                    "{action:?} runs vagrant nowhere"
                 );
             }
 
@@ -392,13 +412,16 @@ mod tests {
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'up'\"",
-                "ssh vmhost \"cd ~/'vms/myproject' && if ! \
-                 BOMBYX_VM_HOST='vmhost' \
+                "ssh vmhost \"cd ~/'vms/myproject' && { \
+                 names=\\$(BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'snapshot' \
-                 'list' | grep -qx 'fresh-install'; then \
-                 BOMBYX_VM_HOST='vmhost' \
+                 'list') && if ! printf '%s\\\\n' \\\"\\$names\\\" \
+                 | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'snapshot' \
-                 'save' 'fresh-install'; fi\"",
+                 'save' 'fresh-install'; fi || printf 'bombyx: could not \
+                 save the fresh-install snapshot for %s; re-run this \
+                 command with snapshot in place of up\\\\n' \
+                 'myproject' >&2; }\"",
             ]
         );
     }
@@ -585,13 +608,15 @@ mod tests {
         // machine that has finished booting, so the save is the
         // last step and never an earlier one.
         let cmds = run(&Action::Up);
-        let env = vm_env();
+        // Compared against the builder rather than a third copy
+        // of the shell. What this test owns is which builder ends
+        // the plan; `remote` owns what that builder emits.
         assert_eq!(
-            cmds.last().unwrap().args[1],
-            format!(
-                "cd ~/'vms/myproject' && if ! {env} vagrant 'snapshot' \
-                 'list' | grep -qx 'fresh-install'; then {env} vagrant \
-                 'snapshot' 'save' 'fresh-install'; fi"
+            cmds.last().unwrap(),
+            &remote::save_snapshot_if_absent(
+                &cfg(),
+                &cfg().remote_project_dir(),
+                Tty::NoPty
             )
         );
         assert!(

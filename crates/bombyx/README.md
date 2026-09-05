@@ -31,7 +31,7 @@ bombyx provision          # re-run provisioning in the guest
 bombyx shell              # open a shell inside the VM
 bombyx status             # vagrant status on the host
 bombyx reset              # restore the fresh-install snapshot
-bombyx snapshot           # save the fresh-install snapshot
+bombyx snapshot           # replace the fresh-install snapshot
 bombyx down               # halt the VM
 
 bombyx scratch pr-1234    # boot a throwaway VM

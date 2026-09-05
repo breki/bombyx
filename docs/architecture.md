@@ -344,14 +344,18 @@ sequenceDiagram
   cli->>host: mkdir -p the project dir
   cli->>host: cat > Vagrantfile (heredoc)
   cli->>host: cat > bootstrap.sh (heredoc)
-  cli->>vg: vagrant up
+  cli->>host: cd the project dir, then vagrant up
+  host->>vg: vagrant up
   vg->>guest: create from box
   vg->>guest: run bootstrap.sh
   guest->>git: git clone repo at ref
   guest->>guest: run the script from the clone
-  cli->>vg: vagrant snapshot list
-  vg-->>cli: the names it holds
-  cli->>vg: vagrant snapshot save fresh-install (if absent)
+  cli->>host: one script: list, test, save if absent
+  host->>vg: vagrant snapshot list
+  vg-->>host: the names it holds
+  opt fresh-install not among them
+    host->>vg: vagrant snapshot save fresh-install
+  end
   guest-->>op: VM ready
 ```
 
@@ -361,12 +365,37 @@ after them, because it reads the Vagrantfile they just wrote.
 And the snapshot is saved after the boot, so it records a
 machine that has finished provisioning.
 
-The last two steps are one command rather than two: the listing
-and the save are a single shell script with an `if` between
-them, so bombyx never reads the listing and never decides. A
+The four arrows from `one script` to the save are a single
+command. bombyx sends one shell script holding the listing, the
+test and the save, so the host's shell is what reads the listing
+and what decides; bombyx receives neither the names nor the
+decision. `VM ready` below them is not something bombyx emits at
+all -- it is the operator seeing a working machine.
 `vagrant snapshot list` exits 0 whether or not the machine has
 snapshots, so the script tests its output rather than its
 status.
+
+Pretty-printed, and with the identity prefix left off each
+`vagrant` call, that script is:
+
+```sh
+cd <project dir> && {
+  names=$(vagrant snapshot list) &&
+  if ! printf '%s\n' "$names" | grep -qx 'fresh-install'; then
+    vagrant snapshot save fresh-install
+  fi || printf 'bombyx: could not save ...\n' >&2
+}
+```
+
+Three parts of that carry weight. Capturing the listing rather
+than piping it into `grep` is what stops a listing vagrant could
+not produce being read as an empty one, because a pipeline
+reports only its last command's status. The braces keep the `cd`
+outside the `||`, so a project directory that has gone away
+still fails the step. And the `||` itself makes the snapshot
+advisory: it is the last step of `up`, and without it a VM that
+booted correctly would report failure because a snapshot could
+not be taken.
 
 The `if` is what keeps `fresh-install` meaning what it says.
 Only the first `up` finds the name missing; every later one
@@ -379,8 +408,9 @@ Every step is one command, and which command depends on the
 route. Over SSH each step is an `ssh`. Running on the VM host
 itself each step is an `sh -c` carrying the same script. Either
 way bombyx spawns exactly one process per step and interprets
-none of the script itself, which is why the `cli` lifeline has
-no self-call.
+none of the script itself. The one `cli` self-call in the
+diagram is reading the config, which happens before there is a
+plan to run.
 
 `provision` is the same sequence ending in `vagrant provision`,
 which exists because vagrant runs provisioners only when it

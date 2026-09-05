@@ -19,7 +19,7 @@ can no longer locate.
 > **The transcripts in Parts 3 and 4 are not from that run
 > (unverified).** They show behaviour that is unreleased at the
 > time of writing -- bombyx generating the Vagrantfile, `up` as
-> four `ssh` commands, `doctor` without the `tar` and `scp`
+> five `ssh` commands, `doctor` without the `tar` and `scp`
 > rows -- none of which 0.4.1 could produce. They are written
 > from the code rather than captured from a machine. Treat
 > your own first `bombyx up` as the real test.
@@ -659,11 +659,13 @@ ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
 ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
+ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
-Four commands, and every one of them is an `ssh`: make the
-directory, write the two files bombyx generates, boot. bombyx
-runs nothing on your workstation.
+Five commands, and every one of them is an `ssh`: make the
+directory, write the two files bombyx generates, boot, then save
+the `fresh-install` snapshot if the VM does not already have
+one. bombyx runs nothing on your workstation.
 
 The two writes print as one line each. Each carries a whole
 file, and printing both in full would bury the plan they belong
@@ -712,11 +714,14 @@ the next login.
 
 `bombyx reset` restores a snapshot named `fresh-install`, and
 the `up` you ran a moment ago already took it. That happens on
-the first `up` only: bombyx asks the host which snapshots the
-machine has, and saves one just when the name is missing. Every
-later `up` finds it and leaves it alone, so `fresh-install` goes
-on describing the VM as provisioning left it rather than
-whatever an agent has since done to it.
+the first `up` only. The last step of `up` is a small script the
+*host* runs: it lists the snapshots, tests for the name, and
+saves one only when the name is missing. bombyx never sees the
+list and never makes the decision -- it sends the script and
+reads an exit status. So every later `up` finds the snapshot and
+leaves it alone, and `fresh-install` goes on describing the VM
+as provisioning left it rather than whatever an agent has since
+done to it.
 
 That is the state you want to come back to after an agent has
 made a mess, which is why it must not be overwritten quietly.
@@ -729,12 +734,17 @@ bombyx snapshot
 
 That replaces the existing snapshot without asking, so the state
 `reset` would have returned to is gone. The VM itself and its
-caches are untouched. Two occasions call for it. One is a VM you
-created before this behaviour existed: its first guarded save
-recorded whatever state it was in, not a fresh install. The
-other is a machine you have brought somewhere worth returning
-to -- a long dependency build finished, say -- and want that to
-be the new starting point.
+caches are untouched.
+
+Two occasions call for it. The first is a VM you created before
+this behaviour existed, and what you have depends on whether you
+have run `up` since. If you have, that `up` took a snapshot of
+the machine as it stood, which was not a fresh install. If you
+have not, there is no snapshot at all. Either way `bombyx
+snapshot` is how you set the point you want. The second occasion
+is a machine you have brought somewhere worth returning to -- a
+long dependency build finished, say -- and want that to be the
+new starting point.
 
 ## Part 5: living with it
 
@@ -830,9 +840,13 @@ dealt with:
   Part 5.
 - **Arrow keys print `^[[A` inside the VM.** The box created
   its user with dash rather than bash. Part 3.
-- **`reset` says the snapshot was not found.** The VM was
-  created before bombyx took snapshots, so no `up` of it ever
-  saved one. Run `bombyx snapshot`. Part 4.
+- **`reset` says the snapshot was not found.** Two causes. The
+  VM predates this behaviour and has had no `up` since, so
+  nothing ever saved one. Or an `up` tried and could not: that
+  step is advisory, so it warns on stderr and lets `up`
+  succeed, and the warning is easy to miss several commands
+  later. Either way, run `snapshot` and read what it says.
+  Part 4.
 - **A mount or a host service hangs rather than failing.** The
   nftables rules drop guest-initiated traffic to the host. See
   **What this does and does not buy** in `vm-host-setup.md`.
