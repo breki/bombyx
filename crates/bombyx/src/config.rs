@@ -1,10 +1,10 @@
-//! Project configuration (`bombyx.toml`).
+//! A project's configuration, from either file that can carry
+//! it.
 //!
-//! A bombyx project describes its VM in `bombyx.toml`, in the
-//! project repo. The VM host holds nothing from that repo:
-//! bombyx renders the Vagrantfile from `[vm]` and writes it
-//! there on every `up`. This module reads that per-project
-//! configuration.
+//! - [`Config::load`] -- `bombyx.toml`, in the project's own
+//!   directory
+//! - [`Config::load_project`] -- one `[projects.<name>]` table
+//!   in the operator's `config.toml`
 //!
 //! **The VM host is not part of it.** Which machine runs the
 //! VMs is a property of the developer, not of the project --
@@ -403,14 +403,9 @@ impl Config {
     /// the project's own directory, which is the dependency
     /// `docs/trust-boundary.md` exists to remove.
     ///
-    /// **One file, read once.** Everything comes out of the
-    /// registry: the `[projects.<name>]` table supplies every
-    /// setting but the host, and the host is ranked across
-    /// `--host`, `BOMBYX_HOST`, that same table's optional
-    /// `host` and the file-wide one. `config::host::rank` holds
-    /// the ranking and is handed the copy already read, so a
-    /// file edited mid-run cannot supply a project host and a
-    /// file-wide host that never coexisted.
+    /// Reads the registry once and ranks the host from that
+    /// same copy, so the settings and the host cannot come from
+    /// two different reads of the file.
     ///
     /// The host is ranked for `name`, whatever `sources.project`
     /// says. Ranking for one project while loading another would
@@ -442,14 +437,9 @@ impl Config {
         name: &str,
         sources: &HostSources,
     ) -> Result<(Self, HostOrigin), ConfigError> {
-        // Before the registry is looked for, because the two
-        // errors below quote `name` back inside
-        // `[projects.<name>]` as the table to write. A name with
-        // a `/` or a `..` in it cannot be a table heading -- the
-        // parser refuses the whole file -- so advising it sends
-        // the operator to break every project in the file.
-        // `Registry::project` runs this same rule for the same
-        // reason; this covers the paths that never reach it.
+        // Before the file is opened, because the errors below
+        // quote `name` back as a table heading and must not
+        // advise an impossible one.
         check_segment(name).map_err(|e| ConfigError::Invalid {
             field: "project",
             reason: e.to_string(),
@@ -486,10 +476,8 @@ impl Config {
         // looked in the file.
         let project = registry.project(name)?;
 
-        // The caller's `project` is overwritten rather than
-        // read, so the host and the settings always come out of
-        // one entry. `Config::load_project` says what ranking
-        // for one project while loading another would cost.
+        // Overwritten, not read, so the host and the settings
+        // always come from the same entry.
         let sources = HostSources {
             project: Some(name),
             ..sources.clone()
@@ -500,12 +488,9 @@ impl Config {
 
         let cfg = project.to_config(name, host);
 
-        // `Project::validate` has already run every rule these
-        // fields carry, and this runs them again over the
-        // assembled value. That is deliberate: `validate` is
-        // what every path building a `Config` calls, so a field
-        // added to `Config` without a matching entry check is
-        // still refused here.
+        // Deliberately checks the entry's fields a second
+        // time: a field added to `Config` with no matching
+        // entry check is still refused here.
         cfg.validate()?;
         Ok((cfg, origin))
     }

@@ -46,29 +46,9 @@
 //! and so refuse the keys the first one names, and the two would
 //! drift as the file grows.
 //!
-//! # Every host in the file is checked as the file is read
-//!
-//! A host value is handed to `ssh` as its first positional
-//! argument, and `ssh` honours no `--` separator, so a leading
-//! `-` is read as an option. [`parse`] therefore applies
-//! `super::host`'s rule to the file-wide `host` and to every
-//! project's `host`, before it builds a [`Registry`] at all.
-//!
-//! **`parse` checks every one of them, not only the one a
-//! command turns out to want.** This is the file where the
-//! operator writes host names, so a value bombyx would refuse is
-//! a mistake to report while they are looking at it. Checking
-//! only the winner leaves a typo sitting in an unused line until
-//! the day that line wins, and then it surfaces during a command
-//! that has nothing to do with editing config.
-//!
-//! Two things follow. Holding a `Registry` is the proof that
-//! every host in it passed, so [`Registry::host`] and
-//! [`Registry::project_host`] hand their values out without
-//! running the rule again. And the ranking's own check --
-//! `super::check_winning_host` -- is then only ever exercised by
-//! a `--host` or `BOMBYX_HOST` value, which is the one pair that
-//! never came through this file.
+//! [`parse`] applies the host rule to every `host` key as the
+//! file is read, so holding a [`Registry`] proves every host in
+//! it passed.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -128,36 +108,9 @@ pub struct Project {
     #[serde(default = "default_remote_root")]
     pub remote_root: String,
 
-    /// The VM host this one project runs on, when it does not
-    /// run on the machine the file-wide `host` names.
-    ///
-    /// Optional, and absent from most entries. It exists for
-    /// the operator who keeps one project on a different
-    /// machine: without it they type `--host` on every command
-    /// for that project and rely on remembering to.
-    ///
-    /// A `String` rather than a checked type, and that is a gap
-    /// rather than a decision: `host` is one of the five fields
-    /// `newtype-remaining-config-fields` in `docs/todo.md`
-    /// covers, and a type built through `TryFrom<String>` would
-    /// make holding one the proof the rule ran, the way
-    /// [`super::RepoUrl`] does.
-    ///
-    /// Until then the rule runs where the value is read: the
-    /// module's `parse` applies it to this key and to the
-    /// file-wide one as the file is parsed, so a bad value is
-    /// reported while the operator is looking at the file that
-    /// carries it -- whether or not the run that read the file
-    /// would have used this project's host. A typo in a line
-    /// nothing consults is still a typo.
-    ///
-    /// **It is holding a [`Registry`] that proves this value
-    /// passed**, not holding a `Project`. This type is public
-    /// and derives `Deserialize`, so a caller outside the crate
-    /// can build one from any text at all and reach a `host`
-    /// nothing has checked. Ask [`Registry::project`] for an
-    /// entry and the guarantee holds, because the only way to a
-    /// `Registry` is the module's `parse`.
+    /// The VM host this one project runs on, when it is not the
+    /// machine the file-wide `host` names. Absent from most
+    /// entries.
     pub host: Option<String>,
 
     /// The machine to build.
@@ -247,24 +200,13 @@ impl Project {
         }
     }
 
-    /// Runs the rules no type on these fields carries.
-    ///
-    /// Each rule lives in the module that owns the field, and
-    /// this function states none of them: it calls
+    /// Runs the rules no type on these fields carries:
     /// `super::root::check` for `remote_root`, then the `[vm]`
-    /// and `[source]` checks. `super::Config::validate` calls
-    /// the same ones, and the two agree because neither holds a
-    /// copy of a rule.
+    /// and `[source]` checks.
     ///
-    /// **`host` is not among them**, and it is the one field
-    /// checked earlier instead. [`parse`] applies the host rule
+    /// **`host` is not among them.** [`parse`] applies that rule
     /// to every key in the file as it is read, so by the time
-    /// anything can call this the entry's host has passed.
-    /// Applying it again here would report the same value twice,
-    /// with the worse of the two messages: this function names a
-    /// field, and the operator with twenty projects in one file
-    /// needs the table heading, which is what [`parse`] gives
-    /// them.
+    /// anything calls this, the entry's host has passed.
     ///
     /// # Errors
     ///

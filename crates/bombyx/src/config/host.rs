@@ -151,23 +151,8 @@ pub(crate) fn host_problem(value: &str) -> Option<HostProblem> {
 }
 
 /// Refuses `value` if [`host_problem`] finds anything wrong,
-/// naming the source it came from.
-///
-/// The source rather than the field, because `host` arrives from
-/// four places and "which key do I edit?" has four answers.
-/// [`HostOrigin::describe`] holds the wording for each, and
-/// `path` is the registry file when the caller knows where it
-/// is: an operator sent to fix a value has to find the file,
-/// while `--host` and the variable name themselves and ignore
-/// it.
-///
-/// Two callers, and between them they cover every host value
-/// bombyx accepts. `super::registry::parse` calls it for each
-/// `host` key in the registry as the file is read, so a bad one
-/// is reported whether or not this run would have used it.
-/// `super::check_winning_host` calls it for whichever source won
-/// the ranking, which is the only path a `--host` or
-/// [`HOST_ENV`] value can arrive by.
+/// naming its source rather than a field -- four sources, four
+/// answers to "which key do I edit?".
 ///
 /// # Errors
 ///
@@ -379,14 +364,8 @@ impl std::fmt::Display for HostOrigin {
     }
 }
 
-/// The two sources that do not come out of a file.
-///
-/// [`resolve_host`] asks this before opening anything, and
-/// [`rank`] asks it again as its first two steps. One copy, so
-/// the decision to read the file and the decision about which
-/// source wins cannot come to disagree -- if `--host` stopped
-/// outranking the registry here, `resolve_host` would skip
-/// reading a file whose value was now supposed to win.
+/// The two host sources that come from the caller rather than a
+/// file.
 fn caller_supplied(sources: &HostSources) -> Option<(String, HostOrigin)> {
     if let Some(host) = sources.flag {
         return Some((host.to_owned(), HostOrigin::Flag));
