@@ -55,7 +55,10 @@ plan, decisions, and outcome.
   chosen by `[vm] provider`, and only the libvirt spelling has ever been run.
   Whether the Hyper-V block boots anything, and whether the two need to
   diverge further than they do, is unanswered until somebody has a Windows VM
-  host. Related: `provider-configured-not-selected`.
+  host. `provider-configured-not-selected` closed the other half of this: the
+  renderer's provider block is now the provider vagrant is actually told to
+  use. What stays open here is `doctor-checks-hyperv-support`, and the Hyper-V
+  block itself, which has never booted anything.
 
 - **provision-lifecycle-hooks** -- named hooks replace one bash provision script
   Provisioning is currently one bash script run by Vagrant at VM creation.
@@ -128,49 +131,6 @@ plan, decisions, and outcome.
   the gap means resolving git, curl and tar before the first fetch. Worth fixing
   in the same pass: git is the first program self-update runs, and it was
   missing from the lists that name its tools.
-
-- **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
-  Found by the red-team review of 58099a8 (RT-2), verified by reading
-  vagrantfile.rs and plan.rs. The generated Vagrantfile emits
-  `config.vm.provider :<name> do |v|`, which configures a provider if vagrant
-  chooses it. It did not choose it. No plan passed `--provider`, and bombyx
-  set no VAGRANT_DEFAULT_PROVIDER, so vagrant picked whatever the host made
-  available. On a Linux VM host with only vagrant-libvirt installed, a project
-  with provider = "hyperv" booted a libvirt machine. The `:hyperv` settings block
-  never applied, so the cpus and memory in the config were ignored and the VM
-  came up at vagrant defaults. Nothing reported the mismatch. Until 58099a8 the
-  libvirt plugin probe caught this by accident: a hyperv project got a red
-  doctor row, for the wrong reason. That probe is now conditional and a hyperv
-  project gets a skip row instead, so the accident is gone and the defect is
-  visible. The fix is to pass the provider to vagrant rather than only
-  describing it -- `vagrant up --provider <name>`, or VAGRANT_DEFAULT_PROVIDER
-  in the command bombyx already builds. Then `doctor` should check that the host
-  can supply the provider the project asks for, which is the honest version of
-  the probe that was removed.
-
-  **Done on the branch for issue #45**, and the entry moves to `## Done` when
-  that PR merges. bombyx sets VAGRANT_DEFAULT_PROVIDER on `vagrant up`, and on
-  that verb alone. Three things were measured on frosti and settled it. With no
-  machine yet, an unusable provider makes vagrant refuse every verb -- `up`,
-  `status`, `halt` and `destroy` alike, each exiting 1 with "The Hyper-V
-  provider only works on Windows". With a machine already created, vagrant reads
-  the provider it recorded and ignores the variable, so
-  `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status` on a running libvirt machine
-  exits 0 and reports libvirt. And a `hyperv` project run end to end on frosti
-  failed the boot after bombyx had written the directory, then destroyed
-  cleanly, because `destroy` carries no provider and so was not refused as well.
-
-  The doctor half is half done, and calling it finished would overstate it. For
-  a libvirt project the existing probe is the check the entry asked for: it
-  greps `vagrant plugin list` for `vagrant-libvirt`, so a host that cannot
-  supply libvirt gets a red row before `up` runs. For a hyperv project doctor
-  emits a skip row, and a skip is the absence of a check -- on a Linux VM host
-  every row comes back green and `up` then fails. Writing an honest hyperv
-  probe needs a Windows VM host, and Provider::Hyperv is documented as never
-  exercised, so that half stays open under `doctor-checks-hyperv-support`.
-
-  Two limits found by the review rounds have their own entries:
-  `provider-change-on-existing-vm` and `disarm-on-the-ssh-route`.
 
 - **validate-resume-from-step** -- let validate resume at the gate that failed
   `cargo xtask validate` prints `-> iterate with: cargo xtask <cmd>` on a
@@ -374,6 +334,9 @@ plan, decisions, and outcome.
   than merely unwritten -- the skip row is the honest report until then.
 
 ## Done
+
+- **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
+  (2026-09-05)
 
 - [**reset-needs-snapshot**](issues/registry-run-against-frosti.md)
   -- reset depends on a snapshot nothing creates
