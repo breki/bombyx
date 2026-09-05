@@ -186,10 +186,6 @@ plan, decisions, and outcome.
   as the restart, and the step names already exist in `validate.rs`'s step list.
   Raised by the workflow retrospective, 2026-09-03.
 
-- **registry-config-load** -- load a Config from the registry by name
-  Step 5 of 7; GitHub issue #26. Depends on registry-projects-table and
-  registry-project-host. Pure addition, the last before the switch.
-
 - **destroy-confirmation-shape** -- what destroy's positional becomes
   Step 7 of 7; GitHub issue #27. Depends on project-selection-flag. One design
   question, undecided.
@@ -243,6 +239,10 @@ plan, decisions, and outcome.
   the body across. Found while using the fixed tool for the first time.
 
 ## Done
+
+- [**registry-config-load**](issues/project-config-off-repo.md)
+  -- load a Config from the registry by name
+  (2026-09-05)
 
 - [**registry-project-host**](issues/project-config-off-repo.md)
   -- an optional host key per project

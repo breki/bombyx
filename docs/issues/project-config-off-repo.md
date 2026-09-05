@@ -1,7 +1,9 @@
 # project-config-off-repo
 
 **Status:** In progress -- chunk 1 landed 2026-09-02, steps 1
-to 4 of 7 landed 2026-09-04
+to 4 of 7 landed 2026-09-04, step 5 landed 2026-09-05. Two
+steps remain: #18 switches the tool over, #27 settles
+`destroy`'s positional.
 
 The Status line and the **Progress log** are written when a step
 is committed, so they lead `docs/todo.md`: an entry there moves
@@ -483,10 +485,9 @@ commands stay identical, which a dry run can show.
 entry below carries the same date, so the order of the headings
 is the only thing that says which landed first -- and two of
 them are out of it: step 4's entry sits above step 3's because
-it was written first. Step 5 has no entry yet, because an entry
-is written when a step is committed and merged, and the Status
-line at the top of this document is what says how far that has
-got.
+it was written first. An entry is written when a step is merged,
+so the Status line at the top of this document is what says how
+far that has got.
 
 ### 2026-09-02 -- chunk 1 landed
 
@@ -692,3 +693,39 @@ beats two. `destroy`'s positional is step 7 and still open. The
 `.git/config` question stays parked, as the plan always had it.
 
 #16 is closed as split rather than done.
+
+### 2026-09-05 -- step 5 landed
+
+`Config::load_project(name, sources)` reads the operator's
+`config.toml`, takes the `[projects.<name>]` table for every
+setting but the host, ranks the host across the four sources and
+returns the same `(Config, HostOrigin)` pair `Config::load`
+returns. A sibling, not a rewrite, as the decision above has it.
+Nothing in the binary calls it; step 6 supplies the first caller
+and deletes `Config::load`.
+
+`config/host.rs` split. The four-source precedence is now `rank`,
+which takes an already-read registry, and `resolve_host` is
+read-then-`rank` for the old loader alone. That split exists
+because the new loader needs the same copy of the file for the
+project's settings, and its own comment said why reading twice is
+wrong.
+
+**The review changed more than the step did.** The operator's
+rule -- every `host` in the registry checked as the file is read
+-- came out of a finding, reverses reasoning written down in
+`b534bb1` and `59dd110`, and is the one behaviour change here: a
+bad host in any entry now fails every command that reads the
+file. The decision above records it. Nothing released is
+affected, because `v0.4.1` refused a `config.toml` with a
+`[projects.*]` table at all.
+
+Three review rounds each found one copy of one rule: a project
+name printed inside a TOML heading must be quoted. The
+consolidation landed afterwards as its own commit, `c9c9ac6`, and
+`docs/architecture.md` under **The heading spelling has one
+owner** holds the reasoning.
+
+Coverage 98.5%, ten gates, seven CI jobs. Definition of Done item
+3 does not apply: the loader has no caller and the emitted
+commands are unchanged, which a dry run shows.
