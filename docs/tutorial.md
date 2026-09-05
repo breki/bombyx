@@ -319,14 +319,16 @@ myproject/                  your project repo
 
 ### The project's table in `config.toml`
 
-Open `config.toml.sample` from bombyx's own repository. Its
-comments explain every key, and a test loads that file as
+Open `config.toml.sample`. It is at the root of the bombyx
+clone you made in Part 1, and also at
+<https://github.com/breki/bombyx/blob/main/config.toml.sample>.
+Its comments explain every key, and a test loads that file as
 shipped, so it cannot drift from what bombyx accepts -- which is
 worth something, because it has been unloadable twice.
 
 Copy the `[projects.myproject]` block out of it and append it to
 the `config.toml` you wrote in Part 1, below the `host` line.
-Then change three values:
+Then change these:
 
 | Key | This tutorial uses |
 |-----|--------------------|
@@ -344,8 +346,9 @@ standing.
 Leave `provider = "libvirt"`, and leave `remote_root` where the
 sample puts it -- above `[projects.myproject.vm]`, because a
 bare key belongs to the table header above it, and written below
-that header this one would parse as `vm.remote_root` and the
-whole file would be refused.
+that header this one would parse as
+`projects.myproject.vm.remote_root` and the whole file would be
+refused.
 
 `[vm]` and `[source]` are required and have no defaults. bombyx
 builds the VM from the first and the guest clones the second,
@@ -531,7 +534,7 @@ one a VM command runs.
 $ bombyx --project myproject --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (265 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -557,8 +560,13 @@ especially `destroy`.
 
 ### Boot it
 
+**Every command from here on takes `--project myproject`.** The
+examples leave it out so the line under discussion stays
+readable; typed without it, bombyx stops and says the argument
+is required.
+
 ```bash
-bombyx up
+bombyx --project myproject up
 ```
 
 The first run downloads the box on the host and takes a while;
@@ -602,10 +610,6 @@ bombyx --project myproject down    # halt it when you are done
 bombyx --project myproject up      # boot again, fast, caches warm
 bombyx --project myproject reset   # roll back to the snapshot
 ```
-
-`--project myproject` is on every one of them, and on every
-command for the rest of this tutorial. The examples below leave
-it out so the line under discussion stays readable.
 
 When you change `vagrant/provision.sh`, use `provision`, not
 `up`:

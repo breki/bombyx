@@ -87,24 +87,26 @@ instead. Nothing is committed and nothing in the project's
 directory is opened.
 
 `config.toml.sample` in the repository root is the only full
-example, and a test loads it as shipped. Keys:
+example, and a test loads it as shipped. The keys, in the order
+a real file needs them, because a bare key binds to the table
+header above it:
 
-- `host` — file-wide; the machine every project runs on unless
+- `host` (file-wide) — the machine every project runs on unless
   its own table says otherwise
 - `[projects.<name>]` — one per project. The table key is the
   project name, so no key inside repeats it. A name containing
   a `.` must be quoted, since TOML reads a bare dot as nesting
+- `remote_root` (in a project's table) — optional, `~/vms`.
+  Written below either table beneath it, this binds to that
+  table instead and the whole file is refused
+- `host` (in a project's table) — optional, for a project that
+  runs on a machine of its own. It outranks the file-wide key
 - `[projects.<name>.vm]` — required, no defaults: `provider`,
   `box`, `cpus`, `memory`. Use `libvirt`; `hyperv` is written
   but bombyx does not tell vagrant to select it
   (`docs/todo.md`)
 - `[projects.<name>.source]` — required: `repo`, `ref`,
   `script`, what the guest clones and runs
-- `remote_root` — optional, `~/vms`, inside the project's own
-  table. Must sit above that entry's tables: a bare key after
-  `[projects.<name>.source]` binds to that table
-- `host` — optional, inside the project's own table, for a
-  project that runs elsewhere
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a

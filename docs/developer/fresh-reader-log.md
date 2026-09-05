@@ -9,6 +9,126 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-05-placeholder-subjects-across-the-config-prose
+
+**Category:** Voice
+
+`CLAUDE.md` under **Voice** rules out "Nothing" and "No X" as a
+subject, because a placeholder lets nobody act. After #18 that
+shape sits in fourteen places, most of them prose this project
+rewrote in the same change: `README.md` (the heading **Why
+nothing bombyx reads is committed**, plus three sentences),
+`crates/bombyx/src/lib.rs`, `llms.txt`, `docs/architecture.md`
+twice, `config/host.rs` twice, `config/registry.rs` twice,
+`config.rs`, and `.gitignore`.
+
+It costs most in the code comments, where the scope of the claim
+is the thing in doubt: `config/host.rs`'s "Nothing here runs the
+rule again" leaves a reader unsure whether the subject is
+`rank`, the module or the crate, and the answer is one named
+actor away.
+
+Deferred during the `/review2` on #18 as a fourteen-place sweep
+at the end of a run that had already stopped once on
+non-convergence. Found as FR-16.
+
+### fr-2026-09-05-field-rules-filed-under-a-traps-heading
+
+**Category:** Structure
+
+In `docs/architecture.md`, the subsection **Two traps a reader
+cannot see from the code** ends with the clap trap, and then
+seventy more lines continue under it: the library-consumer
+paragraph, the `remote_root` newtype paragraph, the whole
+`| Field | Refused | Because |` table and every `remote_root`
+rule. The block opens "Three things keep that survivable
+meanwhile", and "that" refers to a sentence a hundred lines and
+two headings earlier.
+
+The fix is to move the block back beside the gap it qualifies,
+or give it a heading naming its subject and replace "that" with
+the noun. Predates #18 and is untouched by it.
+
+Deferred during the `/review2` on #18: it is a structural move
+in a 550-line document, outside that change's scope. Found as
+FR-1.
+
+### fr-2026-09-05-the-ranking-reason-is-stated-three-times
+
+**Category:** Duplication
+
+The argument for returning a `HostOrigin` rather than letting
+the binary re-derive the winner is written out three times, near
+verbatim: on the type in `config/host.rs`, at the call site in
+`main.rs`, and again in `llms.txt`. A reader of the type cannot
+tell whether the paragraph describes a real caller or a design
+that was considered, and cannot tell which copy to correct if
+the ranking changes.
+
+The repair is to keep the reason where the reporting happens,
+`main.rs`, and let the type's doc say only what it is.
+
+Deferred during the `/review2` on #18: `/review` under **Review,
+then fix** forbids applying a three-copy consolidation in the
+round that finds it. Found as FR-25.
+
+### fr-2026-09-05-comments-that-narrate-their-own-history
+
+**Category:** Code comments
+
+`CLAUDE.md` under **Code comments** says not to narrate the
+past. Four comments do, and none is in code #18 changed:
+`config.rs`'s `validate_generated` explains itself by "outgrew
+the 100-line limit" (a limit no file in the tree names);
+`docs/architecture.md` spends seven lines on which review round
+found which copy of the heading rule; `config/error.rs` spends
+two lines on a count it deliberately does not give;
+`README.md`'s Vagrantfile section asks a first-time reader to
+recognise advice this README used to give.
+
+`config/guards.rs` is a fifth of a different kind: its comment
+justifies "would treat" over "reads" by a caller that passes two
+programs at once, and every production call site passes one word
+-- the only two-program argument in the tree is the test the
+comment cites as its evidence.
+
+Deferred during the `/review2` on #18 as prose outside that
+change. Found as FR-5, FR-8, FR-17, FR-18 and FR-23.
+
+### fr-2026-09-05-paragraphs-left-ragged-by-line-patches
+
+**Category:** Formatting
+
+Eight paragraphs carry a short line in the middle, which a
+reader takes for a paragraph break: two in `docs/usage.md`, one
+in `docs/tutorial.md`, two in `docs/architecture.md`, and three
+more found and fixed during the round. `CLAUDE.md` under
+**Coding Standards** already asks for the whole paragraph to be
+reflowed when one line is patched, and no gate covers `docs/` --
+`cargo xtask canon-check`'s 80-column rule reads `.claude/`,
+`CLAUDE.md` and `llms.txt` only.
+
+Two candidates worth considering together: reflow the remaining
+five, and extend the column check to `docs/`.
+
+Deferred during the `/review2` on #18; the three the change
+itself created were fixed. Found as FR-20.
+
+### fr-2026-09-05-registry-named-in-clap-help-without-introduction
+
+**Category:** Terminology (clap help -- outside a prose reviewer's lane)
+
+`bombyx --help` prints "Path to your registry" for `--config`,
+and the word is not introduced anywhere the operator reads
+before that. #18 added an introduction to `README.md` under
+**Configure**, which leaves the help text itself: a reader who
+starts at `--help` still meets "your registry" cold, with no way
+to tell it from "your config file".
+
+Logged rather than fixed because `/review2` under **Stage 3**
+keeps `fresh-reader` out of clap `///` help: editing it changes
+the program's output. Found as FR-14.
+
 ### fr-2026-09-04-todo-help-hides-four-of-five-doc-rules
 
 **Category:** The program's own help is thinner than its rules

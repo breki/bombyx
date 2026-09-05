@@ -5,6 +5,66 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-05-absolute-no-repo-file-claim-in-fourteen-places
+
+**Category:** Security (threat model)
+
+After #18 the claim that bombyx reads no file from the project's
+directory is stated absolutely in about fourteen places --
+`README.md`, `docs/trust-boundary.md`, `docs/architecture.md`,
+`docs/tutorial.md`, `docs/vm-host-setup.md`, `llms.txt`,
+`CLAUDE.md`, the architect skill, `crates/bombyx/src/lib.rs` and
+an integration-test comment. Two arguments defeat it.
+`--config <path>` reads any file, including one committed in a
+clone; `BOMBYX_CONFIG_HOME` only has to be *anchored*, so an
+absolute path into a clone is accepted and `direnv` or `mise`
+can set it from inside one. Reproduced during the `/review2` on
+#18: a registry inside a repository, reached with
+`--config ./config.toml`, produced
+`ssh in-the-repo "rm -rf '/etc/myproject'"` silently, because
+the file-wide `host` wins and prints no notice.
+
+The reasoning half was fixed in that round --
+`docs/architecture.md` under **What config values are checked**
+and `docs/usage.md` under **What is checked, and what is not**
+now state the two redirect routes and say the allowlist is a
+boundary rather than a typo check. What is deferred is
+qualifying the other twelve copies, and deciding whether one of
+them owns the claim and the rest point at it.
+
+Deferred by the operator during that `/review2`: `/review` under
+**Review, then fix** forbids applying a consolidation of three
+or more copies in the round that finds it, and the run had
+stopped on non-convergence over this very fact. Found as RT-2 in
+round 2.
+
+### rt-2026-09-05-load-project-option-hides-two-dead-branches
+
+**Category:** Correctness (dead code)
+
+`Config::load_project(name, registry: Option<&Path>)` returns
+`RegistryNotFound` from `registry.ok_or_else(missing)?` before
+it can produce any field error except
+`Invalid { field: "project" }`, which `main.rs` catches in its
+own arm. So two `None` branches in `main.rs` are unreachable:
+the `"the registry"` fallback in the error-context closure, and
+`describe`'s `None` path at the provenance notice. Both are code
+worrying about a state that cannot occur, which makes the one
+real case harder to see, and the coverage gate counts an arm no
+test can reach.
+
+The clean fix changes the signature: have `load_project` take
+`&Path` and let `main.rs` raise `RegistryNotFound` itself, which
+removes the `Option` and both dead branches. That needs the
+wording for a machine with no config directory to be reachable
+from the binary, and `config::host::registry_place` is
+`pub(crate)` today.
+
+Deferred by the operator during the `/review2` on #18: it is a
+public-signature change proposed at the end of a review that had
+already stopped on non-convergence, and it has no user-visible
+effect. Found as RT-5 in round 2.
+
 ### rt-2026-09-05-required-tables-has-two-copies
 
 **Category:** Duplication

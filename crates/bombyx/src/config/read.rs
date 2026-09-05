@@ -1,11 +1,11 @@
 //! Reading a configuration file off disk, and reporting what
 //! went wrong with it.
 //!
-//! Everything here is about the *file*: whether the path may be
-//! a symlink, how large a file may be, and how a TOML error is
-//! summarised. What the values inside
-//! the file must look like is `super::guards` and the field
-//! modules beside it.
+//! Everything here is about the *file*: what counts as one that
+//! may be read at all, how large it may be, and how a TOML
+//! error is summarised. What the values inside the file must
+//! look like is `super::guards` and the field modules beside
+//! it.
 
 use std::path::Path;
 
@@ -13,9 +13,9 @@ use super::ConfigError;
 
 /// Largest configuration file that will be read.
 ///
-/// Generous for a handful of keys, and small enough that a file
-/// committed to a repo cannot make bombyx read it into memory
-/// without bound.
+/// Generous for a handful of keys, and small enough that a
+/// mistyped `--config` cannot make bombyx read an arbitrary file
+/// into memory without bound.
 pub(super) const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 
 /// A path as it appears in a message.

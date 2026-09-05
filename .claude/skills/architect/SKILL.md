@@ -120,7 +120,7 @@ Not published. `validate`, `test`, `clippy`, `fmt`,
 
 `cargo xtask validate` runs every gate; the six above are
 the ones worth memorising, and `CLAUDE.md` under
-**Definition of Done** lists all nine in execution order.
+**Definition of Done** lists them all in execution order.
 
 The Claude Code Stop hook runs a **subset**: fmt-check,
 clippy, doc and test. It skips coverage and duplication

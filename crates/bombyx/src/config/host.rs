@@ -263,28 +263,24 @@ impl HostOrigin {
     /// Names this source, in the words every message and the
     /// startup notice print.
     ///
-    /// `path` is the registry file when the caller knows where
-    /// it is, and the bare file name stands in otherwise.
-    /// `super::registry`'s own parse passes it, because an
-    /// operator sent to fix a bad value has to find the file.
+    /// `path` is the registry file, and every caller with one
+    /// passes it: the operator is being sent to that file to fix
+    /// or check a value, and `--config` means the name alone
+    /// does not identify it.
     ///
-    /// The startup notice passes `None` and so prints the bare
-    /// name, which is a gap rather than a decision: the
-    /// directory comes from `BOMBYX_CONFIG_HOME`, `APPDATA`,
-    /// `XDG_CONFIG_HOME` or `HOME`, and a per-directory
-    /// environment tool can redirect the first of those from
-    /// inside a clone -- so `config.toml` alone does not say
-    /// whose file won. `config-home-env-provenance` in
-    /// `docs/todo.md` tracks it, and covers two halves: printing
-    /// the line for a file-wide `host` at all, and passing the
-    /// path in here. Doing only the first leaves this rendering
-    /// a directoryless literal.
+    /// `None` renders the bare [`USER_CONFIG_FILE`], for a
+    /// caller that has no path at all.
+    ///
+    /// **There is deliberately no `Display` impl.** `--config`
+    /// means the winning key can sit at any path, so no default
+    /// rendering can be right; requiring the argument makes the
+    /// caller answer rather than guess.
     ///
     /// One function rather than two, so the notice and the error
     /// cannot come to describe the same source differently. The
     /// wording for a project entry names its table, and that
     /// spelling existing twice is how the two drift apart.
-    pub(crate) fn describe(&self, path: Option<&Path>) -> String {
+    pub fn describe(&self, path: Option<&Path>) -> String {
         let file = path.map_or_else(
             || USER_CONFIG_FILE.to_owned(),
             super::read::path_display,
@@ -299,12 +295,6 @@ impl HostOrigin {
             }
             Self::UserFile => file.to_owned(),
         }
-    }
-}
-
-impl std::fmt::Display for HostOrigin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.describe(None))
     }
 }
 

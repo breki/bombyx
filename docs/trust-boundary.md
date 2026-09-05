@@ -7,8 +7,14 @@ because the reasoning is easy to lose and expensive to rebuild,
 and because several planned pieces of work only make sense once
 you know which way it went.
 
-> **Both statements are now reached in the code. Neither has
-> run against a real VM host.**
+> **Both statements are now reached as far as bombyx is
+> concerned. Neither has run against a real VM host.**
+>
+> Statement one is a property of a *machine*, so no change to
+> bombyx can establish it: a workstation someone develops the
+> project on holds the code whatever bombyx does. What this
+> work reached is that bombyx neither requires a checkout nor
+> puts a project file anywhere outside the guest.
 >
 > "The boundary" states the target. "Where project code lives
 > today" states the current behaviour, which was read from
@@ -41,8 +47,9 @@ rather than the project, and it tells an attacker where the code
 came from without handing them the code or anything derived from
 running it.
 
-Both statements are now reached in the code. Outside the
-guest's own disk image, the VM host holds no project file. The
+Both statements are now reached as far as bombyx is concerned,
+which the note at the top of this document qualifies. Outside
+the guest's own disk image, the VM host holds no project file. The
 workstation reads one file, `config.toml` in the operator's own
 config directory, and opens nothing in the project's directory
 -- so it needs no checkout, and `--project` is what tells
@@ -52,9 +59,10 @@ guest's disk image, below, is the one thing it does not cover.
 
 ## Where project code lives today
 
-The guest clones its own copy, and it is the only machine with
-one. Neither the workstation nor the VM host holds a project
-file.
+The guest clones its own copy. bombyx puts a project file on
+neither of the other two machines and reads one from neither, so
+the only copy either of them can hold is one somebody else put
+there -- a checkout the operator makes for their own reasons.
 
 That last claim needs one qualification, and the threat model
 below is why. The guest's virtual disk is a file on the VM
@@ -200,7 +208,8 @@ than at boot, which is late and confusing.
 
 ## What is built and what is not
 
-Built, as of 2026-09-05:
+Built, as of 2026-09-05. `project-config-off-repo` is six of
+its seven steps done; the seventh is under **Not built** below:
 
 - `generate-vagrantfile` -- bombyx renders the Vagrantfile from
   a project's `[vm]` table and writes it, with a bootstrap

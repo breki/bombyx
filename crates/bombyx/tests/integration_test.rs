@@ -296,7 +296,7 @@ fn destroy_needs_the_project_name_to_confirm() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "bombyx --project myproject destroy myproject",
+            "re-run the same command with \"myproject\"",
         ));
 }
 
@@ -602,6 +602,35 @@ fn an_entrys_own_host_wins_and_the_notice_names_the_entry() {
 }
 
 #[test]
+fn the_notice_names_the_file_the_host_really_came_from() {
+    // The notice exists so the operator can see which machine
+    // `destroy` will run `rm -rf` on, and `--config` means the
+    // winning key can sit in a file the default name does not
+    // describe. Naming the bare `config.toml` there points at a
+    // file bombyx did not read.
+    let dir = project_dir();
+    let elsewhere = dir.path().join("elsewhere.toml");
+    std::fs::write(
+        &elsewhere,
+        registry("host = \"vmhost\"\n", "host = \"otherbox\"\n"),
+    )
+    .unwrap();
+
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "--config"])
+        .arg(&elsewhere)
+        .arg("status")
+        .assert()
+        .success();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("otherbox"), "{stderr}");
+    assert!(
+        stderr.contains(&elsewhere.display().to_string()),
+        "the notice must name the file it read: {stderr}"
+    );
+}
+
+#[test]
 fn a_vm_command_without_a_project_is_refused() {
     // clap cannot mark a global argument required for some
     // subcommands and not others, so `main` states the
@@ -617,6 +646,28 @@ fn a_vm_command_without_a_project_is_refused() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("--project is required"));
+}
+
+#[test]
+fn a_malformed_project_name_does_not_blame_the_registry() {
+    // The name came from `--project`, and the registry cannot
+    // carry a bad one: a table key is a `ProjectName`, refused
+    // while the file parses. So naming the file here would send
+    // the operator to edit the one place the value is not.
+    // Its own command, not `bombyx_in`: that helper appends
+    // `--project myproject`, so this would be asserting about a
+    // second occurrence and clap's last-one-wins.
+    let dir = project_dir();
+    let out = Command::cargo_bin("bombyx")
+        .unwrap()
+        .current_dir(dir.path())
+        .env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME))
+        .args(["--project", "../etc", "--dry-run", "status"])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("invalid `project`"), "{stderr}");
+    assert!(!stderr.contains(USER_CONFIG_FILE), "{stderr}");
 }
 
 #[test]

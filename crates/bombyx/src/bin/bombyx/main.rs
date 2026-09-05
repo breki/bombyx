@@ -38,7 +38,8 @@ use tempfile::TempDir;
 #[derive(Parser)]
 #[command(name = "bombyx", version, about)]
 struct Cli {
-    /// Which project in the registry to act on
+    /// Which project to act on; required by every subcommand
+    /// except `self-update`
     ///
     /// Names a `[projects.<name>]` table in your config file.
     /// bombyx reads nothing from the project's own directory, so
@@ -295,9 +296,20 @@ fn run() -> Result<Ran> {
     // `Empty` and `Invalid` are the two variants that name no
     // file: they come from `FieldError`, and `config::error`
     // keeps that type free of files. So the file is named here.
+    //
+    // `project` is the exception among them, and it comes first
+    // for that reason. That value arrived on the command line,
+    // and the registry cannot carry a bad one -- a table key is
+    // a `ProjectName`, refused while the file parses. Naming the
+    // file would send the operator to edit the one place the
+    // value is not.
     let (cfg, host_origin) =
         Config::load_project(&project, registry.as_deref()).map_err(|err| {
             match err {
+                e @ bombyx::config::ConfigError::Invalid {
+                    field: "project",
+                    ..
+                } => anyhow!(e),
                 e @ (bombyx::config::ConfigError::Empty { .. }
                 | bombyx::config::ConfigError::Invalid { .. }) => {
                     let file = registry.as_deref().map_or_else(
@@ -330,8 +342,19 @@ fn run() -> Result<Ran> {
     // inside a clone -- so staying quiet here also hides a
     // redirect the operator did not choose. `docs/todo.md`
     // tracks it as `config-home-env-provenance`.
-    if host_origin != HostOrigin::UserFile {
-        eprintln!("bombyx: host {} from {host_origin}", cfg.host);
+    //
+    // `describe` rather than `Display`, so the line names the
+    // file bombyx read. `Display` renders the bare `config.toml`,
+    // and `--config` can point at any path at all.
+    match &host_origin {
+        HostOrigin::ProjectEntry(_) => {
+            eprintln!(
+                "bombyx: host {} from {}",
+                cfg.host,
+                host_origin.describe(registry.as_deref())
+            );
+        }
+        HostOrigin::UserFile => {}
     }
 
     let action = action_of(&vm, &cfg)?;
@@ -629,10 +652,14 @@ fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
              ({:?}); refusing to destroy {target}",
             cfg.project
         ),
+        // Says what to add rather than spelling a whole
+        // command. A reconstructed one drops every other
+        // argument the operator gave -- `--config` above all,
+        // which would send the re-run at a different registry.
         None => bail!(
-            "destroy needs the project name to confirm: run \
-             `bombyx --project {0} destroy {0}` -- target is \
-             {target}",
+            "destroy needs the project name to confirm: re-run \
+             the same command with {:?} as its last argument -- \
+             target is {target}",
             cfg.project
         ),
     }

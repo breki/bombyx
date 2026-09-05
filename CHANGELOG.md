@@ -25,7 +25,10 @@ and this project adheres to
   script at a system file and have it made executable as root.
 - The per-developer `config.toml` carries a `[projects.<name>]` table per
   project -- `remote_root`, `[vm]` and `[source]` -- and it is the only place a
-  project is described. `--project <name>` picks the table.
+  project is described. `--project <name>` picks the table. `[vm]` needs
+  `provider`, `box`, `cpus` and `memory`; `[source]` needs `repo`, `ref` and
+  `script`. None of the seven has a default, so bombyx guesses neither a base
+  image nor a repository to clone.
 - Library API: `config::Registry`, `config::Project` and `name::ProjectName`,
   plus a `ConfigError::ProjectNotFound` variant for a registry with no entry for
   the project asked for.
@@ -37,8 +40,11 @@ and this project adheres to
   reads the `[projects.<name>]` table out of the file `registry` names and
   returns a `(Config, HostOrigin)` pair. New alongside it:
   `config::registry_file()`, which is the path bombyx reads when `--config`
-  names none, and the `ConfigError::RegistryNotFound` and
-  `ConfigError::ProjectNotFound` variants.
+  names none, and a `ConfigError::RegistryNotFound` variant for a machine with
+  no registry file at all.
+- `--project`, `--config` and `--dry-run` are global arguments, so they are
+  accepted after the subcommand as well as before it: `bombyx status --dry-run`
+  works where it used to be an argument error.
 
 ### Changed
 
@@ -46,10 +52,6 @@ and this project adheres to
   project's own Vagrantfile is never read by anything: bombyx does not send it,
   and the guest's clone is not what Vagrant boots from. Vagrant needs that file
   before the VM exists, which is why it cannot come from inside the guest.
-- **BREAKING:** `bombyx.toml` now requires a `[vm]` table (`provider`, `box`,
-  `cpus`, `memory`) and a `[source]` table (`repo`, `ref`, `script`). None of
-  the seven has a default, so every existing config must gain both tables before
-  any command runs.
 - `--dry-run` prints the two generated files as one line each, naming the
   heredoc and how many lines it dropped. The full content is still written to
   the host.
@@ -62,7 +64,7 @@ and this project adheres to
   itself. This used to be the project's job in its own Vagrantfile; since bombyx
   now overwrites that file, a hand-written block would be deleted on the next
   `up`.
-- A bad `repo` or `script` in `bombyx.toml` is now refused while the file is
+- A bad `repo` or `script` in a project's entry is refused while the file is
   being read rather than after, so the message names the line and column as well
   as the field and the reason. The rules themselves are unchanged.
 - Config values are refused when they begin or end with whitespace. `box`,

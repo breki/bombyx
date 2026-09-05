@@ -1,14 +1,13 @@
 //! Resolving the external programs bombyx runs.
 //!
 //! bombyx shells out to `ssh` by name, and `self-update` adds
-//! `git`, `curl` and `tar`. Left to
-//! the operating system, a bare name is looked up through a
-//! search order that on Windows includes the **current
+//! `git`, `curl` and `tar`. Left to the operating system, a
+//! bare name is looked up through a search order that on
+//! Windows includes the **current
 //! directory**. An operator runs bombyx from wherever they
 //! happen to be standing, which is usually a project
 //! repository, so a `tar.exe` committed in a clone is a program
-//! a branch can choose. `bombyx doctor` is the command the
-//! documentation tells you to run *first* in a fresh clone.
+//! a branch can choose.
 //!
 //! The lookup itself is [`which`]'s job. Getting it right means
 //! honouring executable permission bits, `PATHEXT` ordering,

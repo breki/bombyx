@@ -4,6 +4,85 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-05-check-segment-runs-three-times-per-load
+
+**Category:** Type Safety
+
+One project name is checked three times in one
+`Config::load_project`: by `check_segment` in that function
+before the file is opened, by `check_segment` again inside
+`Registry::project`, and by `Config::validate` over the
+assembled value. `crate::name::ProjectName` already enforces
+exactly that rule, and `HostOrigin::ProjectEntry` already
+carries one -- so the pair `load_project` returns holds the
+same name as both a checked type and an unchecked `String`.
+
+The wanted shape is `load_project(name: &ProjectName, ..)` with
+`Config::project` a `ProjectName`, which also makes a bad
+`--project` fail at the argument rather than inside the loader.
+
+Deferred by the operator during the `/review2` on
+`project-selection-flag` (#18): it is a public-surface change,
+and `newtype-remaining-config-fields` (#17) owns the
+`Config::project` half. All three call sites have written-down
+reasons, so deleting one is not obviously safe either. Found as
+AQ-2.
+
+### aq-2026-09-05-host-missing-carries-a-string-not-a-path
+
+**Category:** Type Safety
+
+`ConfigError::HostMissing`'s `place` field is a `String`, and
+after #18 it has one construction site: `config::host::rank`,
+which always builds it from `read::path_display(registry.path())`.
+A `Registry` cannot exist without a path, so the value is always
+a path and the `String` loses that. `RegistryNotFound` is the
+variant that genuinely needs prose, because it describes a file
+bombyx never opened.
+
+Deferred by the operator during the `/review2` on
+`project-selection-flag` (#18): it is a public-surface change to
+an error variant, on a branch already carrying several. Found as
+AQ-5.
+
+### aq-2026-09-05-four-fixture-builders-for-two-shapes
+
+**Category:** API Design
+
+`crates/bombyx/src/config.rs` builds a test registry through
+four helpers covering two shapes: `test_registry` and
+`test_entry` at module scope, `test_entry_with` beneath them,
+and `registry_with` inside the `tests` module, which is
+`test_registry` with a `keys` string in place of a
+`project_host`. One module-scope
+`test_registry_with(name, host, keys)` with the others as thin
+wrappers would replace all four.
+
+Deferred by the operator during the `/review2` on
+`project-selection-flag` (#18). `/review` under **Review, then
+fix** forbids applying a three-or-more consolidation in the
+round that finds it, and the one plain copy -- an inline
+`format!` reimplementing `test_registry` -- was fixed in that
+round instead. Found as AQ-8.
+
+### aq-2026-09-05-registry-tests-want-their-own-file
+
+**Category:** Module Size
+
+`crates/bombyx/src/config/registry.rs` is around 900 lines,
+roughly 440 of them `mod tests`, and after #18 it is the file
+that owns the whole config format -- so it is the first file a
+new reader opens and it cannot be read in one pass. Moving the
+tests with
+`#[cfg(test)] #[path = "registry/tests.rs"] mod tests;` brings
+the production text under 500 lines and moves no code.
+
+Deferred by the operator during the `/review2` on
+`project-selection-flag` (#18) as out of scope for that step.
+`config-tests-own-file` in `docs/todo.md` proposes the same
+move for `config.rs`; the two should land together. Found as
+AQ-9.
+
 ### aq-2026-09-04-project-remote-root-stays-a-string
 
 **Category:** Type safety

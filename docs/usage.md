@@ -111,8 +111,8 @@ refusal and the confirmation print the resolved
 
 ```console
 $ bombyx --project myproject destroy
-bombyx: destroy needs the project name to confirm: run
-`bombyx --project myproject destroy myproject` -- target is
+bombyx: destroy needs the project name to confirm: re-run the
+same command with "myproject" as its last argument -- target is
 vmhost:~/vms/myproject
 ```
 
@@ -228,7 +228,7 @@ invocation instead of running it:
 $ bombyx --dry-run up
 ssh vmhost "mkdir -p ~/'vms/myproject'"
 ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (265 lines elided)
+ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
 ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'up'"
 ```
 
@@ -283,13 +283,19 @@ configuration currently says.
 
 ## What is checked, and what is not
 
-Your `config.toml` is your own file, so nothing in it arrives
-from a repository you cloned. Every field is checked against an
-allowlist anyway: `remote_root` must be an anchored path with no
-traversal, and a scratch name must be a single path segment, so
-`../../etc` is refused rather than quoted. These are your typos
-rather than somebody's attack, and a typo caught while you have
-the file open beats one that surfaces on the VM host.
+Your `config.toml` is normally your own file, and every field
+in it is still checked against an allowlist: `remote_root` must
+be an anchored path with no traversal, and a scratch name must
+be a single path segment, so `../../etc` is refused rather than
+quoted.
+
+The checks are not only there for your typos. `--config <path>`
+reads whatever file you name, a repository can commit one, and
+`BOMBYX_CONFIG_HOME` needs only to be anchored -- so a
+per-directory environment tool can redirect bombyx from inside a
+clone. A registry that arrived that way chooses `remote_root`,
+which is the value `destroy` builds its `rm -rf` from. Do not
+pass `--config` a path inside a repository you did not write.
 
 `host` gets the sharpest rule, because it is handed to `ssh` as
 its first argument and `ssh` reads a leading `-` as an option:

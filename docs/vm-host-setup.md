@@ -246,7 +246,8 @@ releases a version that no longer passes the option.
 
 ## Checking that it worked
 
-The quickest check is `bombyx doctor`, run from a project
+The quickest check is `bombyx --project <name> doctor`, run from
+anywhere -- bombyx reads nothing out of a project's own
 directory. It probes every precondition in this page's first
 table plus the Vagrant provider plugin, changes nothing on the
 host, and names each failure without offering a remedy — the
@@ -577,8 +578,8 @@ Note where each of the two lives. The project's repository
 holds only the script, because bombyx opens no file in a
 project's directory: everything describing the VM, this host's
 name included, sits in your `config.toml` --
-`~/.config/bombyx/config.toml`, or `%APPDATA%\bombyx` on
-Windows. **Where bombyx looks for the host** in `README.md` is
+`~/.config/bombyx/config.toml`, or
+`%APPDATA%\bombyx\config.toml` on Windows. **Where bombyx looks for the host** in `README.md` is
 the authoritative statement of which `host` key wins.
 
 ## Other distributions

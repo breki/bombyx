@@ -150,6 +150,16 @@ The table key is the project name, and nothing inside the table
 repeats it. A name containing a `.` has to be quoted --
 `[projects."a.b"]` -- because TOML reads a bare dot as nesting.
 
+`remote_root` has to sit *above* the two tables because TOML
+binds a bare key to the table header above it: written after
+`[projects.myproject.source]` it would parse as
+`projects.myproject.source.remote_root`, and the whole file
+would be refused.
+
+**This file is also called the registry**, in `bombyx --help`
+and in `docs/usage.md`, because it registers one table per
+project. There is only ever the one file.
+
 **Name the project on every command**: `bombyx --project
 myproject up`. bombyx reads nothing out of the project's own
 directory, so it cannot work out which project you mean from
@@ -175,16 +185,9 @@ A private repository therefore needs a credential inside the
 guest, which is an accepted and unsolved exposure -- see
 [trust-boundary.md](docs/trust-boundary.md).
 
-Then name your own VM host once, in a file outside the repo:
-
-```toml
-# ~/.config/bombyx/config.toml
-# Windows: %APPDATA%\bombyx\config.toml
-host = "my-vmhost"
-```
-
-`host` is an SSH alias, resolved through your `~/.ssh/config` --
-bombyx never handles addresses, usernames or keys itself.
+The `host` line at the top is an SSH alias, resolved through
+your `~/.ssh/config` -- bombyx never handles addresses,
+usernames or keys itself.
 
 ### Why nothing bombyx reads is committed
 
@@ -252,10 +255,10 @@ happen to be in.
 The `host` at the top of your file specifies the VM host you use
 for everything, and a project's own `host` key redirects that
 project. Whenever a project's key wins, bombyx prints one line
-on stderr naming the table:
+on stderr naming the table and the file it read:
 
 ```
-bombyx: host vmhost-b from [projects."myproject"].host in config.toml
+bombyx: host vmhost-b from [projects."myproject"].host in /home/you/.config/bombyx/config.toml
 ```
 
 The top-of-file `host` gets no such line. It is the ordinary

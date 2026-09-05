@@ -144,9 +144,9 @@ struct RegistryFile {
     /// `remote_root`.
     ///
     /// A file with no `[projects.*]` table at all parses to an
-    /// empty map. A registry naming only a host is a legitimate
-    /// file: an operator who never asks bombyx for a project
-    /// entry still needs somewhere to put `host`.
+    /// empty map, so a file part-way through being written gets
+    /// the error naming the table to add rather than a TOML
+    /// error about a missing one.
     #[serde(default)]
     projects: BTreeMap<ProjectName, Project>,
 }
@@ -391,9 +391,9 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
     let file: RegistryFile = from_toml(source, path)?;
 
     // Every `host` in the file, not only the one a later
-    // command turns out to want. This module's header says why,
-    // under "Every host in the file is checked as the file is
-    // read", and is the one place that reasoning lives.
+    // command turns out to want: a typo in a project nobody
+    // asked about is reported while the operator has the file
+    // open. `docs/architecture.md` carries the argument.
     if let Some(host) = &file.host {
         super::host::refuse_if_bad(
             host,
@@ -714,8 +714,8 @@ mod tests {
 
     #[test]
     fn a_registry_with_no_projects_at_all_still_parses() {
-        // A registry naming only a host is a legitimate file,
-        // so the projects table has to be optional.
+        // A file part-way through being written has to parse,
+        // so the projects table is optional.
         let registry = parsed("host = \"vmhost\"\n");
         assert_eq!(registry.host.as_deref(), Some("vmhost"));
         assert!(registry.projects.is_empty());
@@ -852,7 +852,8 @@ mod tests {
                 place: "/home/dev/config.toml".to_owned(),
             }
             .to_string(),
-            super::super::HostOrigin::ProjectEntry(key).to_string(),
+            super::super::HostOrigin::ProjectEntry(key)
+                .describe(Some(Path::new("/home/dev/config.toml"))),
         ];
         for text in messages {
             assert!(text.contains(want), "want {want} in: {text}");

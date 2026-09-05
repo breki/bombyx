@@ -111,12 +111,15 @@ plan, decisions, and outcome.
   `cpus`/`memory` whose only rule is a floor. `RepoUrl`, `ScriptPath` and
   `ScratchName` show the shape. `Config`, `Vm` and `Source` all have public
   fields, so every one of those five can be set by hand with no check running.
-  The checks live in `Config::validate`, `vm::validate` and `source::validate`,
-  which only the loading path calls. `remote_root` is the one to do first: it
-  reaches `rm -rf`, it has six rules, and `config::root` already holds all of
-  them in one function, so the constructor wraps something that exists. Not for
-  the generate-vagrantfile PR: the config modules have been re-cut in four
-  commits over two days and the review flagged the churn.
+  The checks for `project` and `remote_root` live in `Config::validate`, and
+  those for `box`, `ref`, `cpus` and `memory` in `vm::validate` and
+  `source::validate`, all of which only the loading path calls. `host` is the
+  exception, and its rule moved to `config::registry::parse` -- see below.
+  `remote_root` is the one to do first: it reaches `rm -rf`, it has six rules,
+  and `config::root` already holds all of them in one function, so the
+  constructor wraps something that exists. Not for the generate-vagrantfile
+  PR: the config modules have been re-cut in four commits over two days and
+  the review flagged the churn.
 
   `host` belongs beside `remote_root` at the front of the queue. Its check has
   been placed twice in two weeks and argued about three times: `b534bb1` left
@@ -206,18 +209,17 @@ plan, decisions, and outcome.
   and prints nothing. Demonstrated live during the /review2 on #23: an anchored
   value such as /tmp/pwn passes is_anchored_dir, and a per-directory environment
   tool (direnv reading an .envrc in a clone, mise, a CI job) can set it.
-  Candidate fix, in two halves. Print the provenance line for UserFile too
-  whenever CONFIG_DIR_ENV supplied the directory, which needs a failing test
-  first. And pass the registry path into HostOrigin::describe from main.rs, so
-  the line names the file bombyx read rather than the bare config.toml -- the
-  printing half alone leaves every config.toml origin still rendering a
-  directoryless literal, which is the same gap one step later. Since #18 the
-  second half is cheap: main.rs holds the registry path already, because
-  --config either named it or config::registry_file did.
+  This was captured as two halves and one of them has landed. #18 passes the
+  registry path into HostOrigin::describe from main.rs, so a notice that prints
+  names the file bombyx read rather than a bare config.toml, and the Display
+  impl that rendered the bare name is deleted. What remains is the printing
+  half: print the provenance line for UserFile too whenever CONFIG_DIR_ENV
+  supplied the directory, which needs a failing test first.
   Raised as red-team finding RT-1; the prose claiming otherwise was corrected in
   that change, the code was not. The second half was added during the /review2
   on #25, where a doc comment cited this item as the work that gives the notice
-  the path and the item did not yet say so.
+  the path and the item did not yet say so; it landed in #18, which the /review2
+  there found still described as pending.
 
 - **add-issue-flag-unused** -- todo add --issue has no caller
   The flag renders a pending entry as a link to issues/<slug>.md, derived rather

@@ -176,7 +176,7 @@ classDiagram
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
-  Registry ..> HostOrigin : reports which key won
+  Registry ..> HostOrigin : ranked to produce one
 ```
 
 `Config` is what bombyx runs with. `Registry` and `Project`
@@ -287,14 +287,29 @@ first creates a machine.
 
 ## What config values are checked
 
-The registry is the operator's own private file rather than a
-committed one, so its values are not attacker-controlled the way
-a file inside a clone would be. They are checked against an
-explicit allowlist anyway, because six of them reach the
-generated files and so the guest: `box`, `repo`, `ref`,
-`script`, `cpus` and `memory`. A typo in any of those is worth
-reporting where the operator is editing rather than on the VM
-host.
+**The registry is usually the operator's own file, and bombyx
+cannot assume it.** Two arguments point the loader elsewhere.
+`--config <path>` reads any file at all, including one committed
+in a clone. `BOMBYX_CONFIG_HOME` only has to be *anchored*, so
+an absolute path into a clone is accepted, and a per-directory
+environment tool (`direnv`, `mise`, a CI job) sets it from
+inside one. Either way the values are then repo-supplied.
+
+So the allowlist is a boundary rather than a typo check. Each
+of those rules is what stops a repo-supplied value reaching
+`ssh` or `rm -rf`, so none of them is there to catch a typo.
+Six values reach
+the generated files and so the guest -- `box`, `repo`, `ref`,
+`script`, `cpus` and `memory` -- and `remote_root` reaches
+`rm -rf` on the VM host. A registry out of a clone with
+`remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
+is `root::check`'s depth floor doing the work it exists for.
+
+What the guards do *not* stop is the redirect itself: bombyx
+opens no file in a project's directory of its own accord, and it
+opens the one `--config` names without asking where it came
+from. `docs/usage.md` under **What is checked, and what is not**
+is the operator-facing half of this.
 
 Two of those six are enforced by their type. `repo` is a
 `RepoUrl` and `script` is a `ScriptPath`, each a newtype whose

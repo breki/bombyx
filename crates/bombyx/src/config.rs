@@ -63,7 +63,7 @@ mod root;
 mod source;
 mod vm;
 
-/// The `[vm]` and `[source]` tables every project file needs.
+/// The `[vm]` and `[source]` tables every project entry needs.
 ///
 /// At module scope rather than inside a test module because two
 /// sibling test modules share it, `tests` and
@@ -246,8 +246,8 @@ impl Config {
     ///
     /// `registry` is the file to read, which is `--config` when
     /// the operator passed it and [`registry_file`] otherwise.
-    /// `None` means the environment names no config directory,
-    /// so bombyx has nowhere to look at all.
+    /// `None` when the caller has no path to offer, and the
+    /// error then describes the file rather than naming one.
     ///
     /// Reads the file once and ranks the host from that same
     /// copy, so the settings and the host cannot come from two
@@ -559,10 +559,8 @@ mod tests {
     #[test]
     fn scratch_dirs_of_two_projects_do_not_collide() {
         let a = good();
-        let source =
-            format!("host = \"vmhost\"\n\n{}", test_entry("ledgerstone", None));
         let b = Config::parse_registry(
-            &source,
+            &test_registry("ledgerstone", "vmhost", None),
             Path::new(USER_CONFIG_FILE),
             "ledgerstone",
         )
@@ -1019,15 +1017,17 @@ mod load_project_tests {
 
     #[test]
     fn the_reported_entry_names_its_table_and_its_file() {
-        // The startup notice is built from `Display`, and it
+        // The startup notice is built from `describe`, and it
         // exists so the operator can see which machine `destroy`
-        // will run `rm -rf` on. A project's host and the
-        // file-wide host come out of the same `config.toml`, so
-        // naming the file alone would not say which of the two
-        // won.
-        let text = entry_origin().to_string();
+        // will run `rm -rf` on. Both `host` keys live in one
+        // file, so the table has to be named as well as the
+        // file -- and the file is the path bombyx read, not the
+        // default name, because `--config` takes any path.
+        let path = Path::new("/home/dev/elsewhere.toml");
+        let text = entry_origin().describe(Some(path));
         assert!(text.contains("myproject"), "{text}");
-        assert!(text.contains(USER_CONFIG_FILE), "{text}");
+        assert!(text.contains("/home/dev/elsewhere.toml"), "{text}");
+        assert!(!text.contains(USER_CONFIG_FILE), "{text}");
     }
 
     #[test]
