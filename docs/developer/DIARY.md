@@ -11,58 +11,97 @@ The workstation turned out to be frosti itself, so a run needed
 SSH from the machine to itself: a key authorized to your own
 account, a `Host` block on loopback, and a handshake per
 command. The question was whether that hop is needed at all.
+This supersedes `1e8d9e1` five days earlier, which argued it
+was, and wrote "there is no local mode and none is needed" into
+`docs/architecture.md`. What changed is that we counted the
+price of the hop.
 
-It is not. As `config.toml` is read, `config::transport`
-compares `host` against this machine's own name -- short form,
-lowercased, so `Frosti`, `frosti` and `frosti.lan` are one
-machine -- and stores the answer on `Config::transport`. Where
-they match, `remote::transport` builds `sh -c "<script>"`
-instead of `ssh <host> "<script>"`. The script itself is
-untouched, because every VM command already builds a POSIX shell
-script string and `sh -c` starts the same shell `ssh` would have
-started on the far side. The quoting, the heredoc that lengthens
-its delimiter, the `cd`, the `$(hostname -s)` and destroy's
+It is not needed. As `config.toml` is read, `config::transport`
+compares `host` against this machine's own name and stores the
+answer on `Config::transport`. Where they match,
+`remote::transport` builds `sh -c "<script>"` instead of
+`ssh <host> "<script>"`. The script is untouched, because every
+VM command already builds a POSIX shell script string and
+`sh -c` starts the same shell `ssh` would have started on the
+far side. The quoting, the heredoc that lengthens its
+delimiter, the `cd`, the `$(hostname -s)` and destroy's
 `if [ -f Vagrantfile ]` guard all stay on one tested path.
 
 The operator chose detection over an opt-in spelling, knowing
-what it costs: one `config.toml` now behaves differently
-depending on which machine reads it, and the local route makes
-the least isolated arrangement the one that happens by itself.
-That is answered by making it visible rather than by making it
-hard. bombyx prints a line on stderr on every command when the
-local route is in force, `doctor` shows its `ssh` row as a skip
-rather than a pass, and `docs/architecture.md` states both the
+what it costs: one `config.toml` behaves differently depending
+on which machine reads it, and the local route makes the least
+isolated arrangement the one that happens by itself. That is
+answered by making it visible rather than by making it hard.
+bombyx prints a line on stderr whenever the local route is in
+force, `doctor` shows its `ssh` and `login shell` rows as skips
+rather than passes, and `docs/architecture.md` states both the
 mechanism and what it gives up.
 
 The issue said this was "one branch at the spawn site in
-`main.rs`". It was not. `main.rs` executes a `RemoteCommand` and
-never reads its program name; the `ssh` program and the host
-argument were baked into six builders across `remote.rs`,
+`main.rs`". It was not. `main.rs` executes a `RemoteCommand`
+and never reads its program name; the `ssh` program and the
+host argument were baked into six builders across `remote.rs`,
 `remote/write.rs` and `remote/probe.rs`. The branch went into
 one wrapper those six now call, which is still the cheap shape,
 just not where the issue expected it.
 
-Two more things the cheap shape had to answer, and a fourth
-nobody had named. The plan test asserting `ssh` for every action
-was rewritten rather than deleted: a plan runs one program per
-route, `ssh` which takes `-t` or `sh` which is never handed one,
-so a third program on either route still fails it. `Tty` is
-ignored locally, and that is correct -- `sh -c` inherits
-whatever stdio bombyx was given, so `bombyx shell` still gets
-the operator's terminal. The unnamed one was
-`remote::probe::reachable`, the gating probe with nothing to
-reach: `sh -c true` would have passed every time while saying
-nothing, so `reachability_finding` produces that row as a skip
-instead.
+**The matching rule took three attempts, and the first two both
+failed open.** It began as a short-name comparison -- the part
+before the first dot -- which made `build01.dmz.example` and
+`build01.corp.example` one machine. The second attempt honoured
+a domain in `host` and fell back to short names when either
+side lacked one, and a real run showed that still answered
+`Local` for a qualified `host` against a bare machine name. The
+shipped rule is exact match ignoring ASCII case and nothing
+else: `frosti` does not match `frosti.lan`. A bare label is
+shared too easily -- `ubuntu`, `vagrant`, `build01` -- and
+matching less than the whole name is how bombyx would boot a
+guest on the workstation while the operator believed it was
+elsewhere. Exact matching has one failure direction and it is
+the harmless one. bombyx does not read `~/.ssh/config`, so an
+alias named exactly what this machine is named is still
+believed; `you@name` is the escape hatch, and the test table
+pins it.
 
-Verified on frosti for real, which is what #37 was waiting for.
-`doctor` ran every probe through `sh -c` and passed with one
-skip. `up` created the directory, wrote both generated files
-intact -- 33 and 266 lines, matching the dry run -- and started
-vagrant with the libvirt provider, failing only on a box name
-chosen not to exist. `destroy` fired the Vagrantfile guard and
-removed the directory. A guest actually booting on this route is
-still unverified, and that stays with #37.
+**`sh -c` inherits an environment that `ssh` does not.** `sshd`
+builds the far side's fresh; `sh -c` is a child of bombyx.
+`VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and `VAGRANT_DOTFILE_PATH`
+each override the directory a script has just `cd`'d into, so
+an operator with one exported would have `destroy` test one
+project and destroy another. The local branch unsets all three.
+This was proven on frosti with a decoy `Vagrantfile` that
+raises: without the unset, vagrant read the decoy that
+`VAGRANT_CWD` named despite the `cd`; with it, bombyx's own.
+
+Windows never takes the local route, whatever the names say. It
+cannot run libvirt, and the route would still get far enough to
+write files into the MSYS home and later delete them, which is
+worse than failing.
+
+Two doctor rows became skips rather than passes. There is no
+host to reach, and the shell is the `sh` bombyx picked itself,
+so `reachable` and `login shell` would each have passed every
+time while reporting nothing. `settled_findings` supplies both
+rows, paired with a match in `host_probes` so each appears
+exactly once on either route.
+
+One claim written during the review was false and is worth
+recording as such. Making `Config::transport` private stops a
+caller *choosing* the route, and for a while six places said it
+also meant the route and `host` could never disagree.
+`load_project` returns an owned `Config` whose other fields are
+public, so assigning `cfg.host` afterwards does exactly that.
+The `CHANGELOG` carried the false version inside a `BREAKING`
+entry, which is the worst place for it.
+
+Verified on frosti against the shipped code, which is what #37
+was waiting for. `doctor` passed with two skips. `up` created
+the directory, wrote both generated files intact -- 33 and 266
+lines, matching the dry run -- and started vagrant with the
+libvirt provider, failing only on a box name chosen not to
+exist. `destroy` fired the Vagrantfile guard and removed the
+directory. A guest actually booting on this route is still
+unverified, and that stays with #37.
 
 **`--project` names the project, and the committed project file
 is gone**

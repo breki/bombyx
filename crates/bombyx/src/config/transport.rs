@@ -24,29 +24,14 @@
 //! difference is visible rather than silent.
 
 /// How bombyx runs the script it built.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
-    /// Over `ssh` to another machine. The default: bombyx
-    /// takes the local route only after proving it may.
-    #[default]
+    /// Over `ssh` to another machine. What this module's
+    /// `resolve` answers unless it can demonstrate the other
+    /// case.
     Ssh,
     /// Through `sh -c` on this machine, which is the VM host.
     Local,
-}
-
-/// The short form of a machine name, lowercased.
-///
-/// A machine answers to several spellings of one name:
-/// `frosti`, `frosti.lan`, `Frosti`. bombyx compares the part
-/// before the first dot, in lower case, because that is the
-/// spelling an operator writes in `config.toml` and the same
-/// one `$(hostname -s)` produces on the far side.
-///
-/// Returns `None` when nothing is left to compare, which covers
-/// the empty string and a name starting with a dot.
-fn short_name(name: &str) -> Option<String> {
-    let head = name.split('.').next()?;
-    (!head.is_empty()).then(|| head.to_ascii_lowercase())
 }
 
 /// Decides the route to `host` from `this_machine`.
@@ -54,16 +39,76 @@ fn short_name(name: &str) -> Option<String> {
 /// Pure, so the rule can be tested without asking the operating
 /// system what it is called. [`this_machine`] is the impure half.
 ///
+/// **The two names must be the same name**, ignoring case and
+/// nothing else. `frosti` matches `frosti`; it does not match
+/// `frosti.lan`, and `build01.corp.example` does not match
+/// `build01.dmz.example`.
+///
+/// Comparing less than the whole name errs towards the local
+/// route, and that is the dangerous direction. A domain is
+/// written to say *which* machine, and two machines share a
+/// bare label easily -- `ubuntu`, `vagrant`, `build01`.
+/// Discarding the half that distinguishes them is how bombyx
+/// would boot a guest on the workstation while the operator
+/// believed it was elsewhere, and then `rm -rf` the
+/// workstation's directory on teardown.
+///
+/// Exact matching errs the other way: an operator who wants the
+/// local route and wrote the name differently gets `ssh`,
+/// notices the handshake, and writes what `hostname` prints.
+///
+/// It is also what makes `you@frosti` force `ssh` from a
+/// machine called `frosti`, which `docs/tutorial.md` documents
+/// as the escape hatch for an alias that collides with this
+/// machine's own name.
+///
+/// **bombyx never reads `~/.ssh/config`.** So an alias naming
+/// this machine but carrying a `User` or a `HostName` that
+/// points elsewhere is still taken for this machine. That is
+/// the residual hazard, and `you@name` is the answer to it.
+///
+/// A blank name never matches, whichever side it is on, so an
+/// empty `host` cannot make a machine with no readable name
+/// look like itself.
+///
 /// `this_machine` is `None` when the name could not be read, and
 /// that answers [`Transport::Ssh`]: bombyx changes route only on
 /// a match it can demonstrate.
 pub(crate) fn resolve(host: &str, this_machine: Option<&str>) -> Transport {
-    let (Some(there), Some(here)) =
-        (short_name(host), this_machine.and_then(short_name))
-    else {
+    resolve_on(host, this_machine, cfg!(windows))
+}
+
+/// [`resolve`], told whether it is running on Windows.
+///
+/// The platform is a parameter so both answers stay testable
+/// from either machine. `resolve` supplies the real one.
+fn resolve_on(
+    host: &str,
+    this_machine: Option<&str>,
+    windows: bool,
+) -> Transport {
+    // A Windows machine cannot be its own VM host. The script
+    // bombyx builds drives a libvirt guest, and libvirt does
+    // not run on Windows; a project configured for Hyper-V does
+    // not change that, because the local route would still be
+    // running the same script here.
+    //
+    // Refusing it outright matters because the route would
+    // otherwise half-work rather than fail. Git for Windows
+    // puts an `sh.exe` on `PATH`, so the writes would land in
+    // the MSYS home where the operator will not find them, and
+    // `destroy` would remove that directory.
+    if windows {
+        return Transport::Ssh;
+    }
+    let Some(here) = this_machine else {
         return Transport::Ssh;
     };
-    if there == here {
+    // `config::host` restricts `host` to ASCII, so a case fold
+    // that only knows ASCII cannot answer wrongly: a non-ASCII
+    // machine name can only fail to match, which is the safe
+    // direction.
+    if !host.is_empty() && host.eq_ignore_ascii_case(here) {
         Transport::Local
     } else {
         Transport::Ssh
@@ -82,7 +127,7 @@ pub(crate) fn this_machine() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Transport, resolve};
+    use super::{Transport, resolve_on};
 
     #[test]
     fn resolve_takes_the_local_route_only_on_a_demonstrated_match() {
@@ -95,34 +140,76 @@ mod tests {
             // ignored in both directions.
             ("Frosti", Some("frosti"), Transport::Local),
             ("frosti", Some("FROSTI"), Transport::Local),
-            // A domain on either side, or on both.
-            ("frosti.lan", Some("frosti"), Transport::Local),
-            ("frosti", Some("frosti.lan"), Transport::Local),
-            ("frosti.lan", Some("frosti.home"), Transport::Local),
+            ("frosti.lan", Some("FROSTI.lan"), Transport::Local),
+            // A domain is part of the name. Dropping it, on
+            // either side, is a match bombyx cannot demonstrate.
+            ("frosti", Some("frosti.lan"), Transport::Ssh),
+            ("frosti.lan", Some("frosti"), Transport::Ssh),
+            // Two machines sharing a bare label. This is the
+            // case exact matching exists for: they are in
+            // different networks and are not the same machine.
+            (
+                "build01.dmz.example",
+                Some("build01.corp.example"),
+                Transport::Ssh,
+            ),
+            // A bare alias colliding with this machine's own
+            // name is the residual hazard: bombyx does not read
+            // `~/.ssh/config`, so it believes the name.
+            ("build01", Some("build01"), Transport::Local),
+            // `you@name` is the escape hatch from that, pinned
+            // here so a later tidy-up cannot delete it silently.
+            ("igor@frosti", Some("frosti"), Transport::Ssh),
+            ("igor@frosti.lan", Some("frosti.lan"), Transport::Ssh),
             // A different machine.
             ("vmhost", Some("frosti"), Transport::Ssh),
-            // A prefix is not a match.
+            // A prefix, a suffix and a substring are not matches.
             ("frost", Some("frosti"), Transport::Ssh),
-            // An alias pointing at loopback is still an alias.
-            // The operator asked for `ssh` and gets it.
+            ("frostier", Some("frosti"), Transport::Ssh),
             ("frosti-local", Some("frosti"), Transport::Ssh),
             // Nothing to compare against.
             ("frosti", None, Transport::Ssh),
-            // Degenerate names. `.` and `.lan` have no short
-            // form, and two of them must not match each other.
+            // Blank on either side, and on both. Two unreadable
+            // names must not look like one machine.
             ("", Some("frosti"), Transport::Ssh),
             ("frosti", Some(""), Transport::Ssh),
-            (".", Some("."), Transport::Ssh),
-            (".lan", Some(".lan"), Transport::Ssh),
             ("", Some(""), Transport::Ssh),
+            // Degenerate spellings that are equal as strings.
+            // `config::host` accepts both, so they can reach
+            // here from a file. They match, and that is
+            // harmless for one reason only: no operating system
+            // reports `.` or a trailing-dot name as its own, so
+            // the second half of the comparison never supplies
+            // them.
+            (".", Some("."), Transport::Local),
+            ("frosti.", Some("frosti."), Transport::Local),
+            // A trailing dot is a different string, so the
+            // absolute and relative spellings do not match.
+            ("frosti.lan.", Some("frosti.lan"), Transport::Ssh),
+            // Non-ASCII cannot reach `host` at all
+            // (`config::host` restricts the charset), and an
+            // ASCII-only fold can only fail to match it.
+            ("fr\u{f6}sti", Some("FR\u{d6}STI"), Transport::Ssh),
         ];
         for (host, here, want) in cases {
-            assert_eq!(resolve(host, here), want, "{host:?} on {here:?}");
+            assert_eq!(
+                resolve_on(host, here, false),
+                want,
+                "{host:?} on {here:?}"
+            );
         }
     }
 
     #[test]
-    fn the_default_route_is_the_network_one() {
-        assert_eq!(Transport::default(), Transport::Ssh);
+    fn windows_never_takes_the_local_route() {
+        // A match that would be `Local` anywhere else. Windows
+        // cannot run libvirt, so the local route there is only
+        // ever a mistake -- and a quiet one, because Git for
+        // Windows supplies the `sh` it would spawn.
+        assert_eq!(resolve_on("frosti", Some("frosti"), true), Transport::Ssh);
+        assert_eq!(
+            resolve_on("frosti", Some("frosti"), false),
+            Transport::Local
+        );
     }
 }

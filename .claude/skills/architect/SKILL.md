@@ -51,7 +51,7 @@ bombyx/
         lib.rs          # crate root, re-exports
         plan.rs         # which commands run, in what order
         config.rs       # config.toml parsing (submodules)
-        remote.rs       # SSH command building (submodules)
+        remote.rs       # command building, either route
         vagrantfile.rs  # renders the two generated files
         doctor.rs       # preflight checks (submodules)
         update.rs       # self-update (submodules)
@@ -134,7 +134,9 @@ caught by `validate`, not by the hook.
 
 1. Write tests first (TDD).
 2. Add the command-building function in `remote.rs`
-   with unit tests asserting the exact argv.
+   with unit tests asserting the exact argv. There are two
+   argv shapes, one per route, so assert both -- see
+   `Config::for_tests_local`.
 3. Add the `VmCmd` variant and its `action_of` arm in
    `main.rs` -- the CLI surface, and nothing else.
 4. Add the `Action` variant and its `plan()` arm in

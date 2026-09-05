@@ -42,7 +42,45 @@ only machine that clones the repository.
 workstation can be its own VM host, and bombyx notices when it
 is. As `config.toml` is read, bombyx compares `host` against
 this machine's own name; when the two match it runs the script
-through `sh -c` here instead of handing it to `ssh`. The script
+through `sh -c` here instead of handing it to `ssh`.
+
+Two rules keep that comparison honest, and both exist because
+the wrong answer boots a guest on the workstation while the
+operator believes it is elsewhere.
+
+The first is that the two names must be equal, ignoring case
+and nothing else. A domain is written to say *which* machine,
+and a bare label is shared easily -- `ubuntu`, `vagrant`,
+`build01` -- so `build01.dmz.example` and
+`build01.corp.example` are two machines, and so are
+`frosti.lan` and a machine calling itself plain `frosti`.
+The two rules err in opposite directions, and only one of them
+is affordable. Matching on less than the whole name errs
+towards the local route, which is the dangerous answer: a guest
+boots on the workstation and teardown deletes there. Exact
+matching errs towards `ssh`, which costs the operator a
+handshake they were not expecting -- they see it, and write
+what `hostname` prints.
+
+bombyx does not read `~/.ssh/config`, so an alias named exactly
+what this machine is named is believed even when it points
+elsewhere. `you@name` is the spelling that forces `ssh`, and
+`config::transport`'s test table pins it.
+
+The second is that Windows never takes the local route at all,
+because it cannot run libvirt. The route would still get far
+enough to write files into the MSYS home and later delete them,
+which is worse than failing.
+
+One more difference is not in the script and is worth
+knowing. `sh -c` is a child of bombyx and inherits its whole
+environment, where `sshd` builds the far side's fresh. Three
+vagrant variables -- `VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and
+`VAGRANT_DOTFILE_PATH` -- override the directory every script
+bounds itself with, so `remote`'s local branch unsets them
+before the script runs. Without that, an operator with
+`VAGRANT_CWD` exported would have `destroy` check one project
+and destroy another. The script
 is identical either way, because every command bombyx builds is
 a POSIX shell script string and `sh -c` starts the same shell
 `ssh` would have started on the host. `config::transport` holds
@@ -53,7 +91,8 @@ Two consequences are worth stating plainly. The first is that
 one `config.toml` now behaves differently depending on which
 machine reads it, so bombyx prints a line naming the route
 whenever the local one is in force, and `bombyx doctor` shows
-its `ssh` row as a skip rather than a pass.
+its `ssh` and `login shell` rows as skips rather than passes --
+neither question has anything left to answer on this route.
 
 The second is what running the guest on your own workstation
 costs, which is the part of the isolation that depends on the
@@ -148,7 +187,7 @@ classDiagram
     +String host
     +String project
     +String remote_root
-    +Transport transport
+    -Transport transport
   }
   class Vm {
     +Provider provider
@@ -223,11 +262,19 @@ live in one file and `destroy` runs `rm -rf` on whichever wins.
 
 `transport` is the one field of `Config` no key supplies.
 `config::transport` derives it from the winning `host` and this
-machine's own name, and a `Config` built any other way gets
-`Transport::Ssh`, which is the route that works from anywhere.
-It is derived from the *winner* rather than from either key,
-so the machine bombyx runs the commands on and the machine
-`destroy` deletes a directory on are always the same one.
+machine's own name. It is derived from the *winner* rather than
+from either key, so the machine bombyx runs the commands on and
+the machine `destroy` deletes a directory on are always the
+same one.
+
+It is also the one field of `Config` that is private, read
+through `Config::transport()`. Every other field is public.
+Privacy here stops a caller *choosing* the route, and that is
+all it stops: `host` is public, so a caller holding a loaded
+`Config` can assign a new one, nothing re-checks, and the route
+then names one machine while the commands run on another.
+`newtype-remaining-config-fields` in `docs/todo.md` owns that
+gap. This field narrows it and does not close it.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -333,9 +380,9 @@ inside one. Either way the values are then repo-supplied.
 So the allowlist is a boundary rather than a typo check. Each
 of those rules is what stops a repo-supplied value reaching
 `ssh` or `rm -rf`, so none of them is there to catch a typo.
-Six values reach
-the generated files and so the guest -- `box`, `repo`, `ref`,
-`script`, `cpus` and `memory` -- and `remote_root` reaches
+Six values reach the generated files and so the guest --
+`box`, `repo`, `ref`, `script`, `cpus` and `memory` -- and
+`remote_root` reaches
 `rm -rf` on the VM host. A registry out of a clone with
 `remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
 is `root::check`'s depth floor doing the work it exists for.
@@ -472,21 +519,28 @@ already returned. A third config-less subcommand added to `Cmd`
 gets that for free; one added to `VmCmd` does not, and would
 fail at the requirement rather than at compile time.
 
+### The unchecked-field gap, and what limits it
 
-Three things keep that survivable meanwhile. `render` escapes
+Three things keep the public fields on `Config` survivable
+until a type replaces them. `render` escapes
 for Ruby whatever it is handed. `bootstrap.sh` passes `--`
 before the ref. And inside this crate the only place that builds
 a `Config` is `Project::to_config`, whose caller runs `validate`
 immediately -- so for bombyx's own commands the check does run.
 
-A library consumer is not covered by that, and the public fields
-are why: outside the crate, a `Config` built field by field with
-a hostile `host` compiles and reaches `plan` with nothing having
-checked it. No snippet here, because a struct literal for this
-type needs all six fields and a shortened one would not
-compile, which is a distraction from the point. That is the argument for
-`newtype-remaining-config-fields`, and it is the reason the
-paragraph above calls the gap a gap.
+A library consumer is not covered by that, and the public
+fields are why. One private field stops a *struct literal*
+outside this crate, and that is a narrower thing than it
+sounds: `load_project` hands the caller an owned `Config`, and
+assigning `cfg.host = "..."` on it compiles and reaches `plan`
+with nothing having checked the new value. No snippet here,
+because the point is the assignment rather than the shape of
+the type.
+
+That is the argument for `newtype-remaining-config-fields`, and
+it is the reason the paragraph above calls the gap a gap. A
+type carries its proof to every use site; a private field on a
+struct whose other fields are public carries it to one.
 
 `remote_root` should stop being a `String` first: it reaches
 `rm -rf`, and `config::root` already holds all of its rules in

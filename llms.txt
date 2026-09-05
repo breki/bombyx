@@ -51,13 +51,18 @@ between them by comparing `host` against this machine's own
 name: `ssh <host> "<script>"` when they differ, `sh -c
 "<script>"` when they match. The script is byte-identical
 either way, because `sh -c` starts the same POSIX shell `ssh`
-would have started on the host. `Config::transport` records
-which route is in force; a `Config` built any other way gets
-`Transport::Ssh`. The VM host's own filesystem holds no project
-file; the guest clones the repository itself once it is
-running. The workstation reads nothing out of the project's
-directory either, which is why `--project` names the project
-rather than being worked out from where bombyx was run.
+would have started on the host. `Config::transport()` reports
+which route is in force. It is the one private field on
+`Config`, which stops a caller choosing the route; `host` is
+still public, so the two can be made to disagree by assigning
+to a loaded `Config`, and that is the gap
+`newtype-remaining-config-fields` owns.
+
+The VM host's own filesystem holds no project file; the guest
+clones the repository itself once it is running. The
+workstation reads nothing out of the project's directory
+either, which is why `--project` names the project rather than
+being worked out from where bombyx was run.
 
 ## Commands
 

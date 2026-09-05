@@ -179,10 +179,20 @@ provider check runs `vagrant plugin list`, and on a host where
 vagrant has never run as that user, vagrant itself creates
 `~/.vagrant.d`. bombyx disables vagrant's version-checkpoint call
 so the probe neither writes more than that nor stalls on a
-firewalled endpoint. When SSH itself fails the remaining host checks are
-skipped rather than each waiting on a dead host. Locally it does
-execute `ssh` to read its version, so it is not a no-op on your
-workstation.
+firewalled endpoint. On the SSH route, when SSH itself fails the remaining host
+checks are skipped rather than each waiting on a dead host, and
+`ssh` is executed locally to read its version -- so it is not a
+no-op on your workstation.
+
+The local route differs in three ways. Nothing gates anything,
+because there is no host to be unreachable and every remaining
+check asks about this machine. `sh` is looked up on the `PATH`
+and not run, since `sh` may be `dash`, which has no version
+flag to ask. And two rows come back as skips rather than
+passes: `ssh`, which is not used, and `login shell`, because
+the shell is the `sh` bombyx started rather than whatever your
+login shell happens to be. A row that passes whatever the state
+of your machine is worse than no row at all.
 
 `doctor` checks one local program, and which one depends on
 the route. Over SSH that is `ssh`. When `host` names this very
@@ -208,8 +218,8 @@ anchored plugin name, because `vagrant plugin list` exits zero
 even with nothing installed.
 
 The local line names the directory that program came from.
-bombyx
-resolves it against `PATH` explicitly rather than leaving it to
+bombyx resolves it against `PATH` explicitly rather than
+leaving it to
 the operating system, which on Windows searches the working
 directory first — and you run bombyx from wherever you happen to
 be standing, which is usually a repository whose contents arrive

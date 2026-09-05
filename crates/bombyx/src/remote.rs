@@ -2,9 +2,13 @@
 //!
 //! Every operation is a POSIX shell script handed to one
 //! program: `ssh <host> "<script>"`, or `sh -c "<script>"` when
-//! the VM host is the machine bombyx is running on. The private
-//! `transport` function below chooses, and `config::transport`
-//! explains how the choice was made.
+//! the VM host is the machine bombyx is running on.
+//!
+//! Two names close together, and they do different jobs.
+//! `config::transport` **decides** the route once, while the
+//! config loads, and stores it on `Config`. The private
+//! `transport` function below **applies** that decision,
+//! turning one script into one command. It chooses nothing.
 //!
 //! Nothing here runs a process: these functions return the argv
 //! to run, which keeps the interesting logic (quoting, paths,
@@ -88,13 +92,18 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// values.
 ///
 /// **`$(hostname -s)` is left unexpanded on purpose.** bombyx
-/// spawns `ssh` directly rather than through a shell, so the
-/// substitution reaches the host's shell and answers with the
-/// host's name. Expanded on this side it would answer with the
-/// *workstation's* name -- a plausible-looking wrong answer, which
-/// is the failure mode worth guarding. It is unquoted because a
-/// shell assignment does not field-split its value, so the quotes
-/// would only add noise to the dry-run output.
+/// writes the substitution into the script verbatim and lets
+/// the shell that receives it answer. Over `ssh` that shell is on the VM
+/// host; running here it is the `sh` bombyx started, and this
+/// machine is the VM host. Either route answers with the VM
+/// host's name.
+///
+/// Expanding it while building the script would be right on one
+/// route and wrong on the other, and the wrong answer is the
+/// workstation's own name -- plausible-looking, which is the
+/// failure worth guarding against. It is unquoted because a
+/// shell assignment does not field-split its value, so the
+/// quotes would only add noise to the dry-run output.
 ///
 /// A host with no `hostname` command leaves the variable empty
 /// rather than failing the boot. Reporting an unknown host name is
@@ -135,9 +144,10 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
 /// need them from being the one that was forgotten.
 ///
 /// The one exemption is `doctor`, whose probes
-/// ([`probe::provider`]) run in the SSH login directory rather
-/// than a project directory. They inspect the host's own vagrant
-/// installation and evaluate no `Vagrantfile`, so there is nothing
+/// ([`probe::provider`]) inspect the host's own vagrant
+/// installation rather than a project. `vagrant plugin list`
+/// reads no `Vagrantfile` -- checked by running it in a
+/// directory holding one that raises -- so there is nothing
 /// there to read the variables.
 fn vagrant_script(cfg: &Config, dir: &str, args: &[&str]) -> String {
     format!(
@@ -222,16 +232,33 @@ impl Tty {
     }
 }
 
+/// Cleared from the environment before a script runs here.
+///
+/// Every script that runs `vagrant` on a project bounds it by
+/// starting `cd <dir> &&`, and `destroy` narrows that further
+/// with `if [ -f Vagrantfile ]`. Each of these three
+/// variables overrides that directory from outside the script:
+/// `VAGRANT_CWD` moves where vagrant looks, `VAGRANT_VAGRANTFILE`
+/// renames the file it reads there, and `VAGRANT_DOTFILE_PATH`
+/// moves the state directory naming the machine. So an operator
+/// with one of them exported would have `destroy` test one
+/// project and destroy another.
+///
+/// The `ssh` route needs none of this. `sshd` builds the far
+/// side's environment and bombyx's own is not in it; `sh -c` is
+/// a child of bombyx and inherits everything.
+///
+/// Ends in `; ` so it prefixes any script, `cat` heredoc
+/// included.
+const DISARM_VAGRANT_REDIRECTS: &str =
+    "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH; ";
+
 /// Wraps `script` in the command that runs it on the VM host.
 ///
 /// The one wrapper every VM command goes through, so no builder
 /// can grow its own opinion about the route.
-/// `Config::transport` holds the decision and
+/// [`Config::transport`] holds the decision and
 /// `config::transport` explains how it was reached.
-///
-/// `probe` calls this for the local route only. Its `ssh` form
-/// carries six connection options none of the others need, so
-/// it builds that half itself.
 ///
 /// Over `ssh`, options come before the destination and everything
 /// after it is the remote command, which is why `-t` sits where
@@ -240,8 +267,11 @@ impl Tty {
 /// over untouched -- and `tty` has nothing to ask for, because
 /// the shell inherits whatever stdio bombyx itself was given.
 fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
-    match (cfg.transport, tty) {
-        (Transport::Local, _) => RemoteCommand::new("sh", &["-c", script]),
+    match (cfg.transport(), tty) {
+        (Transport::Local, _) => RemoteCommand::new(
+            "sh",
+            &["-c", &format!("{DISARM_VAGRANT_REDIRECTS}{script}")],
+        ),
         (Transport::Ssh, Tty::Allocate) => RemoteCommand::new(
             "ssh",
             &["-t", "-o", "LogLevel=ERROR", &cfg.host, script],
@@ -255,8 +285,8 @@ fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
 /// Builds the command running `vagrant` in `dir` on the VM host.
 ///
 /// See [`Tty`] for what the last argument costs and buys. The
-/// private `transport` function decides which of the two
-/// shapes it comes back in.
+/// private `transport` function turns the script into one of
+/// the two command shapes.
 #[must_use]
 pub fn vagrant_in(
     cfg: &Config,
@@ -301,13 +331,11 @@ pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// `destroy` after working on `up` -- and since execution stops at
 /// the first failing step, the directory removal that follows
 /// would never run.
+///
 /// Takes a [`Tty`] like the other vagrant builders, and for the
 /// same reason: `vagrant destroy -f` prints several lines of
-/// progress, so without one `destroy` and `discard` staircase on
-/// the console this parameter exists to fix. It was the sibling
-/// left out when `Tty` was introduced -- the reachable-primitive
-/// case `CLAUDE.md` warns about, found by review rather than by a
-/// test.
+/// progress, so without one `destroy` and `discard` staircase
+/// on the console this parameter exists to fix.
 #[must_use]
 pub fn destroy_vm_if_present(
     cfg: &Config,
@@ -385,12 +413,8 @@ mod tests {
         c.args.last().expect("a remote command").clone()
     }
 
-    /// [`cfg`] with `host` naming the machine bombyx runs on.
     fn local_cfg() -> Config {
-        Config {
-            transport: Transport::Local,
-            ..Config::for_tests()
-        }
+        Config::for_tests_local()
     }
 
     #[test]
@@ -399,7 +423,11 @@ mod tests {
         // the heredoc delimiter and the `$(hostname -s)` the far
         // side must evaluate. `sh -c` is the same POSIX shell
         // `ssh` starts on the host, so every builder keeps one
-        // script and only the two words in front of it change.
+        // script. Only two things differ on this route: the two
+        // words in front of it, and the `unset` prefix that
+        // `the_local_route_disarms_the_vagrant_redirects`
+        // covers. Strip that prefix and the rest must be equal
+        // character for character.
         /// One builder, named for the error message.
         type Builder = (&'static str, fn(&Config) -> RemoteCommand);
 
@@ -418,12 +446,49 @@ mod tests {
             assert_eq!(here.program, "sh", "{name}");
             assert_eq!(here.args.len(), 2, "{name}: {:?}", here.args);
             assert_eq!(here.args[0], "-c", "{name}");
-            assert_eq!(
-                remote_script(&here),
-                remote_script(&over_ssh),
-                "{name}"
-            );
+            let bare = remote_script(&here)
+                .strip_prefix(DISARM_VAGRANT_REDIRECTS)
+                .expect("the local script carries the prefix")
+                .to_owned();
+            assert_eq!(bare, remote_script(&over_ssh), "{name}");
         }
+    }
+
+    #[test]
+    fn the_local_route_disarms_the_vagrant_redirects() {
+        // Over `ssh`, sshd builds the far side's environment
+        // and bombyx's own is not in it. `sh -c` is a child of
+        // bombyx, so it inherits everything the operator
+        // exported -- and three vagrant variables override the
+        // directory the script just `cd`'d into. `destroy`
+        // would then test `[ -f Vagrantfile ]` in one project
+        // and destroy the machine defined in another.
+        for c in [
+            vagrant(&local_cfg(), &["status"], Tty::NoPty),
+            destroy_vm_if_present(&local_cfg(), "~/vms/p", Tty::NoPty),
+            ensure_dir(&local_cfg(), "~/vms"),
+            write_file(&local_cfg(), "~/vms", "Vagrantfile", "x\n"),
+        ] {
+            let script = remote_script(&c);
+            for var in
+                ["VAGRANT_CWD", "VAGRANT_VAGRANTFILE", "VAGRANT_DOTFILE_PATH"]
+            {
+                assert!(
+                    script.starts_with("unset ") && script.contains(var),
+                    "{var} not disarmed: {script}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_ssh_route_disarms_nothing() {
+        // sshd already gives the far side a fresh environment,
+        // and an `unset` there would be noise in every dry run.
+        assert!(
+            !remote_script(&vagrant(&cfg(), &["status"], Tty::NoPty))
+                .contains("unset")
+        );
     }
 
     #[test]

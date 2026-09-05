@@ -289,6 +289,35 @@ plan, decisions, and outcome.
   the workstation, so a local mode makes the weakest configuration the easiest
   to reach rather than a deliberate choice.
 
+- **readme-vagrantfile-pointer** -- README promises what Part 3 deletes
+  Found by /review2 (fresh-reader FR-11) while working local-host-execution
+  (#38); pre-existing and out of that issue's scope. README.md points at
+  docs/tutorial.md for "a sample project with a Vagrantfile and a provisioning
+  script", but tutorial.md Part 3 is headed "The Vagrantfile: bombyx writes it"
+  and ends by telling the reader a committed one is read by nothing and should
+  be deleted. The README pointer describes what Part 3 produced before bombyx
+  generated the file. Fix is in README.md: list what Part 3 actually produces, a
+  provisioning script and a project table.
+
+- **comments-narrating-the-past** -- Eight comments tell history, not reasons
+  Found by /review2 (fresh-reader FR-12) while working local-host-execution
+  (#38); all pre-existing and out of that issue's scope. CLAUDE.md under Code
+  comments forbids narrating the past outright. The eight: remote/probe.rs
+  "which is exactly how an earlier version of this probe passed on a fish
+  shell"; remote.rs "and when it built its own string it silently ran vagrant
+  with neither variable set"; remote.rs "It was the sibling left out when Tty
+  was introduced"; doctor/probes.rs "Hardcoding the reason meant renaming the
+  gating probe left the report explaining the skip in terms of a column that no
+  longer existed"; integration_test.rs "Both names bombyx once used are tried";
+  a remote.rs test "so it once assembled its own string and ran vagrant with
+  neither variable set"; architecture.md "Both of these were code comments
+  once"; architecture.md's "It took three review rounds to find all three
+  copies" paragraph. The reviewer notes each already contains its own
+  present-tense form, so the rewrite is mechanical rather than a judgement call
+  about what the comment is for. The reviewer's own example: "the skip reason is
+  read from the gate, so renaming a report column cannot leave the report naming
+  a column that does not exist".
+
 ## Done
 
 - [**project-selection-flag**](issues/project-config-off-repo.md)

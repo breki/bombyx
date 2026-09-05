@@ -23,10 +23,11 @@
 //! Two of them are checked by their *type* and cannot be built
 //! wrong at all: see [`RepoUrl`]. The rest are checked by
 //! `Config::validate`, which the loading path runs. `Config`
-//! has public fields, so a hand-built one skips that check.
-//! That is a gap rather than a decision, argued once in
-//! `docs/architecture.md` under "What config values are
-//! checked". (`validate` is named rather than linked because
+//! has public fields, so a value that has been through
+//! `validate` can still be edited afterwards and nothing
+//! re-checks it. That is a gap rather than a decision, argued
+//! once in `docs/architecture.md` under "What config values
+//! are checked". (`validate` is named rather than linked because
 //! it is private, and rustdoc rejects a public page pointing
 //! at a private item.)
 //!
@@ -200,15 +201,32 @@ pub struct Config {
     /// Whether bombyx reaches `host` over `ssh` or runs the
     /// script here.
     ///
-    /// Derived rather than configured: `config::transport`
-    /// compares `host` against this machine's own name as the
-    /// config is loaded. A `Config` built any other way gets
-    /// [`Transport::Ssh`], which is the route that works from
-    /// anywhere.
-    pub transport: Transport,
+    /// Private, unlike every field above it, and read through
+    /// [`Config::transport`]. No key supplies this one:
+    /// `config::transport` derives it from `host` as the config
+    /// loads, and privacy is what stops a caller choosing the
+    /// route for itself.
+    ///
+    /// **It does not make the route and `host` agree.** `host`
+    /// is public, so a caller holding a loaded `Config` can
+    /// assign a new one and nothing re-checks: the route stays
+    /// as it was derived, and `remote::remove_dir` would
+    /// `rm -rf` here while every message named the machine that
+    /// was assigned. That is the public-fields gap
+    /// `newtype-remaining-config-fields` in `docs/todo.md`
+    /// owns, and this field narrows it rather than closing it.
+    transport: Transport,
 }
 
 impl Config {
+    /// How bombyx reaches [`Config::host`].
+    ///
+    /// See the field for why it is read through a function.
+    #[must_use]
+    pub fn transport(&self) -> Transport {
+        self.transport
+    }
+
     /// Loads a project out of a registry given as a string.
     ///
     /// [`Config::load_project`] without the file: `source` is a
@@ -258,6 +276,23 @@ impl Config {
             "myproject",
         )
         .expect("the shared test config must be valid")
+    }
+
+    /// [`Config::for_tests`] on the local route.
+    ///
+    /// `host` is left as it is, naming a machine this one is
+    /// not. That pairing cannot be loaded from a file, and it
+    /// is what a test of the local route wants: the two values
+    /// stay distinguishable, so an assertion that reads
+    /// `vmhost` in the output has caught the route being
+    /// ignored.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn for_tests_local() -> Self {
+        Self {
+            transport: Transport::Local,
+            ..Self::for_tests()
+        }
     }
 
     /// Loads the settings for one project out of the registry.

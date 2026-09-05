@@ -116,8 +116,8 @@ impl RemoteCommand {
     }
 }
 
-/// Builds the `ssh` command that writes `contents` into the
-/// file `name`, in the directory `dir`, on the VM host.
+/// Builds the command that writes `contents` into the file
+/// `name`, in the directory `dir`, on the VM host.
 ///
 /// Nothing runs here. Like everything in `remote`, this only
 /// builds the command; `main` is what spawns it. That split is

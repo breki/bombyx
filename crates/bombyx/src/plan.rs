@@ -184,12 +184,8 @@ mod tests {
         plan(action, &cfg(), tty)
     }
 
-    /// The shared config, running on the machine it names.
     fn local_cfg() -> Config {
-        Config {
-            transport: crate::config::Transport::Local,
-            ..cfg()
-        }
+        Config::for_tests_local()
     }
 
     #[test]
@@ -203,7 +199,7 @@ mod tests {
             // command: its probes are parsed, and a PTY would fold
             // control characters into text that gets compared.
             // Every other action ends in exactly one vagrant
-            // invocation over ssh -- including teardown, where the
+            // invocation -- including teardown, where the
             // `rm -rf` beside it has no output worth a terminal.
             let expected = usize::from(action != Action::Doctor);
             assert_eq!(

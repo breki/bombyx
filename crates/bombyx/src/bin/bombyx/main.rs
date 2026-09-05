@@ -357,19 +357,24 @@ fn run() -> Result<Ran> {
         HostOrigin::UserFile => {}
     }
 
-    // Unconditional, unlike the line above. The route is derived
+    // The local route is announced and the `ssh` route is
+    // silent, because `ssh` is the ordinary case and a line on
+    // every command would be noise nobody reads.
+    //
+    // The local one is announced every time it applies, which
+    // is more than the line above manages: the route is derived
     // from `host` rather than written down, so the operator
-    // never chose it and one `config.toml` behaves differently
-    // depending on which machine reads it. It also happens to be
-    // the arrangement that gives up most of the isolation --
-    // `docs/architecture.md` says what -- so bombyx states it
-    // every time rather than only when something looks unusual.
-    if cfg.transport == Transport::Local {
-        eprintln!(
+    // never chose it, one `config.toml` behaves differently
+    // depending on which machine reads it, and it is the
+    // arrangement that gives up most of the isolation --
+    // `docs/architecture.md` says what.
+    match cfg.transport() {
+        Transport::Ssh => {}
+        Transport::Local => eprintln!(
             "bombyx: host {} is this machine; running vagrant \
              here rather than over ssh",
             cfg.host
-        );
+        ),
     }
 
     let action = action_of(&vm, &cfg)?;
@@ -737,8 +742,9 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     // program is missing: the change-state-then-fail behaviour
     // the whole `doctor` command exists to prevent.
     //
-    // A VM plan is `ssh` throughout today, so the map holds one
-    // entry and a missing `ssh` stops the plan before the
+    // A VM plan runs one program throughout -- `ssh`, or `sh`
+    // when the VM host is this machine -- so the map holds one
+    // entry and a missing one stops the plan before the
     // `mkdir`. The loop keeps that property if a plan ever gains
     // a second program. It does not cover `self-update`, which
     // reaches `execute` one command at a time through `ran_ok`
@@ -795,14 +801,8 @@ fn doctor_run(cfg: &Config) -> Ran {
     //
     // `bombyx self-update` also needs `git`, `curl` and `tar`.
     // Those are its problem, for the same reason.
-    match cfg.transport {
+    match cfg.transport() {
         Transport::Ssh => report.add(local_tool("ssh", Some("-V"))),
-        // No version argument. `sh` is whatever the system
-        // links it to -- `dash` on Debian, `bash` elsewhere --
-        // and `dash` has no version flag at all, so asking
-        // reports a failure about the question rather than
-        // about the shell. The path it resolved to is the
-        // answer worth printing.
         Transport::Local => report.add(local_tool("sh", None)),
     }
     report.add_all(doctor::host_findings(cfg, spawn_probe));
@@ -847,10 +847,10 @@ fn spawn_probe(p: &HostProbe) -> Outcome {
 /// `doctor_run` is thin.
 ///
 /// `version_arg` is per tool, and `None` means there is nothing
-/// worth asking for. OpenSSH `ssh` answers `-V`, and it is the
-/// only tool `doctor` checks; `None` exists for a tool that
-/// answers nothing useful, the way `scp` prints a usage message
-/// rather than a version.
+/// worth asking. OpenSSH `ssh` answers `-V`. `sh` gets `None`,
+/// because `sh` is whatever the system links it to and `dash`
+/// has no version flag at all -- asking would report a failure
+/// about the question rather than about the shell.
 fn local_tool(name: &str, version_arg: Option<&str>) -> Finding {
     let resolved = bombyx::tool::resolve(name);
     let version = match (resolved.as_deref(), version_arg) {
