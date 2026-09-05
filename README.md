@@ -141,7 +141,7 @@ What a project's table holds:
 
 | Key | |
 |-----|---|
-| `[vm]` | required; `provider`, `box`, `cpus`, `memory`, no defaults |
+| `[vm]` | required; `provider`, `box`, `cpus`, `memory`, no defaults. The `box` must have `git` |
 | `[source]` | required; `repo`, `ref`, `script` -- what the guest clones |
 | `remote_root` | optional, `~/vms`; must sit above the two tables |
 | `host` | optional; only for a project that runs elsewhere |
@@ -536,9 +536,10 @@ name it would prove nothing, per the note above.
 That the guest's DMI holds nothing about the host was measured
 inside a running guest as the unprivileged user.
 
-The `env:` hand-off into the guest and the `provision.sh` line
-above are Vagrant's ordinary shell-provisioner behaviour and have
-**not** been exercised end to end in a booted VM *(unverified)*.
+The `env:` hand-off into the guest was exercised end to end on
+2026-09-05: a guest's provisioning script printed the host name
+bombyx put on the `vagrant` process. See
+[the run record](docs/issues/registry-run-against-frosti.md).
 
 ## Development
 

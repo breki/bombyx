@@ -315,35 +315,27 @@ plan, decisions, and outcome.
   project, or the sample stops promising more than the directory layout
   delivers.
 
-- **tutorial-local-route-now-booted** -- a guest has booted on the local route
-  Found while working box-must-carry-git. docs/tutorial.md says in its header
-  that the local route is 'verified short of a guest actually booting', and the
-  same claim sits in the section 'Running bombyx against your own machine': 'The
-  up was stopped at the box download by naming a box that does not exist, so a
-  guest booting on this route is still unverified.' registry-run-against-frosti
-  (#37) booted a guest on that route on 2026-09-05 and provisioned it to
-  completion, so both sentences are now false and understate what has been
-  checked. The run record is docs/issues/registry-run-against-frosti.md. Fix is
-  two edits in docs/tutorial.md, and while there, check whether the dated
-  verification header needs the same update.
-
-- **tutorial-box-lacks-git** -- the tutorial's box cannot finish a first up
+- **tutorial-box-lacks-git** -- two passages still assume the Debian box
   Found while working box-must-carry-git, and verified by booting it on frosti
-  on 2026-09-05: debian/bookworm64, the box docs/tutorial.md tells the reader to
-  use, has no git, so bootstrap.sh refuses and the first up exits 1 after the
-  download and the boot. A warning now sits under the table in Part 2 naming the
-  two ways past it, so nobody walks into it unwarned, but the tutorial still
-  recommends a box that cannot finish. Swapping it is the real fix and it is a
-  rework rather than an edit: Part 3's provision.sh runs chsh because the Debian
-  box gives its user /bin/sh, and When something goes wrong explains the
-  arrow-key behaviour the same box causes, so both stop describing what the
-  reader has. generic/ubuntu2204 is the obvious replacement, since
-  config.toml.sample already names it and a guest booted on it the same day.
+  on 2026-09-05: debian/bookworm64, which docs/tutorial.md used to tell the
+  reader to use, has no git, so bootstrap.sh refuses and the first up exits 1
+  after the download and the boot. The table in Part 3 now names
+  generic/ubuntu2204, whose guest booted and provisioned to completion the same
+  day, and the paragraphs under it explain the failure and warn readers off the
+  Debian box. What is left is the two passages written around that box, which
+  still mention it: Part 3's provision.sh runs chsh because the Debian box gives
+  its user /bin/sh, and When something goes wrong explains the arrow-key
+  behaviour the same box causes. Both are currently handled by telling the
+  reader they will not apply, which is an explanation where a rewrite belongs.
   Doing this properly means running the tutorial end to end, which has never
   happened -- its header already marks the Part 3 and Part 4 transcripts
   unverified.
 
 ## Done
+
+- [**tutorial-local-route-now-booted**](issues/registry-run-against-frosti.md)
+  -- a guest has booted on the local route
+  (2026-09-05)
 
 - [**registry-run-against-frosti**](issues/registry-run-against-frosti.md)
   -- drive the new CLI against a real VM host

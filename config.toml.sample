@@ -109,9 +109,9 @@ provider = "libvirt"          # libvirt or hyperv
 # bombyx cannot tell you sooner than that, because finding out
 # what a box contains means starting it.
 #
-# Cloud images tend to ship without `git`.
-# `cloud-image/debian-13` is one, and refusing it is how this
-# rule was found. The value below carries `git`.
+# The name will not tell you which boxes carry it. Two that do
+# not are `cloud-image/debian-13` and `debian/bookworm64`; the
+# value below does. Booting the box is the only way to be sure.
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192                 # MiB
