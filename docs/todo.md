@@ -254,6 +254,40 @@ plan, decisions, and outcome.
   an entry host winning and printing the notice, and destroy's refusal and
   confirmation. reset needs a snapshot nothing creates, which is
   reset-needs-snapshot, so expect it to fail cleanly and do not fix it here.
+  Parked on local-host-execution: the workstation turned out to be frosti
+  itself, so this needs SSH from the machine to itself, and whether that is
+  needed at all is what that item settles. Two corrections from the /issue on
+  #37, both on the GitHub issue: the ssh failure is no alias and no matching
+  key rather than a stale known-hosts entry, and ~/vms/jutro holds a
+  hand-written Vagrantfile that destroy would rm -rf, so the test project must
+  not be named jutro.
+
+- **local-host-execution** -- run vagrant directly when this machine is the host
+  Raised by the operator while working registry-run-against-frosti (#37), which
+  is parked on the answer. The workstation turned out to be frosti itself, so a
+  run needs SSH from the machine to itself: a key authorized to your own
+  account, a Host block pointing at loopback, and a handshake per command. The
+  operator asked whether that is needed at all. As built, yes. plan() returns
+  Vec<RemoteCommand> and a test asserts every action's program is ssh; there is
+  no local execution path. docs/architecture.md states the position -- host is
+  an SSH alias, so it can name loopback, and there is no local mode and none is
+  needed. Two shapes, and they cost very differently. The cheap one replaces ssh
+  <host> <script> with sh -c <script> and changes nothing else: the script
+  string, shell_quote, quote_remote_path, the heredoc that lengthens its
+  delimiter until no payload line matches, cd <dir> &&, the $(hostname -s) the
+  far side must evaluate, and destroy's if [ -f Vagrantfile ] guard are all
+  POSIX shell semantics that sh -c supplies identically. One branch at the spawn
+  site, and everything delicate stays on one tested path. The expensive one
+  drops the shell and runs vagrant with argv and a cwd, which needs a local twin
+  of every quoting decision -- that is the one worth refusing. Three things the
+  cheap shape still has to answer. The plan test asserting ssh for every action
+  exists to stop a workstation-side step returning without the tty rule being
+  revisited, so that rule needs an answer rather than the test being deleted.
+  Tty and its -t handling are ssh concepts, and bombyx shell wants a terminal,
+  which sh -c inherits -- probably right, but a behaviour change. And
+  docs/architecture.md already names what loopback costs, a guest escaping onto
+  the workstation, so a local mode makes the weakest configuration the easiest
+  to reach rather than a deliberate choice.
 
 ## Done
 
