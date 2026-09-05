@@ -5,7 +5,7 @@
 //! VM host.
 
 use assert_cmd::Command;
-use bombyx::config::{CONFIG_DIR_ENV, HOST_ENV, USER_CONFIG_FILE};
+use bombyx::config::{CONFIG_DIR_ENV, USER_CONFIG_FILE};
 use bombyx::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
 use predicates::prelude::*;
 use tempfile::TempDir;
@@ -29,47 +29,58 @@ fn vm_env() -> String {
     format!(r"{VM_HOST_ENV}='vmhost' {VM_HOSTNAME_ENV}=\$(hostname -s)")
 }
 
-/// Writes a `bombyx.toml` and a per-developer config naming
-/// `vmhost` into a fresh temp dir.
-///
-/// The project file carries no `host`: bombyx refuses one there.
-/// The host comes from the per-developer file, which is the
-/// ordinary arrangement and the lowest-precedence source, so a
-/// test can override it from any of the other three.
+/// A fixture whose registry names `myproject` on `vmhost`.
 ///
 /// The returned guard removes the directory on drop, so a
 /// failing assertion cannot leak it into the system temp dir.
 fn project_dir() -> TempDir {
-    let dir = project_dir_with("project = \"myproject\"\n");
-    write_user_config(&dir, "host = \"vmhost\"\n");
+    project_dir_with("")
+}
+
+/// A fixture whose `myproject` entry also carries `keys`.
+///
+/// `keys` are the entry's own bare keys, such as `remote_root`.
+/// The `[vm]` and `[source]` tables come after them, because a
+/// bare key written below a table header joins that table.
+fn project_dir_with(keys: &str) -> TempDir {
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+    write_user_config(&dir, &registry("host = \"vmhost\"\n", keys));
     dir
+}
+
+/// A whole registry: `preamble`, then a `myproject` entry
+/// carrying `keys`.
+///
+/// `preamble` is what sits above every entry, which in practice
+/// is the file-wide `host` line or nothing at all.
+fn registry(preamble: &str, keys: &str) -> String {
+    let tables = REQUIRED_TABLES
+        .replace("[vm]", "[projects.myproject.vm]")
+        .replace("[source]", "[projects.myproject.source]");
+    format!("{preamble}\n[projects.myproject]\n{keys}{tables}")
 }
 
 /// A `Config` for `myproject` on `vmhost`, built the way the
 /// binary builds one.
 ///
-/// Through `Config::load` against a real file, not a shortcut
-/// past it. A test that reaches a narrower entry point than the
-/// binary uses is testing a path nothing ships.
+/// Through `Config::load_project` against a real file, not a
+/// shortcut past it. A test that reaches a narrower entry point
+/// than the binary uses is testing a path nothing ships.
 fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
-    let path = dir.join("bombyx.toml");
-    std::fs::write(&path, completed("project = \"myproject\"\n")).unwrap();
-    let (cfg, _) = bombyx::config::Config::load(
-        &path,
-        &bombyx::config::HostSources {
-            flag: Some("vmhost"),
-            ..bombyx::config::HostSources::default()
-        },
-    )
-    .unwrap();
+    let path = dir.join(USER_CONFIG_FILE);
+    std::fs::write(&path, registry("host = \"vmhost\"\n", "")).unwrap();
+    let (cfg, _) =
+        bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
     cfg
 }
 
-/// The `[vm]` and `[source]` tables every project file needs.
+/// The `[vm]` and `[source]` tables every project entry needs.
 ///
 /// bombyx generates the Vagrantfile, so it has to be told what
 /// machine to build and where the guest clones the project
-/// from. Neither section has a default.
+/// from. Neither table has a default. [`registry`] renames both
+/// into the project's namespace.
 const REQUIRED_TABLES: &str = "\n[vm]\n\
      provider = \"libvirt\"\n\
      box = \"generic/ubuntu2204\"\n\
@@ -81,51 +92,34 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
      ref = \"main\"\n\
      script = \"vagrant/provision.sh\"\n";
 
-/// Appends [`REQUIRED_TABLES`] when `source` omits them.
+/// Writes the registry inside a fixture.
 ///
-/// These tests vary one top-level key and care nothing about
-/// the machine description, so spelling it out in each would
-/// bury the line under test. A test *about* a missing section
-/// includes `[vm]` itself and is left alone.
-fn completed(source: &str) -> String {
-    if source.contains("[vm]") {
-        source.to_owned()
-    } else {
-        format!("{source}{REQUIRED_TABLES}")
-    }
-}
-
-/// A fixture whose `bombyx.toml` is `source`, with the required
-/// `[vm]` and `[source]` tables appended when absent.
-fn project_dir_with(source: &str) -> TempDir {
-    let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join("bombyx.toml"), completed(source)).unwrap();
-    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
-    dir
-}
-
-/// Writes the per-developer config inside a fixture.
-///
-/// The file name and both environment variables come from the
+/// The file name and the environment variable come from the
 /// library's own constants. Hardcoded, a rename would leave this
-/// suite green while it wrote a file bombyx no longer reads and
-/// cleared a variable it no longer honours -- so the hermeticity
-/// below would quietly stop holding.
+/// suite green while it wrote a file bombyx no longer reads --
+/// so the hermeticity below would quietly stop holding.
 fn write_user_config(dir: &TempDir, source: &str) {
     std::fs::write(dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE), source)
         .unwrap();
 }
 
+/// The binary, pointed at a fixture's registry and asked for
+/// `myproject`.
+///
+/// Hermetic on purpose. Without the environment variable every
+/// assertion below would depend on the developer's own
+/// `config.toml`, passing on one machine and failing on the
+/// next.
+///
+/// `--project` is added here rather than in each test because
+/// every VM subcommand requires it, and every fixture names the
+/// same project. A test about the argument itself builds its own
+/// command.
 fn bombyx_in(dir: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("bombyx").unwrap();
     cmd.current_dir(dir.path());
-    // Hermetic on purpose. The host now comes from outside the
-    // project, so without these two lines every assertion below
-    // would depend on the developer's own `config.toml` and on
-    // whether their shell exports BOMBYX_HOST -- passing on one
-    // machine and failing on the next.
     cmd.env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME));
-    cmd.env_remove(HOST_ENV);
+    cmd.args(["--project", "myproject"]);
     cmd
 }
 
@@ -202,28 +196,30 @@ fn up_runs_nothing_on_the_workstation() {
 }
 
 #[test]
-fn a_stray_bombyx_local_toml_is_not_read() {
-    // bombyx no longer opens `bombyx.local.toml`, so a leftover
-    // one is an ordinary unread file. Three things must hold.
-    // The host it names must lose to the per-developer config;
-    // contents that are not TOML at all must not become an
-    // error, because a parse failure would prove bombyx had
-    // opened the file; and bombyx must not name the file on
-    // stderr, which `README.md` and `CHANGELOG.md` both promise.
-    for contents in ["host = \"my-vmhost\"\n", "host = "] {
-        let dir = project_dir();
-        std::fs::write(dir.path().join("bombyx.local.toml"), contents).unwrap();
+fn a_config_file_in_the_working_directory_is_not_read() {
+    // The rule `docs/trust-boundary.md` states: the workstation
+    // reads no file out of the project's own directory. Both
+    // names bombyx once used are tried, and each is written twice
+    // -- once naming a different host, once as text that is not
+    // TOML at all. The second is what proves bombyx never opened
+    // the file, because a parse failure would be an error rather
+    // than silence.
+    for name in ["bombyx.toml", "bombyx.local.toml"] {
+        for contents in ["host = \"my-vmhost\"\n", "host = "] {
+            let dir = project_dir();
+            std::fs::write(dir.path().join(name), contents).unwrap();
 
-        let out = bombyx_in(&dir)
-            .args(["--dry-run", "status"])
-            .assert()
-            .success();
-        let stdout =
-            String::from_utf8(out.get_output().stdout.clone()).unwrap();
-        let stderr =
-            String::from_utf8(out.get_output().stderr.clone()).unwrap();
-        assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
-        assert!(!stderr.contains("bombyx.local.toml"), "{stderr}");
+            let out = bombyx_in(&dir)
+                .args(["--dry-run", "status"])
+                .assert()
+                .success();
+            let stdout =
+                String::from_utf8(out.get_output().stdout.clone()).unwrap();
+            let stderr =
+                String::from_utf8(out.get_output().stderr.clone()).unwrap();
+            assert!(stdout.starts_with("ssh vmhost "), "{stdout}");
+            assert!(!stderr.contains(name), "{stderr}");
+        }
     }
 }
 
@@ -234,10 +230,10 @@ fn the_user_config_host_reaches_the_ssh_command_in_silence() {
     //
     // The silence is asserted, not incidental. `README.md` tells
     // the operator that no provenance line means the host came
-    // from their own `config.toml`, and that a line means
-    // something overrode it. Both halves of that promise need a
-    // test: the other tests here assert that a line appears for
-    // `--host` and for the variable, and a `contains` check
+    // from the file-wide `host`, and that a line means one
+    // project's own entry overrode it. Both halves of that
+    // promise need a test: the test below asserts that a line
+    // appears for an entry's own `host`, and a `contains` check
     // still passes when bombyx prints the line on every command.
     // Then the line is noise and the rule is false.
     let dir = project_dir();
@@ -299,7 +295,9 @@ fn destroy_needs_the_project_name_to_confirm() {
         .args(["--dry-run", "destroy"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("bombyx destroy myproject"));
+        .stderr(predicate::str::contains(
+            "bombyx --project myproject destroy myproject",
+        ));
 }
 
 #[test]
@@ -347,7 +345,7 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
 #[test]
 fn doctor_fails_and_says_which_check_failed() {
     let dir = project_dir();
-    write_user_config(&dir, "host = \"nosuchhost.invalid\"\n");
+    write_user_config(&dir, &registry("host = \"nosuchhost.invalid\"\n", ""));
 
     // `~/.ssh/config` is not consulted. A `Host *` block with a
     // `ProxyCommand` is common on a work laptop, and
@@ -458,13 +456,7 @@ fn a_dangerous_remote_root_is_refused_at_load() {
     // forbid. They must fail before any command is built, on
     // every subcommand -- not just the destructive ones.
     for root in ["~/..", "/.", "~/.", "/", "~", "vms"] {
-        let dir = project_dir_with(&format!(
-            "project = \"etc\"\nremote_root = {root:?}\n"
-        ));
-        // A host has to be configured, or the run fails with
-        // `no VM host configured` before it ever validates
-        // `remote_root`.
-        write_user_config(&dir, "host = \"vmhost\"\n");
+        let dir = project_dir_with(&format!("remote_root = {root:?}\n"));
         bombyx_in(&dir)
             .args(["--dry-run", "up"])
             .assert()
@@ -518,15 +510,22 @@ fn a_host_cannot_smuggle_an_ssh_option() {
     // per-developer file or a mistyped flag still reaches the
     // same argv.
     let dir = project_dir();
-    write_user_config(&dir, "host = \"-oProxyCommand=curl evil\"\n");
-    bombyx_in(&dir)
+    write_user_config(
+        &dir,
+        &registry("host = \"-oProxyCommand=curl evil\"\n", ""),
+    );
+    let out = bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("must not start with"));
+        .failure();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("must not start with"), "{stderr}");
+    // And the message names the file the value is written in, so
+    // the operator knows which line to edit.
+    assert!(stderr.contains(USER_CONFIG_FILE), "{stderr}");
 }
 
-/// `bombyx.toml.sample` loads, exactly as it is shipped.
+/// `config.toml.sample` loads, exactly as it is shipped.
 ///
 /// It is the file the header tells a reader to copy, and it has
 /// been broken twice: once with `remote_root` written after
@@ -542,11 +541,10 @@ fn a_host_cannot_smuggle_an_ssh_option() {
 /// instead of restating it, so there is nothing else to drift.
 #[test]
 fn the_sample_config_loads_as_shipped() {
-    let sample = include_str!("../../../bombyx.toml.sample");
+    let sample = include_str!("../../../config.toml.sample");
     let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join("bombyx.toml"), sample).unwrap();
     std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
-    write_user_config(&dir, "host = \"vmhost\"\n");
+    write_user_config(&dir, sample);
 
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
@@ -560,8 +558,7 @@ fn a_typo_in_the_config_is_reported() {
     // `remote_rot`, a near-miss of a key that exists. A typo of
     // a key that never existed would pass for the same reason
     // whether or not `deny_unknown_fields` were set.
-    let dir = project_dir_with("project = \"p\"\nremote_rot = \"x\"\n");
-    write_user_config(&dir, "host = \"vmhost\"\n");
+    let dir = project_dir_with("remote_rot = \"x\"\n");
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
@@ -570,94 +567,93 @@ fn a_typo_in_the_config_is_reported() {
 }
 
 #[test]
-fn a_host_in_the_project_file_is_refused() {
-    // The rule the design turns on: the VM host belongs to the
-    // developer, and `bombyx.toml` is committed. Refused rather
-    // than ignored, and the message has to say where the line
-    // goes instead.
-    let dir = project_dir_with("host = \"vmhost\"\nproject = \"myproject\"\n");
-    write_user_config(&dir, "host = \"mine\"\n");
-    bombyx_in(&dir)
-        .args(["--dry-run", "status"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("`host` is not allowed"))
-        .stderr(predicate::str::contains(USER_CONFIG_FILE));
-}
-
-#[test]
-fn no_host_anywhere_names_every_way_to_set_one() {
+fn no_host_anywhere_says_to_add_one() {
     // The first-run failure. It has to be actionable: an
-    // operator who has never configured a host learns all three
-    // sources from this one message.
-    let dir = project_dir_with("project = \"myproject\"\n");
+    // operator who has never configured a host learns from this
+    // one message which file to edit and which key to write.
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+    write_user_config(&dir, &registry("", ""));
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("no VM host configured"))
         .stderr(predicate::str::contains(USER_CONFIG_FILE))
-        .stderr(predicate::str::contains("--host"))
-        .stderr(predicate::str::contains("BOMBYX_HOST"));
+        .stderr(predicate::str::contains("`host`"));
 }
 
 #[test]
-fn the_host_flag_outranks_the_user_config_and_says_so() {
-    // The per-developer file names a host, the flag beats it,
-    // and the provenance line has to say so. `destroy` runs
-    // `rm -rf` on the winning host, so a line naming the source
-    // that lost would point the operator at the wrong machine.
-    let dir = project_dir();
-    let out = bombyx_in(&dir)
-        .args(["--dry-run", "--host", "from-flag", "status"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("host from-flag from --host"));
-    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(stdout.starts_with("ssh from-flag "), "{stdout}");
-}
-
-#[test]
-fn an_invalid_host_does_not_blame_the_project_file() {
-    // The project file is the one file forbidden to carry a host,
-    // so an error about a bad host must not be prefixed with
-    // "loading bombyx.toml" -- that sends the operator to edit
-    // the wrong thing.
-    let dir = project_dir();
-    write_user_config(&dir, "host = \"-oProxyCommand=curl evil\"\n");
+fn an_entrys_own_host_wins_and_the_notice_names_the_entry() {
+    // A project on a machine of its own. `destroy` runs `rm -rf`
+    // on the winning host, and both `host` keys sit in the same
+    // file -- so a notice naming only the file would leave the
+    // operator to work out which line is in force.
+    let dir = project_dir_with("host = \"from-entry\"\n");
     let out = bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
-        .failure();
-    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(stderr.contains("must not start with"), "{stderr}");
-    assert!(stderr.contains(USER_CONFIG_FILE), "{stderr}");
-    assert!(!stderr.contains("loading bombyx.toml"), "{stderr}");
+        .success()
+        .stderr(predicate::str::contains(
+            "host from-entry from [projects.\"myproject\"].host",
+        ));
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.starts_with("ssh from-entry "), "{stdout}");
 }
 
 #[test]
-fn the_host_env_var_outranks_the_user_config() {
-    // Between the flag and the per-developer file: useful in CI,
-    // or for an agent driving bombyx with no config directory of
-    // its own.
-    //
-    // The provenance line is asserted here too. An exported
-    // `BOMBYX_HOST` redirects every `ssh` bombyx runs, `destroy`
-    // included, and what bombyx offers against that is one line
-    // on stderr naming the variable. Removing that print has to
-    // turn a test red, and the flag test above covers only the
-    // other half. The `if` guarding it is covered separately, by
-    // the silence assertion in
-    // `the_user_config_host_reaches_the_ssh_command_in_silence`.
+fn a_vm_command_without_a_project_is_refused() {
+    // clap cannot mark a global argument required for some
+    // subcommands and not others, so `main` states the
+    // requirement itself. The message has to name the table,
+    // because an operator who has never passed the argument does
+    // not know what a project name is here.
     let dir = project_dir();
-    let out = bombyx_in(&dir)
-        .env(HOST_ENV, "from-env")
+    Command::cargo_bin("bombyx")
+        .unwrap()
+        .current_dir(dir.path())
+        .env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME))
         .args(["--dry-run", "status"])
         .assert()
+        .failure()
+        .stderr(predicate::str::contains("--project is required"));
+}
+
+#[test]
+fn self_update_needs_neither_project_nor_registry() {
+    // The one subcommand that is not about a VM, and the machine
+    // running it is the machine with no registry yet. It is
+    // handled before anything reads a config, so a dry run must
+    // succeed in an empty directory with nothing configured.
+    let dir = TempDir::new().unwrap();
+    Command::cargo_bin("bombyx")
+        .unwrap()
+        .current_dir(dir.path())
+        .env(CONFIG_DIR_ENV, dir.path())
+        .args(["--dry-run", "self-update"])
+        .assert()
         .success()
-        .stderr(predicate::str::contains("host from-env from BOMBYX_HOST"));
+        .stdout(predicate::str::contains("git"));
+}
+
+#[test]
+fn the_config_flag_names_the_registry_file() {
+    // `--config` takes a path to the file, not to a directory,
+    // and it outranks whatever the environment names. The
+    // fixture's own registry names `vmhost`, so a run that reads
+    // the flagged file has to reach a different host.
+    let dir = project_dir();
+    let elsewhere = dir.path().join("elsewhere.toml");
+    std::fs::write(&elsewhere, registry("host = \"flagged\"\n", "")).unwrap();
+
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "--config"])
+        .arg(&elsewhere)
+        .arg("status")
+        .assert()
+        .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(stdout.starts_with("ssh from-env "), "{stdout}");
+    assert!(stdout.starts_with("ssh flagged "), "{stdout}");
 }
 
 #[test]
@@ -669,13 +665,19 @@ fn status_sends_exactly_one_command() {
 }
 
 #[test]
-fn missing_config_is_an_error() {
+fn a_missing_registry_says_what_to_create() {
+    // The machine bombyx has never run on. The message names the
+    // file and the table, because an empty file gets the operator
+    // no further.
     let dir = TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("config file not found"));
+        .stderr(predicate::str::contains("no registry file"))
+        .stderr(predicate::str::contains(USER_CONFIG_FILE))
+        .stderr(predicate::str::contains("[projects.\"myproject\"]"));
 }
 
 #[test]

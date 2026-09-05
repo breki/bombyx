@@ -4,12 +4,11 @@
 //! `git`, `curl` and `tar`. Left to
 //! the operating system, a bare name is looked up through a
 //! search order that on Windows includes the **current
-//! directory**. bombyx runs from a project repository, and
-//! `config.rs` already treats a repo as attacker-controlled:
-//! `bombyx.toml` arrives with whatever branch you check out. A
-//! `tar.exe` committed beside it is the same trust boundary, and
-//! `bombyx doctor` is the command the documentation tells you to
-//! run *first* in a fresh clone.
+//! directory**. An operator runs bombyx from wherever they
+//! happen to be standing, which is usually a project
+//! repository, so a `tar.exe` committed in a clone is a program
+//! a branch can choose. `bombyx doctor` is the command the
+//! documentation tells you to run *first* in a fresh clone.
 //!
 //! The lookup itself is [`which`]'s job. Getting it right means
 //! honouring executable permission bits, `PATHEXT` ordering,

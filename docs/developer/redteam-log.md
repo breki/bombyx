@@ -22,6 +22,11 @@ Deferred: deleting the function is a test-only change, and the
 operator ended this round's code changes. Found as FR-9 in the
 `/review2` on registry-config-load (#26).
 
+**Resolved 2026-09-05 by `project-selection-flag` (#18).** The
+`tests` module was rewritten onto the registry, and
+`required_tables()` and `completed()` went with the project-file
+helpers they served. One copy is left, the constant.
+
 ### rt-2026-09-05-test-fixtures-sit-above-the-public-exports
 
 **Category:** Module structure

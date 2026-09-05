@@ -25,10 +25,11 @@ generates a Vagrantfile and a bootstrap script, writes them
 onto the VM host and runs `vagrant` there, streaming output
 back.
 
-The key architectural constraint: **the VM host holds no
-project code.** Both files are generated from `bombyx.toml`
-and rewritten on every boot, so the host cannot drift, and
-the guest clones the project itself once it is running. See
+The key architectural constraint: **neither the workstation
+nor the VM host reads the project's files.** Both generated
+files come out of the operator's own `config.toml` and are
+rewritten on every boot, so the host cannot drift, and the
+guest clones the project itself once it is running. See
 `docs/trust-boundary.md`.
 
 ## Repository Layout
@@ -47,7 +48,7 @@ bombyx/
       src/
         lib.rs          # crate root, re-exports
         plan.rs         # which commands run, in what order
-        config.rs       # bombyx.toml parsing (submodules)
+        config.rs       # config.toml parsing (submodules)
         remote.rs       # SSH command building (submodules)
         vagrantfile.rs  # renders the two generated files
         doctor.rs       # preflight checks (submodules)
@@ -72,16 +73,14 @@ bombyx/
 
 ### `config` -- project configuration
 
-Parses `bombyx.toml`: `project`, `remote_root`, `[vm]` and
-`[source]` -- and *refuses* `host`, which belongs to the
-developer rather than the repo. `host` is resolved
-separately from `--host`, `BOMBYX_HOST`, the named
-project's own `host` key in the per-developer
-`config.toml`, and that file's own `host`, in that order
-(`HostSources`). The third of those is accepted by the
-parser and reached by no command yet, because nothing
-names a project until `project-selection-flag` lands.
-Typed errors via `thiserror`.
+Parses the operator's `config.toml`: a file-wide `host`,
+and one `[projects.<name>]` table per project carrying
+`remote_root`, an optional `host`, `[vm]` and `[source]`.
+`Config::load_project(name, registry)` is the one loader,
+and `config::host::rank` picks between the two `host` keys,
+the project's own winning. Every `host` in the file is
+checked as the file is read, so holding a `Registry` proves
+they all passed. Typed errors via `thiserror`.
 Computes remote paths (`remote_project_dir`,
 `remote_scratch_dir`).
 

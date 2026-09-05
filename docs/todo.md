@@ -157,7 +157,7 @@ plan, decisions, and outcome.
   sets no VAGRANT_DEFAULT_PROVIDER, so vagrant picks whatever the host makes
   available. On a Linux VM host with only vagrant-libvirt installed, a project
   with provider = "hyperv" boots a libvirt machine. The `:hyperv` settings block
-  never applies, so the cpus and memory in bombyx.toml are ignored and the VM
+  never applies, so the cpus and memory in the config are ignored and the VM
   comes up at vagrant defaults. Nothing reports the mismatch. Until 58099a8 the
   libvirt plugin probe caught this by accident: a hyperv project got a red
   doctor row, for the wrong reason. That probe is now conditional and a hyperv
@@ -211,7 +211,9 @@ plan, decisions, and outcome.
   first. And pass the registry path into HostOrigin::describe from main.rs, so
   the line names the file bombyx read rather than the bare config.toml -- the
   printing half alone leaves every config.toml origin still rendering a
-  directoryless literal, which is the same gap one step later.
+  directoryless literal, which is the same gap one step later. Since #18 the
+  second half is cheap: main.rs holds the registry path already, because
+  --config either named it or config::registry_file did.
   Raised as red-team finding RT-1; the prose claiming otherwise was corrected in
   that change, the code was not. The second half was added during the /review2
   on #25, where a doc comment cited this item as the work that gives the notice

@@ -469,7 +469,7 @@ const SEP: &str = " -- ";
 ///
 /// This is what keeps prose out of the queue. The delimiters
 /// alone are too weak a guard: inline code in a sentence, as in
-/// `` - `bombyx.toml` -- lives at the repo root ``, is
+/// `` - `config.toml` -- lives outside the repo ``, is
 /// structurally identical to a backticked entry. Requiring the
 /// captured text to look like a slug rejects it.
 ///
@@ -901,7 +901,10 @@ mod tests {
     fn parse_slug_rejects_prose_in_inline_code() {
         // The delimiters alone are too weak a guard: a sentence
         // using inline code has the same shape as an entry.
-        assert_eq!(parse_slug("- `bombyx.toml` -- lives at the root"), None);
+        assert_eq!(
+            parse_slug("- `config.toml` -- lives outside the repo"),
+            None
+        );
         assert_eq!(parse_slug("- `cargo xtask deploy` -- missing"), None);
         assert_eq!(parse_slug("- `` -- x"), None);
         assert_eq!(parse_slug("- **Not A Slug** -- x"), None);

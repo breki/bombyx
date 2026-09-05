@@ -4,14 +4,12 @@
 //! The module has two error types, and they are separate for a
 //! reason.
 //!
-//! [`ConfigError`] belongs to *loading* a config. The project
-//! file was missing, unreadable, not TOML, or carried a
-//! forbidden key. No source at all named a VM host -- not the
-//! flag, not the environment, not the registry. Or the registry
-//! has no table for the project asked for. Most of the variants
-//! are about a file. No count here: one lands most times this
-//! module is touched, and a stale number costs the next reader a
-//! recount.
+//! [`ConfigError`] belongs to *loading* a config. The registry
+//! was missing, unreadable or not TOML. It carries no table for
+//! the project asked for. Neither of its `host` keys named a VM
+//! host. Most of the variants are about a file. No count here:
+//! one lands most times this module is touched, and a stale
+//! number costs the next reader a recount.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a
@@ -30,7 +28,6 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::host::HOST_ENV;
 use super::registry::heading;
 use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
 
@@ -89,10 +86,6 @@ impl FieldError {
 /// Errors produced while loading a project configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// The configuration file does not exist.
-    #[error("config file not found: {}", .0.display())]
-    NotFound(PathBuf),
-
     /// The configuration file could not be read.
     #[error("failed to read {}: {source}", .path.display())]
     Read {
@@ -119,19 +112,17 @@ pub enum ConfigError {
     /// file:
     ///
     /// ```text
-    /// bombyx: loading bombyx.toml: invalid config in bombyx.toml:
+    /// bombyx: invalid config in config.toml:
     /// TOML parse error at line 1, column 12
     ///   |
     /// 1 | -----BEGIN OPENSSH PRIVATE KEY-----
     /// ```
     ///
-    /// Reproduced against the built binary. Two routes put a
-    /// file bombyx should not quote in front of the parser.
-    /// `bombyx.toml` arrives inside a clone and nobody reads it
-    /// before running bombyx. And `--config` takes any path at
-    /// all, so a mistyped or pasted `--config ~/.ssh/id_ed25519`
-    /// hands the parser a private key. Neither needs a symlink,
-    /// which is refused separately.
+    /// Reproduced against the built binary. `--config` takes any
+    /// path at all, so a mistyped or pasted
+    /// `--config ~/.ssh/id_ed25519` hands the parser a private
+    /// key, and a symlinked registry is followed rather than
+    /// refused.
     ///
     /// So `summary` keeps the position and the reason and drops
     /// the quoted line. That is enough to correct a malformed
@@ -161,30 +152,12 @@ pub enum ConfigError {
         reason: String,
     },
 
-    /// The committed project file carried a `host` key.
+    /// Neither `host` key supplied a VM host.
     ///
-    /// Refused rather than ignored. A committed host identifies one
-    /// developer's machine, and a stale one that still parses
-    /// is how `destroy` ends up deleting a directory on a
-    /// colleague's host.
-    #[error(
-        "`host` is not allowed in {}: it names one developer's \
-         machine, and this file is committed. Move that line to \
-         {place}",
-        .path.display()
-    )]
-    HostInProjectFile {
-        /// The project file carrying the key.
-        path: PathBuf,
-        /// Where the value belongs instead.
-        place: String,
-    },
-
-    /// No source supplied a VM host.
-    #[error(
-        "no VM host configured -- set it in {place}, pass \
-         --host, or set {HOST_ENV}"
-    )]
+    /// The message asks for the file-wide key rather than the
+    /// project's own: one machine name written once covers every
+    /// project.
+    #[error("no VM host configured -- add a `host` line to {place}")]
     HostMissing {
         /// The file that would supply one.
         place: String,
@@ -225,12 +198,10 @@ pub enum ConfigError {
     /// A project's settings were asked for and there is no
     /// registry file to hold them.
     ///
-    /// Separate from [`ConfigError::NotFound`], which says a
-    /// file is absent and stops there, and from
-    /// [`ConfigError::ProjectNotFound`], whose message claims
-    /// bombyx looked inside a file. The operator here has to
-    /// create the file *and* know what to put in it, so the
-    /// message says both.
+    /// Separate from [`ConfigError::ProjectNotFound`], whose
+    /// message claims bombyx looked inside a file. The operator
+    /// here has to create the file *and* know what to put in it,
+    /// so the message says both.
     ///
     /// `place` is a `String` rather than a `PathBuf` because a
     /// machine whose environment names no config directory has
@@ -248,14 +219,14 @@ pub enum ConfigError {
         place: String,
     },
 
-    /// The winning source supplied an unusable host.
+    /// A `host` key in the registry named an unusable host.
     ///
     /// Separate from [`ConfigError::Invalid`] so the message can
-    /// name *where the value came from*. A plain field error
-    /// carries a field name and, at most, the project file's
-    /// path -- and the project file is the one file forbidden to
-    /// carry a host, so that message would send the operator to
-    /// edit a file that cannot hold the value.
+    /// name *which line carried the value*. A plain field error
+    /// carries the field name `host`, and the registry has one
+    /// of those per project plus a file-wide one, so the
+    /// operator would be told to fix a key without being told
+    /// which.
     #[error("invalid VM host from {origin}: {reason}")]
     InvalidHost {
         /// Which source supplied it.

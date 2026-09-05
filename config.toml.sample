@@ -1,27 +1,48 @@
-# Sample bombyx project configuration.
+# Sample bombyx configuration.
 #
-# Copy this to `bombyx.toml` in the ROOT OF THE PROJECT you
-# want a VM for -- not here. Each project carries its own
-# config. bombyx reads the file from the directory you run it
-# in and does not search upwards the way git and cargo do, so
-# run bombyx from that root.
+# Copy this to your own config file, OUTSIDE ANY REPOSITORY:
+#
+#   Linux/macOS  ~/.config/bombyx/config.toml
+#   Windows      %APPDATA%\bombyx\config.toml
+#
+# This is the only file bombyx reads. It holds every project you
+# drive VMs for, one `[projects.<name>]` table each, and it is
+# yours: nothing in it is committed anywhere. Name the project
+# you mean on the command line -- `bombyx --project myproject
+# up` -- because bombyx reads nothing at all from the project's
+# own directory and so cannot work it out from where you stand.
 #
 # Paths in the comments below, such as docs/trust-boundary.md,
 # are in bombyx's own repository:
 # https://github.com/breki/bombyx
 #
-# THERE IS NO `host` KEY HERE, AND ONE IS REFUSED.
-# Which machine runs the VMs is a property of whoever is
-# driving bombyx, not of the project: everyone has their own
-# hardware on their own network. See the bottom of this file.
+# `--config <path>` reads a different file instead, which is
+# useful for keeping two setups apart.
 
-# Project name. Doubles as the VM's directory name on the
-# host, e.g. ~/vms/myproject.
-project = "myproject"
+# The machine every project runs on, unless its own table says
+# otherwise.
+#
+# It is an SSH alias, resolved through your ~/.ssh/config, so
+# bombyx never handles addresses, usernames or keys.
+#
+# Which machine runs the VMs is a property of you rather than of
+# any project: everyone on a team has their own hardware on
+# their own network. That is why this line lives here and not in
+# a repository.
+host = "my-vmhost"
+
+# One table per project. The table key is the project name, and
+# it doubles as the VM's directory name on the host, e.g.
+# ~/vms/myproject. Nothing inside the table repeats it, so a
+# project cannot disagree with itself about what it is called.
+#
+# A name containing a `.` has to be quoted -- `[projects."a.b"]`
+# -- because TOML reads a bare dot as nesting.
+[projects.myproject]
 
 # Optional; `~/vms` if you leave it out.
 #
-# Root on the VM host under which project directories are
+# Root on the VM host under which this project's directories are
 # created. Scratch VMs land in
 # <remote_root>/scratch/<project>/<name>, so the same scratch
 # name in two projects cannot collide.
@@ -40,15 +61,26 @@ project = "myproject"
 # it is rejected, as are shell metacharacters.
 remote_root = "~/vms"
 
+# Optional. The machine THIS project runs on, when it is not the
+# one the `host` line above names. Most entries leave it out.
+#
+# Written here, it wins for this project alone, and bombyx says
+# so on stderr on every command -- because `destroy` runs
+# `rm -rf` on whichever machine wins, and both keys sit in this
+# one file.
+#
+# host = "other-vmhost"
+
 # EVERY KEY BELOW A TABLE HEADER BELONGS TO THAT TABLE.
-# `remote_root` sits above `[vm]` for that reason: written
-# after `[source]` it would parse as `source.remote_root` and
-# the whole file would be refused.
+# `remote_root` sits above [projects.myproject.vm] for that
+# reason: written after it, the key would parse as
+# `projects.myproject.vm.remote_root` and the whole file would
+# be refused.
 
 # bombyx builds the machine from this table. All four keys are
 # required: bombyx cannot guess a base image, and any size it
 # picked would be wrong on either a laptop or a workstation.
-[vm]
+[projects.myproject.vm]
 # Use libvirt. bombyx does not yet tell vagrant which provider
 # to use -- it only writes the settings block -- so `hyperv`
 # configures a provider that vagrant will not select, and on a
@@ -67,7 +99,7 @@ memory = 8192                 # MiB
 #
 # A private repository needs a credential inside the guest, and
 # code in there can read it. See docs/trust-boundary.md.
-[source]
+[projects.myproject.source]
 repo = "https://github.com/you/myproject"
 ref = "main"
 script = "vagrant/provision.sh"   # path inside the clone
@@ -75,22 +107,3 @@ script = "vagrant/provision.sh"   # path inside the clone
 # `script` names a file that must exist in the repository at
 # `ref`. The guest refuses to provision without it. Part 3 of
 # bombyx's docs/tutorial.md writes a re-runnable one.
-
-# WHERE THE VM HOST GOES INSTEAD
-#
-# Set it once, in your own file outside any repo:
-#
-#   Linux/macOS  ~/.config/bombyx/config.toml
-#   Windows      %APPDATA%\bombyx\config.toml
-#
-#   # config.toml
-#   host = "my-vmhost"
-#
-# `host` is an SSH alias, resolved through your ~/.ssh/config,
-# so bombyx never handles addresses, usernames or keys.
-#
-# Two other sources override that when you need them:
-# `--host` and `BOMBYX_HOST`.
-# "Where bombyx looks for the host" in bombyx's own README
-# gives the full order; it is deliberately documented in one
-# place.

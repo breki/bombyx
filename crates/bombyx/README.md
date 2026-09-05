@@ -15,9 +15,9 @@ see `docs/trust-boundary.md` in the repository for what is
 accepted there and why.
 
 bombyx generates the Vagrantfile and a bootstrap script from
-`bombyx.toml` and writes them onto the VM host on every boot,
-so that machine cannot drift and holds none of your code. The
-guest clones the project itself.
+your own `config.toml` and writes them onto the VM host on
+every boot, so that machine cannot drift and holds none of your
+code. The guest clones the project itself.
 
 ```bash
 bombyx up                 # write the generated files, boot the VM

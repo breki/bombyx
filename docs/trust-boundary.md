@@ -7,19 +7,19 @@ because the reasoning is easy to lose and expensive to rebuild,
 and because several planned pieces of work only make sense once
 you know which way it went.
 
-> **Partly built. Read the status of each part below.**
+> **Both statements are now reached in the code. Neither has
+> run against a real VM host.**
 >
 > "The boundary" states the target. "Where project code lives
 > today" states the current behaviour, which was read from
 > `crates/bombyx/src/plan.rs` rather than recalled.
 >
 > What landed: bombyx generates the Vagrantfile and writes it on
-> the VM host, the guest clones the project itself, and the push
-> is gone, so the VM host holds no project code. What has not:
-> the workstation still reads `bombyx.toml` out of the project's
-> working directory, which means it still holds a checkout.
->
-> None of it has run against a real VM host.
+> the VM host, the guest clones the project itself, the push is
+> gone, and every setting now comes out of the operator's own
+> `config.toml` with `--project` naming the project. So neither
+> the workstation nor the VM host opens a file in the project's
+> repository, and the workstation needs no checkout.
 
 ## The boundary
 
@@ -30,9 +30,9 @@ code.** Neither the workstation nor the VM host keeps a copy, a
 clone, or a cache of it.
 
 **Neither machine reads any file from the project's
-repository.** Not the source, and not `bombyx.toml` or
-`vagrant/` either. A repository that bombyx has never opened
-cannot decide what runs on the machines outside the VM.
+repository.** Not the source, and not a config file or a
+`vagrant/` directory either. A repository that bombyx has never
+opened cannot decide what runs on the machines outside the VM.
 
 What the workstation may still hold is a repository URL, a
 commit, and host configuration -- kept in its own configuration,
@@ -41,19 +41,20 @@ rather than the project, and it tells an attacker where the code
 came from without handing them the code or anything derived from
 running it.
 
-Neither statement is reached, and both are closer than they
-were. Outside the guest's own disk image, the VM host now holds
-no project file, so half of the first statement holds. The
-workstation is the other half: `bombyx.toml` is read from the
-working directory, so you run bombyx from inside a clone of the
-project. Moving that one file off the repo is what
-`project-config-off-repo` does, and it is what unblocks both
-statements.
+Both statements are now reached in the code. Outside the
+guest's own disk image, the VM host holds no project file. The
+workstation reads one file, `config.toml` in the operator's own
+config directory, and opens nothing in the project's directory
+-- so it needs no checkout, and `--project` is what tells
+bombyx which project a command is about. The work that got here
+is `project-config-off-repo`. The qualification about the
+guest's disk image, below, is the one thing it does not cover.
 
 ## Where project code lives today
 
-The workstation holds a checkout, and the guest clones its own
-copy. The VM host holds no project file of its own.
+The guest clones its own copy, and it is the only machine with
+one. Neither the workstation nor the VM host holds a project
+file.
 
 That last claim needs one qualification, and the threat model
 below is why. The guest's virtual disk is a file on the VM
@@ -88,12 +89,12 @@ generated Vagrantfile disables that share. The VM host's own
 copy arrived in a `tar` archive that no program there read once
 the share was disabled, and that push is gone.
 
-The workstation is the one left, and removing the push did not
-change that. bombyx no longer *sends* anything from the
-checkout, but it still reads `bombyx.toml` out of it, so an
-operator running `bombyx up` is standing in a clone of the
-project. That is what the first statement above forbids, and
-`project-config-off-repo` is the work that closes it.
+The workstation was the last one, and its copy is gone too.
+Removing the push stopped bombyx *sending* anything from a
+checkout; moving every setting into the operator's own
+`config.toml` stopped it *reading* one. `bombyx --project
+myproject up` runs the same four commands from any directory at
+all, so the operator need not be standing in a clone.
 
 ## Why the guest cannot simply hold everything
 
@@ -199,35 +200,35 @@ than at boot, which is late and confusing.
 
 ## What is built and what is not
 
-Built, as of 2026-09-02:
+Built, as of 2026-09-05:
 
 - `generate-vagrantfile` -- bombyx renders the Vagrantfile from
-  `[vm]` in `bombyx.toml` and writes it, with a bootstrap
+  a project's `[vm]` table and writes it, with a bootstrap
   script, onto the VM host. The generated file disables the
   default `/vagrant` share.
 - `remote-clone-project-source` -- the bootstrap clones
   `[source]` inside the guest and runs a script from it, and the
   push is gone. `vagrant_dir`, the `tar`/`scp` pair and the
   remote unpack all went with it, so `bombyx up` is four `ssh`
-  commands and the VM host holds no project code. The
-  workstation still holds a checkout, so the first statement is
-  half reached rather than reached.
+  commands and the VM host holds no project code.
+- `project-config-off-repo` -- every setting moved into the
+  operator's own `config.toml`, one `[projects.<name>]` table
+  per project, and `project-selection-flag` added the
+  `--project` argument that names one. The committed project
+  file is gone, along with the overlay file and the `--host`
+  flag, so the workstation opens no file in the project's
+  directory and both statements above are reached.
+
+  Note the direction of travel it reversed.
+  `generate-vagrantfile` had added `[vm]` and `[source]` **to
+  the committed file**, putting more of what bombyx depends on
+  into the repository rather than less. Those tables are what
+  moved.
 
 Not built. The captured work sits in `docs/todo.md`:
 
-- `project-config-off-repo` -- reaching the second statement
-  means `bombyx.toml` stops being read from the project's
-  directory. The machine description and the repository URL have
-  to move into configuration the operator holds, keyed by
-  project.
-
-  Note the direction of travel. `generate-vagrantfile` added
-  `[vm]` and `[source]` **to `bombyx.toml`**, so it put more of
-  what bombyx depends on into the repo, not less. Those tables
-  are what has to move.
-- `project-selection-flag` -- how bombyx is told which project a
-  command is about, once it cannot read that from the working
-  directory.
+- `destroy-confirmation-shape` -- what `destroy`'s positional
+  becomes, now that `--project` already names the project.
 - `minimal-vagrantfile` -- what the generator should emit, and
   nothing more.
 - `provision-lifecycle-hooks` -- how the guest's setup is

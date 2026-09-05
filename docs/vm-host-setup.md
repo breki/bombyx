@@ -562,25 +562,24 @@ exists.
 ## Configuration for each project
 
 Setting up the host is something you do once per machine.
-After that, every project you want a VM for needs two things
-of its own, kept in that project's own repository: a
-`bombyx.toml` file and a `vagrant/` directory containing a
-Vagrantfile.
+After that, every project you want a VM for needs two things:
+a `[projects.<name>]` table in your own `config.toml`, and a
+provisioning script in that project's repository for the guest
+to run.
 
-bombyx does not ship either of them, because the project
-repository is meant to be the source of truth for how its VM
-is built. See `bombyx.toml.sample`, and the **Configure**
-section of `README.md`. [tutorial.md](tutorial.md) writes both
-files from scratch and boots the result, if you would rather
-follow a worked example than assemble one.
+bombyx ships neither. See `config.toml.sample`, and the
+**Configure** section of `README.md`.
+[tutorial.md](tutorial.md) writes both from scratch and boots
+the result, if you would rather follow a worked example than
+assemble one.
 
-One thing that does *not* go in the project's file is the name
-of this host. `bombyx.toml` is committed and a VM host is
-personal, so bombyx refuses a `host` key there and reads it
-from a per-developer `config.toml` instead --
+Note where each of the two lives. The project's repository
+holds only the script, because bombyx opens no file in a
+project's directory: everything describing the VM, this host's
+name included, sits in your `config.toml` --
 `~/.config/bombyx/config.toml`, or `%APPDATA%\bombyx` on
-Windows. **Where bombyx looks for the host** in `README.md`
-lists the four sources and their order.
+Windows. **Where bombyx looks for the host** in `README.md` is
+the authoritative statement of which `host` key wins.
 
 ## Other distributions
 

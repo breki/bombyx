@@ -102,7 +102,7 @@ pub(super) fn check_charset(
 /// bombyx generates a Vagrantfile, which is a Ruby file, and
 /// four config values get written into it inside double quotes:
 /// `box`, `repo`, `ref` and `script`. Something like
-/// `box = "generic/ubuntu2204"` in `bombyx.toml` becomes
+/// `box = "generic/ubuntu2204"` in the config becomes
 /// `config.vm.box = "generic/ubuntu2204"` in the Ruby.
 ///
 /// Four kinds of character break that. All four are refused,
