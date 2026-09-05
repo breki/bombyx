@@ -9,6 +9,25 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-05-record-done-while-backlog-says-pending
+
+**Category:** Two documents disagree about whether the work is
+finished.
+
+`docs/issues/registry-run-against-frosti.md` opens with
+**Status:** Done, while `docs/todo.md` still carries
+`registry-run-against-frosti` under `## Pending`, written as
+future work and not linked to the record. A reader who opens
+the backlog first takes the run as still owed and never learns
+the record exists.
+
+Deferred rather than fixed, because `/issue` step 12 makes the
+move the last action after the operator merges the PR:
+`cargo xtask todo done <slug> --date <date> --doc <plan>`.
+Moving it now would put the backlog ahead of the merge and
+contradict the process the other Done entries followed. The
+window is the life of the PR.
+
 ### fr-2026-09-05-placeholder-subjects-across-the-config-prose
 
 **Category:** Voice
