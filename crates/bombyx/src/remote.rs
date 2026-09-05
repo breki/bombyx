@@ -84,6 +84,23 @@ pub const VM_HOST_ENV: &str = "BOMBYX_VM_HOST";
 /// pointing at a private item.
 pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 
+/// Vagrant's own variable naming the provider it must use.
+///
+/// Rendering `config.vm.provider :libvirt` in the generated
+/// Vagrantfile only *configures* that provider. Vagrant still
+/// chooses one for itself, and it chooses from what the host
+/// offers, so a project asking for one provider can be handed
+/// another with its settings block silently unapplied.
+///
+/// Setting this makes vagrant use the named provider or refuse,
+/// which is the outcome bombyx wants: a machine that does not
+/// boot says more than a machine built to the wrong shape.
+///
+/// It rides on every vagrant call rather than only on `up`,
+/// because `--provider` is an argument `up` accepts and `halt`,
+/// `status`, `destroy` and `snapshot` do not.
+pub const PROVIDER_ENV: &str = "VAGRANT_DEFAULT_PROVIDER";
+
 /// The environment prefix that tells the guest which machine it
 /// is running on.
 ///
@@ -126,7 +143,15 @@ fn vm_host_env(cfg: &Config) -> String {
 /// silently ran `vagrant` with neither variable set -- while the
 /// doc comment here claimed every invocation carried them.
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
-    let mut cmd = format!("{} vagrant", vm_host_env(cfg));
+    // `Provider` renders one of two fixed lowercase words, so
+    // there is no operator input here for a quote to protect.
+    // It is quoted anyway, so the assignment matches every
+    // other one in the script.
+    let mut cmd = format!(
+        "{identity} {PROVIDER_ENV}={provider} vagrant",
+        identity = vm_host_env(cfg),
+        provider = shell_quote(&cfg.vm.provider.to_string()),
+    );
     for arg in args {
         cmd.push(' ');
         cmd.push_str(&shell_quote(arg));
@@ -708,6 +733,32 @@ mod tests {
         format!("{VM_HOST_ENV}='vmhost' {VM_HOSTNAME_ENV}=$(hostname -s)")
     }
 
+    /// The whole prefix a vagrant invocation carries.
+    ///
+    /// Kept apart from [`vm_env`] so the identity assertions
+    /// can name the two variables the guest reads on their own.
+    fn env_prefix() -> String {
+        format!("{} {PROVIDER_ENV}='libvirt'", vm_env())
+    }
+
+    #[test]
+    fn vagrant_names_the_provider_the_config_asks_for() {
+        // The defect this closes: the generated Vagrantfile
+        // *configures* a provider, and configuring one does
+        // nothing unless vagrant independently picks it. A
+        // hyperv project on a libvirt-only host booted a libvirt
+        // machine at vagrant's defaults, because the `:hyperv`
+        // settings block never applied and nothing reported the
+        // substitution.
+        let mut cfg = cfg();
+        cfg.vm.provider = crate::config::Provider::Hyperv;
+        let script = vagrant(&cfg, &["up"], Tty::NoPty).args[1].clone();
+        assert!(
+            script.contains(&format!("{PROVIDER_ENV}='hyperv'")),
+            "{script}"
+        );
+    }
+
     #[test]
     fn vagrant_carries_the_vm_host_identity() {
         // The guest cannot work out which machine it runs on:
@@ -721,7 +772,8 @@ mod tests {
         assert_eq!(
             c.args[1],
             "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' \
-             BOMBYX_VM_HOSTNAME=$(hostname -s) vagrant 'up'"
+             BOMBYX_VM_HOSTNAME=$(hostname -s) \
+             VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
         );
     }
 
@@ -782,7 +834,7 @@ mod tests {
     #[test]
     fn builds_a_vagrant_command() {
         let c = vagrant(&cfg(), &["up"], Tty::NoPty);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(c.program, "ssh");
         assert_eq!(c.args[0], "vmhost");
         assert_eq!(
@@ -798,7 +850,7 @@ mod tests {
             &["snapshot", "restore", "fresh-install"],
             Tty::NoPty,
         );
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(
             c.args[1],
             format!(
@@ -818,7 +870,7 @@ mod tests {
             &["destroy", "-f"],
             Tty::NoPty,
         );
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(
             c.args[1],
             format!(
@@ -886,7 +938,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
-                vm_env()
+                env_prefix()
             )
         );
     }
@@ -903,7 +955,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
                  '-f' 'fresh-install'",
-                vm_env()
+                env_prefix()
             )
         );
     }
@@ -919,7 +971,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' \
                  'restore' 'fresh-install'",
-                vm_env()
+                env_prefix()
             )
         );
     }
@@ -936,7 +988,7 @@ mod tests {
         // step: an unguarded save would make the second `up`
         // report failure.
         let c = save_snapshot_if_absent(&cfg(), "~/vms/myproject", Tty::NoPty);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(
             c.args[1],
             format!(
@@ -1011,7 +1063,7 @@ mod tests {
     #[test]
     fn vagrant_in_runs_in_the_given_dir() {
         let c = vagrant_in(&cfg(), "/srv/x", &["halt"], Tty::NoPty);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(c.args[1], format!("cd '/srv/x' && {env} vagrant 'halt'"));
     }
 }

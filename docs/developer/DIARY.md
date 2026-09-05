@@ -4,6 +4,38 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**bombyx now tells vagrant which provider to use**
+
+The generated Vagrantfile carried
+`config.vm.provider :libvirt do |v|`, and that only configures a
+provider vagrant might pick. Vagrant picked one for itself, from
+what the host offered, so a project asking for `hyperv` on a
+libvirt-only host got a libvirt machine with the settings block
+unapplied and its `cpus` and `memory` ignored. Nothing said so.
+
+bombyx sets `VAGRANT_DEFAULT_PROVIDER` on every vagrant call it
+builds, in the same prefix that already carries the two
+`BOMBYX_VM_*` variables. The environment variable rather than
+`vagrant up --provider <name>`, because only `up` accepts that
+argument: `halt`, `status`, `destroy` and `snapshot` would
+each keep choosing for themselves.
+
+We checked the part the backlog entry marked unverified, on
+frosti: a bare Vagrantfile under
+`VAGRANT_DEFAULT_PROVIDER=hyperv` exits 1 with "The provider
+'hyperv' ... isn't usable on this system". Vagrant refuses
+rather than substituting, which is the whole point.
+
+`[vm] provider` is optional now and defaults to libvirt. It is
+the only key in that table with a default, and
+`every_vm_and_source_field_but_provider_is_required` is where
+that list lives, so a second defaulted field cannot appear
+without a test noticing.
+
+`doctor` is untouched. Its libvirt probe already greps
+`vagrant plugin list` for `vagrant-libvirt`, and a hyperv
+project already gets a skip row saying nobody has checked it.
+
 **The review rounds found one real defect and 26 false claims**
 
 `/review2` over the newtype branch: three stages, 27 findings,

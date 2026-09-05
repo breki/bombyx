@@ -26,9 +26,9 @@ and this project adheres to
 - The per-developer `config.toml` carries a `[projects.<name>]` table per
   project -- `remote_root`, `[vm]` and `[source]` -- and it is the only place a
   project is described. `--project <name>` picks the table. `[vm]` needs
-  `provider`, `box`, `cpus` and `memory`; `[source]` needs `repo`, `ref` and
-  `script`. None of the seven has a default, so bombyx guesses neither a base
-  image nor a repository to clone.
+  `box`, `cpus` and `memory`, and takes an optional `provider`; `[source]`
+  needs `repo`, `ref` and `script`. Only `provider` has a default, `libvirt`,
+  so bombyx guesses neither a base image nor a repository to clone.
 - Library API: `config::Registry`, `config::Project` and `name::ProjectName`,
   plus a `ConfigError::ProjectNotFound` variant for a registry with no entry for
   the project asked for.
@@ -66,6 +66,14 @@ and this project adheres to
 - Library API: `config::RemoteRoot` and `config::HostName`, the checked types
   behind `remote_root` and `host`. `RemoteRoot` also drops a trailing slash, so
   the value is always in the form a path join needs.
+- bombyx passes the project's provider to vagrant as `VAGRANT_DEFAULT_PROVIDER`
+  on every call it makes. Rendering a provider block in the generated
+  Vagrantfile only configures that provider; vagrant still chose one for itself,
+  so a host offering something else built a machine of the wrong kind with the
+  configured cpus and memory ignored. A host that cannot supply the named
+  provider now fails the boot.
+- Library API: `remote::PROVIDER_ENV`, the name of the environment variable
+  bombyx sets to select the provider.
 
 ### Changed
 

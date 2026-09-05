@@ -442,6 +442,16 @@ a clone with `remote_root = "/etc"` gets `rm -rf /etc/<project>`
 there, which is `RemoteRoot`'s depth floor doing the work it
 exists for.
 
+`provider` reaches both the generated Vagrantfile and the `ssh`
+command line, where bombyx sets `VAGRANT_DEFAULT_PROVIDER` so
+vagrant uses the named provider rather than choosing one. It is
+absent from the list above because it is not a string. `Provider`
+is an enum, so serde refuses anything but `libvirt` or `hyperv`
+while the file is being read, and the two words it can render
+carry nothing a shell would act on. `remote::vagrant_command`
+quotes it regardless, so the assignment matches every other one
+in the script.
+
 What the guards do *not* stop is the redirect itself: bombyx
 opens no file in a project's directory of its own accord, and it
 opens the one `--config` names without asking where it came

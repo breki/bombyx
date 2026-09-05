@@ -123,10 +123,11 @@ header above it:
   table instead and the whole file is refused
 - `host` (in a project's table) — optional, for a project that
   runs on a machine of its own. It outranks the file-wide key
-- `[projects.<name>.vm]` — required, no defaults: `provider`,
-  `box`, `cpus`, `memory`. Use `libvirt`; `hyperv` is written
-  but bombyx does not tell vagrant to select it
-  (`docs/todo.md`)
+- `[projects.<name>.vm]` — required. `box`, `cpus` and `memory`
+  have no defaults; `provider` is optional and defaults to
+  `libvirt`. bombyx passes the provider to vagrant as
+  `VAGRANT_DEFAULT_PROVIDER`, so a host that cannot supply it
+  fails the boot. `hyperv` parses and has never been run
 - `[projects.<name>.source]` — required: `repo`, `ref`,
   `script`, what the guest clones and runs
 

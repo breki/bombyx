@@ -6,27 +6,35 @@
 
 use assert_cmd::Command;
 use bombyx::config::{CONFIG_DIR_ENV, USER_CONFIG_FILE};
-use bombyx::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
+use bombyx::remote::{PROVIDER_ENV, VM_HOST_ENV, VM_HOSTNAME_ENV};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 /// Name of the per-developer config directory inside a fixture.
 const CONFIG_HOME: &str = "config-home";
 
-/// The VM-host identity prefix, as `--dry-run` prints it.
+/// The whole environment prefix, as `--dry-run` prints it.
 ///
-/// Every vagrant invocation carries it so the guest can find out
-/// which machine it is running on. The command substitution
-/// appears escaped here because that is what makes the printed
-/// line honest: pasted into a shell it asks the *host* for its
-/// name, which is the whole point of the variable.
+/// Two of the three variables tell the guest which machine it is
+/// running on. The command substitution appears escaped here
+/// because that is what makes the printed line honest: pasted
+/// into a shell it asks the *host* for its name, which is the
+/// whole point of the variable.
+///
+/// The third names the provider for vagrant. Rendering a
+/// provider block in the Vagrantfile configures a provider that
+/// vagrant might pick; this variable is what makes it pick that
+/// one.
 ///
 /// Built from the library's own constants, for the same reason
 /// [`write_user_config`] uses them: renamed, a hardcoded copy
 /// would leave this suite green while bombyx exported something
 /// else entirely.
 fn vm_env() -> String {
-    format!(r"{VM_HOST_ENV}='vmhost.invalid' {VM_HOSTNAME_ENV}=\$(hostname -s)")
+    let identity = format!(
+        r"{VM_HOST_ENV}='vmhost.invalid' {VM_HOSTNAME_ENV}=\$(hostname -s)"
+    );
+    format!("{identity} {PROVIDER_ENV}='libvirt'")
 }
 
 /// A fixture whose registry names `myproject` on `vmhost.invalid`.

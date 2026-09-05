@@ -37,11 +37,15 @@ use super::guards::check_renderable;
 /// `provider = "libvirt"` in the TOML select the `Libvirt`
 /// variant: without it serde matches the Rust spelling, and the
 /// operator would have to write `"Libvirt"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+///
+/// `Libvirt` is the default, and it is the only provider bombyx
+/// has ever booted a machine with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     /// libvirt via `vagrant-libvirt`. The only provider bombyx
     /// has ever booted a machine with.
+    #[default]
     Libvirt,
     /// Hyper-V. **Never exercised** -- written from the
     /// provider's documented options, not from a run.
@@ -66,10 +70,10 @@ impl fmt::Display for Provider {
 
 /// The machine bombyx builds, as a project's `[vm]` table.
 ///
-/// Every field is required. None of them has a defensible
-/// default: the base image is the one thing bombyx cannot
-/// invent, and a size bombyx chose would be wrong on both a
-/// laptop and a workstation.
+/// Every field but `provider` is required. None of the other
+/// three has a defensible default: the base image is the one
+/// thing bombyx cannot invent, and a size bombyx chose would be
+/// wrong on both a laptop and a workstation.
 ///
 /// `#[serde(deny_unknown_fields)]` makes a key serde does not
 /// recognise an error instead of something quietly ignored. It
@@ -78,7 +82,9 @@ impl fmt::Display for Provider {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Vm {
-    /// Virtualization backend.
+    /// Virtualization backend. Defaults to
+    /// [`Provider::Libvirt`] when the key is absent.
+    #[serde(default)]
     pub provider: Provider,
     /// Vagrant box the VM boots from, e.g.
     /// `generic/ubuntu2204`.

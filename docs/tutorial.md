@@ -345,11 +345,12 @@ you elsewhere. Hyper-V is the other way to run VMs there, and
 bombyx accepts it as a `provider` value -- `libvirt` and
 `hyperv` are the two it takes, and VirtualBox is not one of
 them. It does not give you the local route, though, and it
-comes with two caveats of its own. Its provider needs an
-elevated shell, which an SSH session does not have. And bombyx
-does not yet tell vagrant which provider to use, so setting
-`hyperv` today gets you whatever the host chooses. See
-`provider-configured-not-selected` in [todo.md](todo.md).
+comes with a caveat of its own: its provider needs an elevated
+shell, which an SSH session does not have. bombyx does pass the
+provider to vagrant, so setting `hyperv` on a host that cannot
+supply it fails the boot rather than quietly building a libvirt
+machine *(unverified -- nobody has run bombyx against a Windows
+VM host)*.
 
 ### Optional: keep the VM from reaching your home network
 
@@ -465,18 +466,22 @@ this table: bombyx opens no file in the project's directory, so
 it cannot work out which project you mean from where you are
 standing.
 
-Leave `provider = "libvirt"`, and leave `remote_root` where the
-sample puts it -- above `[projects.myproject.vm]`, because a
-bare key belongs to the table header above it, and written below
-that header this one would parse as
-`projects.myproject.vm.remote_root` and the whole file would be
-refused.
+Leave `provider = "libvirt"`. Deleting the line gets you the
+same thing, since libvirt is what bombyx assumes when the key
+is absent.
 
-`[vm]` and `[source]` are required and have no defaults. bombyx
-builds the VM from the first and the guest clones the second,
-so there is nothing sensible for bombyx to guess: a base image
-is a choice, and a repository bombyx invented would be cloned
-into the guest and run as root.
+Leave `remote_root` where the sample puts it, above
+`[projects.myproject.vm]`. A bare key belongs to the table
+header above it, so written below that header this one would
+parse as `projects.myproject.vm.remote_root` and the whole file
+would be refused.
+
+`[vm]` and `[source]` are required, and every key in them
+except `provider` is required too. bombyx builds the VM from
+the first and the guest clones the second, so there is nothing
+sensible for bombyx to guess: a base image is a choice, and a
+repository bombyx invented would be cloned into the guest and
+run as root.
 
 `remote_root` is optional, shown with its default.
 

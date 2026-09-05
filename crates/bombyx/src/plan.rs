@@ -423,7 +423,8 @@ mod tests {
                  <<'BOMBYX_EOF'",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
-                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'up'\"",
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
+                 VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'\"",
             ]
         );
     }
@@ -521,7 +522,8 @@ mod tests {
                  <<'BOMBYX_EOF'",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
-                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'provision'\"",
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
+                 VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'provision'\"",
             ]
         );
     }
@@ -542,7 +544,7 @@ mod tests {
         assert_eq!(up.len(), pr.len() + 1);
         let writes = pr.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(
             up[writes].args[1],
             format!("cd ~/'vms/myproject' && {env} vagrant 'up'")
@@ -586,7 +588,7 @@ mod tests {
     #[test]
     fn down_only_halts() {
         let cmds = run(&Action::Down);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(cmds.len(), 1);
         assert_eq!(
             cmds[0].args[1],
@@ -597,7 +599,7 @@ mod tests {
     #[test]
     fn status_queries_the_project_dir() {
         let cmds = run(&Action::Status);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(
             cmds[0].args[1],
             format!("cd ~/'vms/myproject' && {env} vagrant 'status'")
@@ -640,7 +642,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
                  '-f' 'fresh-install'",
-                vm_env()
+                env_prefix()
             )
         );
     }
@@ -667,7 +669,7 @@ mod tests {
     #[test]
     fn reset_restores_the_fresh_install_snapshot() {
         let cmds = run(&Action::Reset);
-        let env = vm_env();
+        let env = env_prefix();
         assert_eq!(
             cmds[0].args[1],
             format!(
@@ -695,7 +697,7 @@ mod tests {
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f \
                  Vagrantfile ]; then {} vagrant 'destroy' '-f'; fi",
-                vm_env()
+                env_prefix()
             )
         );
         assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/myproject/pr-1234'");
@@ -710,7 +712,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
-                vm_env()
+                env_prefix()
             )
         );
         assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/myproject'");
@@ -754,6 +756,44 @@ mod tests {
             doctor::probe_commands(&doctor::host_probes(&cfg()))
         );
         assert!(!run(&Action::Doctor).is_empty());
+    }
+
+    /// The whole prefix every project vagrant call carries.
+    ///
+    /// Separate from [`vm_env`] so the identity test can assert
+    /// the identity alone. Equality assertions want this one.
+    fn env_prefix() -> String {
+        format!("{} {}='libvirt'", vm_env(), remote::PROVIDER_ENV)
+    }
+
+    #[test]
+    fn every_project_vagrant_call_names_the_provider() {
+        // Rendering `config.vm.provider :libvirt` in the
+        // Vagrantfile configures a provider vagrant might pick.
+        // It does not pick it. Without this variable vagrant
+        // chooses whatever the host offers, so a hyperv project
+        // on a libvirt-only host booted a libvirt machine with
+        // the config's cpus and memory ignored.
+        //
+        // Derived from `all_actions` for the reason the identity
+        // test below gives: a hand-written list of call sites
+        // was green while `destroy` carried neither variable.
+        let want = format!("{}='libvirt'", remote::PROVIDER_ENV);
+        for action in all_actions() {
+            if action == Action::Doctor {
+                continue;
+            }
+            for cmd in run(&action) {
+                let script = &cmd.args[cmd.args.len() - 1];
+                if !script.contains(" vagrant '") {
+                    continue;
+                }
+                assert!(
+                    script.contains(&want),
+                    "{action:?} runs vagrant without a provider: {script}"
+                );
+            }
+        }
     }
 
     #[test]

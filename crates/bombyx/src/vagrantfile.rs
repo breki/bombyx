@@ -82,13 +82,11 @@ fn ruby_string(value: &str) -> String {
 /// Returns a `String`. Nothing is written to disk here, and
 /// nothing is sent anywhere -- `remote::write_file` does that.
 ///
-/// **bombyx configures a provider; it does not select one.** No
-/// plan passes `--provider` to `vagrant` and bombyx sets no
-/// `VAGRANT_DEFAULT_PROVIDER`, so the block below applies only
-/// if vagrant independently chooses that provider. On a host
-/// offering only libvirt, a `hyperv` project gets a libvirt
-/// machine at vagrant's default size. Captured as
-/// `provider-configured-not-selected` in `docs/todo.md`.
+/// **The block below configures a provider; it does not select
+/// one.** Vagrant applies it only to the provider it has
+/// chosen, and it chooses from what the host offers. bombyx
+/// makes that choice elsewhere, by setting
+/// [`crate::remote::PROVIDER_ENV`] on every `vagrant` call.
 ///
 /// A provider is the thing that actually runs the VM, libvirt
 /// or Hyper-V. Both of them happen to spell their settings the
