@@ -239,7 +239,8 @@ plan, decisions, and outcome.
   first-real-run exercised the old tool: bombyx up from inside a project
   directory, a committed bombyx.toml, and the tar-push. All three are gone.
   Seven steps of project-config-off-repo have landed since, and that plan
-  document says 'not verified against a real VM host' six times -- every one of
+  document marks three of them 'Not verified against a real VM host' and records
+  Definition of Done item 3 as outstanding in a fourth place -- every one of
   them argued from a dry run, which proves the argv and nothing about whether
   the remote accepts it. So no real host has ever seen the current tool. Two
   things are already known to be in the way. ssh frosti fails from this
@@ -295,7 +296,8 @@ plan, decisions, and outcome.
 
 - **vm-disk-size-unset** -- no disk key, so the guest gets the box's own size
   Found by registry-run-against-frosti (#37), driving the CLI against frosti.
-  The generated Vagrantfile writes cpus and memory and nothing else
+  The generated Vagrantfile's provider block carries cpus and memory only, and
+  no disk setting appears anywhere in the template
   (crates/bombyx/src/vagrantfile.rs, render). There is no disk key in
   config.toml, so the guest inherits the box's own partitioning. That is a wide
   range in practice. cloud-image/debian-13 gave the guest a 9.7 GB root;
@@ -315,8 +317,10 @@ plan, decisions, and outcome.
   one with git. The refusal itself is right. What costs time is when it arrives.
   It runs inside the guest as the first provisioner, so the operator has already
   downloaded the box, created the domain and waited for the boot before learning
-  the box cannot work. Both boxes already on frosti are cloud images without
-  git, so this is the ordinary case rather than a corner. Neither
+  the box cannot work. The two boxes already on frosti when the run started were
+  cloud-image/debian-13 and cloud-image/ubuntu-24.04. Only the first was booted,
+  and it had no git; the second was not tested, so treat "cloud images tend not
+  to ship git" as the expectation it is rather than as a measurement. Neither
   config.toml.sample nor doctor mentions the requirement, and the sample's own
   box value, generic/ubuntu2204, does carry git, so a reader following the
   sample never meets the problem and never learns the rule. Options: say it in
@@ -328,9 +332,11 @@ plan, decisions, and outcome.
   Found by registry-run-against-frosti (#37). config.toml.sample claims that
   scratch VMs land in remote_root/scratch/project/name, so the same scratch name
   in two projects cannot collide. The directories indeed cannot. The libvirt
-  domain names can. vagrant-libvirt derives the domain name from the directory
-  the Vagrantfile sits in, and every domain on frosti matches that rule:
-  ~/vms/jutro gave jutro_default, ~/vms/vmtest gave vmtest_default, and
+  domain names can. vagrant-libvirt builds the domain name as the basename of
+  the directory holding the Vagrantfile, an underscore, and the Vagrant machine
+  name -- which bombyx never sets, so it is Vagrant's default, `default`. Three
+  domains on frosti follow that rule: ~/vms/jutro gave jutro_default,
+  ~/vms/vmtest gave vmtest_default, and
   ~/vms/scratch/vmtest/probe gave probe_default. The project name is nowhere in
   the last one, so a probe scratch in a second project would ask libvirt for
   probe_default as well. The collision itself was not booted, so treat the
