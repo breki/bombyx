@@ -350,6 +350,103 @@ pub fn destroy_vm_if_present(
     transport(cfg, &script, tty)
 }
 
+/// The snapshot name bombyx saves and restores.
+///
+/// A primitive because the value carries no rule: bombyx chooses
+/// the name rather than reading it from the operator, so there
+/// is nothing for a constructor to check. One constant rather
+/// than a literal per call site, because the saving commands and
+/// the restoring one have to name the same snapshot.
+pub const FRESH_SNAPSHOT: &str = "fresh-install";
+
+/// Builds the command that restores the VM in `dir` to its
+/// [`FRESH_SNAPSHOT`].
+#[must_use]
+pub fn restore_snapshot(cfg: &Config, dir: &str, tty: Tty) -> RemoteCommand {
+    vagrant_in(cfg, dir, &["snapshot", "restore", FRESH_SNAPSHOT], tty)
+}
+
+/// Builds the command that saves the VM in `dir` as
+/// [`FRESH_SNAPSHOT`], replacing one that is already there.
+///
+/// `-f` is what makes the command re-takeable. Vagrant refuses a
+/// name it already holds without it, printing `You must include
+/// the --force option to replace an existing snapshot.` and
+/// exiting 1.
+#[must_use]
+pub fn save_snapshot(cfg: &Config, dir: &str, tty: Tty) -> RemoteCommand {
+    vagrant_in(cfg, dir, &["snapshot", "save", "-f", FRESH_SNAPSHOT], tty)
+}
+
+/// Builds the command that saves the VM in `dir` as
+/// [`FRESH_SNAPSHOT`] when it does not already hold that name.
+///
+/// The guard reads `vagrant snapshot list` rather than letting a
+/// plain save fail. Two measured facts require that: `snapshot
+/// list` exits 0 whether or not any snapshot exists, so its
+/// status answers nothing, and a save over an existing name
+/// exits 1, which would stop `up` at its last step on every run
+/// after the first.
+///
+/// The listing is captured into a variable, and the `&&` after
+/// it is what stops a failed listing being read as an empty one.
+/// Piping it straight into `grep` would hide that: a shell
+/// pipeline reports only its last command's status, so a machine
+/// vagrant could not read would look indistinguishable from one
+/// holding no snapshots, and the save would run on that reading.
+///
+/// `grep -qx` requires a whole-line match. `snapshot list`
+/// prints each name bare on its own line, and when the machine
+/// has none it prints an explanation of how to take one, no line
+/// of which is a bare name. `printf` rather than `echo` because
+/// a snapshot the operator named `-n` would be swallowed as an
+/// option instead of compared.
+///
+/// The trailing `|| printf ... >&2` makes the snapshot advisory.
+/// It is the last step of `up`, and `execute` stops at the first
+/// failing step and returns its status, so without it a VM that
+/// booted and provisioned correctly reports failure because a
+/// snapshot could not be taken. Two machines reach that on every
+/// run: a provider with no snapshot support, whose listing
+/// raises, and one whose listing decorates the name, so the
+/// guard reads "absent" and vagrant then refuses the unforced
+/// save.
+///
+/// The braces are what keep the `cd` out of that. `&&` and `||`
+/// have equal precedence and associate left, so an unbraced
+/// `||` would also answer for the `cd` -- and a project
+/// directory that has gone away would report success behind a
+/// message naming a snapshot. Grouping the listing and the save
+/// leaves the `cd` failing the step, as it does in every other
+/// builder here.
+///
+/// The message names the project and asks for one word to be
+/// changed, rather than spelling a command out that would drop
+/// the operator's other arguments. `confirm_destroy` states the
+/// same rule for the same reason.
+#[must_use]
+pub fn save_snapshot_if_absent(
+    cfg: &Config,
+    dir: &str,
+    tty: Tty,
+) -> RemoteCommand {
+    let script = format!(
+        "cd {dir} && {{ names=$({list}) && \
+         if ! printf '%s\\n' \"$names\" | grep -qx {name}; \
+         then {save}; fi \
+         || printf 'bombyx: could not save the {name_bare} snapshot \
+         for %s; re-run this command with snapshot in place of \
+         up\\n' {project} >&2; }}",
+        dir = quote_remote_path(dir),
+        list = vagrant_command(cfg, &["snapshot", "list"]),
+        name = shell_quote(FRESH_SNAPSHOT),
+        save = vagrant_command(cfg, &["snapshot", "save", FRESH_SNAPSHOT]),
+        name_bare = FRESH_SNAPSHOT,
+        project = shell_quote(&cfg.project),
+    );
+    transport(cfg, &script, tty)
+}
+
 /// Builds the command that recursively removes `dir` on the VM
 /// host.
 ///
@@ -431,12 +528,18 @@ mod tests {
         /// One builder, named for the error message.
         type Builder = (&'static str, fn(&Config) -> RemoteCommand);
 
-        let builders: [Builder; 5] = [
+        let builders: [Builder; 7] = [
             ("vagrant", |c| vagrant(c, &["status"], Tty::NoPty)),
             ("ensure_dir", |c| ensure_dir(c, "~/vms")),
             ("remove_dir", |c| remove_dir(c, "~/vms/myproject")),
             ("destroy", |c| {
                 destroy_vm_if_present(c, "~/vms/myproject", Tty::NoPty)
+            }),
+            ("snapshot", |c| {
+                save_snapshot(c, &c.remote_project_dir(), Tty::NoPty)
+            }),
+            ("guarded snapshot", |c| {
+                save_snapshot_if_absent(c, &c.remote_project_dir(), Tty::NoPty)
             }),
             ("write", |c| write_file(c, "~/vms", "Vagrantfile", "x\n")),
         ];
@@ -466,6 +569,8 @@ mod tests {
         for c in [
             vagrant(&local_cfg(), &["status"], Tty::NoPty),
             destroy_vm_if_present(&local_cfg(), "~/vms/p", Tty::NoPty),
+            save_snapshot(&local_cfg(), "~/vms/p", Tty::NoPty),
+            save_snapshot_if_absent(&local_cfg(), "~/vms/p", Tty::NoPty),
             ensure_dir(&local_cfg(), "~/vms"),
             write_file(&local_cfg(), "~/vms", "Vagrantfile", "x\n"),
         ] {
@@ -784,6 +889,123 @@ mod tests {
                  {} vagrant 'destroy' '-f'; fi",
                 vm_env()
             )
+        );
+    }
+
+    #[test]
+    fn saving_the_snapshot_replaces_one_that_is_already_there() {
+        // `--force` is what makes the command re-takeable. Without
+        // it vagrant refuses a name it already holds, exiting 1
+        // with `You must include the --force option to replace an
+        // existing snapshot.` -- measured on a libvirt host.
+        let c = save_snapshot(&cfg(), "~/vms/myproject", Tty::NoPty);
+        assert_eq!(
+            c.args[1],
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
+                 '-f' 'fresh-install'",
+                vm_env()
+            )
+        );
+    }
+
+    #[test]
+    fn restoring_names_the_snapshot_the_saves_write() {
+        // The pairing the three builders exist for, pinned where
+        // the shell is spelled. `plan` still has its own test
+        // that `reset` is handed this builder and not another.
+        let c = restore_snapshot(&cfg(), "~/vms/myproject", Tty::NoPty);
+        assert_eq!(
+            c.args[1],
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'snapshot' \
+                 'restore' 'fresh-install'",
+                vm_env()
+            )
+        );
+    }
+
+    #[test]
+    fn the_guarded_save_asks_vagrant_what_it_already_holds() {
+        // `up` runs this, and every `up` after the first follows
+        // arbitrary use of the machine. Saving only when the name
+        // is absent keeps `fresh-install` describing a fresh
+        // install.
+        //
+        // The test is on the listing rather than on vagrant's own
+        // refusal because `execute` stops at the first failing
+        // step: an unguarded save would make the second `up`
+        // report failure.
+        let c = save_snapshot_if_absent(&cfg(), "~/vms/myproject", Tty::NoPty);
+        let env = vm_env();
+        assert_eq!(
+            c.args[1],
+            format!(
+                "cd ~/'vms/myproject' && {{ names=$({env} vagrant \
+                 'snapshot' 'list') && if ! printf '%s\\n' \"$names\" \
+                 | grep -qx 'fresh-install'; then {env} vagrant 'snapshot' \
+                 'save' 'fresh-install'; fi || printf 'bombyx: could not \
+                 save the fresh-install snapshot for %s; re-run this \
+                 command with snapshot in place of up\\n' 'myproject' \
+                 >&2; }}"
+            )
+        );
+    }
+
+    #[test]
+    fn a_listing_that_fails_stops_the_guarded_save() {
+        // A shell pipeline reports only its last command's
+        // status. Piping the listing straight into `grep` would
+        // make a machine vagrant cannot read look exactly like
+        // one holding no snapshots. Capturing it and joining with
+        // `&&` is what fails the step instead.
+        let script = save_snapshot_if_absent(&cfg(), "~/vms/p", Tty::NoPty)
+            .args[1]
+            .clone();
+        assert!(script.contains("names=$("), "{script}");
+        let after_listing = script
+            .split_once("'list')")
+            .expect("the listing is captured")
+            .1;
+        assert!(
+            after_listing.starts_with(" && "),
+            "the listing must gate what follows: {script}"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_that_cannot_be_saved_does_not_fail_up() {
+        // `execute` stops at the first failing step and returns
+        // its status, and this is the last step of `up`. Without
+        // the trailing `||`, a VM that booted and provisioned
+        // correctly reports failure because of a snapshot.
+        //
+        // Two machines reach that on every run, not as an edge
+        // case: a provider whose `snapshot list` raises because
+        // it has no snapshot support, and one whose listing
+        // decorates the name so the guard reads "absent" and the
+        // unforced save is then refused.
+        let script = save_snapshot_if_absent(&cfg(), "~/vms/p", Tty::NoPty)
+            .args[1]
+            .clone();
+        assert!(script.contains("|| printf 'bombyx: "), "{script}");
+        // The braces keep the `cd` out of the advisory. Every
+        // other builder here fails its step on a missing
+        // directory, and this one must not differ.
+        assert!(script.contains("&& { names=$("), "{script}");
+        assert!(script.trim_end().ends_with(">&2; }"), "{script}");
+    }
+
+    #[test]
+    fn the_guarded_save_does_not_force() {
+        // The guard and `-f` answer the same question, and only
+        // one of them may. A guarded save carrying `-f` would
+        // overwrite the snapshot whenever the listing test was
+        // wrong about what is there, which is the failure the
+        // guard exists to prevent.
+        assert!(
+            !save_snapshot_if_absent(&cfg(), "~/vms/p", Tty::NoPty).args[1]
+                .contains("'-f'")
         );
     }
 

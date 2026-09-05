@@ -60,6 +60,9 @@ and this project adheres to
   environment where `ssh` would not and all three redirect which machine
   vagrant acts on. The local route is announced on stderr on every command, and
   `bombyx doctor` shows its `ssh` and `login shell` rows as skips.
+- `bombyx snapshot` saves the project VM's `fresh-install` snapshot, replacing
+  one that is already there. It is how you move the point `reset` returns to,
+  and how a VM created before bombyx took snapshots gets a correct one.
 
 ### Changed
 
@@ -140,6 +143,13 @@ and this project adheres to
   loaded `Config`, so the two can still be made to disagree that way; the
   public fields are a known gap, tracked as
   `newtype-remaining-config-fields`.
+- `up` now takes the `fresh-install` snapshot that `reset` restores, so the
+  reset cycle works without anyone taking it by hand. It saves only when the
+  machine does not already hold that name, leaving every later `up` free to run
+  without moving the point `reset` returns to. The step is advisory: when the
+  snapshot cannot be taken -- a provider with no snapshot support, say -- `up`
+  warns on stderr and still succeeds, because a VM that booted correctly has
+  not failed.
 
 ### Fixed
 

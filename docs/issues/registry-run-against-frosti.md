@@ -146,7 +146,7 @@ already carries `vagrant/provision.sh`.
 | `down` | halted the domain |
 | `up` again | booted, skipped provisioning, exit 0 |
 | `provision` | re-ran, left the existing clone alone |
-| `reset` | exit 1, snapshot not found -- expected, see below |
+| `reset` | exit 1, snapshot not found -- expected on the day; see **What was not verified** for what closed it |
 | `scratch probe` | booted `~/vms/scratch/vmtest/probe` |
 | `discard probe` | removed the domain and the directory |
 | `destroy` (no name) | refused, named the target |
@@ -279,6 +279,13 @@ bombyx: --project is required: name the `[projects.<name>]`
 - **`reset` succeeding.** No command creates the
   `fresh-install` snapshot. That is `reset-needs-snapshot`,
   GitHub issue #6, and it was left alone deliberately.
+  **Closed since, on this same host.** Working #6 made `up`
+  take the snapshot and added `bombyx snapshot`, and the
+  cycle was then driven here: `up` saved it, a file made in
+  the guest disappeared on `reset`, `bombyx snapshot` moved
+  the return point, and a second `reset` returned to the new
+  one. The `reset` row above records what the tool did on
+  the day of this run, and is left as it was.
 
 ## Defects captured, not fixed
 

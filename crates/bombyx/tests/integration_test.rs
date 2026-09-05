@@ -165,7 +165,7 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // even if the boot ran before the writes.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
-    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
+    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     // Each generated file prints as one elided line.
     assert!(lines[1].contains("cat > ~/'vms/myproject/Vagrantfile'"));
@@ -178,6 +178,36 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
         )),
         "{}",
         lines[3]
+    );
+    // The snapshot save comes last, so it records a machine that
+    // has finished booting -- and it is the guarded save, not the
+    // forced one. A bare `contains` on the save would pass for
+    // either, which is the one difference that decides whether
+    // `up` overwrites the operator's return point every run.
+    assert!(
+        lines[4].contains("vagrant 'snapshot' 'save' 'fresh-install'"),
+        "{}",
+        lines[4]
+    );
+    assert!(lines[4].contains("if ! printf"), "{}", lines[4]);
+    assert!(!lines[4].contains("'-f'"), "{}", lines[4]);
+}
+
+#[test]
+fn snapshot_replaces_the_snapshot_it_finds() {
+    // The binary's own view of the on-demand command: `-f`, and
+    // one step, so nothing else on the host is touched.
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "snapshot"]);
+    assert_eq!(programs(&lines), vec!["ssh"]);
+    assert!(
+        lines[0].ends_with(&format!(
+            "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
+             '-f' 'fresh-install'\"",
+            vm_env()
+        )),
+        "{}",
+        lines[0]
     );
 }
 
@@ -813,4 +843,265 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr),
     );
+}
+
+/// Six runtime states the `up` snapshot step can meet, each run
+/// against a stub `vagrant`: the `cd` fails, the listing fails,
+/// the machine has no snapshots, it already has this one, the
+/// listing decorates the name, and the save itself fails.
+///
+/// The set is meant to be the whole family, which `CLAUDE.md`
+/// under **Input guards: enumerate the family first** asks for
+/// before a guard is written rather than after. A state missing
+/// from it is a state nobody is checking, so add the row before
+/// changing the script.
+///
+/// Unix only. The subject is a POSIX shell script that always
+/// runs on the VM host, and this is the one place the suite can
+/// run one: bombyx itself never interprets it. On Windows the
+/// module is simply absent.
+#[cfg(unix)]
+mod snapshot_guard_states {
+    use super::{CONFIG_HOME, project_dir};
+    use bombyx::config::{Config, USER_CONFIG_FILE};
+    use bombyx::plan::{Action, plan};
+    use bombyx::remote::Tty;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::process::Command as StdCommand;
+
+    /// What the stub `vagrant` should do for one state.
+    struct Stub {
+        /// What `vagrant snapshot list` writes to stdout.
+        ///
+        /// Written to a file beside the stub and `cat`-ed, never
+        /// interpolated into the stub's own shell. That is not
+        /// tidiness: this text imitates vagrant's output, which
+        /// contains backticks, and a backtick inside a
+        /// double-quoted shell word is command substitution. It
+        /// ran the stub a second time as `vagrant snapshot save`
+        /// and created the marker that says the guard saved, so
+        /// the one test asserting a snapshot is ever taken
+        /// passed without the guard doing anything.
+        list_out: &'static str,
+        /// What `vagrant snapshot list` exits with.
+        list_exit: u8,
+        /// What `vagrant snapshot save` exits with.
+        save_exit: u8,
+    }
+
+    /// What running the guard against a [`Stub`] produced.
+    struct Ran {
+        /// The step's exit status, which is what decides whether
+        /// `bombyx up` reports failure.
+        code: i32,
+        /// Whether the stub's `save` subcommand was invoked.
+        saved: bool,
+        /// Whether the advisory warning reached stderr.
+        warned: bool,
+        /// Everything the step wrote to stderr.
+        ///
+        /// Kept so a state can assert *why* it failed and not
+        /// merely that it did. A script the shell refuses to
+        /// parse also exits non-zero, saves nothing and warns
+        /// nothing, so without this the missing-directory state
+        /// would be satisfied by shell that never ran.
+        stderr: String,
+    }
+
+    /// Writes a stub `vagrant` into `dir`, with its listing
+    /// beside it.
+    ///
+    /// The stub answers `snapshot list` and `snapshot save` only.
+    /// Anything else exits 3 and says what it was called with,
+    /// so an unexpected invocation fails the test loudly instead
+    /// of being counted as one of the two it recognises.
+    ///
+    /// `save` records that it ran by appending to
+    /// `$BOMBYX_TEST_MARKER`, because an exit status alone cannot
+    /// separate "skipped" from "ran and succeeded".
+    fn write_stub(dir: &Path, s: &Stub) {
+        std::fs::write(dir.join("listing"), s.list_out).unwrap();
+        let script = format!(
+            "#!/bin/sh\n\
+             here=$(dirname \"$0\")\n\
+             case \"$2\" in\n\
+             list) cat \"$here/listing\"; exit {list_exit} ;;\n\
+             save) echo save >> \"$BOMBYX_TEST_MARKER\"; \
+             exit {save_exit} ;;\n\
+             *) echo \"stub vagrant called as: $*\" >&2; exit 3 ;;\n\
+             esac\n",
+            list_exit = s.list_exit,
+            save_exit = s.save_exit,
+        );
+        let path = dir.join("vagrant");
+        std::fs::write(&path, script).unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+    }
+
+    /// Runs the guard bombyx emits for `up` against `stub`.
+    ///
+    /// `make_project_dir` is what separates the `cd` states from
+    /// the rest: the script opens by entering the project
+    /// directory, so leaving it uncreated is how that failure is
+    /// reproduced.
+    fn run(stub: &Stub, make_project_dir: bool) -> Ran {
+        let home = tempfile::TempDir::new().unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        write_stub(&bin, stub);
+        if make_project_dir {
+            std::fs::create_dir_all(home.path().join("vms/myproject")).unwrap();
+        }
+        let marker = home.path().join("marker");
+
+        // The script comes from the plan rather than a literal,
+        // so this table cannot pass against shell nobody emits.
+        let fixture = project_dir();
+        let cfg_path = fixture
+            .path()
+            .join(CONFIG_HOME)
+            .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
+        let (cfg, _) =
+            Config::load_project("myproject", Some(&cfg_path)).unwrap();
+        let cmds = plan(&Action::Up, &cfg, Tty::NoPty);
+        let script = cmds.last().unwrap().args.last().unwrap().clone();
+
+        let out = StdCommand::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .env("HOME", home.path())
+            .env("BOMBYX_TEST_MARKER", &marker)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    bin.display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .output()
+            .unwrap();
+
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        Ran {
+            code: out.status.code().unwrap_or(-1),
+            saved: marker.exists(),
+            warned: stderr.contains("could not save"),
+            stderr,
+        }
+    }
+
+    /// A stub for which everything works and `list` prints
+    /// `names`.
+    fn ok_listing(names: &'static str) -> Stub {
+        Stub {
+            list_out: names,
+            list_exit: 0,
+            save_exit: 0,
+        }
+    }
+
+    /// The blurb vagrant prints when the machine has no
+    /// snapshots. Measured on a libvirt host: it exits 0, and no
+    /// line of it is a bare snapshot name.
+    ///
+    /// Real newlines rather than escapes, because the stub
+    /// `cat`s this text instead of printing it through a shell.
+    const NO_SNAPSHOTS: &str = "==> default: No snapshots have been taken \
+                                yet!\n    default: You can take a snapshot \
+                                using `vagrant snapshot save`.\n";
+
+    #[test]
+    fn the_project_directory_is_missing() {
+        // The one state that must NOT be advisory. A directory
+        // that has gone away is not a snapshot problem, and
+        // reporting success here would hide it behind a message
+        // naming the wrong cause.
+        let r = run(&ok_listing(""), false);
+        assert_ne!(r.code, 0, "a failed cd must fail the step");
+        assert!(!r.saved);
+        assert!(!r.warned, "the warning would name the wrong cause");
+        // Says *why* it failed. Every shell words this
+        // differently -- dash writes `cd: can't cd to ...` and
+        // bash writes `cd: ...: No such file or directory` --
+        // and `cd:` is the part they share. Without it a script
+        // the shell could not parse would satisfy the three
+        // assertions above, in the one state whose whole point
+        // is that the braces left the `cd` alone.
+        assert!(r.stderr.contains("cd:"), "not a cd failure: {}", r.stderr);
+    }
+
+    #[test]
+    fn the_listing_fails() {
+        // A provider with no snapshot support raises here on
+        // every run. The save must not run on a listing nobody
+        // could read, and `up` must still succeed.
+        let r = run(
+            &Stub {
+                list_out: "",
+                list_exit: 1,
+                save_exit: 0,
+            },
+            true,
+        );
+        assert_eq!(r.code, 0);
+        assert!(!r.saved, "a failed listing must not be read as empty");
+        assert!(r.warned);
+    }
+
+    #[test]
+    fn the_machine_has_no_snapshots() {
+        let r = run(&ok_listing(NO_SNAPSHOTS), true);
+        assert_eq!(r.code, 0);
+        assert!(r.saved, "the snapshot should be taken");
+        assert!(!r.warned);
+    }
+
+    #[test]
+    fn the_machine_already_has_the_snapshot() {
+        // The state every `up` after the first meets. Saving
+        // here would move the point `reset` returns to.
+        let r = run(&ok_listing("==> default: \nfresh-install\n"), true);
+        assert_eq!(r.code, 0);
+        assert!(!r.saved, "an existing snapshot must not be overwritten");
+        assert!(!r.warned);
+    }
+
+    #[test]
+    fn the_listing_decorates_the_name() {
+        // A provider that prefixes the name defeats `grep -qx`,
+        // so the guard reads "absent" and vagrant then refuses
+        // the unforced save. `up` must survive it.
+        let r = run(
+            &Stub {
+                list_out: "==> default: fresh-install\n",
+                list_exit: 0,
+                save_exit: 1,
+            },
+            true,
+        );
+        assert_eq!(r.code, 0, "a refused save must not fail up");
+        assert!(r.saved, "the save is attempted, and refused");
+        assert!(r.warned);
+    }
+
+    #[test]
+    fn the_save_itself_fails() {
+        // A domain libvirt cannot snapshot. Advisory, like the
+        // rest of the snapshot step.
+        let r = run(
+            &Stub {
+                list_out: NO_SNAPSHOTS,
+                list_exit: 0,
+                save_exit: 1,
+            },
+            true,
+        );
+        assert_eq!(r.code, 0);
+        assert!(r.saved);
+        assert!(r.warned);
+    }
 }
