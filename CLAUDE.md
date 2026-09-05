@@ -1212,6 +1212,16 @@ For any script that runs more than ~30 seconds
   (`cmd > log 2>&1`) or run the command bare and read the
   captured output, and when the status matters, print it
   (`echo "EXIT=$?"`).
+- **Caller side** -- **a bombyx command that boots or
+  provisions a VM belongs in `run_in_background`.** `up`,
+  `provision` and `scratch` wait on a download, a domain and a
+  guest boot, so they run for minutes rather than seconds; a
+  first `up` against a box the host does not have took most of
+  ten minutes here. In the foreground that time buys nothing,
+  because the session sits idle until the VM answers. Start it
+  in the background and read the log when the notification
+  arrives. `status`, `doctor` and the teardown commands are
+  quick enough to run in front.
 
 ## Lints: `doc_markdown` allowlist via `clippy.toml`
 

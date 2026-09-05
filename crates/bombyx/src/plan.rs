@@ -401,8 +401,20 @@ mod tests {
         // from the directory it runs in, so both generated files
         // have to be written before the boot, into a directory
         // that already exists.
+        //
+        // The snapshot save that follows the boot is not spelled
+        // out here. Its shell is pinned twice already -- in
+        // `remote` for what the builder emits, and by
+        // `up_takes_the_snapshot_after_booting` for the fact that
+        // `up` ends with that builder -- and a third escaped copy
+        // was rewritten by hand three times while this change was
+        // being reviewed, wrongly on each of them. The length
+        // assertion below is what still catches a step that goes
+        // missing.
+        let s = scripts_head(&Action::Up);
+        assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
         assert_eq!(
-            scripts_head(&Action::Up),
+            s[..4],
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
@@ -412,16 +424,6 @@ mod tests {
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'up'\"",
-                "ssh vmhost \"cd ~/'vms/myproject' && { \
-                 names=\\$(BOMBYX_VM_HOST='vmhost' \
-                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'snapshot' \
-                 'list') && if ! printf '%s\\\\n' \\\"\\$names\\\" \
-                 | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' \
-                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'snapshot' \
-                 'save' 'fresh-install'; fi || printf 'bombyx: could not \
-                 save the fresh-install snapshot for %s; re-run this \
-                 command with snapshot in place of up\\\\n' \
-                 'myproject' >&2; }\"",
             ]
         );
     }
