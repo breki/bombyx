@@ -7,7 +7,7 @@
 
 use super::text::{fail_reason, first_line, sanitize};
 use super::{Finding, Outcome, ProbeResult, Scope};
-use crate::config::{Config, Provider};
+use crate::config::{Config, Provider, Transport};
 use crate::remote::{self, RemoteCommand};
 
 /// A check applied to a probe's stdout when a zero exit is not
@@ -74,8 +74,18 @@ impl HostProbe {
 /// failure did not.
 #[must_use]
 pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
-    let mut probes = vec![
-        HostProbe::plain("ssh", remote::probe::reachable(cfg)).gating(),
+    let mut probes = vec![];
+
+    // Running here there is no host to reach, and `sh -c true`
+    // would pass unconditionally while reporting nothing.
+    // `reachability_finding` supplies the row instead.
+    if cfg.transport == Transport::Ssh {
+        probes.push(
+            HostProbe::plain("ssh", remote::probe::reachable(cfg)).gating(),
+        );
+    }
+
+    probes.extend([
         HostProbe::plain("login shell", remote::probe::posix_shell(cfg))
             .with_verdict(posix_shell_verdict),
         HostProbe::plain("vagrant", remote::probe::command(cfg, "vagrant")),
@@ -83,7 +93,7 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
             "project dir",
             remote::probe::dir_writable(cfg, &cfg.remote_project_dir()),
         ),
-    ];
+    ]);
 
     // The provider probe greps `vagrant plugin list` for
     // `vagrant-libvirt`, which only answers a question a libvirt
@@ -101,6 +111,21 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
         Provider::Hyperv => {}
     }
     probes
+}
+
+/// The reachability row for a run that has nothing to reach.
+///
+/// Returns `None` over `ssh`, whose probe is in the list above.
+/// Running here it returns a skip, because the row must appear
+/// either way: an absent row reads as a check that passed.
+pub(crate) fn reachability_finding(cfg: &Config) -> Option<Finding> {
+    (cfg.transport == Transport::Local).then(|| {
+        Finding::new(
+            Scope::Host,
+            "ssh",
+            Outcome::Skip("not used; the host is this machine".to_owned()),
+        )
+    })
 }
 
 /// The provider row for a project that `host_probes` cannot
@@ -158,7 +183,11 @@ pub fn host_findings<F>(cfg: &Config, run: F) -> Vec<Finding>
 where
     F: FnMut(&HostProbe) -> Outcome,
 {
-    let mut findings = run_probes(&host_probes(cfg), run);
+    // The reachability row comes first whichever way it was
+    // produced, so the report reads the same on both routes.
+    let mut findings: Vec<Finding> =
+        reachability_finding(cfg).into_iter().collect();
+    findings.extend(run_probes(&host_probes(cfg), run));
     findings.extend(provider_finding(cfg));
     findings
 }
@@ -242,6 +271,37 @@ mod tests {
         let mut c = cfg();
         c.vm.provider = provider;
         c
+    }
+
+    /// The shared config, running on the machine it names.
+    fn local_cfg() -> Config {
+        Config {
+            transport: Transport::Local,
+            ..cfg()
+        }
+    }
+
+    #[test]
+    fn the_reachability_row_is_a_skip_when_there_is_nothing_to_reach() {
+        // `sh -c true` would pass every time and say nothing.
+        // The row still has to appear: an absent one reads as a
+        // check that passed, which is the same trap
+        // `provider_finding` exists to close.
+        let findings =
+            host_findings(&local_cfg(), |_| Outcome::Pass(String::new()));
+        let ssh = findings.first().expect("a first row");
+        assert_eq!(ssh.name, "ssh");
+        let Outcome::Skip(reason) = &ssh.outcome else {
+            panic!("expected a skip, got {:?}", ssh.outcome);
+        };
+        assert!(reason.contains("this machine"), "{reason}");
+    }
+
+    #[test]
+    fn the_local_probes_all_run_here() {
+        for p in host_probes(&local_cfg()) {
+            assert_eq!(p.command.program, "sh", "{}", p.name);
+        }
     }
 
     #[test]

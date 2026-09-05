@@ -1,8 +1,9 @@
 # Architecture
 
-bombyx runs `vagrant` on a remote VM host over SSH, so an agent
-works inside a VM and the workstation stays clean. It composes
-`ssh` and `vagrant` and reimplements neither.
+bombyx runs `vagrant` on a VM host, usually a second machine
+reached over SSH, so an agent works inside a VM and the
+workstation stays clean. It composes `ssh` and `vagrant` and
+reimplements neither.
 
 ## The three machines
 
@@ -26,8 +27,8 @@ flowchart LR
   git[("git host")]
 
   reg --> cli
-  cli -- ssh --> vg
-  cli -- "heredoc over ssh" --> dir
+  cli -- "ssh, or sh -c here" --> vg
+  cli -- "heredoc, same two routes" --> dir
   vg -- creates --> guest
   git -- clone --> clone
   agent --> clone
@@ -37,12 +38,27 @@ The workstation never runs project code. The VM host runs
 `vagrant` and holds a directory per project. The guest is the
 only machine that clones the repository.
 
-**Three roles, not necessarily three machines.** `host` is an
-SSH alias, so it can name loopback and the workstation can be
-its own VM host. There is no local mode and none is needed.
-What that costs is the part of the isolation that depends on
-the host being elsewhere: a guest that escapes the hypervisor
-is already on your workstation, and network isolation from your
+**Three roles, not necessarily three machines.** The
+workstation can be its own VM host, and bombyx notices when it
+is. As `config.toml` is read, bombyx compares `host` against
+this machine's own name; when the two match it runs the script
+through `sh -c` here instead of handing it to `ssh`. The script
+is identical either way, because every command bombyx builds is
+a POSIX shell script string and `sh -c` starts the same shell
+`ssh` would have started on the host. `config::transport` holds
+the comparison and `remote::transport` holds the one wrapper
+that acts on it.
+
+Two consequences are worth stating plainly. The first is that
+one `config.toml` now behaves differently depending on which
+machine reads it, so bombyx prints a line naming the route
+whenever the local one is in force, and `bombyx doctor` shows
+its `ssh` row as a skip rather than a pass.
+
+The second is what running the guest on your own workstation
+costs, which is the part of the isolation that depends on the
+host being elsewhere: a guest that escapes the hypervisor is
+already on your workstation, and network isolation from your
 own machine means nothing. The VM boundary still holds --
 separate kernel, no host filesystem, none of your credentials
 (see `docs/trust-boundary.md` for the one the guest does need).
@@ -108,9 +124,10 @@ probe commands, `doctor` decides what their output means.
 | `config::registry` | the operator's `config.toml` and its project tables |
 | `config::root` | what `remote_root` may be, and why it is strict |
 | `config::source` | `[source]`, and the two checked types it holds |
+| `config::transport` | whether `host` names this very machine |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
 | `vagrantfile` | rendering the Vagrantfile and the bootstrap |
-| `remote` | building `ssh` argv, quoting |
+| `remote` | building the argv for either route, quoting |
 | `remote::write` | the heredoc that writes a generated file |
 | `doctor` | preconditions, and what a result means |
 | `update` | `self-update`: download, verify, swap |
@@ -131,6 +148,7 @@ classDiagram
     +String host
     +String project
     +String remote_root
+    +Transport transport
   }
   class Vm {
     +Provider provider
@@ -166,9 +184,15 @@ classDiagram
     ProjectEntry
     UserFile
   }
+  class Transport {
+    <<enumeration>>
+    Ssh
+    Local
+  }
 
   Config *-- Vm : vm
   Config *-- Source : source
+  Config *-- Transport : transport
   Registry *-- Project : projects
   Project *-- Vm : vm
   Project *-- Source : source
@@ -196,6 +220,14 @@ An operator who keeps one project on a different machine writes
 `host` in that project's table, and bombyx then prints a line on
 stderr naming the table. That notice exists because both keys
 live in one file and `destroy` runs `rm -rf` on whichever wins.
+
+`transport` is the one field of `Config` no key supplies.
+`config::transport` derives it from the winning `host` and this
+machine's own name, and a `Config` built any other way gets
+`Transport::Ssh`, which is the route that works from anywhere.
+It is derived from the *winner* rather than from either key,
+so the machine bombyx runs the commands on and the machine
+`destroy` deletes a directory on are always the same one.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -277,9 +309,12 @@ first, because the heredocs write into it. And `vagrant` runs
 last, because it reads the Vagrantfile that the heredocs just
 wrote.
 
-Every step is an `ssh`. bombyx runs no program on the
-workstation for a VM action, which is why the `cli` lifeline
-has no self-call.
+Every step is one command, and which command depends on the
+route. Over SSH each step is an `ssh`. Running on the VM host
+itself each step is an `sh -c` carrying the same script. Either
+way bombyx spawns exactly one process per step and interprets
+none of the script itself, which is why the `cli` lifeline has
+no self-call.
 
 `provision` is the same sequence ending in `vagrant provision`,
 which exists because vagrant runs provisioners only when it
@@ -448,7 +483,7 @@ A library consumer is not covered by that, and the public fields
 are why: outside the crate, a `Config` built field by field with
 a hostile `host` compiles and reaches `plan` with nothing having
 checked it. No snippet here, because a struct literal for this
-type needs all five fields and a shortened one would not
+type needs all six fields and a shortened one would not
 compile, which is a distraction from the point. That is the argument for
 `newtype-remaining-config-fields`, and it is the reason the
 paragraph above calls the gap a gap.
@@ -467,7 +502,7 @@ that exists. Captured as `newtype-remaining-config-fields` in
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
-| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. For `host` that is live — it is `ssh`'s first positional argument. For the other two it is a precaution, since both are shell-quoted before `ssh` carries them |
+| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. For `host` that is live — it is `ssh`'s first positional argument. Running on the VM host itself no argv position holds it, but the rule still applies, because the same `config.toml` carried to another machine takes the `ssh` route. For the other two it is a precaution, since both are shell-quoted before the far shell receives them |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |

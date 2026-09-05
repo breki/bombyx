@@ -149,7 +149,7 @@ pub fn write_file(
     let script = format!(
         "cat > {path} <<'{delimiter}'\n{contents}{newline}{delimiter}\n"
     );
-    RemoteCommand::new("ssh", &[&cfg.host, &script])
+    super::transport(cfg, &script, super::Tty::NoPty)
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
-use bombyx::config::{Config, HostOrigin};
+use bombyx::config::{Config, HostOrigin, Transport};
 use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
@@ -355,6 +355,21 @@ fn run() -> Result<Ran> {
             );
         }
         HostOrigin::UserFile => {}
+    }
+
+    // Unconditional, unlike the line above. The route is derived
+    // from `host` rather than written down, so the operator
+    // never chose it and one `config.toml` behaves differently
+    // depending on which machine reads it. It also happens to be
+    // the arrangement that gives up most of the isolation --
+    // `docs/architecture.md` says what -- so bombyx states it
+    // every time rather than only when something looks unusual.
+    if cfg.transport == Transport::Local {
+        eprintln!(
+            "bombyx: host {} is this machine; running vagrant \
+             here rather than over ssh",
+            cfg.host
+        );
     }
 
     let action = action_of(&vm, &cfg)?;
@@ -772,12 +787,24 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// left here is process spawning.
 fn doctor_run(cfg: &Config) -> Ran {
     let mut report = Report::default();
-    // `ssh` is the only local program a VM command runs, so it is
-    // the only one checked here. `bombyx self-update` also needs
-    // `git`, `curl` and `tar`; those are its problem, and failing
-    // `doctor` over them would make a red report mean nothing
-    // about whether `up` works.
-    report.add(local_tool("ssh", Some("-V")));
+    // One local program per route, and only the one this run
+    // will actually spawn: checking `ssh` where bombyx starts
+    // `sh` reports on a program no VM command reaches, and a
+    // report that turns red over it says nothing about whether
+    // `up` works.
+    //
+    // `bombyx self-update` also needs `git`, `curl` and `tar`.
+    // Those are its problem, for the same reason.
+    match cfg.transport {
+        Transport::Ssh => report.add(local_tool("ssh", Some("-V"))),
+        // No version argument. `sh` is whatever the system
+        // links it to -- `dash` on Debian, `bash` elsewhere --
+        // and `dash` has no version flag at all, so asking
+        // reports a failure about the question rather than
+        // about the shell. The path it resolved to is the
+        // answer worth printing.
+        Transport::Local => report.add(local_tool("sh", None)),
+    }
     report.add_all(doctor::host_findings(cfg, spawn_probe));
 
     print_lines(&report.render(&cfg.host));

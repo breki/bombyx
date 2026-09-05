@@ -180,7 +180,9 @@ impl Project {
     /// about what it is called.
     ///
     /// `host` comes from the caller because two keys can supply
-    /// one and this entry carries only the first.
+    /// one and this entry carries only the first, and
+    /// `transport` for the same reason: it is derived from that
+    /// winning host, which this entry may not hold.
     /// `super::Config::load_project` ranks them and passes the
     /// winner.
     ///
@@ -188,13 +190,19 @@ impl Project {
     /// and one entry out of it is small, so borrowing them into
     /// the `Config` -- and giving that type a lifetime every
     /// module holding one would carry -- buys nothing.
-    pub(super) fn to_config(&self, name: &str, host: String) -> super::Config {
+    pub(super) fn to_config(
+        &self,
+        name: &str,
+        host: String,
+        transport: super::Transport,
+    ) -> super::Config {
         super::Config {
             host,
             project: name.to_owned(),
             remote_root: self.remote_root.clone(),
             vm: self.vm.clone(),
             source: self.source.clone(),
+            transport,
         }
     }
 

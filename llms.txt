@@ -1,7 +1,8 @@
 # bombyx
 
-> Drive isolated AI-agent VMs on a remote libvirt host
-> over SSH. Rust CLI, derived from the rustbase template.
+> Drive isolated AI-agent VMs on a libvirt host, over SSH or
+> on this machine. Rust CLI, derived from the rustbase
+> template.
 
 ## Project Structure
 
@@ -16,8 +17,10 @@ Cargo workspace, CLI only:
   - `config/host.rs` — where the VM host name comes from, the
     ranking between the registry's two `host` keys, the shape a
     host may take, and which directory the registry lives in
+  - `config/transport.rs` — whether `host` names this very
+    machine, and the `Transport` that answers
   - `name.rs` — validated `ScratchName` (one path segment)
-  - `remote.rs` — ssh command construction (pure)
+  - `remote.rs` — command construction for either route (pure)
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `vagrantfile.rs` — renders the Vagrantfile, embeds the
     bootstrap script
@@ -42,8 +45,15 @@ subsystem — those were removed from the template.
 
 bombyx never manages VMs directly. It generates a
 Vagrantfile and a bootstrap script from the operator's own
-`config.toml`, writes both onto the VM host over SSH, and runs
-`vagrant` there. The VM host's own filesystem holds no project
+`config.toml`, writes both onto the VM host and runs `vagrant`
+there. Two routes carry that, and `config::transport` picks
+between them by comparing `host` against this machine's own
+name: `ssh <host> "<script>"` when they differ, `sh -c
+"<script>"` when they match. The script is byte-identical
+either way, because `sh -c` starts the same POSIX shell `ssh`
+would have started on the host. `Config::transport` records
+which route is in force; a `Config` built any other way gets
+`Transport::Ssh`. The VM host's own filesystem holds no project
 file; the guest clones the repository itself once it is
 running. The workstation reads nothing out of the project's
 directory either, which is why `--project` names the project
@@ -139,9 +149,10 @@ coexisted.
 passed one, `config::registry_file()` otherwise, and `None`
 when the environment names no config directory at all. It reads
 the `[projects.<name>]` table for every setting but the host,
-ranks the host across the two keys, and returns a
-`(Config, HostOrigin)` pair so the binary reports the winner
-rather than re-deriving the rule. Its errors include
+ranks the host across the two keys, derives `Config::transport`
+from the host that won, and returns a `(Config, HostOrigin)`
+pair so the binary reports the winner rather than re-deriving
+the rule. Its errors include
 `RegistryNotFound` for a machine with no registry file,
 `ProjectNotFound` for a file with no table for `name`, and
 `HostMissing` when neither `host` key names one. An illegal
@@ -201,7 +212,8 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 - the registry is the operator's own file rather than a
   committed one, and every field is still validated against an
   allowlist. `host` reaching `ssh` as `-oProxyCommand=...`
-  would be local RCE
+  would be local RCE, and the rule holds on both routes because
+  the same file carried to another machine takes the `ssh` one
 - Remote paths go through `quote_remote_path`, which leaves
   a leading `~` outside the quotes — a POSIX shell does not
   expand `~` inside single quotes

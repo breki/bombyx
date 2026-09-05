@@ -2,7 +2,7 @@
 name = "bombyx"
 version = "0.4.1"
 edition = "2024"
-description = "Drive isolated AI-agent VMs on a remote libvirt host over SSH"
+description = "Drive isolated AI-agent VMs on a libvirt host, over SSH or on this machine"
 license = "MIT"
 repository = "https://github.com/breki/bombyx"
 # Must live inside the package: `cargo package` does not
@@ -26,6 +26,11 @@ path = "src/bin/bombyx/main.rs"
 # do NOT use anyhow::Result in lib.rs public API.
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# This machine's own name, to decide whether `host` names it.
+# The system call behind it differs per platform and returns a
+# byte string of platform-defined length; this wraps that safely,
+# and the workspace forbids the `unsafe` the call itself needs.
+gethostname = "1.1.0"
 serde = { version = "1", features = ["derive"] }
 # `self-update` downloads and unpacks into a private per-run
 # directory, so a co-user cannot pre-create the path and two

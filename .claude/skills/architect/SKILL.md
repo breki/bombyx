@@ -19,11 +19,13 @@ description: Project overview and architecture guide for bombyx -- crate layout,
 
 ## What bombyx Does
 
-Drives isolated AI-agent VMs on a remote libvirt host
-over SSH. The control plane is deliberately thin: bombyx
-generates a Vagrantfile and a bootstrap script, writes them
-onto the VM host and runs `vagrant` there, streaming output
-back.
+Drives isolated AI-agent VMs on a libvirt host, usually a
+second machine reached over SSH. The control plane is
+deliberately thin: bombyx generates a Vagrantfile and a
+bootstrap script, writes them onto the VM host and runs
+`vagrant` there, streaming output back. When `host` names the
+machine bombyx is running on, the same script goes through
+`sh -c` instead.
 
 The key architectural constraint: **neither the workstation
 nor the VM host reads the project's files.** Both generated

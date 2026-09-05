@@ -1,10 +1,14 @@
 //! Building the commands that drive Vagrant on the VM host.
 //!
-//! Every operation is a plain `ssh` invocation. Nothing here
-//! runs a process: these functions
-//! return the argv to run, which keeps the interesting logic
-//! (quoting, paths, command composition) unit-testable
-//! without a VM host.
+//! Every operation is a POSIX shell script handed to one
+//! program: `ssh <host> "<script>"`, or `sh -c "<script>"` when
+//! the VM host is the machine bombyx is running on. The private
+//! `transport` function below chooses, and `config::transport`
+//! explains how the choice was made.
+//!
+//! Nothing here runs a process: these functions return the argv
+//! to run, which keeps the interesting logic (quoting, paths,
+//! command composition) unit-testable without a VM host.
 //!
 //! This module is the builders and the VM-host identity constants.
 //! Two neighbours hold the pieces they are built from: `command`
@@ -23,7 +27,7 @@ pub use command::RemoteCommand;
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::write_file;
 
-use crate::config::Config;
+use crate::config::{Config, Transport};
 
 /// Environment variable carrying the VM host's SSH alias into
 /// the `vagrant` process on the host.
@@ -218,10 +222,41 @@ impl Tty {
     }
 }
 
-/// Builds an `ssh` command running `vagrant` in `dir` on the
-/// VM host.
+/// Wraps `script` in the command that runs it on the VM host.
 ///
-/// See [`Tty`] for what the last argument costs and buys.
+/// The one wrapper every VM command goes through, so no builder
+/// can grow its own opinion about the route.
+/// `Config::transport` holds the decision and
+/// `config::transport` explains how it was reached.
+///
+/// `probe` calls this for the local route only. Its `ssh` form
+/// carries six connection options none of the others need, so
+/// it builds that half itself.
+///
+/// Over `ssh`, options come before the destination and everything
+/// after it is the remote command, which is why `-t` sits where
+/// it does. Running here, `sh -c` starts the same POSIX shell
+/// `ssh` would have started on the host, so `script` is handed
+/// over untouched -- and `tty` has nothing to ask for, because
+/// the shell inherits whatever stdio bombyx itself was given.
+fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
+    match (cfg.transport, tty) {
+        (Transport::Local, _) => RemoteCommand::new("sh", &["-c", script]),
+        (Transport::Ssh, Tty::Allocate) => RemoteCommand::new(
+            "ssh",
+            &["-t", "-o", "LogLevel=ERROR", &cfg.host, script],
+        ),
+        (Transport::Ssh, Tty::NoPty) => {
+            RemoteCommand::new("ssh", &[&cfg.host, script])
+        }
+    }
+}
+
+/// Builds the command running `vagrant` in `dir` on the VM host.
+///
+/// See [`Tty`] for what the last argument costs and buys. The
+/// private `transport` function decides which of the two
+/// shapes it comes back in.
 #[must_use]
 pub fn vagrant_in(
     cfg: &Config,
@@ -230,34 +265,26 @@ pub fn vagrant_in(
     tty: Tty,
 ) -> RemoteCommand {
     let script = vagrant_script(cfg, dir, args);
-    // `-t` ahead of the destination: ssh takes options before the
-    // host, and everything after the host is the remote command.
-    match tty {
-        Tty::Allocate => RemoteCommand::new(
-            "ssh",
-            &["-t", "-o", "LogLevel=ERROR", &cfg.host, &script],
-        ),
-        Tty::NoPty => RemoteCommand::new("ssh", &[&cfg.host, &script]),
-    }
+    transport(cfg, &script, tty)
 }
 
-/// Builds an `ssh` command running `vagrant` in the project
+/// Builds the command running `vagrant` in the project
 /// directory on the VM host.
 #[must_use]
 pub fn vagrant(cfg: &Config, args: &[&str], tty: Tty) -> RemoteCommand {
     vagrant_in(cfg, &cfg.remote_project_dir(), args, tty)
 }
 
-/// Builds the `ssh` command that creates `dir` on the VM
-/// host if it does not yet exist.
+/// Builds the command that creates `dir` on the VM host if it
+/// does not yet exist.
 #[must_use]
 pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
     let script = format!("mkdir -p {}", quote_remote_path(dir));
-    RemoteCommand::new("ssh", &[&cfg.host, &script])
+    transport(cfg, &script, Tty::NoPty)
 }
 
-/// Builds the `ssh` command that destroys the VM defined in
-/// `dir`, doing nothing when there is no Vagrantfile there.
+/// Builds the command that destroys the VM defined in `dir`,
+/// doing nothing when there is no Vagrantfile there.
 ///
 /// The guard makes teardown idempotent. A bare
 /// `vagrant destroy -f` exits non-zero in a directory with no
@@ -292,17 +319,11 @@ pub fn destroy_vm_if_present(
         dir = quote_remote_path(dir),
         cmd = vagrant_command(cfg, &["destroy", "-f"]),
     );
-    match tty {
-        Tty::Allocate => RemoteCommand::new(
-            "ssh",
-            &["-t", "-o", "LogLevel=ERROR", &cfg.host, &script],
-        ),
-        Tty::NoPty => RemoteCommand::new("ssh", &[&cfg.host, &script]),
-    }
+    transport(cfg, &script, tty)
 }
 
-/// Builds the `ssh` command that recursively removes `dir` on
-/// the VM host.
+/// Builds the command that recursively removes `dir` on the VM
+/// host.
 ///
 /// This is the widest-reaching command bombyx emits: its blast
 /// radius is bounded by a path rather than by Vagrant's notion
@@ -324,11 +345,11 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
         "remove_dir given a path shallower than Config permits: {dir:?}"
     );
     let script = format!("rm -rf {}", quote_remote_path(dir));
-    RemoteCommand::new("ssh", &[&cfg.host, &script])
+    transport(cfg, &script, Tty::NoPty)
 }
 
-/// Builds the `ssh` command that opens an interactive shell
-/// inside the project's VM.
+/// Builds the command that opens an interactive shell inside
+/// the project's VM.
 ///
 /// Always [`Tty::Allocate`], and unconditionally so: `vagrant ssh`
 /// needs a TTY when invoked through a non-interactive SSH command,
@@ -362,6 +383,63 @@ mod tests {
     /// The remote script, whatever precedes it.
     fn remote_script(c: &RemoteCommand) -> String {
         c.args.last().expect("a remote command").clone()
+    }
+
+    /// [`cfg`] with `host` naming the machine bombyx runs on.
+    fn local_cfg() -> Config {
+        Config {
+            transport: Transport::Local,
+            ..Config::for_tests()
+        }
+    }
+
+    #[test]
+    fn the_local_route_runs_the_same_script_through_sh() {
+        // The script is the delicate part: quoting, the `cd`,
+        // the heredoc delimiter and the `$(hostname -s)` the far
+        // side must evaluate. `sh -c` is the same POSIX shell
+        // `ssh` starts on the host, so every builder keeps one
+        // script and only the two words in front of it change.
+        /// One builder, named for the error message.
+        type Builder = (&'static str, fn(&Config) -> RemoteCommand);
+
+        let builders: [Builder; 5] = [
+            ("vagrant", |c| vagrant(c, &["status"], Tty::NoPty)),
+            ("ensure_dir", |c| ensure_dir(c, "~/vms")),
+            ("remove_dir", |c| remove_dir(c, "~/vms/myproject")),
+            ("destroy", |c| {
+                destroy_vm_if_present(c, "~/vms/myproject", Tty::NoPty)
+            }),
+            ("write", |c| write_file(c, "~/vms", "Vagrantfile", "x\n")),
+        ];
+        for (name, build) in builders {
+            let over_ssh = build(&cfg());
+            let here = build(&local_cfg());
+            assert_eq!(here.program, "sh", "{name}");
+            assert_eq!(here.args.len(), 2, "{name}: {:?}", here.args);
+            assert_eq!(here.args[0], "-c", "{name}");
+            assert_eq!(
+                remote_script(&here),
+                remote_script(&over_ssh),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_local_route_asks_for_no_pty() {
+        // `-t` is an `ssh` option. `sh -c` inherits whatever
+        // stdio bombyx itself was given, so an interactive
+        // `bombyx shell` still gets the operator's terminal and
+        // there is nothing to request.
+        for c in [
+            vagrant(&local_cfg(), &["status"], Tty::Allocate),
+            destroy_vm_if_present(&local_cfg(), "~/vms/p", Tty::Allocate),
+            shell_into_vm(&local_cfg()),
+        ] {
+            assert_eq!(c.program, "sh");
+            assert!(!c.args.iter().any(|a| a == "-t"), "{:?}", c.args);
+        }
     }
 
     #[test]

@@ -22,9 +22,9 @@
 //! `crate::doctor`.
 
 use super::{RemoteCommand, quote_remote_path, shell_quote};
-use crate::config::Config;
+use crate::config::{Config, Transport};
 
-/// Builds a non-interactive `ssh` probe running `script`.
+/// Builds a non-interactive probe running `script`.
 ///
 /// Each option closes a way a diagnostic can be worse than
 /// useless:
@@ -51,6 +51,13 @@ use crate::config::Config;
 /// Setting them in one place is what makes the guarantee
 /// structural rather than something each builder remembers.
 fn probe(cfg: &Config, script: &str) -> RemoteCommand {
+    // Running here, none of the options below has anything to
+    // configure: there is no connection to time out, no session
+    // to keep alive and no banner to suppress. The script is
+    // unchanged, so the shared wrapper builds it.
+    if cfg.transport == Transport::Local {
+        return super::transport(cfg, script, super::Tty::NoPty);
+    }
     RemoteCommand::new(
         "ssh",
         &[

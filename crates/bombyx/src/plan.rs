@@ -184,6 +184,14 @@ mod tests {
         plan(action, &cfg(), tty)
     }
 
+    /// The shared config, running on the machine it names.
+    fn local_cfg() -> Config {
+        Config {
+            transport: crate::config::Transport::Local,
+            ..cfg()
+        }
+    }
+
     #[test]
     fn every_action_carries_the_tty_choice_it_should() {
         // Classifying every action is what makes a new one a
@@ -216,17 +224,31 @@ mod tests {
     }
 
     #[test]
-    fn every_command_in_a_plan_is_ssh() {
+    fn a_plan_runs_one_program_and_only_ssh_is_handed_dash_t() {
         // `-t` is an `ssh` option, and the tty tests above assert
-        // where it appears. This is the premise those rest on: no
-        // plan contains a program that could be handed `-t`
+        // where it appears. This is the premise those rest on:
+        // no plan contains a program that could be handed `-t`
         // meaning something else. `-t` is a `tar` option and is
-        // not an `scp` option at all, so reintroducing a
-        // workstation-side step without revisiting the tty rule
-        // is what this refuses.
+        // not an `scp` option at all.
+        //
+        // bombyx has two routes and each uses one program, so
+        // this states both: `ssh`, which takes `-t`, and `sh`,
+        // which is never given one because a local shell already
+        // has whatever terminal bombyx was started with. A third
+        // program appearing on either route is a step whose
+        // relationship to `-t` nobody has decided yet.
         for action in all_actions() {
             for c in &plan_for(&action, Tty::Allocate) {
-                assert_eq!(c.program, "ssh", "{action:?}");
+                assert_eq!(c.program, "ssh", "{action:?} over ssh");
+            }
+            let here = plan(&action, &local_cfg(), Tty::Allocate);
+            for c in &here {
+                assert_eq!(c.program, "sh", "{action:?} here");
+                assert!(
+                    !c.args.iter().any(|a| a == "-t"),
+                    "{action:?} here: {:?}",
+                    c.args
+                );
             }
         }
     }

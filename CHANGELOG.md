@@ -45,6 +45,13 @@ and this project adheres to
 - `--project`, `--config` and `--dry-run` are global arguments, so they are
   accepted after the subcommand as well as before it: `bombyx status --dry-run`
   works where it used to be an argument error.
+- When the config file's `host` names the machine bombyx is running on, bombyx
+  runs each command through `sh -c` instead of `ssh`, so a workstation that is
+  its own VM host needs no SSH server, no key authorized to your own account and
+  no loopback alias. The comparison uses the short name, lowercased, so
+  `Frosti`, `frosti` and `frosti.lan` are one machine; an alias that merely
+  points at loopback still takes the `ssh` route. The route is stated on stderr
+  on every command, and `bombyx doctor` shows its `ssh` row as a skip.
 
 ### Changed
 

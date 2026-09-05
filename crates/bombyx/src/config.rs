@@ -45,6 +45,8 @@
 //! - `host` -- where the VM host name comes from, and its shape.
 //! - `root` -- every rule `remote_root` must pass.
 //! - `source` -- the `[source]` table and its two checked types.
+//! - `transport` -- whether `host` names this very machine, and
+//!   what bombyx does when it does.
 //! - `vm` -- the `[vm]` table.
 //!
 //! A new field rule belongs in the module that owns the field.
@@ -61,7 +63,10 @@ mod read;
 mod registry;
 mod root;
 mod source;
+mod transport;
 mod vm;
+
+pub use transport::Transport;
 
 /// The `[vm]` and `[source]` tables every project entry needs.
 ///
@@ -191,6 +196,16 @@ pub struct Config {
 
     /// Where the guest clones the project from.
     pub source: Source,
+
+    /// Whether bombyx reaches `host` over `ssh` or runs the
+    /// script here.
+    ///
+    /// Derived rather than configured: `config::transport`
+    /// compares `host` against this machine's own name as the
+    /// config is loaded. A `Config` built any other way gets
+    /// [`Transport::Ssh`], which is the route that works from
+    /// anywhere.
+    pub transport: Transport,
 }
 
 impl Config {
@@ -218,7 +233,10 @@ impl Config {
         name: &str,
     ) -> Result<Self, ConfigError> {
         let registry = registry::parse_for_tests(source, path)?;
-        Self::from_registry(&registry, name).map(|(cfg, _origin)| cfg)
+        // `None`, so a test never depends on what the machine
+        // running it is called. A test wanting the local route
+        // sets `Config::transport` itself.
+        Self::from_registry(&registry, name, None).map(|(cfg, _origin)| cfg)
     }
 
     /// The config every module's tests use.
@@ -290,7 +308,11 @@ impl Config {
         };
         let path = registry.ok_or_else(missing)?;
         let registry = Registry::read(path)?.ok_or_else(missing)?;
-        Self::from_registry(&registry, name)
+        Self::from_registry(
+            &registry,
+            name,
+            transport::this_machine().as_deref(),
+        )
     }
 
     /// [`Config::load_project`] against a registry already read.
@@ -308,6 +330,7 @@ impl Config {
     fn from_registry(
         registry: &Registry,
         name: &str,
+        this_machine: Option<&str>,
     ) -> Result<(Self, HostOrigin), ConfigError> {
         let project = registry.project(name)?;
 
@@ -315,7 +338,8 @@ impl Config {
         // host and the settings always come from one project.
         let (host, origin) = host::rank(registry, name)?;
 
-        let cfg = project.to_config(name, host);
+        let route = transport::resolve(&host, this_machine);
+        let cfg = project.to_config(name, host, route);
 
         // Deliberately checks the entry's fields a second
         // time: a field added to `Config` with no matching
@@ -969,9 +993,22 @@ mod load_project_tests {
         source: &str,
         name: &str,
     ) -> Result<(Config, HostOrigin), ConfigError> {
+        load_on(source, name, None)
+    }
+
+    /// [`load`], told what this machine is called.
+    ///
+    /// `load` passes `None` so no test depends on the name of
+    /// the machine running it. This one supplies a name, for the
+    /// tests about which route the loaded config takes.
+    fn load_on(
+        source: &str,
+        name: &str,
+        this_machine: Option<&str>,
+    ) -> Result<(Config, HostOrigin), ConfigError> {
         let registry =
             registry::parse_for_tests(source, Path::new(USER_CONFIG_FILE))?;
-        Config::from_registry(&registry, name)
+        Config::from_registry(&registry, name, this_machine)
     }
 
     /// A registry naming one project and nothing unusual.
@@ -1005,6 +1042,29 @@ mod load_project_tests {
         // The entry names no host of its own, so the file-wide
         // key won.
         assert_eq!(origin, HostOrigin::UserFile);
+    }
+
+    #[test]
+    fn the_route_follows_the_host_that_won_the_ranking() {
+        // The entry's host outranks the file-wide one, and the
+        // route is derived from the winner. Ranking the two and
+        // then deciding the route from the loser would send
+        // `destroy` to `entry` while reporting that it runs
+        // here.
+        let source = test_registry("myproject", "file-wide", Some("entry"));
+
+        let (cfg, _) = load_on(&source, "myproject", Some("entry")).unwrap();
+        assert_eq!(cfg.transport, Transport::Local);
+
+        let (cfg, _) =
+            load_on(&source, "myproject", Some("file-wide")).unwrap();
+        assert_eq!(cfg.transport, Transport::Ssh);
+    }
+
+    #[test]
+    fn a_config_loaded_anywhere_else_takes_the_network_route() {
+        let (cfg, _) = load_on(&plain(), "myproject", Some("laptop")).unwrap();
+        assert_eq!(cfg.transport, Transport::Ssh);
     }
 
     #[test]

@@ -227,47 +227,70 @@ perfectly when you log in and is invisible to bombyx.
 [vm-host-setup.md](vm-host-setup.md) explains the mechanism and
 the fix under **Why the non-interactive PATH causes trouble**.
 
-### Running bombyx against your own machine *(unverified)*
+### Running bombyx against your own machine
 
-bombyx has no "local mode" and does not need one. `host` is an
-SSH alias, so pointing it at your own machine is a matter of
-running an SSH server there and giving the loopback an alias:
+*Verified on frosti (Ubuntu, vagrant 2.4.9, vagrant-libvirt
+0.12.2) on 2026-09-05: `doctor`, `up` and `destroy` all ran
+through `sh -c`, and the two generated files arrived intact.
+The `up` was stopped at the box download by naming a box that
+does not exist, so a guest booting on this route is still
+unverified.*
 
-```sshconfig
-Host selfhost
-    HostName 127.0.0.1
-    User igor
+Write your own machine's name as `host` and bombyx does the
+rest. As it reads `config.toml` it compares `host` against this
+machine's name, and when the two match it runs each command
+here through `sh -c` instead of handing it to `ssh`. There is
+no SSH server to install, no key to authorize to your own
+account and no loopback alias to write.
+
+```toml
+host = "frosti"     # this machine, so no ssh hop
 ```
 
-Everything else is unchanged -- bombyx still writes the
-generated files and runs `vagrant` over SSH, just to a host that
-happens to be this one. Read **Before you start** above for what
-you give up.
+The comparison ignores case and ignores any domain on either
+side, so `Frosti`, `frosti` and `frosti.lan` all name the same
+machine. An alias that merely *points* at loopback does not
+count: if you write `host = "selfhost"` and your SSH config
+sends `selfhost` to `127.0.0.1`, bombyx takes you at your word
+and uses `ssh`, because you asked for it by name.
 
-Two requirements are easy to miss, because they are about the
-machine being a *host*, not about bombyx:
+You can tell which route is in force. bombyx prints a line on
+stderr whenever it is running here, and `bombyx doctor` shows
+its `ssh` row as a skip rather than a pass. That notice is
+worth reading rather than tuning out: **Before you start**
+above says what you give up by putting the guest on the same
+machine you work on, and the local route is what makes that
+arrangement easy to reach by accident.
 
-- **The remote side must be POSIX.** bombyx sends `mkdir -p`
-  and a `cat > file <<'EOF'` heredoc, so the SSH login shell
-  has to be `bash` or `sh`. On a Linux workstation that is
-  already true. On Windows, OpenSSH Server starts `cmd.exe`
-  by default and those commands fail; you would have to set
-  the `DefaultShell` registry value to a POSIX shell, which
-  is why `doctor` has a `login shell` check.
-- **libvirt has to run there.** That means a Linux
-  workstation. A Windows machine cannot be its own libvirt
-  host: the options are a Linux VM or WSL2 distro with
-  nested virtualization acting as the host -- see
-  [vm-host-wsl2.md](vm-host-wsl2.md), which is verified end to
-  end -- or Hyper-V.
-  bombyx accepts two provider values, `libvirt` and `hyperv`,
-  and refuses anything else -- VirtualBox is not one of them.
-  Hyper-V comes with two caveats of its own: its provider
-  needs an elevated shell, which an SSH session does not
-  have, and bombyx does not yet tell vagrant which provider
-  to use, so setting `hyperv` today gets you whatever the
-  host chooses. See `provider-configured-not-selected` in
-  [todo.md](todo.md).
+Nothing else changes. bombyx still writes the generated files
+and still runs `vagrant`, and the script it builds is
+identical on both routes -- `sh -c` is the same POSIX shell
+`ssh` would have started on a remote host.
+
+On the `ssh` route the host's login shell has to be POSIX,
+because bombyx sends `mkdir -p` and a `cat > file <<'EOF'`
+heredoc for the far side to interpret. On Linux that is already
+true. On Windows, OpenSSH Server starts `cmd.exe` and those
+commands fail, and the fix is the `DefaultShell` registry
+value. That is what `doctor`'s `login shell` row checks. The
+local route asks nothing of your login shell, because bombyx
+starts `sh` itself.
+
+One requirement is easy to miss, because it is about the
+machine being a *host* rather than about bombyx: **libvirt has
+to run there.** That means a Linux workstation. A Windows
+machine cannot be its own libvirt host, and the options are a
+Linux VM or WSL2 distribution with nested virtualization acting
+as the host -- see [vm-host-wsl2.md](vm-host-wsl2.md), which is
+verified end to end -- or Hyper-V.
+
+bombyx accepts two provider values, `libvirt` and `hyperv`, and
+refuses anything else. VirtualBox is not one of them. Hyper-V
+comes with two caveats of its own. Its provider needs an
+elevated shell, which an SSH session does not have. And bombyx
+does not yet tell vagrant which provider to use, so setting
+`hyperv` today gets you whatever the host chooses. See
+`provider-configured-not-selected` in [todo.md](todo.md).
 
 ### Optional: keep the VM from reaching your home network
 

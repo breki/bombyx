@@ -4,6 +4,66 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-05
 
+**bombyx notices when it is its own VM host**
+
+Answering `local-host-execution` (#38), which #37 was parked on.
+The workstation turned out to be frosti itself, so a run needed
+SSH from the machine to itself: a key authorized to your own
+account, a `Host` block on loopback, and a handshake per
+command. The question was whether that hop is needed at all.
+
+It is not. As `config.toml` is read, `config::transport`
+compares `host` against this machine's own name -- short form,
+lowercased, so `Frosti`, `frosti` and `frosti.lan` are one
+machine -- and stores the answer on `Config::transport`. Where
+they match, `remote::transport` builds `sh -c "<script>"`
+instead of `ssh <host> "<script>"`. The script itself is
+untouched, because every VM command already builds a POSIX shell
+script string and `sh -c` starts the same shell `ssh` would have
+started on the far side. The quoting, the heredoc that lengthens
+its delimiter, the `cd`, the `$(hostname -s)` and destroy's
+`if [ -f Vagrantfile ]` guard all stay on one tested path.
+
+The operator chose detection over an opt-in spelling, knowing
+what it costs: one `config.toml` now behaves differently
+depending on which machine reads it, and the local route makes
+the least isolated arrangement the one that happens by itself.
+That is answered by making it visible rather than by making it
+hard. bombyx prints a line on stderr on every command when the
+local route is in force, `doctor` shows its `ssh` row as a skip
+rather than a pass, and `docs/architecture.md` states both the
+mechanism and what it gives up.
+
+The issue said this was "one branch at the spawn site in
+`main.rs`". It was not. `main.rs` executes a `RemoteCommand` and
+never reads its program name; the `ssh` program and the host
+argument were baked into six builders across `remote.rs`,
+`remote/write.rs` and `remote/probe.rs`. The branch went into
+one wrapper those six now call, which is still the cheap shape,
+just not where the issue expected it.
+
+Two more things the cheap shape had to answer, and a fourth
+nobody had named. The plan test asserting `ssh` for every action
+was rewritten rather than deleted: a plan runs one program per
+route, `ssh` which takes `-t` or `sh` which is never handed one,
+so a third program on either route still fails it. `Tty` is
+ignored locally, and that is correct -- `sh -c` inherits
+whatever stdio bombyx was given, so `bombyx shell` still gets
+the operator's terminal. The unnamed one was
+`remote::probe::reachable`, the gating probe with nothing to
+reach: `sh -c true` would have passed every time while saying
+nothing, so `reachability_finding` produces that row as a skip
+instead.
+
+Verified on frosti for real, which is what #37 was waiting for.
+`doctor` ran every probe through `sh -c` and passed with one
+skip. `up` created the directory, wrote both generated files
+intact -- 33 and 266 lines, matching the dry run -- and started
+vagrant with the libvirt provider, failing only on a box name
+chosen not to exist. `destroy` fired the Vagrantfile guard and
+removed the directory. A guest actually booting on this route is
+still unverified, and that stays with #37.
+
 **`--project` names the project, and the committed project file
 is gone**
 
