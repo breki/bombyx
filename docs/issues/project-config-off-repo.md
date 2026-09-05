@@ -1,9 +1,10 @@
 # project-config-off-repo
 
 **Status:** In progress -- chunk 1 landed 2026-09-02, steps 1
-to 4 of 7 landed 2026-09-04, step 5 landed 2026-09-05. Two
-steps remain: #18 switches the tool over, #27 settles
-`destroy`'s positional.
+to 4 of 7 landed 2026-09-04, steps 5 and 6 landed 2026-09-05.
+One step remains: #27 settles `destroy`'s positional. The two
+rules in `docs/trust-boundary.md` are reached as far as bombyx
+is concerned, which step 6 is what did.
 
 The Status line and the **Progress log** are written when a step
 is committed, so they lead `docs/todo.md`: an entry there moves
@@ -751,3 +752,64 @@ owner** holds the reasoning.
 Coverage 98.5%, ten gates, seven CI jobs. Definition of Done item
 3 does not apply: the loader has no caller and the emitted
 commands are unchanged, which a dry run shows.
+
+### 2026-09-05 -- step 6 landed
+
+The switch. `--project <name>` is required by every subcommand
+but `self-update`, `--config` names the registry file, and every
+setting comes out of one `[projects.<name>]` table. `ProjectFile`,
+`reject_host_key`, `Config::load`, `ConfigError::NotFound`,
+`ConfigError::HostInProjectFile` and `bombyx.toml` as a concept
+are all gone, and `bombyx.toml.sample` became
+`config.toml.sample`.
+
+**The operator's scope decision took `--host` and `BOMBYX_HOST`
+with it, and that simplified more than it cost.** Both remaining
+host sources are keys in the registry, and
+`config::registry::parse` already checks every `host` as it reads
+the file -- so `check_winning_host` had nothing left to do,
+`Config::validate` stopped checking `host`, `HostSources`
+collapsed to one field and went, and `read::Symlinks` went with
+it, one caller and one live variant. `Config::load_project` takes
+the registry path directly.
+
+`--config` naming the file rather than the directory is the
+decision recorded above. It is what made `Registry::read` take a
+path and `registry_place` take an `Option<&Path>`.
+
+**The review found two behaviour defects, both created by this
+step.** The provenance notice went through `Display`, which
+renders the bare `config.toml`, so with `--config` it named a
+file bombyx never read -- and that line is the operator's only
+warning about which machine `destroy` runs `rm -rf` on. And a
+malformed `--project` made the error blame the registry, which
+cannot carry a project name. `Display` was deleted rather than
+fixed: it had no production caller and its only effect was the
+wrong answer by default.
+
+**The third finding is the one to remember.** Moving the config
+out of the repository made it tempting to say the values are no
+longer attacker-controlled, and `docs/architecture.md` was
+rewritten to say exactly that -- withdrawing the argument for
+every rule in `config::root`, `config::guards` and
+`config::host`. `--config` and `BOMBYX_CONFIG_HOME` both point
+the loader at a file a repository can supply, and the reviewer
+reproduced `rm -rf /etc/<project>` on the VM host that way. The
+threat statement is restored in that file and in
+`docs/usage.md`. The twelve copies still stated absolutely are
+carried by
+`rt-2026-09-05-absolute-no-repo-file-claim-in-fourteen-places`
+in the red-team log.
+
+Stage 2 of the review stopped after two rounds on the
+non-convergence rule rather than the round cap: four of round
+two's findings landed inside round one's fixes, all on one fact
+stated in fourteen places. That is the first time that condition
+has fired in `/review2`.
+
+Coverage 98.4%, ten gates, seven CI jobs. 44 review findings, 28
+fixed, 12 logged. **Definition of Done item 3 is outstanding:**
+no run against a real VM host. The emitted `ssh` commands are
+byte-for-byte unchanged -- what changed is where bombyx reads
+them from -- so a dry run proves the argv and nothing about the
+remote side.

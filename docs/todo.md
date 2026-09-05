@@ -130,13 +130,6 @@ plan, decisions, and outcome.
   type rather than a missing decision -- a `HostName` cannot be placed in the
   wrong function.
 
-- **project-selection-flag** -- `--project` names the project explicitly
-  Step 6 of 7 in the project-config-off-repo re-split; GitHub issue #18.
-  Depends on registry-config-load. The switch: `--project` becomes required,
-  `--config` names the registry, and the project file is deleted. The only
-  breaking step, and it carries every document. Decided in
-  `docs/issues/project-config-off-repo.md`.
-
 - **self-update-resolves-tar-late** -- two downloads before it notices no tar
   Found by the red-team review of 92c2e74 (RT-7), verified by reading the call
   sites rather than by running it. bombyx resolves every program a plan needs up
@@ -243,6 +236,10 @@ plan, decisions, and outcome.
   the body across. Found while using the fixed tool for the first time.
 
 ## Done
+
+- [**project-selection-flag**](issues/project-config-off-repo.md)
+  -- `--project` names the project explicitly
+  (2026-09-05)
 
 - [**registry-config-load**](issues/project-config-off-repo.md)
   -- load a Config from the registry by name
