@@ -2,7 +2,230 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-05
+
+**Ten comments, three shorter forms each, and a canon rule
+reversed**
+
+An experiment the operator ran on this branch. Ten comments the
+work had added were each put to them with three shorter
+alternatives and the option to keep them as written. None was
+kept. Eight of the ten landed at two or three lines, three took
+the shortest form offered, and the exercise removed 125 comment
+lines and added 31.
+
+`CLAUDE.md` under **Code comments** said "Length is not what is
+being minimised" and inherited "prefer comprehensibility over
+brevity" from **Documentation style**. That pair is what made a
+thirty-line doc comment on one field defensible, and it is what
+the ten choices contradict. The bullet is now a length budget,
+with five more bullets under it: one reason rather than the
+chain, the invariant rather than the disaster, no inventory of a
+function's own callers, no hypotheticals and no case for future
+work, and a marker on anything that looks like a mistake and is
+not.
+
+The sixth is the one the others follow from, and it reverses
+advice a reviewer had given the day before. `/review2`'s
+comprehension stage said `config/registry.rs`'s header should
+*own* the reasoning for the read-time host rule, with the other
+four copies shrinking to the local fact. The operator chose the
+two-line form with no heading, which owns it nowhere in the
+code. So: reasoning lives in `docs/`, a comment carries the
+local fact. Every paragraph cut in the exercise was reasoning,
+and every one already existed elsewhere -- the `ssh` mechanism on
+the function holding the rule, the operator's argument under
+**Decisions** in the plan, the newtype case in `docs/todo.md`.
+It also dissolves the consolidation that review escalated: no
+comment may hold the paragraph there were five copies of, so
+there is nothing left to reconcile.
+
+Two warnings were genuinely lost rather than shortened, both
+aimed at a future editor and neither visible from the code:
+reordering the two caller-supplied host sources changes whether
+the registry is read at all, and `Project` being public with
+public fields lets an outside caller hold an unchecked `host`.
+The second had been a review fix earlier the same day, and the
+exercise cut it. They are now a section of
+`docs/architecture.md`, **Two traps a reader cannot see from the
+code**, and the new rule names that file as where such a thing
+goes -- so the next cut of this kind has somewhere to put what
+it removes.
+
+A local HTML report holds the evidence table and the reasoning.
+It is on the operator's machine rather than in the repo, which
+is why this entry carries the argument.
+
+**Three reviewers in sequence on the registry loader, and one
+rule that had to be found three times**
+
+`/review2` on #26, run after the commit rather than before it,
+so parts of it correct what that commit says. Three stages, 46
+findings, 36 fixed, four logged, two declined. Stage 2 ran two
+rounds and stopped on non-convergence rather than on a clean
+sheet: round 2 found defects in two of round 1's own fixes,
+which is the stop condition, so no third round ran.
+
+**The operator changed a rule mid-review, and it is the largest
+thing in the commit.** Every `host` in the registry is now
+checked as the file is read -- the file-wide key and every
+`[projects.*].host` -- and refused, whatever the command line
+says, with `--host` and `BOMBYX_HOST` checked separately. The
+reasoning that `Registry::host` and `Registry::project_host`
+carried said the opposite in as many words, so both were
+rewritten, and the host arm left `Project::validate` because one
+place now owns the rule.
+
+That started as a finding about a message. `Project::validate`
+checked the entry's host, so the field-named error beat the
+source-named one and `HostOrigin::ProjectEntry`'s wording --
+which exists to name the table an operator must edit -- was
+unreachable through the new loader. Three options went to the
+operator and they picked a fourth.
+
+**One rule needed finding three times, in three rounds.** A
+project name printed inside a TOML heading has to be quoted,
+because a name may contain a `.` and TOML reads a bare dot as
+nesting -- so the unquoted spelling names a table the operator's
+file does not contain, and writing it refuses the whole file.
+Round 1 of stage 1 found the missing name check. Round 1 of
+stage 2 found two messages interpolating the name unquoted.
+Round 2 found the third, in `HostOrigin::describe`, which this
+work is what made reachable. That is `/review`'s first
+non-convergence category, the rule with no single home, and the
+cure -- one function owning the spelling -- is logged rather
+than applied, because a consolidation inside a round is what the
+command forbids.
+
+Three claims of ours were false and a reviewer produced the
+counter-example for each. "Nothing observable changes in the
+CLI" rested on checking only the file-wide host, which is the
+one case that did not change; a bad host in any entry now fails
+every command that reads the file. A `CLAUDE.md` bullet said
+`Edit` refuses a file read only through Bash, inferred from a
+negative result; the positive probe was then run and the rule
+now cites both. And a citation blamed `b534bb1` for a placement
+that commit declined in writing.
+
+Nothing released is affected by any of it. `v0.4.1` parsed the
+registry with `deny_unknown_fields` on a struct carrying `host`
+alone, so a released bombyx refused any `config.toml` with a
+`[projects.*]` table at all. That is why the CHANGELOG entry
+carries no `**BREAKING:**` marker, and the reasoning is written
+into the decision record so nobody re-argues it.
+
+Every generated command was checked by running the binary rather
+than by reading a format string -- six runs, including both
+spellings of the advised heading, to see which loads and which
+fails with `unknown field b`. `cargo xtask validate --check`
+passes, ten gates, coverage 98.5%.
+
+The red-team backlog now holds 19 open entries. Past ten the
+process says to say so: the backlog has become the problem.
+
 ### 2026-09-04
+
+**A second loader: a `Config` out of the registry, by project
+name**
+
+Step 5 of seven in `project-config-off-repo` (#26).
+`Config::load_project(name, sources)` reads the operator's
+`config.toml`, takes the `[projects.<name>]` table for every
+setting but the host, ranks the host across the four sources and
+returns the same `(Config, HostOrigin)` pair `Config::load`
+does. Both loaders exist until step 6 (#18) deletes the old one.
+Nothing in the binary calls the new one.
+
+The reason it is a sibling and not a rewrite is in the plan
+document: a rewrite would put the switch and the new loading
+path in one commit, which is the lump this re-split exists to
+avoid.
+
+`config/host.rs` split, and the reason is sharper than tidying.
+`resolve_host` opened the registry itself, and the new loader
+needs the same file for the entry -- its own comment said why
+reading it twice is wrong, because a file edited between the two
+reads can supply a project host and a file-wide host that never
+coexisted. So the four-source precedence is now `rank`, which
+takes the registry already read, and `resolve_host` is
+read-then-`rank` for `Config::load` alone. The top two sources
+came out into `caller_supplied`, shared by both, so the decision
+to open the file and the decision about which source wins cannot
+drift apart.
+
+`from_registry` overwrites `sources.project` with the name it
+was asked for rather than reading what the caller put there.
+Ranking one project's host while loading another's settings
+would boot this project's VM on that one's machine, and
+`destroy` would `rm -rf` there.
+
+Two smaller pieces. `ConfigError::RegistryNotFound` covers a
+machine with no registry file: `NotFound` says a file is absent
+and stops, and `ProjectNotFound` claims bombyx looked inside a
+file that is not there, while the operator here has to create
+the file and know what to put in it. And `host_place` is
+`registry_place`, because a third message now uses it and it was
+never about the host.
+
+`Config::parse` and `Config::for_tests` moved onto the registry,
+which is why the diff is large for a pure addition. Every test
+module in the crate builds its config through `for_tests`, so
+leaving it on `bombyx.toml` would mean rewriting it in step 6
+instead of deleting it. The forty-odd tests that are *about*
+parsing `bombyx.toml` keep testing it through a helper in
+`config.rs`'s own test module, and that helper is deleted with
+them.
+
+The loader's tests are in `load_project_tests`, and five of them
+were proven by removing the code they cover: dropping the
+`sources.project` overwrite failed two, dropping the
+winning-host check failed one, and spelling `RegistryNotFound`
+as `NotFound` failed two. A sixth
+claim did not survive that treatment. A test said the entry is
+read before the host is ranked, and it passed with the two
+swapped, because with `--host` set both orders reach the same
+error. It now pins the order the only way that can fail: a
+broken entry and no host anywhere, where the order decides which
+of the two problems the operator is told about.
+
+**The review changed the behaviour of the loader that ships.**
+The operator's rule, given during the round: every `host` in the
+registry is checked as the file is read and reported as an
+error, whatever the command line says, with `--host` checked
+separately. So `config::registry::parse` now applies the host
+rule to the file-wide key and to every `[projects.*].host`
+before a `Registry` exists, the host arm left
+`Project::validate`, and `Registry::host` and
+`Registry::project_host` document their values as already
+checked. Their previous doc comments argued the opposite in as
+many words, which is what the operator overruled.
+
+That is a behaviour change and not only an addition: a bad host
+anywhere in the registry now fails every command that reads the
+file, which is every command run without `--host`. We first
+wrote that nothing in the CLI changed, having checked only the
+file-wide `host` -- the one case that did not change. A reviewer
+built both revisions and produced the case that did. Nothing
+released is affected: `v0.4.1` refused any `config.toml` with a
+`[projects.*]` table at all, so the behaviour being changed has
+never shipped.
+
+Two defects in our own review fixes came out of the same round.
+A name check added to `load_project` covered `/` and `..` and
+not `.`, so a project legitimately named `a.b` was advised to
+write `[projects.a.b]` -- which TOML reads as nesting, and serde
+then refuses the whole file. Both messages now quote the name,
+and the advised heading was run through the binary in both
+spellings to confirm which loads. And a sentence in
+`docs/architecture.md` claiming the loaders are the only way a
+`Config` is built was edited without being corrected, four
+sentences below the same document saying every field is public.
+
+`cargo xtask validate` passes, ten gates, coverage 98.4%.
+Definition of Done item 3 does not apply -- the loader still has
+no caller, and a dry run against a `bombyx.toml` emits the same
+four commands as before, for a registry with no bad host in
+it.
 
 **Three reviewers on the per-project host: one unguarded value,
 and two claims in the commit message that were not true**

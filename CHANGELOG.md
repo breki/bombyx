@@ -31,12 +31,16 @@ and this project adheres to
   the project asked for.
 - A `[projects.<name>]` table in the per-developer `config.toml` accepts an
   optional `host`, naming the machine that one project runs on. It outranks the
-  file-wide `host` and is outranked by `--host` and `BOMBYX_HOST`. Its value is
-  refused on the same terms as any other host, so a leading `-` cannot reach
-  `ssh` through it. bombyx does not consult it yet: no command names a
-  project.
+  file-wide `host` and is outranked by `--host` and `BOMBYX_HOST`. bombyx does
+  not consult it yet: no command names a project.
 - Library API: a `project` field on `HostSources`, and a
   `HostOrigin::ProjectEntry` variant carrying the project name.
+- Library API: `Config::load_project(name, sources)` loads a project's settings
+  out of the per-developer `config.toml` -- the registry counterpart of
+  `Config::load`, returning the same `(Config, HostOrigin)` pair -- plus a
+  `ConfigError::RegistryNotFound` variant for a machine with no registry file at
+  all. No command calls it yet: `bombyx.toml` is still where a project is
+  described.
 
 ### Changed
 
@@ -100,6 +104,15 @@ and this project adheres to
   variant. `config::HostSources` and `config::Project` each have a new public
   field. A caller matching the enum exhaustively, relying on the copy, or
   building either struct from a literal must be updated.
+- Reading the per-developer `config.toml` now checks every `host` in it -- the
+  file-wide key and every `[projects.<name>].host` -- and refuses the file if
+  any is a value `ssh` would misread, naming the table it came from. Nothing
+  released behaved otherwise: `0.4.1` refused a `config.toml` containing a
+  `[projects.<name>]` table at all, so the looser check this replaces was itself
+  never shipped. `--host` and `BOMBYX_HOST` are still checked on their own, and
+  still bypass reading the file altogether for `Config::load`;
+  `Config::load_project` reads it either way, because the file is where the
+  project's settings are.
 
 ### Fixed
 

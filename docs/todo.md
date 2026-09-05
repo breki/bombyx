@@ -118,6 +118,15 @@ plan, decisions, and outcome.
   the generate-vagrantfile PR: the config modules have been re-cut in four
   commits over two days and the review flagged the churn.
 
+  `host` belongs beside `remote_root` at the front of the queue. Its check has
+  been placed twice in two weeks and argued about three times: `b534bb1` left
+  the value to the ranking and wrote down why, `59dd110` put a check in
+  `Project::validate` after a review round on #25, and the registry-config-load
+  review moved it again into `config::registry::parse`. Each move reversed the
+  reasoning written down for the one before it, which is the sign of a missing
+  type rather than a missing decision -- a `HostName` cannot be placed in the
+  wrong function.
+
 - **project-selection-flag** -- `--project` names the project explicitly
   Step 6 of 7 in the project-config-off-repo re-split; GitHub issue #18.
   Depends on registry-config-load. The switch: `--project` becomes required,
@@ -186,8 +195,8 @@ plan, decisions, and outcome.
   question, undecided.
 
 - **config-tests-own-file** -- config.rs tests into config/tests.rs
-  config.rs runs to well over 1300 lines and its production half is under 500,
-  so `mod tests` is most of the file and what makes it unreadable in one pass.
+  `mod tests` is most of config.rs -- by a wide margin -- and that is what makes
+  the file unreadable in one pass.
   No exact figure here: it moves every commit and a stale one costs a reader a
   check. CLAUDE.md records
   that reading it whole overflowed a session. Move it with `#[cfg(test)] #[path

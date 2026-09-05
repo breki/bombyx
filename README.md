@@ -195,10 +195,17 @@ rather than guessing.
 key of its own, meant for the one project you keep on a
 different machine, and it is ranked between row 2 and row 3.
 No command reaches it, because none of them names a project
-yet -- so bombyx accepts the key, ignores it, and uses row 3.
-Do not write it expecting an effect. `project-selection-flag`
-in `docs/todo.md` is the work that connects it, and this table
-grows a fourth row when it lands.
+yet -- so bombyx never uses the value, and picks row 3 instead.
+Do not write it expecting an effect.
+
+It is not ignored, though, and that is the one thing it does do:
+reading `config.toml` checks every `host` in the file, including
+this key, and refuses the file if any of them is a value `ssh`
+would misread. So a typo here stops every command that reads the
+file, for every project, even though no command would have used
+the value. `project-selection-flag` in `docs/todo.md` is the
+work that connects it, and this table grows a fourth row when it
+lands.
 
 **This section is the authoritative list** -- the sample config
 and `llms.txt` point here rather than repeating it, so there is

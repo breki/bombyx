@@ -9,7 +9,13 @@ Cargo workspace, CLI only:
 
 - `crates/bombyx` — core library and CLI binary (paths below
   are `src/`-relative unless written in full)
-  - `config.rs` — `bombyx.toml` parsing, validation, paths
+  - `config.rs` — `Config` itself, and the two loaders: one
+    for `bombyx.toml`, one for the registry
+  - `config/registry.rs` — the operator's own `config.toml`:
+    the VM host, and a `[projects.<name>]` table per project
+  - `config/host.rs` — where the VM host name comes from, the
+    ranking between the four sources, and the shape a host may
+    take
   - `name.rs` — validated `ScratchName` (one path segment)
   - `remote.rs` — ssh command construction (pure)
   - `remote/probe.rs` — the read-only `doctor` probe scripts
@@ -91,9 +97,11 @@ person has their own hardware on their own network, so a
 committed value is wrong for everyone but its author -- and
 `destroy` runs `rm -rf` on whatever host is in force. It is
 resolved from `--host`, `BOMBYX_HOST` and a per-developer
-`config.toml`, in that order; see "Where bombyx looks for the
-host" in `README.md` for the authoritative list, and
-`resolve_host` in `config.rs` for the code.
+`config.toml` -- called **the registry** from here on, because
+it also carries a table per project -- in that order; see
+"Where bombyx looks for the host" in `README.md` for the
+authoritative list, and `resolve_host` in `config/host.rs` for
+the code.
 
 `resolve_host` ranks a fourth source the CLI cannot reach: a
 `host` key inside a `[projects.<name>]` table, between
@@ -101,13 +109,52 @@ host" in `README.md` for the authoritative list, and
 `None` on every path today, so the key never wins. The README
 section above says the same and is where the count is kept.
 
-`Config::load` returns an error naming all three places when no
-source supplies a host. It takes a `HostSources` carrying the
-flag, the env value, the project name and the config dir, and
-returns the winning `HostOrigin`, so precedence is unit-testable
-without mutating the process environment and the binary reports
-the winner rather than re-deriving it; the binary is the only
-thing that reads `std::env`. A config dir from the environment must be an
+Every `host` in the registry is checked while the file is being
+read, by `config::registry::parse` -- the file-wide key and
+every project's, not only the one a command wants. A host value
+is `ssh`'s first positional argument, and this is the file the
+operator writes host names in, so a value bombyx would refuse is
+reported while they are looking at that file. Holding a
+`Registry` is the proof every host in it passed;
+`Registry::host` and `Registry::project_host` therefore run no
+rule of their own, and `Project::validate` does not check
+`host`. `--host` and `BOMBYX_HOST` are checked separately, by
+`check_winning_host` on whichever source won. Note that `--host`
+makes `resolve_host` skip reading the registry, so a bad host in
+a file that run never opens goes unreported;
+`Config::load_project` always reads the file and has no such
+gap.
+
+The ranking itself is `config::host::rank`, which takes the
+registry already read rather than opening it. `resolve_host`
+reads the file and calls it; `Config::load_project` reads the
+file for the project's settings and calls it with that same
+copy, so a file edited mid-run cannot supply a project host and
+a file-wide host that never coexisted.
+
+`Config::load_project(name, sources)` is the registry
+counterpart of `Config::load`: it takes a project name instead
+of a path to a `bombyx.toml`, reads the `[projects.<name>]`
+table for every setting but the host, and returns the same
+`(Config, HostOrigin)` pair. It ranks the host for the project
+it loads whatever `HostSources.project` says, so the settings
+and the host always come from one entry. No command calls it
+yet -- `project-selection-flag` in `docs/todo.md` is the step
+that switches the binary over and deletes `Config::load`.
+The one error it adds is `RegistryNotFound`, for a machine with
+no registry file at all; `ProjectNotFound` already existed. An
+illegal project name is refused before the file is looked for,
+so no message ever advises a `[projects.<name>]` heading that
+the parser would reject.
+
+`Config::load` returns an error naming the config file, plus
+`--host` and `BOMBYX_HOST`, when no source supplies a host. It
+takes a `HostSources` carrying the flag, the env value, the
+project name and the config dir, and returns the winning
+`HostOrigin`, so precedence is unit-testable without mutating
+the process environment and the binary reports the winner rather
+than re-deriving it; the binary is the only thing that reads
+`std::env`. A config dir from the environment must be an
 anchored path -- a relative one would resolve against the
 working directory and take the host out of the repo.
 

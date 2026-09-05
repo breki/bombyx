@@ -186,9 +186,13 @@ Delete `ProjectFile`. Step 1 removed `Config::with_overlay`
 and the call site that printed the "overrides" notice, and
 step 2 removed `Overlay`, `read::local_config_path` and
 `HostOrigin::Overlay`, so `ProjectFile` is the last of the
-list. `Config::load` stops taking a path to a project file and
-takes a project name instead. Host ranking becomes flag,
-environment, the project's `host`, the top-level `host`.
+list. A second loader, `Config::load_project(name, sources)`,
+takes a project name where `Config::load` takes a path, and
+step 6 deletes `Config::load` rather than changing its
+signature -- the decision under **The registry loader is
+`Config::load_project`** says why a sibling and not a rewrite.
+Host ranking becomes flag, environment, the project's `host`,
+the top-level `host`.
 
 ### 3. Select the project explicitly
 
@@ -245,6 +249,124 @@ the libvirt VM host this project is developed against. Chunk
 commands stay identical, which a dry run can show.
 
 ## Decisions
+
+- **2026-09-05 -- Every `host` in the registry is checked as the
+  file is read.** The operator's rule, given during the review
+  of step 5: all hosts in the file are checked when the file is
+  read and reported as errors, whatever the command line says,
+  and `--host` is checked separately. So
+  `config::registry::parse` applies `host_problem` to the
+  file-wide `host` and to every `[projects.*].host` before it
+  builds a `Registry` at all.
+
+  This reverses two reasons written down in earlier steps.
+  `Registry::host` said checking there "would report a value
+  this file supplies even on a run that never uses it", and
+  `Registry::project_host` said the same. Those reasons landed
+  in `b534bb1` and were hardened in `59dd110` after a review
+  round on #25. That is exactly the behaviour the operator
+  wants: this file is where host names are written, so a value
+  bombyx would refuse is a mistake to report while they are
+  looking at it, and checking only the winner leaves a typo in
+  an unused line until the day that line wins.
+
+  Two things follow. Holding a `Registry` is now the proof that
+  every host in it passed, so `Registry::host` and
+  `Registry::project_host` run no rule and `Project::validate`
+  no longer checks `host` -- one place owns it. And the entry
+  host's error now names its table, through
+  `HostOrigin::ProjectEntry`, where the field-named message used
+  to win the race; that was the review finding that started the
+  discussion.
+
+  **What this changes in the CLI**, corrected after a review
+  round caught the first version of this paragraph claiming
+  nothing did. A bad `host` anywhere in the registry now fails
+  every command that reads the file, and that is every command
+  run without `--host`. Verified by running the binary: a
+  registry whose `[projects.other].host` starts with `-` makes
+  `bombyx --dry-run status` for an unrelated project exit 1,
+  where the same file at `b491701` ran normally. The first
+  version of this paragraph was written after checking only the
+  file-wide `host`, which is the one case that did not change.
+
+  Two things are unchanged, both verified the same way. With
+  `--host`, `resolve_host` never opens the registry, so a bad
+  host in it is still unreported -- an old deliberate property,
+  so that the flag works on a machine whose registry is broken.
+  And a bad file-wide `host` with no flag is refused with the
+  same error naming the same file as before.
+
+  Nothing that shipped is affected. `v0.4.1` parsed the registry
+  with `deny_unknown_fields` on a struct carrying `host` alone,
+  so a released bombyx refused any `config.toml` containing a
+  `[projects.*]` table outright. The behaviour this changes was
+  introduced in steps 3 and 4 and has never been released, which
+  is why the CHANGELOG entry carries no `**BREAKING:**` marker.
+
+  A `HostName` newtype would be the stronger form of this and is
+  not built here: `host` is one of the five fields
+  `newtype-remaining-config-fields` (#17) covers.
+
+- **2026-09-04 -- The registry loader is
+  `Config::load_project(name, sources)`.** Step 6 deletes
+  `Config::load`, so the name chosen here is the only loader
+  bombyx has afterwards, and renaming it then would be churn in
+  the step that already carries every document. "load" states
+  that the function opens a file, which the common errors are
+  all about: no `config.toml`, no entry in it, a broken entry.
+  `for_project` hides that.
+
+  It splits in two. `load_project` reads the registry and hands
+  off to a private `from_registry(registry, name, sources)`,
+  which looks the entry up, ranks the host, checks the winner
+  and validates. The pure half is what the test-only
+  constructor calls, so a test needs no temporary directory.
+
+  `config/host.rs` splits the same way and for a harder reason.
+  `resolve_host` reads the registry itself, and the loader needs
+  the same file for the entry. Its own comment says why reading
+  it twice is wrong: a file edited between the two reads can
+  supply a project host and a file-wide host that never
+  coexisted. So the four-source precedence moves into a pure
+  `rank(sources, Option<&Registry>)`, and `resolve_host` becomes
+  read-then-`rank` for `Config::load` alone until step 6 deletes
+  it.
+
+  `from_registry` overwrites `sources.project` with `name`
+  rather than reading what the caller put there. The project
+  whose host is ranked is then always the project the rest of
+  the config came from, and a caller cannot make the two differ.
+
+- **2026-09-04 -- A missing registry file gets its own error,
+  `RegistryNotFound`.** It carries a `place` rather than a
+  `PathBuf`, so it reuses the function that words the file for
+  the two host messages, which already covers the case where the
+  environment names no config directory at all. That function is
+  now `registry_place`: a third message uses it, and it was
+  never about the host.
+  The message names the file and says to create it with a
+  `[projects.<name>]` table.
+
+  `ConfigError::NotFound` was the alternative and says only that
+  a file is absent, leaving the operator to find out what goes
+  in it. `ProjectNotFound` already names the tables to write,
+  but its message claims bombyx looked inside a file that does
+  not exist.
+
+- **2026-09-04 -- `Config::parse` becomes registry-based, and
+  the project-file tests get their own helper.** `parse` and
+  `for_tests` are both test-only constructors built from a
+  `bombyx.toml` string, and every test module in the crate uses
+  `for_tests`. Moving both onto the registry now means step 6
+  deletes `ProjectFile` and its tests rather than rewriting the
+  helper every module depends on.
+
+  The forty-odd tests in `config.rs` that are *about* parsing
+  `bombyx.toml` keep testing it. They reach it through one local
+  helper in that file's test module, and the helper now does the
+  `ProjectFile` parse itself. It is deleted in step 6 along with
+  the tests that call it and the struct it parses.
 
 - **2026-09-04 -- The flag and the environment variable go in
   step 6 (`project-selection-flag`), not step 4
@@ -356,6 +478,15 @@ commands stay identical, which a dry run can show.
   `bombyx.toml` behaves today.
 
 ## Progress log
+
+**Oldest first**, unlike `docs/developer/DIARY.md`. Every step
+entry below carries the same date, so the order of the headings
+is the only thing that says which landed first -- and two of
+them are out of it: step 4's entry sits above step 3's because
+it was written first. Step 5 has no entry yet, because an entry
+is written when a step is committed and merged, and the Status
+line at the top of this document is what says how far that has
+got.
 
 ### 2026-09-02 -- chunk 1 landed
 

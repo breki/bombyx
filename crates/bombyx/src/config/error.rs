@@ -8,8 +8,10 @@
 //! file was missing, unreadable, not TOML, or carried a
 //! forbidden key. No source at all named a VM host -- not the
 //! flag, not the environment, not the registry. Or the registry
-//! has no table for the project asked for. Most of the eleven
-//! variants are about a file.
+//! has no table for the project asked for. Most of the variants
+//! are about a file. No count here: one lands most times this
+//! module is touched, and a stale number costs the next reader a
+//! recount.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a
@@ -29,6 +31,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::host::HOST_ENV;
+use super::registry::heading;
 use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
 
 /// A single configuration value broke its own rule.
@@ -194,6 +197,9 @@ pub enum ConfigError {
     /// Guessing a repository address and a provisioning script
     /// would boot a VM the operator did not describe.
     ///
+    /// `super::registry::heading` spells the heading, so this
+    /// message and the two others showing one cannot differ.
+    ///
     /// The tables, not every key inside them. `[vm]` and
     /// `[source]` require seven keys between them, and listing
     /// all seven turns a one-line error into a config sample.
@@ -201,17 +207,45 @@ pub enum ConfigError {
     /// in turn, which is the same information delivered where
     /// the operator is already editing.
     #[error(
-        "no `[projects.{name}]` in {} -- add that table with \
-         `[projects.{name}.vm]` and `[projects.{name}.source]`, \
+        "no `{}` in {} -- add that table with `{}` and `{}`, \
          and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
          where this project belongs",
-        .path.display()
+        heading(.name, ""),
+        .path.display(),
+        heading(.name, ".vm"),
+        heading(.name, ".source")
     )]
     ProjectNotFound {
         /// Project name that was looked up.
         name: String,
         /// The registry file that has no table for it.
         path: PathBuf,
+    },
+
+    /// A project's settings were asked for and there is no
+    /// registry file to hold them.
+    ///
+    /// Separate from [`ConfigError::NotFound`], which says a
+    /// file is absent and stops there, and from
+    /// [`ConfigError::ProjectNotFound`], whose message claims
+    /// bombyx looked inside a file. The operator here has to
+    /// create the file *and* know what to put in it, so the
+    /// message says both.
+    ///
+    /// `place` is a `String` rather than a `PathBuf` because a
+    /// machine whose environment names no config directory has
+    /// no path to print. `config::host::registry_place` decides
+    /// the wording for both cases and is where it is written
+    /// down.
+    #[error(
+        "no registry file -- create {place} with a `{}` table",
+        heading(.name, "")
+    )]
+    RegistryNotFound {
+        /// Project name that was looked up.
+        name: String,
+        /// The registry file bombyx would have read.
+        place: String,
     },
 
     /// The winning source supplied an unusable host.

@@ -5,6 +5,62 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-05-required-tables-has-two-copies
+
+**Category:** Duplication
+
+`crates/bombyx/src/config.rs` defines the `[vm]` and `[source]`
+tables twice, character for character: the `REQUIRED_TABLES`
+constant at module scope, and a `required_tables()` function in
+the file's `tests` module. `minimal()` uses the constant and
+`completed()` uses the function, so both are live. The
+constant's doc claimed every test read one copy, which was the
+claim that made the duplication a defect rather than a
+tidiness point; that claim now names the second copy instead.
+
+Deferred: deleting the function is a test-only change, and the
+operator ended this round's code changes. Found as FR-9 in the
+`/review2` on registry-config-load (#26).
+
+### rt-2026-09-05-test-fixtures-sit-above-the-public-exports
+
+**Category:** Module structure
+
+Three `#[cfg(test)]` fixtures -- `REQUIRED_TABLES`,
+`test_entry` and `test_registry` -- occupy 43 lines of
+`crates/bombyx/src/config.rs` between the module declarations
+and the `pub use` block, so a reader scanning the top of the
+file for its public surface hits test scaffolding first. They
+are at module scope because two sibling test modules share
+them, which is a good reason and is now written down.
+
+Deferred: moving them is a code change and the operator ended
+this round's. Worth folding into `config-tests-own-file` in
+`docs/todo.md`, which moves the test modules out anyway. Found
+as FR-8 in the `/review2` on registry-config-load (#26).
+
+### rt-2026-09-05-registry-not-found-advises-too-little
+
+**Category:** Error messages
+
+`ConfigError::RegistryNotFound` in
+`crates/bombyx/src/config/error.rs` tells an operator with no
+registry file to "create <place> with a `[projects."<name>"]`
+table" and stops there. Its sibling `ProjectNotFound` lists the
+`.vm` and `.source` sub-tables and `remote_root` as well. The
+asymmetry is backwards: `Project` requires `vm` and `source`
+with no serde default, so an operator who follows the shorter
+advice literally writes a file bombyx then refuses for a missing
+field, and gets a third failure after that for the host. The
+variant's own doc comment claims the opposite -- "the message
+says both".
+
+Deferred: the operator ended the review round's code changes
+after the third quoting fix, and this one changes what bombyx
+prints, so it wants a failing test and a round nobody is in.
+Found as RT-11 in the `/review2` on registry-config-load
+(#26).
+
 ### rt-2026-09-04-registry-host-is-pub-and-unchecked
 
 **Category:** Public surface nothing public consumes
