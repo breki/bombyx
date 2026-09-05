@@ -235,38 +235,6 @@ plan, decisions, and outcome.
   Either say it in move_to_done's doc comment and the Done clap help, or carry
   the body across. Found while using the fixed tool for the first time.
 
-- **registry-run-against-frosti** -- drive the new CLI against a real VM host
-  first-real-run exercised the old tool: bombyx up from inside a project
-  directory, a committed bombyx.toml, and the tar-push. All three are gone.
-  Seven steps of project-config-off-repo have landed since, and that plan
-  document marks three of them 'Not verified against a real VM host' and records
-  Definition of Done item 3 as outstanding in a fourth place, for three
-  different reasons -- frosti unreachable, the selection visible in a dry run,
-  the emitted commands untouched. A dry run proves the argv and nothing about
-  whether the remote accepts it. So no real host has ever seen the current tool.
-  Two
-  things are already known to be in the way. ssh frosti fails from this
-  workstation with 'Host key verification failed'. And there is no
-  ~/.config/bombyx/ here at all, so the registry every command now requires has
-  never existed outside a temp directory -- building it by hand from
-  config.toml.sample is itself the first test of that file, since the review
-  only proved the sample loads, not that a person following its comments arrives
-  somewhere useful. What to exercise: the sequence first-real-run covered (up,
-  status, shell, down, scratch, discard, a second up for idempotency) under
-  --project, plus the paths this work added -- --config naming a file elsewhere,
-  an entry host winning and printing the notice, and destroy's refusal and
-  confirmation. reset needs a snapshot nothing creates, which is
-  reset-needs-snapshot, so expect it to fail cleanly and do not fix it here.
-  No longer parked. The workstation turned out to be frosti itself, so this
-  looked like it needed SSH from the machine to itself; local-host-execution
-  settled that it does not, and landed 2026-09-05. Write host = "frosti" and
-  bombyx runs vagrant here, so the run needs no alias and no key. The name must
-  match exactly, ignoring case only. Two corrections from the /issue on
-  #37, both on the GitHub issue: the ssh failure is no alias and no matching
-  key rather than a stale known-hosts entry, and ~/vms/jutro holds a
-  hand-written Vagrantfile that destroy would rm -rf, so the test project must
-  not be named jutro.
-
 - **readme-vagrantfile-pointer** -- README promises what Part 3 deletes
   Found by /review2 (fresh-reader FR-11) while working local-host-execution
   (#38); pre-existing and out of that issue's scope. README.md points at
@@ -348,6 +316,10 @@ plan, decisions, and outcome.
   delivers.
 
 ## Done
+
+- [**registry-run-against-frosti**](issues/registry-run-against-frosti.md)
+  -- drive the new CLI against a real VM host
+  (2026-09-05)
 
 - **local-host-execution** -- run vagrant directly when this machine is the host
   (2026-09-05)
