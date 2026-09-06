@@ -125,9 +125,8 @@ pub fn command(cfg: &Config, tool: &str) -> RemoteCommand {
 /// test and print a token means the shell that actually
 /// interprets bombyx's commands is the one answering. Printing
 /// `$SHELL` instead would report an environment variable a
-/// wrapper can set, and would pass on whatever it said -- which
-/// is exactly how an earlier version of this probe passed on a
-/// `fish` shell.
+/// wrapper can set, so a `fish` login shell whose `$SHELL` says
+/// `/bin/sh` would pass.
 ///
 /// The verdict lives in
 /// `crate::doctor::probes::posix_shell_verdict`, because the
@@ -200,10 +199,11 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 ///
 /// A missing provider is the one host-provisioning gap worth
 /// probing: everything bombyx itself needs can be present, so
-/// `up` creates the remote directory and ships a tarball before
-/// `vagrant` fails. Other provisioning concerns -- `/dev/kvm`,
-/// libvirtd, storage pools -- cost nothing before failing and
-/// stay in `docs/vm-host-setup.md`.
+/// `up` creates the remote directory and writes the Vagrantfile
+/// and the bootstrap script before `vagrant` fails. Other
+/// provisioning concerns -- `/dev/kvm`, libvirtd, storage pools
+/// -- cost nothing before failing and stay in
+/// `docs/vm-host-setup.md`.
 ///
 /// # The one probe that is not strictly read-only
 ///

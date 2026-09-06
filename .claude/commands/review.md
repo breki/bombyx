@@ -64,13 +64,14 @@ sample config that will not load, a quoted command with a typo
 in it. **If you fix anything during step 2, write the snapshot
 again before spawning anyone.** Overwrite the same `<n>`: the
 round has one snapshot, and it has to match the text the
-reviewers read. Otherwise they judge the pre-fix version of the
-least-read edit in the run.
+reviewers read. A fix made during step 2 is the one edit no
+reviewer has seen, so it is exactly the one they must be shown.
 
 ### 1. Snapshot
 
-Reviewers must read one immutable text; `CLAUDE.md` gives the
-reason a live tree is not one.
+Reviewers must read one immutable text; `CLAUDE.md` under
+**Reviewing is its own process** gives the reason a live tree is
+not one.
 
 ```bash
 mkdir -p target
@@ -148,9 +149,7 @@ pipeline leaves the gates behind it *could not run*.
 
 **On round three, report the findings and apply nothing.**
 Otherwise the run ends on edits nobody read, in a tree with no
-commit behind them. The rule lives here rather than in step 4
-because this is where the fixing happens, and a rule about not
-fixing is no use one step downstream of it.
+commit behind them.
 
 `code-reviewers.md` under **When to run** specifies which
 reviewers this change needs. Spawn those in one parallel
@@ -326,7 +325,7 @@ step-2 artifact with its label and, where it failed, what
 failed. Each non-converging area in the shape above. Then what
 the run left behind, because the developer's next commit sees
 all of it: the edited files, the backlog files written this
-run, and the intent-to-add entries from **Snapshot**. Nothing
+run, and the intent-to-add entries from step 1. Nothing
 was committed.
 
 `fresh-reader`'s **What worked** section is not a finding and

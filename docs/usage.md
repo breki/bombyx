@@ -79,11 +79,10 @@ is deliberately no `git clean`: in an agent VM the untracked
 files are the agent's work.
 
 **Committing inside the guest does not save the agent's work
-either.** A
-forced checkout of `FETCH_HEAD` detaches HEAD, so a commit the
-agent makes afterwards sits on no branch, and the next
-`provision` moves HEAD away from it. `git log` stops showing it
-and only `git reflog` can find it. Push the work out to survive
+either.** A forced checkout of `FETCH_HEAD` detaches HEAD, so a
+commit the agent makes afterwards sits on no branch, and the
+next `provision` moves HEAD away from it. `git log` stops
+showing it and only `git reflog` can find it. Push the work out to survive
 a provision.
 
 **Changing `source.repo` loses everything.** The guest removes
@@ -245,9 +244,9 @@ checks are skipped rather than each waiting on a dead host, and
 `ssh` is executed locally to read its version -- so it is not a
 no-op on your workstation.
 
-The local route differs in three ways. Nothing gates anything,
-because there is no host to be unreachable and every remaining
-check asks about this machine. `sh` is looked up on the `PATH`
+The local route differs in three ways. No check gates the ones
+behind it, because there is no host to be unreachable and every
+remaining check asks about this machine. `sh` is looked up on the `PATH`
 and not run, since `sh` may be `dash`, which has no version
 flag to ask. And two rows come back as skips rather than
 passes: `ssh`, which is not used, and `login shell`, because
@@ -280,11 +279,10 @@ even with nothing installed.
 
 The local line names the directory that program came from.
 bombyx resolves it against `PATH` explicitly rather than
-leaving it to
-the operating system, which on Windows searches the working
-directory first — and you run bombyx from wherever you happen to
-be standing, which is usually a repository whose contents arrive
-with whatever branch you checked out.
+leaving it to the operating system, which on Windows searches
+the working directory first — and you run bombyx from wherever
+you happen to be standing, which is usually a repository whose
+contents arrive with whatever branch you checked out.
 
 Every command resolves what it needs the same way, all of it
 before running any step. So a missing `ssh` stops `up` before it
@@ -333,11 +331,11 @@ read is what runs.
 
 The `\$` in the last line is the escaping doing its job rather
 than a stray backslash. `BOMBYX_VM_HOSTNAME` has to be filled in
-by the *host's* shell -- it is the host's name the guest wants --
-so the substitution is printed escaped, and the line you paste
-asks the same machine bombyx would have asked. Unescaped it would
-answer with your workstation's name, which is exactly the kind of
-wrong answer nobody questions. See
+by the *host's* shell -- it is the host's name the guest wants
+-- so the substitution is printed escaped, and the line you
+paste asks the same machine bombyx would have asked. Unescaped
+it would answer with your workstation's name, which is exactly
+the kind of wrong answer nobody questions. See
 [the README section](../README.md#telling-the-vm-which-host-it-runs-on)
 for what the two variables are for.
 

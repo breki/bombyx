@@ -10,9 +10,9 @@
 //! subtlety. [`shell_quote`] wraps the value entirely.
 //! [`quote_remote_path`] leaves a leading `~` *outside* the quotes,
 //! because a POSIX shell does not expand `~` inside them -- a fully
-//! quoted `~/vms/p` once created a directory literally named `~`
-//! while `scp` wrote to the real home directory, so the two halves
-//! of `up` targeted different places.
+//! quoted `~/vms/p` makes `mkdir -p` create a directory literally
+//! named `~` in whatever directory the login shell starts in, rather
+//! than `vms/p` inside the operator's home directory.
 
 /// Characters that carry no shell meaning, so an argument
 /// made only of them needs no quoting when echoed.

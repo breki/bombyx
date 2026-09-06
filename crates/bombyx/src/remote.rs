@@ -162,12 +162,15 @@ fn vm_host_env(cfg: &Config) -> String {
 /// Builds the `vagrant` command itself: the identity prefix, the
 /// program, and its quoted arguments.
 ///
-/// Split out from [`vagrant_script`] so the two shapes bombyx
-/// emits cannot disagree about the prefix. `destroy` needs the
-/// command nested inside a `if [ -f Vagrantfile ]` guard rather
-/// than after a bare `cd`, and when it built its own string it
-/// silently ran `vagrant` with neither variable set -- while the
-/// doc comment here claimed every invocation carried them.
+/// Split out from [`vagrant_script`] so every shape bombyx emits
+/// carries the same prefix. [`vagrant_script`] puts the command
+/// after a bare `cd`, so a builder needing it somewhere else
+/// calls this function instead. Two do:
+/// `destroy_vm_if_present` nests it inside an
+/// `if [ -f Vagrantfile ]` guard, and `save_snapshot_if_absent`
+/// puts `snapshot list` and `snapshot save` inside one `if`. A
+/// builder assembling its own string would run `vagrant` with
+/// neither variable set.
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
     let mut cmd = vm_host_env(cfg);
     if creates_a_machine(args) {
@@ -763,9 +766,9 @@ mod tests {
 
     #[test]
     fn teardown_takes_a_tty_like_every_other_vagrant_call() {
-        // The sibling that was left out when `Tty` was introduced.
-        // `vagrant destroy -f` streams progress, so it staircased on
-        // the very console this parameter exists to fix.
+        // `vagrant destroy -f` streams progress, so without a PTY
+        // it staircases on the console this parameter exists to
+        // fix.
         let with = destroy_vm_if_present(&cfg(), "~/vms/p", Tty::Allocate);
         assert_eq!(opts_before_host(&with), vec!["-t", "-o", "LogLevel=ERROR"]);
         let without = destroy_vm_if_present(&cfg(), "~/vms/p", Tty::NoPty);
@@ -873,12 +876,9 @@ mod tests {
 
     #[test]
     fn teardown_carries_the_identity_too() {
-        // The regression this test exists for: `destroy` builds
-        // its command inside an `if [ -f Vagrantfile ]` guard
-        // rather than after a bare `cd`, so it once assembled its
-        // own string and ran `vagrant` with neither variable set --
-        // while the doc comment claimed every invocation carried
-        // them.
+        // Pins one of the two builders that call
+        // `vagrant_command` directly; `vagrant_command` names
+        // both and says why neither can use `vagrant_script`.
         //
         // It matters most here. Teardown still evaluates the
         // project's Vagrantfile, so one reading the variable
@@ -887,8 +887,7 @@ mod tests {
         // never run.
         //
         // Exhaustiveness across actions is asserted in `plan`,
-        // which can enumerate them; this pins the one builder that
-        // does not go through `vagrant_script`.
+        // which can enumerate them.
         let script =
             destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty).args
                 [1]

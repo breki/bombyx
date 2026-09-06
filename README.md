@@ -13,8 +13,8 @@ agent works inside it.
 - [Model](#model)
 - [Install](#install)
 - [Configure](#configure)
-  - [Why nothing bombyx reads is
-    committed](#why-nothing-bombyx-reads-is-committed)
+  - [Why the repository holds nothing bombyx
+    reads](#why-the-repository-holds-nothing-bombyx-reads)
   - [Where bombyx looks for the host](#where-bombyx-looks-for-the-host)
   - [Which host a command is about to use](#which-host-a-command-is-about-to-use)
 - [Use](#use)
@@ -189,10 +189,11 @@ The `host` line at the top is an SSH alias, resolved through
 your `~/.ssh/config` -- bombyx never handles addresses,
 usernames or keys itself.
 
-### Why nothing bombyx reads is committed
+### Why the repository holds nothing bombyx reads
 
-**No file inside a repository configures bombyx.** A project is
-shared; a VM host is not. Every developer has their own
+**bombyx takes no configuration from a file inside a
+repository.** A project is shared; a VM host is not. Every
+developer has their own
 hardware on their own network, so a committed `host` could only
 ever be right for the person who wrote it, and would be wrong
 for everyone who cloned after them. That is not a cosmetic
@@ -204,8 +205,12 @@ value out of reach of a branch. `host` is handed to `ssh` as its
 first argument, and `ssh` reads a leading `-` as an option, so a
 value such as `-oProxyCommand=...` runs code on your workstation
 from a bare `bombyx status`. bombyx refuses any host beginning
-with `-` wherever it came from, and no clone can supply one in
-the first place.
+with `-` wherever it came from, which is the guarantee that
+holds: a clone can still reach the loader, through a
+`BOMBYX_CONFIG_HOME` a per-directory environment tool sets from
+inside it, or through a `--config` you point at a file it
+carries. [trust-boundary.md](docs/trust-boundary.md) states
+both routes and what the value checks then protect.
 
 ### Where bombyx looks for the host
 
@@ -489,12 +494,11 @@ guest's environment, so anything from the host has to be handed
 over deliberately. The `Vagrantfile` is Ruby running on the
 host, so it can read them and pass them on.
 
-**bombyx does that for you now.** This used to be the project's
-job, and the README told you to write the `env:` block into your
-own `Vagrantfile`. bombyx generates that file and overwrites
-what the project ships, so a hand-written block would be deleted
-on the next `up`. The generated file forwards both variables
-into the guest alongside the `[source]` settings.
+**bombyx does that for you.** It generates the `Vagrantfile` and
+overwrites whatever the project ships, so an `env:` block you
+write into your own copy is deleted on the next `up`. The
+generated file forwards both variables into the guest alongside
+the `[source]` settings.
 
 What is still the project's job is the other half: your
 provisioning script decides what to do with them. It can write

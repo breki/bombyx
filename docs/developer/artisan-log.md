@@ -65,24 +65,6 @@ round that finds it, and the one plain copy -- an inline
 `format!` reimplementing `test_registry` -- was fixed in that
 round instead. Found as AQ-8.
 
-### aq-2026-09-05-registry-tests-want-their-own-file
-
-**Category:** Module Size
-
-`crates/bombyx/src/config/registry.rs` is around 900 lines,
-roughly 440 of them `mod tests`, and after #18 it is the file
-that owns the whole config format -- so it is the first file a
-new reader opens and it cannot be read in one pass. Moving the
-tests with
-`#[cfg(test)] #[path = "registry/tests.rs"] mod tests;` brings
-the production text under 500 lines and moves no code.
-
-Deferred by the operator during the `/review2` on
-`project-selection-flag` (#18) as out of scope for that step.
-`config-tests-own-file` in `docs/todo.md` proposes the same
-move for `config.rs`; the two should land together. Found as
-AQ-9.
-
 ### aq-2026-09-04-project-remote-root-stays-a-string
 
 **Category:** Type safety
@@ -104,45 +86,6 @@ a `Project` out.
 
 ---
 
-### aq-2026-09-04-config-rs-is-mostly-its-own-test-module
-
-**Category:** Module size
-
-`crates/bombyx/src/config.rs` is 1371 lines. Its production half
-is under 500; the rest is one `mod tests`. `CLAUDE.md` records
-that reading this file whole once overflowed a session, and the
-rule the size gate targets is about the production code, which
-is not over budget. So the fix is to move the tests out with
-`#[cfg(test)] #[path = "config/tests.rs"] mod tests;` rather
-than to split the module.
-
-Raised again while reviewing #24, which added 24 more test
-lines to the file: the new test sits 750 lines from the code it
-is about. Still deferred, for the same reason.
-
-Deferred: unrelated to the change that surfaced it (#23, the
-overlay removal). Also tracked as `config-tests-own-file` in
-`docs/todo.md`.
-
-### aq-2026-09-04-canon-check-surface-is-pub-for-nobody
-
-**Category:** Abstraction Boundaries / API Design
-
-`xtask/src/canon.rs` marks `Finding`, `reference_targets`,
-`unresolved_xrefs`, `missing_paths`, `ungranted_git`,
-`over_wide`, `unknown_ids`, `ids_in_backlog` and `collect`
-`pub`, but `xtask/src/main.rs` and `xtask/src/validate.rs`
-call only `canon_check` and `canon_check_detail`. The unit
-tests sit in the same module and reach everything through
-`use super::*`, so they need no visibility either. The `pub`
-fixes the shape of each check as a contract nobody has.
-
-Deferred: the surface predates the wrapped-bold fix, and
-narrowing it touches every check in the file rather than the
-two functions that changed.
-
----
-
 ### aq-2026-09-04-blocks-rebuilt-per-check
 
 **Category:** Efficiency
@@ -161,98 +104,6 @@ Deferred: 23 small markdown files, so the cost is invisible
 today.
 
 ---
-
-### aq-2026-09-04-canon-rs-past-the-module-size-rule
-
-**Category:** Module Size
-
-`xtask/src/canon.rs` is 733 lines and holds two structs, five
-independent checks and the driver. The checks share no state,
-so a split into `canon/mod.rs` (the entry points, `Finding`,
-`collect`), `canon/block.rs` (`Block`, `blocks`,
-`strip_list_marker`, `between`) and `canon/checks.rs` is
-cheap.
-
-Deferred: a file split is rework across the whole module and
-belongs in its own commit, not in a review round.
-
----
-
-### aq-2026-09-04-required-tables-fixture-has-three-homes
-
-**Category:** One rule with no single home
-
-`crates/bombyx/src/config.rs` defines the required `[vm]` and
-`[source]` fields three times: `REQUIRED_TABLES` near the top,
-a byte-identical `required_tables()` in the test module, and
-`TABLE_FIELDS`, added by the round-1 fix for AQ-5 and RT-8.
-`crates/bombyx/tests/integration_test.rs` holds a fourth in the
-other crate. `TABLE_FIELDS` also diverged on a value:
-`repo = "https://example.invalid/p.git"` against
-`.../myproject.git` in the other three.
-
-`REQUIRED_TABLES`'s own doc comment says "Every test that needs
-them reads this one constant. Writing the eleven lines out per
-test module would mean editing each module to add a required
-field." That claim was already false before this branch --
-`required_tables()` is its twin -- and the round-1 fix made it
-falser.
-
-Raised by AQ-21 and FR-1 independently, both pointing at the
-same contradiction: a constant claiming to be the only copy,
-with two more beside it. Fresh-reader's report is the useful
-statement of the cost: it wanted to add a required `[source]`
-field and could not tell which definition to edit, or whether
-editing one would leave a test silently green.
-
-The repair is one home and derivations from it -- most likely
-`TABLE_FIELDS` as the source, with `required_tables()` built
-from it -- and a corrected doc comment, since the guarantee is
-"a failure names the omitted field *provided* `TABLE_FIELDS`
-lists every required field".
-
-Deferred by the operator to its own commit after this branch
-lands: `/review` under **Review, then fix** says a
-consolidation converts N copies into N-1 pointers and wants its
-own reviewed change, and this one crosses a crate boundary.
-
-### aq-2026-09-04-host-only-rule-in-five-prose-copies
-
-**Category:** One rule with no single home
-
-"`bombyx.local.toml` accepts `host` and nothing else" is stated
-as prose in five places, and none says which one wins:
-`README.md` under **A different machine for one project**,
-`docs/tutorial.md` in the `bombyx.toml` walkthrough,
-`docs/usage.md` in the untrusted-input section, `llms.txt`, and
-`bombyx.toml.sample`. The doc comment on `Overlay` in
-`crates/bombyx/src/config.rs` is a sixth, in code.
-
-`README.md` already claims authority, but only for the
-four-source host list: "**This section is the authoritative
-list** -- the sample config and `llms.txt` point here rather
-than repeating it". Both of those files restate the order
-inline anyway, and `docs/tutorial.md` gives a third table with
-a different shape -- four ranked rows against three-plus-one.
-So the authority sentence is itself contradicted by two of the
-files it names.
-
-The drift the rule predicts has already happened: this round
-fixed `docs/usage.md` for saying the charset check was all that
-file must pass, while `README.md` said an unknown key is
-refused.
-
-The repair is one authoritative statement and pointers to it --
-extend `README.md`'s authority sentence to cover the host-only
-rule, reduce the tutorial and the sample to pointers, and
-either make `llms.txt` point without restating or drop the
-"not repeated" clause and accept it as a finding aid.
-
-Not applied in the round that found it: `/review` under
-**Review, then fix** says a consolidation converts prose into
-N-1 pointers rather than removing it, and a pointer can name
-the wrong section or chain two deep. It wants its own commit,
-reviewed on its own. Raised by AQ-9 and FR-14 independently.
 
 ### aq-2026-09-03-finding-ids-do-not-persist-into-a-backlog
 
@@ -315,75 +166,6 @@ Deferred: mechanical, but it lands in the loop prose that
 `/review` now says to sweep as its own change.
 
 Found by the Artisan review (AQ-6), 2026-09-03.
-
----
-
-### aq-2026-09-03-sentences-that-explain-a-pointer
-
-**Category:** Voice
-
-Reducing duplicated rules to one owner left commentary about
-document layout inside the rules themselves. `CLAUDE.md` says
-"That is the reason; `/review` under **Snapshot** holds how it
-does it, and is the only place that should" -- the final clause
-has no verb. `code-reviewers.md` says "Neither argument is
-repeated here." `/review` explains that a rule "lives here
-rather than in step 4 because this is where the fixing
-happens". None of the four is actionable, and each is one more
-sentence to keep true the next time a section moves, which is
-the maintenance the consolidation was meant to reduce. A
-pointer needs no note explaining that it is a pointer.
-
-`CLAUDE.md` also says "`git log 6055f93` is the arrangement we
-backed out of". A command is not an arrangement, and
-`git log <sha>` prints that commit and its ancestors. "Commit
-`6055f93` is where that arrangement landed" says it.
-
-Deferred: phrasing only, in the surface `/review` now says to
-leave alone unless a sweep is its own change.
-
-Found by the Artisan review (AQ-7, AQ-8), 2026-09-03.
-
----
-
-### aq-2026-09-03-ragged-paragraphs-and-two-xref-styles
-
-**Category:** Formatting left by single-line patches
-
-Two paragraphs were patched a line at a time and left short
-lines mid-paragraph, which `CLAUDE.md` under **Coding
-Standards** says a reader takes for a paragraph break:
-`CLAUDE.md` around the `/commit` bullet (one line of 42
-characters), and `code-reviewers.md` where the diary sentence
-was inserted. `cargo xtask canon-check` cannot see these -- it
-checks the 80-column ceiling, and a too-short line is not a
-claim about the tree.
-
-Separately, `/review` refers to its own steps by number in
-twelve places and by heading name in one ("the intent-to-add
-entries from **Snapshot**"). A reader cannot tell whether those
-are two schemes or two different things, and the next renumber
-leaves half the file stale. Since the step headings are
-numbered, either convention resolves; the file should pick one.
-
-Deferred: reflowing and picking a convention is a sweep of this
-surface, which `/review` now says to do as its own change.
-
-Found by the Artisan review (AQ-9, AQ-12), 2026-09-03.
-
----
-
-### aq-2026-09-02-writing-actions-listed-three-times
-
-**Category:** A rule hand-listed in three places
-
-Which actions write the generated files is spelled out in `plan()`,
-in `every_other_action_writes_nothing`'s classifier, and in
-`only_the_three_writing_actions_write`. The test comment claims the
-set is derived; only the iteration is. One
-`Action::writes_files(&self)` with an exhaustive match would make a
-new action a compile error instead of a silent omission.
-
 
 ---
 

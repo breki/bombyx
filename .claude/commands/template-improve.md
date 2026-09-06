@@ -72,7 +72,8 @@ four are in range:
 - **`docs/developer/DIARY.md`.** The entries record what
   cost an hour and why, which is exactly the asymmetry
   template feedback wants.
-- **`docs/developer/redteam-log.md` and `artisan-log.md`.**
+- **The three reviewer backlogs under `docs/developer/`**:
+  `redteam-log.md`, `artisan-log.md`, `fresh-reader-log.md`.
   A deferred finding against template-provided code *is*
   template feedback, and it is already written up.
 - **The diffs**, where a message is thin.

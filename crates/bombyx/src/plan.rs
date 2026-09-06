@@ -310,6 +310,29 @@ mod tests {
         )
     }
 
+    /// Whether [`plan`] writes the Vagrantfile and the bootstrap
+    /// script before `action`'s own commands.
+    ///
+    /// `plan` branches per action and reads no such flag, so
+    /// this is the second statement of that policy and
+    /// `writes_files_agrees_with_the_commands_built` is what
+    /// holds the two together. The match is exhaustive, so a new
+    /// variant fails to compile here rather than joining the
+    /// non-writing set unnoticed.
+    fn writes_files(action: &Action) -> bool {
+        match action {
+            Action::Up | Action::Provision | Action::Scratch(_) => true,
+            Action::Down
+            | Action::Shell
+            | Action::Status
+            | Action::Reset
+            | Action::Snapshot
+            | Action::Doctor
+            | Action::Destroy
+            | Action::Discard(_) => false,
+        }
+    }
+
     /// Every action, for the tests that must cover all of them.
     ///
     /// Listed here once. A new variant is a compile error in the
@@ -476,21 +499,22 @@ mod tests {
     }
 
     #[test]
-    fn every_other_action_writes_nothing() {
+    fn writes_files_agrees_with_the_commands_built() {
         // A write on `down` or `destroy` would recreate the
-        // directory teardown had just removed.
+        // directory teardown had just removed, and a missing
+        // write on `scratch` boots a directory with no
+        // Vagrantfile.
         //
-        // Derived from `all_actions()` rather than listed, so a
-        // new action joins this test by existing. Listing the
-        // set by hand is how `shell` and `doctor` came to be
-        // absent from both halves of the rule.
-        let writes = |a: &Action| {
-            matches!(a, Action::Up | Action::Provision | Action::Scratch(_))
-        };
-        for action in all_actions().iter().filter(|a| !writes(a)) {
-            for s in scripts(action) {
-                assert!(!s.contains("cat > "), "{action:?} writes: {s}");
-            }
+        // Both halves are checked from `all_actions()` against
+        // `writes_files`, whose match is exhaustive, so a new
+        // action reaches this test by existing.
+        for action in all_actions() {
+            let wrote = scripts(&action).iter().any(|s| s.contains("cat > "));
+            assert_eq!(
+                wrote,
+                writes_files(&action),
+                "{action:?}: writes_files disagrees with the commands"
+            );
         }
     }
 
@@ -859,21 +883,6 @@ mod tests {
             assert!(
                 !script.contains(remote::VM_HOST_ENV),
                 "doctor probe should not carry the identity: {script}"
-            );
-        }
-    }
-
-    #[test]
-    fn only_the_three_writing_actions_write() {
-        // `provision` writes without booting anything, so a rule
-        // phrased around booting would have made it an exception
-        // instead of a third member of the set.
-        for action in
-            [Action::Up, Action::Provision, Action::Scratch(scratch("x"))]
-        {
-            assert!(
-                scripts(&action).iter().any(|s| s.contains("cat > ")),
-                "{action:?} must write the generated files"
             );
         }
     }

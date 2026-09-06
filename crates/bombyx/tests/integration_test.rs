@@ -103,6 +103,16 @@ fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
 /// machine to build and where the guest clones the project
 /// from. Neither table has a default. [`registry`] renames both
 /// into the project's namespace.
+///
+/// A second copy of the library's own `TABLE_FIELDS`, which is
+/// `#[cfg(test)]` and so does not cross the crate boundary. A
+/// field added to `[vm]` or `[source]` has to be added here as
+/// well, and every test that reaches `Config::load_project`
+/// fails until it is. Reaching the load is the rule, not
+/// building a fixture: `main` returns before it for `--help`,
+/// `--version`, `self-update` and a missing `--project`, so
+/// those stay green with a registry sitting unread beside
+/// them.
 const REQUIRED_TABLES: &str = "\n[vm]\n\
      provider = \"libvirt\"\n\
      box = \"generic/ubuntu2204\"\n\
@@ -256,11 +266,12 @@ fn up_over_ssh_runs_nothing_on_the_workstation() {
 fn a_config_file_in_the_working_directory_is_not_read() {
     // The rule `docs/trust-boundary.md` states: the workstation
     // reads no file out of the project's own directory. Both
-    // names bombyx once used are tried, and each is written twice
-    // -- once naming a different host, once as text that is not
-    // TOML at all. The second is what proves bombyx never opened
-    // the file, because a parse failure would be an error rather
-    // than silence.
+    // names a project might plausibly carry for a bombyx config
+    // are tried, and each is written twice -- once naming a
+    // different host, once as text that is not TOML at all. The
+    // second is what proves bombyx never opened the file,
+    // because a parse failure would be an error rather than
+    // silence.
     for name in ["bombyx.toml", "bombyx.local.toml"] {
         for contents in ["host = \"my-vmhost.invalid\"\n", "host = "] {
             let dir = project_dir();

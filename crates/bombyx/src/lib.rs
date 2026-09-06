@@ -9,13 +9,15 @@
 //! The VM host is usually a second machine, reached over SSH.
 //! Where `host` names the machine bombyx is running on, the
 //! same script goes to `sh -c` instead -- `config::transport`
-//! decides, and `remote` builds either shape. Nothing from the
-//! project's
-//! repository reaches that machine, and bombyx reads nothing out
-//! of the project's directory either; the guest clones the
-//! project itself once running.
+//! decides, and `remote` builds either shape. bombyx sends that
+//! machine no file from the project's repository, and it opens
+//! no file in the project's directory either; the guest clones
+//! the project itself once running.
 //!
-//! See `docs/` for the isolation strategy this implements.
+//! `docs/trust-boundary.md` states the isolation strategy this
+//! implements, and the two qualifications on the sentence
+//! above: the guest's disk image, and the two arguments that
+//! point the config loader at a file of the caller's choosing.
 
 pub mod config;
 pub mod doctor;

@@ -43,6 +43,7 @@ bombyx/
   .claude/
     hooks/              # Claude Code hook scripts
     commands/           # slash commands
+    agents/             # the three reviewer personas
     skills/             # domain knowledge skills
     settings.json       # hook configuration
   crates/
@@ -57,7 +58,7 @@ bombyx/
         update.rs       # self-update (submodules)
         name.rs term.rs tool.rs
         bin/bombyx/
-          main.rs       # CLI entry point (thin)
+          main.rs       # CLI entry point
       tests/
         integration_test.rs
   xtask/
@@ -68,6 +69,7 @@ bombyx/
     developer/
       DIARY.md          # development diary
       redteam-log.md    # security review findings
+      fresh-reader-log.md  # comprehension review findings
       artisan-log.md    # quality review findings
 ```
 

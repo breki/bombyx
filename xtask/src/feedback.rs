@@ -1,10 +1,9 @@
 //! `cargo xtask feedback-add` -- the deterministic appender for
 //! `docs/developer/template-feedback.md`.
 //!
-//! `/template-improve` used to hand-edit the feedback file,
-//! which meant the LLM owned entry placement, date stamping,
-//! and dedup -- all mechanical work that drifts. This command
-//! owns that: it mints a stable `tf-<yyyy-mm-dd>-<slug>` ID
+//! Entry placement, date stamping and dedup are mechanical work
+//! that drifts when an LLM does it by hand, so this command
+//! owns them: it mints a stable `tf-<yyyy-mm-dd>-<slug>` ID
 //! (mirroring the `rt-`/`aq-` log convention in
 //! `docs/developer/`), inserts the entry at the top of the
 //! chosen section, and skips a re-add of an ID already present.

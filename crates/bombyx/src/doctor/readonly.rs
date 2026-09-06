@@ -8,30 +8,29 @@
 //! [`MUTATING_COMMANDS`] for the precise claim.
 //!
 //! **This is the largest of `doctor`'s submodules and stays whole
-//! on purpose.** When `doctor.rs` was split into a directory
-//! module, the production line counts came out as `readonly.rs`
-//! 193, `probes.rs` 97, `report.rs` 79, `doctor.rs` 68,
-//! `local.rs` 62, `text.rs` 36. This file is the outlier that
-//! prompted the split, and it was left as one piece because it
-//! holds one concern, declares no types, and most of its bulk is
-//! the explanation of why each entry in the blocklist is there.
-//! Splitting it would separate the list from that explanation --
-//! which is the part that keeps the list correct.
+//! on purpose.** It holds one concern, declares no types, and
+//! most of its length is the explanation attached to each
+//! blocklist entry. Splitting it would separate the list from
+//! that explanation, which is the part that keeps the list
+//! correct.
 
 /// Commands whose purpose is to write, matched on **word
 /// boundaries**.
 ///
 /// One list, shared by the unit test over the probe builders and
-/// the CLI-level test over the rendered dry run. Two separately
-/// maintained lists were the original problem: they disagreed
-/// about what read-only meant, so each test proved something
-/// slightly different and weaker.
+/// the CLI-level test over the rendered dry run, so both prove
+/// the same thing by what read-only means here.
 ///
-/// Matching is by word, not by substring. An earlier version
-/// listed `"rm "` and `"> "` with trailing spaces -- the ordinary
-/// spelling, and not the only one. `>file`, `1>file`, `>|file`
-/// and a tab-separated `rm` all slipped past while the tests read
-/// as though the whole family were covered.
+/// These are command *names*, matched by word rather than by
+/// substring, because one name has several spellings around it:
+/// `rm` arrives tab-separated as readily as space-separated, and
+/// an entry of `"rm "` with a trailing space covers the ordinary
+/// spelling and only that one.
+///
+/// Redirection is not here and is not matched this way. `>file`,
+/// `1>file` and `>|file` are found by `redirection_that_writes`,
+/// a character scanner that `mutating_token` runs before this
+/// list. Add a redirection spelling there, not here.
 ///
 /// # What this does not claim
 ///

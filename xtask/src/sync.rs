@@ -1,11 +1,13 @@
 //! `cargo xtask sync-candidates` -- the deterministic file-delta
 //! half of the `/template-sync` workflow.
 //!
-//! `/template-sync` is already SHA-delta based, but it surfaced
-//! template-internal bookkeeping files (CHANGELOG, the feedback
-//! file, the diary and review logs, per-issue docs) as sync
-//! candidates. Those grow on every commit, so they became pure
-//! review noise on every downstream sync. This command runs the
+//! `/template-sync` works from a SHA delta, and a raw delta
+//! carries template-internal bookkeeping files (CHANGELOG, the
+//! feedback file, the diary and review logs, per-issue docs).
+//! Those change on every commit and each project owns its own,
+//! so an upstream change to one is never worth pulling and
+//! reading the list costs the reviewer for nothing. This
+//! command runs the
 //! `git diff --name-status` delta, drops the never-sync set, and
 //! categorizes what remains into a clean candidate table, so the
 //! LLM only judges files that could actually be worth applying.

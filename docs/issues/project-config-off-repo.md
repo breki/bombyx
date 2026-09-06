@@ -586,8 +586,11 @@ checkout. That is what closes the exposure
 described, and three other red-team findings go with it:
 `rt-2026-09-04-provenance-line-names-the-default-filename`,
 `rt-2026-09-04-a-malformed-overlay-defeats-the-host-flag` and
-`rt-2026-09-04-overlay-and-local-config-path-are-pub`. All four
-carry a closing line in `docs/developer/redteam-log.md`.
+`rt-2026-09-04-overlay-and-local-config-path-are-pub`. Three of
+those were closed and removed from
+`docs/developer/redteam-log.md` on 2026-09-06;
+`rt-2026-09-04-provenance-line-names-the-default-filename` is
+the one still open there.
 
 The operator chose the pure removal over stopping with a
 message when a stray file is found. A leftover
@@ -796,10 +799,19 @@ every rule in `config::root`, `config::guards` and
 the loader at a file a repository can supply, and the reviewer
 reproduced `rm -rf /etc/<project>` on the VM host that way. The
 threat statement is restored in that file and in
-`docs/usage.md`. The twelve copies still stated absolutely are
+`docs/usage.md`. Fourteen copies were found and two were
+qualified in that round; the twelve left absolute were
 carried by
-`rt-2026-09-05-absolute-no-repo-file-claim-in-fourteen-places`
-in the red-team log.
+`rt-2026-09-05-absolute-no-repo-file-claim-in-fourteen-places`,
+closed on 2026-09-06. `docs/trust-boundary.md` owns both
+qualifications, and the copies the security argument rests on
+name it: `README.md` in the Model section and beside the
+leading-dash rule, `llms.txt` in both places, `docs/usage.md`
+and `docs/architecture.md`. The copies in `docs/tutorial.md`,
+`docs/vm-host-setup.md` and the opening of `docs/usage.md`
+still state it plainly, on purpose: there the sentence is
+telling a reader they can run bombyx from any directory, and
+the redirect routes have nothing to do with that.
 
 Stage 2 of the review stopped after two rounds on the
 non-convergence rule rather than the round cap: four of round

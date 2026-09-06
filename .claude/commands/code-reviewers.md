@@ -80,8 +80,8 @@ in the summary when it applies.
 A **snapshot** file that `/review` writes. `CLAUDE.md` under
 **Reviewing is its own process** argues why the target must not
 move, and `/review` under **Snapshot** specifies how it writes
-one. Neither argument is repeated here. What each reviewer is
-handed is in **Diff handoff** below.
+one. What each reviewer is handed is in **Diff handoff**
+below.
 
 Never commit, amend or push. The calling command owns the rest
 of its loop, including what a later round or stage hands over.
@@ -115,10 +115,10 @@ module doc. Two kinds of file are exempt even then, because
 their content is not prose anybody reads to learn the project:
 the reviewers' own backlogs (`docs/developer/*-log.md`) and the
 diary (`docs/developer/DIARY.md`). `/review` under **Snapshot**
-already subtracts the backlogs. It does not subtract
-the diary, because `/commit` writes that after `/review` has
-finished, so a diary edit reaches a snapshot only when one is
-already sitting in the tree.
+already subtracts the backlogs. It does not subtract the diary,
+because `/commit` writes that after `/review` has finished, so a
+diary edit reaches a snapshot only when one is already sitting
+in the tree.
 
 ## How to spawn
 
@@ -146,9 +146,11 @@ Give each spawn:
    report comes back without the IDs `/review` needs to cite
    when it reports what it fixed.
 
-**Diff handoff.** `red-team` and `artisan` are both handed the
-snapshot path `/review` writes under **Snapshot**, and are told
-the tree may have moved since. `artisan` has no shell, so say
+## Diff handoff
+
+`red-team` and `artisan` are both handed the snapshot path
+`/review` writes under **Snapshot**, and are told the tree may
+have moved since. `artisan` has no shell, so say
 plainly that the path names a file to read; it cannot work that
 out for itself. **Never `/tmp`**: under Git Bash on Windows
 that resolves outside the workspace, where the operator cannot

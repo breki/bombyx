@@ -618,9 +618,9 @@ to be opened.
   cut in that exercise were aimed at a future editor rather
   than a reader, and neither is visible from the code:
   reordering the host precedence changes whether the registry
-  is read at all, and `Project` being public with public
-  fields lets an outside caller hold an unchecked `host`. A
-  trap a reader cannot see and a comment may no longer carry
+  is read at all, and a `Project`'s checked-`host` guarantee
+  is a property of `Registry` rather than of `Project` itself.
+  A trap a reader cannot see and a comment may no longer carry
   goes in `docs/architecture.md`, which is where both of those
   now are.
 
@@ -844,12 +844,11 @@ Committing and releasing are separate:
 - **`/commit`** is a save-point. It updates the diary and the
   `CHANGELOG.md` `[Unreleased]` block and commits. It does
   **no reviewing** -- see **Reviewing is its own process**
-  below. It does **not** bump the version,
-  touch `Cargo.lock`, or run `cargo xtask validate` --
-  multiple commits land between releases, and forcing each one
-  to make a SemVer decision turns the version field into
-  accounting rather than a description of what users run.
-  `/commit` never runs `cargo xtask validate`; run it
+  below. It does **not** bump the version, touch `Cargo.lock`,
+  or run `cargo xtask validate` -- multiple commits land
+  between releases, and forcing each one to make a SemVer
+  decision turns the version field into accounting rather than
+  a description of what users run. Run `cargo xtask validate`
   manually at your own shell when you want the full gate on a
   work-in-progress.
 
@@ -884,7 +883,7 @@ That split is deliberate. We tried running the reviews inside
 multi-round session -- fixes needing their own commits, the
 reviewers firing again on each, and no way to commit a
 save-point without inviting all of it. A save-point should be
-cheap. `git log 6055f93` is the arrangement we backed out of.
+cheap. Commit `6055f93` is where that arrangement landed.
 
 The earlier arrangement got one thing right, and `/review`
 keeps it: **the reviewers get an immutable target.** Reviewing
@@ -892,8 +891,7 @@ a live working tree means reviewing something that changes
 while they read it, and this repo has already had a reviewer
 report against a tree that no longer compiled, because fixes
 for its own earlier findings had landed underneath it. That is
-the reason; `/review` under **Snapshot** holds how it does it,
-and is the only place that should.
+the reason; `/review` under **Snapshot** holds how it does it.
 
 **Stop when we would not fix anything the round found** -- every
 finding deferred or declined. Do not keep going for a clean
@@ -933,9 +931,13 @@ order they execute** so the numbers match what the run prints:
    `cargo fmt --all -- --check` (use in CI or before
    partial staging, so an in-place rewrite does not sweep
    unrelated drift into the working tree)
-3. **Canon claims** (`cargo xtask canon-check`) -- reads the
-   markdown in `.claude/`, `CLAUDE.md` and `llms.txt`, and
-   fails on five kinds of claim the tree does not support: a
+3. **Canon claims** (`cargo xtask canon-check`) -- reads four
+   inputs, and only these four: `CLAUDE.md`, `llms.txt`,
+   `.claude/commands/` and `.claude/agents/`. So
+   `.claude/skills/` and everything under `docs/` are
+   unchecked, and a green gate says nothing about them --
+   `backlog-ids-dangle-in-docs` in `docs/todo.md` holds that.
+   It fails on five kinds of claim the tree does not support: a
    bold cross-reference introduced by the word "under" that
    names no heading anywhere in canon, a backticked repo path
    that does not exist, a command file telling the agent to
@@ -956,10 +958,13 @@ order they execute** so the numbers match what the run prints:
    (`cargo xtask doc`) -- see "Doc gate" below
 8. **`xtask`'s own tests pass** -- this step runs `-p xtask`
    only, which is why the run prints `Test (xtask only)`
-9. **Coverage >= 90%** -- and this is where the *workspace*
-   tests run, under `llvm-cov --workspace --exclude xtask`.
-   Splitting them that way stops the same tests being
-   compiled and run twice
+9. **Coverage >= 90% overall and >= 85% per module** -- one
+   file below the per-module floor fails the run even when the
+   workspace figure passes. `xtask/src/coverage.rs` owns both
+   as `OVERALL_THRESHOLD` and `MODULE_THRESHOLD`. This is
+   also where the *workspace* tests run, under
+   `llvm-cov --workspace --exclude xtask`; splitting them that
+   way stops the same tests being compiled and run twice
 10. **Security audit** (RUSTSEC; `cargo xtask audit`) --
    a positive vulnerability fails; an unreachable advisory
    DB degrades to a warning

@@ -6,9 +6,9 @@
 //! Apache-2.0 both require the licence and copyright notice to travel
 //! with a distributed binary, and `serde`, `clap`, `anyhow` and the
 //! `windows-sys` tree are all in the shipped binary under one or the
-//! other. The release archives previously held only bombyx's own
-//! `LICENSE`, so that attribution went unmet the moment binaries
-//! started being published.
+//! other. Shipping only bombyx's own `LICENSE` in the release
+//! archives leaves that attribution unmet, so this command puts the
+//! third-party texts beside it.
 //!
 //! The licence *texts* come from the crate sources already unpacked
 //! in the cargo registry, so nothing is downloaded.
@@ -17,8 +17,8 @@
 //! Crates reachable from a *distributed* workspace member (so not
 //! `xtask`'s own tree) through *normal* dependencies (so not
 //! `assert_cmd`, `predicates` or `difflib`), resolved for *one
-//! platform* (so not `r-efi`, a `uefi` crate). Before those three
-//! restrictions the file listed every package in the tree.
+//! platform* (so not `r-efi`, a `uefi` crate). Without all three
+//! restrictions the file lists every package in the tree.
 //!
 //! **It is deliberately over-inclusive within that, and the wording
 //! has to stay that way.** Two kinds of crate are in the list without
@@ -32,13 +32,11 @@
 //! Pruning either one means reimplementing feature resolution, which
 //! fails quietly and in the direction that matters -- an omitted
 //! notice. So the file says "goes into building", never "linked
-//! into", and an earlier version of it said the wrong one.
+//! into".
 //!
 //! **A crate shipping no licence text fails the command** rather
-//! than being noted in passing. Reporting it was not enough: if the
-//! registry sources are absent every crate comes back text-less, and
-//! the tool would write a short file announcing that all of them
-//! ship no licence and exit 0. Raise `--max-missing` with a reason
+//! than being noted in passing. `check_complete` holds that gate
+//! and the argument for it. Raise `--max-missing` with a reason
 //! when a crate genuinely has none.
 
 use std::collections::BTreeMap;
@@ -271,10 +269,9 @@ fn render(crates: &[Attribution]) -> String {
         // "go into building", not "are linked into". The set holds
         // proc-macro crates and optional dependencies the build does
         // not enable, and pruning those needs feature resolution --
-        // see the module docs. An earlier version of this file did
-        // claim "linked", which was a false statement in a legal
-        // document. Over-inclusion is not, so the wording is what
-        // gets kept honest, not the set.
+        // see the module docs. Claiming "linked" would be a false
+        // statement in a legal document. Over-inclusion is not, so
+        // the wording is what gets kept honest, not the set.
         "bombyx is distributed under the licence in the LICENSE file\n\
          beside this one. The crates listed below go into building the\n\
          binary in this archive -- its normal dependencies, for this\n\
@@ -356,15 +353,16 @@ pub fn licenses(
 
 /// Refuses an attribution set that is missing licence texts.
 ///
-/// **This is the gate, and it is the point.** Nothing used to fail
-/// when a crate shipped no licence text -- the count was printed and
-/// the file written anyway. So if the registry sources were absent (a
-/// vendored build, or a container whose `CARGO_HOME` differs between
-/// the build and packaging steps) every crate came back text-less and
-/// the tool wrote a short file announcing that all of them ship no
-/// licence, then exited 0. That shipped, and it is worse than having
-/// no file at all: it documents that the obligation was considered
-/// and then not met.
+/// **This is the gate, and it is the point.** Missing licence
+/// text fails the command rather than being counted and noted.
+/// The case that makes the gate necessary is absent registry
+/// sources -- a vendored build, or a container whose
+/// `CARGO_HOME` differs between the build and packaging steps --
+/// where every crate arrives text-less. Counting alone would
+/// then write a short, complete-looking notice saying all of
+/// them ship no licence, and exit 0, which is worse than no file
+/// at all: it documents that the obligation was considered and
+/// then not met.
 ///
 /// An empty set is refused separately, because zero missing out of
 /// zero crates satisfies any threshold.
@@ -485,8 +483,8 @@ mod tests {
     fn a_notice_alone_does_not_satisfy_the_gate() {
         // `AUTHORS` and `NOTICE` are collected, because they carry
         // obligations -- but they state no terms. A crate shipping
-        // only those used to pass a `--max-missing 0` run, and the
-        // archive then held an attribution block with no licence in
+        // only those must not satisfy a `--max-missing 0` run, or
+        // the archive holds an attribution block with no licence in
         // it, which is the reassuring-but-empty file the gate exists
         // to prevent.
         let only_notice = Attribution {

@@ -22,15 +22,15 @@ use crate::helpers::workspace_root;
 
 /// One thing canon claims that the tree does not support.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Finding {
+struct Finding {
     /// Short tag naming which check fired.
-    pub kind: &'static str,
+    kind: &'static str,
     /// Repo-relative file the claim is in.
-    pub file: String,
+    file: String,
     /// 1-indexed line the claim is on.
-    pub line: usize,
+    line: usize,
     /// What is wrong, in one clause.
-    pub message: String,
+    message: String,
 }
 
 /// Paths named in prose that are correct to be absent here.
@@ -202,7 +202,7 @@ fn blocks(content: &str) -> Vec<Block> {
 /// becomes citable too. Accepting those costs nothing -- a
 /// target nobody names is never looked up -- while missing
 /// one fails a correct pointer.
-pub fn reference_targets(content: &str) -> BTreeSet<String> {
+fn reference_targets(content: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for raw in content.lines() {
         let line = raw.trim_start();
@@ -242,7 +242,7 @@ pub fn reference_targets(content: &str) -> BTreeSet<String> {
 /// actually use for a pointer, and widening it to `in` or `at`
 /// matches ordinary prose such as "the only one asked what
 /// **worked**".
-pub fn unresolved_xrefs(
+fn unresolved_xrefs(
     file: &str,
     content: &str,
     targets: &BTreeSet<String>,
@@ -276,7 +276,7 @@ pub fn unresolved_xrefs(
 /// Backticked repository paths that do not exist.
 ///
 /// `exists` is injected so the tests need no files on disk.
-pub fn missing_paths(
+fn missing_paths(
     file: &str,
     content: &str,
     exists: &dyn Fn(&str) -> bool,
@@ -321,7 +321,7 @@ pub fn missing_paths(
 /// a line the skill prints for the operator. And a file that
 /// says in prose it has ``no `git <sub>` grant`` has declared
 /// the omission deliberate.
-pub fn ungranted_git(file: &str, content: &str) -> Vec<Finding> {
+fn ungranted_git(file: &str, content: &str) -> Vec<Finding> {
     let Some(grants) =
         content.lines().find(|l| l.starts_with("allowed-tools:"))
     else {
@@ -372,7 +372,7 @@ pub fn ungranted_git(file: &str, content: &str) -> Vec<Finding> {
 /// Frontmatter values, table rows and fenced or indented code
 /// are exempt: none of them can be wrapped without changing
 /// what they mean.
-pub fn over_wide(file: &str, content: &str) -> Vec<Finding> {
+fn over_wide(file: &str, content: &str) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut in_front = false;
     let mut in_fence = false;
@@ -414,7 +414,7 @@ pub fn over_wide(file: &str, content: &str) -> Vec<Finding> {
 ///
 /// The ID scheme exists so an ID greps; a citation that finds
 /// nothing defeats it.
-pub fn unknown_ids(
+fn unknown_ids(
     file: &str,
     content: &str,
     known: &BTreeSet<String>,
@@ -458,7 +458,7 @@ fn is_backlog_id(word: &str) -> bool {
 }
 
 /// The `### <id>` headings in a backlog file.
-pub fn ids_in_backlog(content: &str) -> BTreeSet<String> {
+fn ids_in_backlog(content: &str) -> BTreeSet<String> {
     content
         .lines()
         .filter_map(|l| l.strip_prefix("### "))
@@ -500,7 +500,7 @@ fn canon_files(root: &Path) -> Vec<String> {
 ///
 /// Returns the findings and the number of files read, so both
 /// callers can report the same counts.
-pub fn collect() -> Result<(Vec<Finding>, usize), String> {
+fn collect() -> Result<(Vec<Finding>, usize), String> {
     let root = workspace_root();
     let files = canon_files(&root);
 

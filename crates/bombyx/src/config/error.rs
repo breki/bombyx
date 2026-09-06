@@ -7,9 +7,8 @@
 //! [`ConfigError`] belongs to *loading* a config. The registry
 //! was missing, unreadable or not TOML. It carries no table for
 //! the project asked for. Neither of its `host` keys named a VM
-//! host. Most of the variants are about a file. No count here:
-//! one lands most times this module is touched, and a stale
-//! number costs the next reader a recount.
+//! host. Most of the variants are about a file. No count here,
+//! because a stale one costs the next reader a recount.
 //!
 //! [`FieldError`] belongs to *one value*: it was blank, or it
 //! broke a rule. It has two variants, and neither mentions a

@@ -72,20 +72,19 @@ because it cannot run libvirt. The route would still get far
 enough to write files into the MSYS home and later delete them,
 which is worse than failing.
 
-One more difference is not in the script and is worth
-knowing. `sh -c` is a child of bombyx and inherits its whole
+One more difference is not in the script and is worth knowing.
+`sh -c` is a child of bombyx and inherits its whole
 environment, where `sshd` builds the far side's fresh. Three
 vagrant variables -- `VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and
 `VAGRANT_DOTFILE_PATH` -- override the directory every script
 bounds itself with, so `remote`'s local branch unsets them
 before the script runs. Without that, an operator with
 `VAGRANT_CWD` exported would have `destroy` check one project
-and destroy another. The script
-is identical either way, because every command bombyx builds is
-a POSIX shell script string and `sh -c` starts the same shell
-`ssh` would have started on the host. `config::transport` holds
-the comparison and `remote::transport` holds the one wrapper
-that acts on it.
+and destroy another. The script is identical either way,
+because every command bombyx builds is a POSIX shell script
+string and `sh -c` starts the same shell `ssh` would have
+started on the host. `config::transport` holds the comparison
+and `remote::transport` holds the one wrapper that acts on it.
 
 Two consequences are worth stating plainly. The first is that
 one `config.toml` now behaves differently depending on which
@@ -105,15 +104,15 @@ separate kernel, no host filesystem, none of your credentials
 covers running the host as a WSL2 distribution on a Windows
 workstation.
 
-No box in the diagram is the project's repository, and that is
-the point: neither the workstation nor the VM host reads any
+The diagram shows no box for the project's repository, and that
+is the point: neither the workstation nor the VM host reads any
 file from it. The VM host reads none because the push that sent
 it `vagrant/` is gone. The workstation reads none because every
 setting comes out of `config.toml`, which lives in the
 operator's config directory, and `--project` names the project
 rather than the working directory implying it. The workstation
-therefore needs no checkout at all.
-`docs/trust-boundary.md` has the reasoning.
+therefore needs no checkout at all. `docs/trust-boundary.md`
+has the reasoning.
 
 ## Library modules
 
@@ -523,19 +522,17 @@ supply one because it does not know which key it is reading.
 Trading that answer for a line number would be the worse deal,
 so the host rule runs where the origin is known.
 
-**No value is checked after parsing.** serde has run every rule
-by the time a `Config` exists, so a `Vm`, a `Source`, a
+**Parsing is where every rule runs.** serde has applied all of
+them by the time a `Config` exists, so a `Vm`, a `Source`, a
 `Project` or a `Config` that exists at all is one whose values
-passed,
-whoever built it and however -- with one exception.
+passed, whoever built it and however -- with one exception.
 `Project::host` is a bare `Option<String>`, and its rule runs
 in `registry::parse` rather than in a type, because the field
 name cannot say which of the two `host` keys carried the value.
-So a `Project` built by hand outside this crate has had no rule
-run on its `host`. Nothing can reach a command that way, since
-`Registry` cannot be assembled from outside and
-`Project::to_config` is `pub(super)`, but the guarantee is
-narrower than the sentence above it.
+So the `host` guarantee belongs to `registry::parse` rather
+than to the `Project` type. Nothing outside the crate can hold
+a `Project` to begin with: `mod registry` is private, the type
+is not re-exported, and `Project::to_config` is `pub(super)`.
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`, which is its table key.
@@ -582,9 +579,9 @@ parse has always cost.
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it. `Vm`,
-`Source` and `Project` have nothing but public fields, so any
-code can build one by hand and reach the guest without calling
-anything, and a private checking function is not something a
+`Source` have nothing but public fields, so any code can build
+one by hand and reach the guest without calling anything, and a
+private checking function is not something a
 library caller could reach for even if it wanted to. That is
 why every rule here belongs to a type.
 
@@ -595,18 +592,17 @@ field is public, so a caller can still assign to one on the
 `Config` it was handed, and only the fields with types refuse a
 bad value when they do.
 
-`Project` is the sharpest case of that, because the guarantee
-about its `host` belongs to a different type. It is holding a
-`Registry` that proves every host in the file passed, since
-`config::registry::parse` is the only way to build one. Holding
-a `&Project` proves the same thing only when
-`Registry::project` handed it over. `Project` is public,
-re-exported from the crate root, derives `Deserialize` and has
-a public `host`, so a library consumer can deserialize one from
-any text at all and read a `host` no rule has touched. Nothing
-inside bombyx does that -- the loader takes the host from
-`config::host::rank`, over a `Registry` -- so this is a trap for
-a future caller rather than a live hole.
+`Project` is the case where the guarantee belongs to a
+different type. Holding a `Registry` proves every host in the
+file passed, since `config::registry::parse` is the only way to
+build one, and holding a `&Project` proves the same thing only
+because `Registry::project` handed it over. `Project` derives
+`Deserialize` and has a public `host`, so within the crate a
+serde call on arbitrary text would produce one carrying a `host`
+no rule has touched. What keeps that from reaching a library
+consumer is visibility rather than a rule on the field: the
+`registry` module is private, `Project` is not exported, and
+`Registry` is `pub(crate)`.
 
 ### The heading spelling has one owner
 
@@ -627,13 +623,9 @@ than fixing one. Quoting is valid TOML for every name the check
 accepts, so `[projects."a.b"]` is right for all of them and the
 message never has to guess which names need it.
 
-It took three review rounds to find all three copies. The first
-round found a missing name check, the second found two messages
-spelling the heading unquoted and fixed those two, and the third
-found the last one -- in the message that this work had just made
-reachable. That is `/review`'s "the rule has no single home"
-pattern, and the consolidation was deliberately left out of the
-round that found it.
+Three separate messages spell that heading, which is `/review`'s
+"the rule has no single home" pattern: each copy can drift on its
+own, and a reader checking one learns nothing about the other two.
 
 `every_message_spells_a_project_heading_the_same_way` in
 `config/registry.rs` is what holds it: it asserts one spelling
@@ -648,9 +640,9 @@ agrees with itself and every test still passes.
 
 ### Two traps a reader cannot see from the code
 
-Both of these were code comments once, and `CLAUDE.md` under
-**Code comments** now says a trap aimed at a future editor lives
-here instead. Neither is visible at the place it matters.
+`CLAUDE.md` under **Code comments** says a trap aimed at a future
+editor lives here rather than in a comment. Neither of these two
+is visible at the place it matters.
 
 The first is the one above: the `Project` guarantee is a
 property of `Registry`, not of `Project`.
@@ -768,9 +760,9 @@ flowchart TD
 Each stage is safe on its own rather than trusting the one
 before it. `render` escapes every `"`, `\` and `#` even though
 `BoxName`, `RepoUrl`, `GitRef` and `ScriptPath` already refused
-them. `write_file` lengthens its
-heredoc delimiter until no payload line equals it, rather than
-assuming the payload came from `render`.
+them. `write_file` lengthens its heredoc delimiter until no
+payload line equals it, rather than assuming the payload came
+from `render`.
 
 The repetition is not redundant, and the newtypes narrowed it
 rather than removing it. A library caller can no longer hand

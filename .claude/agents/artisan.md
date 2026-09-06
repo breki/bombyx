@@ -29,8 +29,14 @@ the binary instead of the library.
 stringly-typed APIs where enums/newtypes would be safer,
 unnecessary clones or allocations.
 
-**Module Size**: any source file over 500 lines that contains
-multiple structs/enums should be flagged for splitting.
+**Module Size**: 500 lines is a prompt to look, not a limit.
+`CLAUDE.md` sets no ceiling on a file, and many files here are
+past that figure without being defects. So read a long file
+before reporting its length, and report it only when the length
+is what makes it hard to follow -- two concerns that never
+reference each other, or a test module that has grown past the
+code it tests. "This file is over 500 lines" is not a finding
+on its own, and the operator will decline it.
 
 **Canon and documentation** (`.md`, `CLAUDE.md`,
 `.claude/**`): this project keeps its rules in prose, so a

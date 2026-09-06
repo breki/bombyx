@@ -543,10 +543,12 @@ would list perfectly while matching nothing.
 **A guest cannot reach services on the host, including ones it
 may want.** The input chain drops everything the guest starts.
 NFS synced folders are the case to watch: a guest mounting an
-export from the host will hang rather than fail clearly. The
-Vagrantfile in each project decides whether that applies, and
-bombyx does not control it. Disabling the default synced folder
-avoids the problem entirely, which is what the jutro VM does.
+export from the host will hang rather than fail clearly.
+Vagrant's own share does not arise on a VM bombyx generates --
+the Vagrantfile it renders disables the default one and adds
+none -- but a mount the guest makes for itself still hangs, so
+a provisioning script reaching back to the host is the case to
+look for.
 
 **The enforcement lives on the machine being protected.** A
 guest that escalates to root on the VM host can remove these

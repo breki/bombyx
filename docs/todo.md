@@ -124,7 +124,8 @@ plan, decisions, and outcome.
   Step 7 of 7; GitHub issue #27. Depends on project-selection-flag. One design
   question, undecided.
 
-- **config-tests-own-file** -- config.rs tests into config/tests.rs
+- **config-tests-own-file** -- config.rs and registry.rs tests into their own
+  files
   `mod tests` is most of config.rs -- by a wide margin -- and that is what makes
   the file unreadable in one pass.
   No exact figure here: it moves every commit and a stale one costs a reader a
@@ -132,6 +133,16 @@ plan, decisions, and outcome.
   that reading it whole overflowed a session. Move it with `#[cfg(test)] #[path
   = "config/tests.rs"] mod tests;`. Raised by artisan during the /review2 on #23
   and kept out of that change as unrelated scope.
+  Carry the module-scope fixtures out with the tests: TABLE_FIELDS,
+  required_tables, test_entry, test_entry_with and test_registry all sit above
+  the pub use block, because two sibling test modules share them, so a reader
+  scanning the top of config.rs for its public surface hits test scaffolding
+  first. Raised by red-team during the /review2 on #26.
+  config/registry.rs wants the same move and should land with it: it is around
+  900 lines, roughly 440 of them mod tests, and after #18 it is the file that
+  owns the whole config format, so it is the first file a new reader opens.
+  `#[cfg(test)] #[path = "registry/tests.rs"] mod tests;` moves no code. Raised
+  by artisan as AQ-9 during the /review2 on #18.
 
 - **config-home-env-provenance** -- say when the environment picked the config
   A repo-set BOMBYX_CONFIG_HOME redirects bombyx to another config.toml, and the
@@ -182,25 +193,6 @@ plan, decisions, and outcome.
   be deleted. The README pointer describes what Part 3 produced before bombyx
   generated the file. Fix is in README.md: list what Part 3 actually produces, a
   provisioning script and a project table.
-
-- **comments-narrating-the-past** -- Eight comments tell history, not reasons
-  Found by /review2 (fresh-reader FR-12) while working local-host-execution
-  (#38); all pre-existing and out of that issue's scope. CLAUDE.md under Code
-  comments forbids narrating the past outright. The eight: remote/probe.rs
-  "which is exactly how an earlier version of this probe passed on a fish
-  shell"; remote.rs "and when it built its own string it silently ran vagrant
-  with neither variable set"; remote.rs "It was the sibling left out when Tty
-  was introduced"; doctor/probes.rs "Hardcoding the reason meant renaming the
-  gating probe left the report explaining the skip in terms of a column that no
-  longer existed"; integration_test.rs "Both names bombyx once used are tried";
-  a remote.rs test "so it once assembled its own string and ran vagrant with
-  neither variable set"; architecture.md "Both of these were code comments
-  once"; architecture.md's "It took three review rounds to find all three
-  copies" paragraph. The reviewer notes each already contains its own
-  present-tense form, so the rewrite is mechanical rather than a judgement call
-  about what the comment is for. The reviewer's own example: "the skip reason is
-  read from the gate, so renaming a report column cannot leave the report naming
-  a column that does not exist".
 
 - **vm-disk-size-unset** -- no disk key, so the guest gets the box's own size
   Found by registry-run-against-frosti (#37), driving the CLI against frosti.
@@ -337,7 +329,90 @@ plan, decisions, and outcome.
   `checked_str_newtype!` macro took roughly 40 lines back out of the file in the
   meantime, so this is not urgent.
 
+- **doc-link-guard-path-family** -- DocLink accepts a doubled or trailing slash
+  DocLink::new refuses blank, rooted, unrenderable, escaping and naming-no-file
+  paths, but not the rest of the family CLAUDE.md enumerates under Test-Driven
+  Development: doubled slash, trailing slash and an interior . segment. Both
+  --doc issues//project-config-off-repo.md and --doc
+  ./issues/../issues/project-config-off-repo.md pass every rule today.
+  escapes_repo skips empty and . components deliberately, and
+  Path::join(..).is_file() normalises the doubled separator, so the existence
+  check agrees while the written link keeps the odd spelling. The guard doc
+  comment claims it refuses every shape that would not survive the trip to
+  another reader, which is one claim wider than the code. Whether a renderer
+  resolves docs/issues//plan.md was not verified and should not be assumed; what
+  was verified is that the check normalises and the rendered link does not. Fix:
+  refuse an empty or . component in escapes_repo, which costs nothing because no
+  real target needs one, and add the four rows to the existing test table.
+  Raised by red-team in round 3 of the /review2 on #7, at the ceiling.
+
+- **registry-not-found-advice** -- the no-registry message advises too little
+  ConfigError::RegistryNotFound in crates/bombyx/src/config/error.rs tells an
+  operator with no registry file to create <place> with a [projects."<name>"]
+  table and stops there. Its sibling ProjectNotFound lists the .vm and .source
+  sub-tables and remote_root as well. The asymmetry is backwards: Project
+  requires vm and source with no serde default, so an operator who follows the
+  shorter advice literally writes a file bombyx then refuses for a missing
+  field, and gets a third failure after that for the host. The variant own doc
+  comment claims the opposite, that the message says both. Changing what bombyx
+  prints wants a failing test first. Raised by red-team as RT-11 in the /review2
+  on registry-config-load (#26).
+
+- **backlog-ids-dangle-in-docs** -- canon-check never reads docs for cited IDs
+  cargo xtask canon-check fails on a cited backlog ID that is in no backlog, but
+  it reads only .claude/, CLAUDE.md and llms.txt. Files under docs/ cite those
+  IDs too and no gate sees them. Deleting 47 entries from the three reviewer
+  logs on 2026-09-06 left four dangling citations in
+  docs/issues/project-config-off-repo.md, and validate passed the whole time;
+  they were found by hand and repaired. A fifth,
+  aq-2026-08-10-doctor-module-size in docs/developer/template-feedback.md, has
+  been dangling since the 2026-08-18 sweep and nothing reported it either. Fix:
+  give the unknown-ids check the same file set the other checks get plus docs/,
+  or a second pass over docs/. Watch for the two files that are meant to cite
+  closed IDs: an issue record and template-feedback.md both name entries on
+  purpose after they are closed, so the check may need to accept a citation that
+  says the entry was closed. Found by the artifact walk of the backlog sweep,
+  before any reviewer was spawned.
+
+- **comment-claims-have-no-gate** -- no gate checks a claim against the code
+  Comments and docs state checkable facts about the code -- how many callers a
+  function has, which builders skip a helper, whether a type is public, how many
+  files pass a line count -- and no gate compares any of them to the tree. The
+  /review2 on the 2026-09-06 backlog sweep found six such claims false in one
+  round, and every one had been written that same day while fixing a vaguer
+  version of the same sentence. Sharpening prose is what makes it falsifiable,
+  so the class grows each time comments are improved. canon-check already reads
+  markdown and checks five claim shapes, and backlog-ids-dangle-in-docs asks it
+  to widen its file set; a sibling check over doc comments would need to parse
+  Rust, which is a bigger job and may not be worth it. Worth deciding what is
+  mechanically checkable: a backticked item name in a doc comment that no longer
+  exists in the crate is the cheapest candidate, and rustdoc intra-doc links
+  already cover part of it. Found during the /review2 on the backlog sweep.
+
+- **more-comments-narrating-the-past** -- a second set of history comments
+  comments-narrating-the-past closed on 2026-09-06 having fixed the eight
+  comments it named. The /review2 on that sweep then found the class alive
+  elsewhere, so the entry covered its own list rather than the tree. The
+  survivors fresh-reader named: doctor/readonly.rs lines 130, 375, 391, 401 and
+  466 (the substring version this replaced, the earlier substring version,
+  vagrant subcommands beyond the four once listed, stopping at the wrapper made
+  sudo mkdir read as read-only, taking eight bytes of context panicked);
+  remote/probe.rs around 290, the doc on the test helper all, six of whose eight
+  lines argue with a deleted list; plan.rs 428, 586 and 806; config.rs 527, 767,
+  780 and 1317; remote.rs 828; docs/architecture.md 571;
+  xtask/src/licenses/graph.rs 26. Two want judgement rather than a rewrite:
+  plan.rs 407-436 argues a case against a reviewer nobody can read and states a
+  hypothetical future condition, which CLAUDE.md rules out separately, and the
+  invariant worth keeping there is that two tests spell out nearly the same
+  script deliberately, because two independently written expectations cannot
+  drift the same wrong way. Verify each rewrite against the code as you make it:
+  six sharpened comments in the sweep this came from turned out false, which is
+  what comment-claims-have-no-gate records.
+
 ## Done
+
+- **comments-narrating-the-past** -- the eight comments that entry named
+  (2026-09-06)
 
 - **newtype-remaining-config-fields** -- types for the five checked fields
   (2026-09-06)

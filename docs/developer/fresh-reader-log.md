@@ -9,6 +9,70 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-06-round-local-finding-ids-promise-a-record
+
+**Category:** A citation with nothing behind it
+
+`xtask/src/feedback.rs` cites `(RT-3)` at line 92 and `(RT-4)`
+at line 109, and thirteen more instances sit in
+`xtask/src/coverage.rs`, `dep_age.rs`, `backfeed.rs` and
+`dep_age/preflight.rs`. These are round-local numbers from a
+review run, not backlog IDs: `xtask/src/canon.rs`'s
+`is_backlog_id` requires `rt-<ISO date>-<slug>`, and the
+reviewer logs hold only that shape. So a reader who tries to
+look one up finds nothing.
+
+Each comment already states its property in full, so the tag
+adds no information and can simply go. The alternative is
+citing the durable `rt-<date>-<slug>` ID, which greps.
+
+Deferred: the files are outside the change that found it, and
+`canon-check` does not read `.rs`, so nothing gates the shape
+either way. Found as FR-10 in the `/review2` on the backlog
+sweep, 2026-09-06.
+
+### fr-2026-09-06-usage-dates-a-case-by-unstated-behaviour
+
+**Category:** A condition the reader cannot locate
+
+`docs/usage.md` around line 141 says "The first is a VM you
+created before this behaviour existed, and which branch you are
+in depends on whether you have run `up` since." Two snags.
+bombyx is pre-release and the sentence names no version, so
+"before this behaviour existed" gives a reader no way to tell
+whether it applies to them. And "which branch you are in" reads
+as a git branch, in a document whose next paragraphs are about
+`ref`, `repo` and checkouts.
+
+The repair is to state the observable condition instead of the
+history -- a VM whose `fresh-install` snapshot records
+something other than a fresh install, or that has none -- and
+to say "which of the two cases applies to you".
+
+Deferred: pre-existing prose outside the change. Found as FR-17
+in the `/review2` on the backlog sweep, 2026-09-06.
+
+### fr-2026-09-06-tutorial-transcripts-dated-by-release
+
+**Category:** A qualification the reader cannot apply
+
+`docs/tutorial.md` around line 19 warns that the transcripts in
+Parts 3 and 4 "show behaviour that is unreleased at the time of
+writing ... none of which 0.4.1 could produce". But Part 1
+installs with `cargo install --path crates/bombyx` from a
+clone, so the reader's binary is whatever the checkout builds
+rather than 0.4.1, and the warning gives them no way to tell
+whether the transcripts match what they will see.
+
+Tie the qualification to what the reader has: the transcripts
+were written from the current source rather than captured from
+a run, and a binary installed from a published 0.4.1 archive
+prints something different.
+
+Deferred: pre-existing prose outside the change, and the
+version figure is the kind `/release` moves. Found as FR-20 in
+the `/review2` on the backlog sweep, 2026-09-06.
+
 ### fr-2026-09-05-provider-argument-lives-in-a-comment
 
 **Category:** reasoning in a comment rather than in `docs/`
@@ -37,93 +101,6 @@ Found by `fresh-reader` in stage 3 of the review on issue #45.
 
 ---
 
-### fr-2026-09-05-snapshot-rule-in-eight-places
-
-**Category:** One rule restated in many places, none of them
-the home.
-
-The rule that `up` saves the `fresh-install` snapshot only when
-the name is absent, while `bombyx snapshot` replaces it with
-`-f`, is now stated in roughly eight places: `README.md`,
-`crates/bombyx/README.md`, `llms.txt`, `docs/usage.md`,
-`docs/tutorial.md`, `docs/architecture.md`, the clap help on
-`VmCmd::Snapshot` and the doc comment on `Action::Snapshot`.
-The reviewer that read the files cold said `docs/usage.md`
-carries the version that answers the question a reader arrives
-with, and everything else restates it.
-
-Deferred rather than fixed. `/review` under **Review, then fix**
-puts a consolidation of three or more copies on the escalate
-list, and says a consolidation is never applied in the round
-that found it: the round carrying twenty-five other edits is
-exactly where one goes wrong. It wants its own commit, after
-this one, with `docs/usage.md` as the home and the rest cut back
-to a pointer.
-
-Two of the copies are not free to move. The clap help is what
-`bombyx --help` prints, so the operator-facing version belongs
-there; `llms.txt` is an inventory and is meant to restate.
-
-### fr-2026-09-05-comments-narrating-bombyx-past
-
-**Category:** Comments telling the story of an earlier version.
-
-`CLAUDE.md` under **Code comments** says not to narrate the
-past, because bombyx is pre-release and nobody is migrating.
-Two comments outside the snapshot work still do:
-`crates/bombyx/src/remote.rs` on `vagrant_command`, which
-recounts that `destroy` once built its own string and ran
-`vagrant` with neither variable set, and a test comment in the
-same file recounting the same episode.
-
-Deferred as out of scope: the snapshot change does not touch
-either, and rewriting comments a change does not otherwise
-reach is churn the next reviewer reads as part of the work. The
-one instance the change *did* introduce, on `Action::Snapshot`,
-was fixed rather than logged.
-
-### fr-2026-09-05-record-done-while-backlog-says-pending
-
-**Category:** Two documents disagree about whether the work is
-finished.
-
-`docs/issues/registry-run-against-frosti.md` opens with
-**Status:** Done, while `docs/todo.md` still carries
-`registry-run-against-frosti` under `## Pending`, written as
-future work and not linked to the record. A reader who opens
-the backlog first takes the run as still owed and never learns
-the record exists.
-
-Deferred rather than fixed, because `/issue` step 12 makes the
-move the last action after the operator merges the PR:
-`cargo xtask todo done <slug> --date <date> --doc <plan>`.
-Moving it now would put the backlog ahead of the merge and
-contradict the process the other Done entries followed. The
-window is the life of the PR.
-
-### fr-2026-09-05-placeholder-subjects-across-the-config-prose
-
-**Category:** Voice
-
-`CLAUDE.md` under **Voice** rules out "Nothing" and "No X" as a
-subject, because a placeholder lets nobody act. After #18 that
-shape sits in fourteen places, most of them prose this project
-rewrote in the same change: `README.md` (the heading **Why
-nothing bombyx reads is committed**, plus three sentences),
-`crates/bombyx/src/lib.rs`, `llms.txt`, `docs/architecture.md`
-twice, `config/host.rs` twice, `config/registry.rs` twice,
-`config.rs`, and `.gitignore`.
-
-It costs most in the code comments, where the scope of the claim
-is the thing in doubt: `config/host.rs`'s "Nothing here runs the
-rule again" leaves a reader unsure whether the subject is
-`rank`, the module or the crate, and the answer is one named
-actor away.
-
-Deferred during the `/review2` on #18 as a fourteen-place sweep
-at the end of a run that had already stopped once on
-non-convergence. Found as FR-16.
-
 ### fr-2026-09-05-field-rules-filed-under-a-traps-heading
 
 **Category:** Structure
@@ -144,67 +121,6 @@ the noun. Predates #18 and is untouched by it.
 Deferred during the `/review2` on #18: it is a structural move
 in a 550-line document, outside that change's scope. Found as
 FR-1.
-
-### fr-2026-09-05-the-ranking-reason-is-stated-three-times
-
-**Category:** Duplication
-
-The argument for returning a `HostOrigin` rather than letting
-the binary re-derive the winner is written out three times, near
-verbatim: on the type in `config/host.rs`, at the call site in
-`main.rs`, and again in `llms.txt`. A reader of the type cannot
-tell whether the paragraph describes a real caller or a design
-that was considered, and cannot tell which copy to correct if
-the ranking changes.
-
-The repair is to keep the reason where the reporting happens,
-`main.rs`, and let the type's doc say only what it is.
-
-Deferred during the `/review2` on #18: `/review` under **Review,
-then fix** forbids applying a three-copy consolidation in the
-round that finds it. Found as FR-25.
-
-### fr-2026-09-05-comments-that-narrate-their-own-history
-
-**Category:** Code comments
-
-`CLAUDE.md` under **Code comments** says not to narrate the
-past. Four comments do, and none is in code #18 changed:
-`config.rs`'s `validate_generated` explains itself by "outgrew
-the 100-line limit" (a limit no file in the tree names);
-`docs/architecture.md` spends seven lines on which review round
-found which copy of the heading rule; `config/error.rs` spends
-two lines on a count it deliberately does not give;
-`README.md`'s Vagrantfile section asks a first-time reader to
-recognise advice this README used to give.
-
-`config/guards.rs` is a fifth of a different kind: its comment
-justifies "would treat" over "reads" by a caller that passes two
-programs at once, and every production call site passes one word
--- the only two-program argument in the tree is the test the
-comment cites as its evidence.
-
-Deferred during the `/review2` on #18 as prose outside that
-change. Found as FR-5, FR-8, FR-17, FR-18 and FR-23.
-
-### fr-2026-09-05-paragraphs-left-ragged-by-line-patches
-
-**Category:** Formatting
-
-Eight paragraphs carry a short line in the middle, which a
-reader takes for a paragraph break: two in `docs/usage.md`, one
-in `docs/tutorial.md`, two in `docs/architecture.md`, and three
-more found and fixed during the round. `CLAUDE.md` under
-**Coding Standards** already asks for the whole paragraph to be
-reflowed when one line is patched, and no gate covers `docs/` --
-`cargo xtask canon-check`'s 80-column rule reads `.claude/`,
-`CLAUDE.md` and `llms.txt` only.
-
-Two candidates worth considering together: reflow the remaining
-five, and extend the column check to `docs/`.
-
-Deferred during the `/review2` on #18; the three the change
-itself created were fixed. Found as FR-20.
 
 ### fr-2026-09-05-registry-named-in-clap-help-without-introduction
 
@@ -301,32 +217,6 @@ twice.
 
 ---
 
-### fr-2026-09-04-review2-justifications-narrate-their-history
-
-**Category:** History where a reason belongs
-
-Two findings against `.claude/commands/review2.md`, both about
-prose that tells the reader what happened instead of what to
-do.
-
-- FR-11. "the step that deletes the file deletes them with
-  it" names no file, no step and no plan, so a reader cannot
-  judge whether their own deferral resembles the example the
-  sentence exists to give.
-- FR-12. The stop rule's justification says the previous
-  version "could only be satisfied by a code finding, which
-  is the mirror of a condition reverted in `bd52dcd`". The
-  previous version is not in the file and the hash has to be
-  read to learn what it means. The instruction that follows
-  -- take findings against this rule to a backlog -- stands
-  on its own.
-
-Deferred: `review2.md` itself says a finding against the stop
-rule waits for a run that measures it, and FR-12 is next to
-that rule. FR-11 rides along so the two are fixed together.
-
----
-
 ### fr-2026-09-04-open-questions-count-does-not-match-its-list
 
 **Category:** A count that disagrees with the list under it
@@ -344,36 +234,6 @@ the seven-step re-split -- so it is logged rather than fixed
 here. Either say "One of the three", or, if assigning
 `destroy`'s positional to step 7 counts as closing that
 question, say so in those words.
-
-### fr-2026-09-04-config-parse-doc-narrates-its-own-past
-
-**Category:** Comment tells the history instead of the rule
-
-`Config::parse`'s doc comment in `crates/bombyx/src/config.rs`
-spends four sentences on a visibility change and a test
-migration -- "It was `pub` and had no production caller ...
-which now build a temp fixture and call `load`" -- before
-reaching the fact a reader needs, which is that `parse` takes
-the host directly and so skips the four-source ranking `load`
-performs. `CLAUDE.md` under **Do not narrate the past** rules
-this out. Deferred as pre-existing text outside the change that
-found it.
-
-### fr-2026-09-04-two-documents-narrate-the-codes-past
-
-**Category:** Comment tells the history instead of the rule
-
-Three passages describe a version the reader may think they are
-running. `README.md`: "**bombyx does that for you now.** This
-used to be the project's job, and the README told you to write
-the `env:` block into your own `Vagrantfile`" -- from which a
-reader cannot tell whether an `env:` block of their own is
-harmful, useless or required. `README.md` again: "so a repo
-shipping `host = "-oProxyCommand=..."` used to be able to run
-code on your workstation". `docs/usage.md`: "`host` in
-`bombyx.toml` is now an error". Each reads the same without the
-history. Deferred as pre-existing prose outside the change that
-found it.
 
 ### fr-2026-09-03-no-reviewer-emits-the-severity-field
 
@@ -398,57 +258,6 @@ briefs, and `/review` is frozen until a run against a real code
 diff has exercised the bar.
 
 Found by the Fresh Reader review (FR-4), 2026-09-03.
-
----
-
-### fr-2026-09-03-artisan-500-line-rule-has-no-canon-counterpart
-
-**Category:** A reviewer rule the project may have outgrown
-
-`.claude/agents/artisan.md` says any source file over 500 lines
-containing multiple structs or enums should be flagged for
-splitting. `CLAUDE.md` **Coding Standards** states no such limit,
-and `CLAUDE.md` **Environment Constraints** describes
-`crates/bombyx/src/config.rs` as 1747 lines while advising how to
-read it, with no suggestion that its length is a defect.
-
-So a caller receiving "split `config.rs`" cannot tell whether it
-is a project rule or a default from the brief that the project
-has silently outgrown, and therefore whether to decline it every
-round.
-
-Deferred: either the limit belongs in `CLAUDE.md` with the brief
-pointing at it, or the brief should say the number is a prompt to
-look rather than a rule. Deciding that is not this run's work.
-
-Found by the Fresh Reader review (FR-9), 2026-09-03.
-
----
-
-### fr-2026-09-03-pointers-do-not-name-what-they-point-at
-
-**Category:** A cross-reference a reader cannot follow
-
-Two defects in the pointer network that replaced the duplicated
-rules. `/review` step 1 says "`CLAUDE.md` gives the reason a
-live tree is not one" without naming the section, while three
-other pointers in the same file do name theirs -- so a reader
-greps a 1000-line file for a heading they have to guess. And
-six references call **Diff handoff** a section, `/review`
-saying "what its **Diff handoff** section says", when the
-target is an inline bold paragraph inside **How to spawn**. A
-reader scans the headings, finds none, and concludes the
-pointer is stale.
-
-`cargo xtask canon-check` catches a bold reference that names
-no heading at all. It cannot catch one that resolves to a
-paragraph rather than a heading, or one that names no section
-when it should.
-
-Deferred: promoting **Diff handoff** to a heading and
-qualifying the `CLAUDE.md` pointer is a sweep of this surface.
-
-Found by the Fresh Reader review (FR-1, FR-11), 2026-09-03.
 
 ---
 
@@ -496,29 +305,6 @@ Found by the Fresh Reader review (FR-4), 2026-09-03.
 
 ---
 
-### fr-2026-09-03-sync-module-doc-narrates-the-past
-
-**Category:** A comment that describes the behaviour it replaced
-
-`xtask/src/sync.rs`'s module doc reads "`/template-sync` is
-*already* SHA-delta based, but *it surfaced* template-internal
-bookkeeping files ... as sync candidates. Those grow on every
-commit, so *they became* pure review noise." A reader cannot
-tell whether the noisy behaviour is live somewhere or is the
-state this command replaced, and "already" implies a contrast
-with knowledge they do not have. `CLAUDE.md` under **Code
-comments** rules this out by name. The present-tense reason
-survives the cut: bookkeeping files change on every commit and
-each project owns its own, so an upstream change to one is
-never worth pulling, and this command drops them before the LLM
-sees the list.
-
-Deferred: outside the work under review.
-
-Found by the Fresh Reader review (FR-8), 2026-09-03.
-
----
-
 ### fr-2026-09-03-diff-filter-case-mechanism-unstated
 
 **Category:** A mechanism the comment leans on without stating
@@ -536,24 +322,6 @@ Deferred: one clause, in the loop prose `/review` now says to
 sweep as its own change.
 
 Found by the Fresh Reader review (FR-9), 2026-09-03.
-
----
-
-### fr-2026-09-03-least-read-edit-reads-as-a-ranking
-
-**Category:** Voice
-
-`/review`'s re-snapshot paragraph ends "Otherwise they judge
-the pre-fix version of the least-read edit in the run." The
-superlative over "edits in the run" sends the reader looking
-for a ranking of edits by how often they were read. The point
-is simpler: a fix made during step 2 is the one edit no
-reviewer has seen, so it is exactly the one they must be shown.
-
-Deferred: phrasing, in prose written during the review that
-raised it.
-
-Found by the Fresh Reader review (FR-10), 2026-09-03.
 
 ---
 
@@ -576,27 +344,6 @@ Found by the Fresh Reader review (FR-13), 2026-09-03.
 
 ---
 
-### fr-2026-09-03-three-logs-named-as-two
-
-**Category:** Canon states a set incompletely
-
-`docs/developer/fresh-reader-log.md` exists and `/review` names
-all three backlogs. `.claude/commands/retrospect.md` and
-`xtask/src/sync.rs` have been corrected to name all three.
-Two files still name only two:
-`.claude/skills/architect/SKILL.md:67-68` and
-`.claude/commands/template-improve.md:75`.
-
-Deferred: both remaining files are outside the work under
-review, and neither states a rule -- `SKILL.md` draws a
-directory tree and `template-improve.md` lists where feedback
-goes.
-
-Found by the Fresh Reader review (FR-7), 2026-09-03. Narrowed
-2026-09-03 after `retrospect.md` and `sync.rs` were fixed.
-
----
-
 ### fr-2026-09-03-implement-md-stale-tool-grants
 
 **Category:** Command definition
@@ -612,26 +359,6 @@ it or hands off to the developer.
 Deferred: outside the diff of the commit under review.
 
 Found by the Fresh Reader review (FR-8, FR-9), 2026-09-03.
-
----
-
-### fr-2026-09-03-gate-numbers-copied-out-of-xtask
-
-**Category:** A number owned by code, restated in prose
-
-Two figures live in `xtask` and are re-typed into canon, where
-they have drifted. `llms.txt:125` lists seven items for
-`validate` and `llms.txt:136` says it has nine steps; the two
-missing are the dependency cooldown and `deny`, and the cooldown
-is the gate `CLAUDE.md` says fires when you were not expecting
-it. Separately `xtask/src/coverage.rs:18` enforces
-`MODULE_THRESHOLD = 85.0`, which `CLAUDE.md` never mentions --
-it states only the 90% workspace floor, so whether a module at
-86% passes is answerable only from the source.
-
-Deferred: outside the diff of the commit under review.
-
-Found by the Fresh Reader review (FR-12, FR-13), 2026-09-03.
 
 ---
 
@@ -690,128 +417,3 @@ Found by the Fresh Reader review (FR-14) and the red team review
 (RT-12), 2026-09-03.
 
 ---
-
-### fr-2026-09-02-two-more-files-describe-the-push
-
-**Category:** Files no sweep opened
-
-`bombyx.toml.sample` and `llms.txt` both describe the push as current
-behaviour, and `README.md` and `docs/vm-host-setup.md` point readers
-at them. `llms.txt` is the file whose name promises a machine can
-read it first; it says bombyx "pushes a project's `vagrant/`
-directory" and that "the host holds a cache refreshed on every `up`".
-It also says `validate` has eight steps where `CLAUDE.md` says nine.
-
-### fr-2026-09-02-host-setup-tells-you-to-write-a-vagrantfile
-
-**Category:** Two documents giving opposite instructions
-
-`docs/vm-host-setup.md`'s "Configuration for each project" says every
-project needs "a `vagrant/` directory containing a Vagrantfile" and
-that bombyx does not ship one "because the project repository is
-meant to be the source of truth". `docs/tutorial.md` says the
-opposite in as many words: bombyx renders it, a committed one is read
-by nothing, delete it. The same page also says bombyx does not
-control the synced folder, which the generated Vagrantfile disables
-unconditionally, and names "the jutro VM" with no definition.
-
-### fr-2026-09-02-boundary-claim-unqualified-in-five-places
-
-**Category:** One rule, two strengths
-
-`docs/trust-boundary.md` qualifies "the VM host holds no project
-code" once -- the guest's disk image is a file on the host -- and
-repeats it unqualified at three other points in the same file, plus
-`CLAUDE.md`, `.claude/skills/architect/SKILL.md` and
-`crates/bombyx/README.md`. A reader meets the strong form first and
-may never reach the qualification.
-
-### fr-2026-09-02-main-narrates-its-own-history
-
-**Category:** Voice
-
-Six comments in `main.rs` explain the code by saying what it used to
-be: "It used to say 'thin by design'", "the first cut of this fix",
-"An earlier version answered a non-zero `curl` with ...". Two of them
-describe a `matches!` "four hundred lines away" that no longer
-exists, which costs a search of the file. `CLAUDE.md` rules the shape
-out by name.
-
-### fr-2026-09-02-architect-skill-calls-main-thin
-
-**Category:** Canon disagreeing with the code it describes
-
-The architect skill calls `main.rs` "(thin)" and says to keep logic
-out of it. `main.rs` opens by refusing that description: "It used to
-say 'thin by design', and that is worth not claiming", and the
-self-update sequence lives there. The rule the skill wants is "keep
-new decisions out", not "it is thin".
-
-### fr-2026-09-02-project-field-unaccounted
-
-**Category:** Gap in the plan
-
-The document opens a ledger of five values read from the
-repository. Chunk 1 accounts for `vagrant_dir`, chunk 2 for
-`remote_root`, `[vm]` and `[source]`. `project` is never mentioned
-again, and it is load-bearing: `remote_project_dir()` builds the
-path `destroy` runs `rm -rf` against from it.
-
-### fr-2026-09-02-chunk-two-has-no-caller
-
-**Category:** Gap in the plan
-
-Chunk 2 changes `Config::load` to take a project name, and chunk 3
-introduces the `--project` that supplies one. Each chunk is its own
-commit, so chunk 2 as described leaves `main.rs` with no name to
-pass and no registry path to read.
-
-### fr-2026-09-02-project-flag-clap-shape
-
-**Category:** Unclear specification
-
-"a required global argument for every `VmCmd` variant" does not
-describe a shape clap can build. A `global = true` argument cannot
-also be required, `VmCmd` is a flattened enum with no shared field,
-and the next sentence says `self-update` must work without it.
-Three lines of argv and a note on where the check happens would
-settle it.
-
-### fr-2026-09-02-chunk-two-test-inventory-missing
-
-**Category:** Asymmetry that misleads
-
-Chunk 1 gets nine tests named by line, all of them accurate. Chunk
-2 gets one sentence, which reads as "nothing else breaks". Chunk 2
-deletes the overlay, and `integration_test.rs:224` and `:241` are
-built on `bombyx.local.toml`; the second becomes a test of nothing
-rather than a failure.
-
-### fr-2026-09-02-rules-versus-statements
-
-**Category:** Two names for one thing
-
-The document calls the boundary's two halves "rules" in the Problem
-section and "statements" in the Plan. `docs/trust-boundary.md` uses
-only "statements".
-
-### fr-2026-09-02-chunk-used-before-defined
-
-**Category:** Term used before introduction
-
-"chunk 1" and "chunk 2" appear in the Problem section; "Three
-chunks, in this order. Each is its own commit." is 80 lines later.
-The opening paragraph already lists the three items and could say
-they are the three chunks. The same document introduces "the
-registry" correctly, which is the pattern to copy.
-
-### fr-2026-09-02-three-phrasings
-
-**Category:** Voice
-
-Three stumbles. "Rust unit tests for the config loading and
-lookup." is a verbless fragment of the shape `CLAUDE.md` rules out.
-"It names the registry file and the keys the entry needs" reads
-"It" as the entry, not the error message. "which reads the
-filesystem here" uses "here" for "on the workstation", right after
-a file:line reference, where it first reads as "at that line".

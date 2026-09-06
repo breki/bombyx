@@ -73,8 +73,9 @@ impl HostProbe {
 /// probes behind it would each wait on a dead host and teach
 /// nothing the first failure did not.
 ///
-/// Running here nothing gates, because there is no host to be
-/// dead and every remaining probe asks about this machine.
+/// On the local route no probe gates the ones behind it,
+/// because there is no host to be dead and every remaining
+/// probe asks about this machine.
 /// `settled_findings` supplies the two rows this route has
 /// already answered.
 #[must_use]
@@ -251,9 +252,9 @@ pub fn classify(result: &ProbeResult, verdict: Option<Verdict>) -> Outcome {
 /// closure returning canned outcomes.
 ///
 /// A skipped probe names the gate that stopped it, read from the
-/// gate itself. Hardcoding the reason meant renaming the gating
-/// probe left the report explaining the skip in terms of a
-/// column that no longer existed.
+/// gate itself rather than hardcoded, so renaming a gating probe
+/// cannot leave the report explaining a skip in terms of a
+/// column that is gone.
 pub(crate) fn run_probes<F>(probes: &[HostProbe], mut run: F) -> Vec<Finding>
 where
     F: FnMut(&HostProbe) -> Outcome,

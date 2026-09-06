@@ -1,4 +1,4 @@
-//! Which package ids the distributed binary actually links.
+//! Which package ids go into building the distributed binary.
 //!
 //! Split from the parent module because this is the part most likely
 //! to change again: cargo has already renamed package ids once, and
@@ -62,10 +62,12 @@ pub(super) fn workspace_members(json: &Value) -> Vec<&str> {
 ///
 /// Walks `resolve.nodes`, following only a dep whose `dep_kinds`
 /// carries an entry with `kind: null`. A `kind` of `"dev"` or
-/// `"build"` is not in the binary, and the attribution file used to
-/// list them: `assert_cmd`, `predicates` and `difflib` were all
-/// named as crates the binary links, which `cargo tree -i difflib
-/// -e normal` flatly contradicts.
+/// `"build"` is not in the binary, so following one would put
+/// `assert_cmd`, `predicates` and `difflib` in the attribution
+/// file, which `cargo tree -i difflib -e normal` flatly
+/// contradicts. "Goes into building" is the wording throughout,
+/// never "linked into"; the parent module says why the
+/// distinction has to hold.
 ///
 /// Platform filtering is not done here -- `--filter-platform` on the
 /// `cargo metadata` call already prunes `resolve` to one target, so

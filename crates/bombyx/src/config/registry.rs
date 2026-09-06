@@ -262,8 +262,7 @@ impl Registry {
     ///
     /// The rules themselves live in `super::host`, which is
     /// where they are written down.
-    #[must_use]
-    pub fn host(&self) -> Option<&str> {
+    pub(super) fn host(&self) -> Option<&str> {
         self.host.as_deref()
     }
 
@@ -293,8 +292,8 @@ impl Registry {
     /// with a zero `cpus` or a quote in its `box` never exists:
     /// such a file fails the parse outright.
     ///
-    /// `pub(crate)` all the same. Nothing outside the crate has
-    /// a use for one project's preferred host without the rest
+    /// `pub(crate)` all the same. A caller outside the crate has
+    /// no use for one project's preferred host without the rest
     /// of its entry, and [`Registry::project`] is the way to ask
     /// for that.
     pub(crate) fn project_host(
@@ -425,8 +424,8 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
 ///
 /// Gated on `cfg(test)`, so the widened visibility exists only
 /// in a test build and production keeps the single route above.
-/// The callers are `super::Config::parse_registry` and the
-/// helper in `super`'s own test module.
+/// Widened past `parse` because a test needs a `Registry` from
+/// text with no file behind it.
 ///
 /// # Errors
 ///

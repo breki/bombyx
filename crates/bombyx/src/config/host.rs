@@ -280,12 +280,9 @@ where
 
 /// Which key supplied [`super::Config::host`].
 ///
-/// Returned by [`super::Config::load_project`], so a caller can
-/// *report* the winner instead of re-deriving it. A binary that
-/// re-read the registry for itself would hold a second copy of
-/// the precedence rule below, in code no library test can reach
-/// -- so swapping the two keys here would leave its message
-/// naming the wrong one.
+/// Returned by [`super::Config::load_project`] alongside the
+/// `Config`, so the winning host and the key that supplied it
+/// always travel together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostOrigin {
     /// One project's entry in the per-developer
@@ -371,8 +368,9 @@ impl HostOrigin {
 /// [`ConfigError::InvalidHost`] is in the signature and cannot
 /// occur through `super::registry::Registry::read`, which is the
 /// only production route to a `Registry`: its parse refuses a
-/// bad host before one exists. No test reaches that branch, and
-/// no `config.toml` produces it.
+/// bad host before one exists. It is in the signature because
+/// `checked` returns a `Result` and `rank` propagates it, and
+/// no `config.toml` and no test can reach that arm.
 pub(crate) fn rank(
     registry: &registry::Registry,
     name: &str,

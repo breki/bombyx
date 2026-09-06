@@ -513,11 +513,10 @@ You do not write one. bombyx renders the Vagrantfile from
 and `scratch`, together with a small bootstrap script.
 
 This is not a convenience. Vagrant reads the Vagrantfile before
-the VM exists, so a project-supplied one has to sit on a machine
-outside the guest -- and keeping project code off those machines
-is the whole point. [trust-boundary.md](trust-boundary.md)
-records the
-reasoning.
+the VM exists, so a project-supplied one has to sit on a
+machine outside the guest -- and keeping project code off those
+machines is the whole point.
+[trust-boundary.md](trust-boundary.md) records the reasoning.
 
 Two things the generated file does that are worth knowing:
 
@@ -723,14 +722,12 @@ the next login.
 
 `bombyx reset` restores a snapshot named `fresh-install`, and
 the `up` you ran a moment ago already took it. That happens on
-the first `up` only. The last step of `up` is a small script the
-*host* runs: it lists the snapshots, tests for the name, and
-saves one only when the name is missing. bombyx never sees the
-list and never makes the decision -- it sends the script and
-reads an exit status. So every later `up` finds the snapshot and
-leaves it alone, and `fresh-install` goes on describing the VM
+the first `up` only: every later one finds the snapshot and
+leaves it alone, so `fresh-install` goes on describing the VM
 as provisioning left it rather than whatever an agent has since
-done to it.
+done to it. [usage.md](usage.md) states the rule and why it is
+that way, and [architecture.md](architecture.md) shows the
+script the host runs to apply it.
 
 That is the state you want to come back to after an agent has
 made a mess, which is why it must not be overwritten quietly.

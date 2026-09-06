@@ -66,11 +66,6 @@ pub(super) fn check_not_an_option(
     tool: &str,
 ) -> Result<(), FieldError> {
     if value.starts_with('-') {
-        // "would treat" rather than "reads", because `tool` is
-        // sometimes two programs at once. A verb agreeing with a
-        // single subject turns ungrammatical the moment a caller
-        // passes "ssh and scp", and the test below is what holds
-        // this wording in place.
         return Err(FieldError::invalid(
             field,
             format!(
@@ -351,37 +346,38 @@ mod tests {
     }
 
     #[test]
-    fn the_option_message_names_the_tool_that_would_be_fooled() {
+    fn the_option_message_names_the_field_the_tool_and_the_rule() {
         // Several callers share this rule, so the message has
-        // to send the operator to the right place. Each pairing
-        // below is one the production code really produces:
+        // to send the operator to the right place. Both pairings
+        // below are ones the production code really produces:
         // `ref` is handed to `git`, and `host` becomes `ssh`'s
         // first positional argument.
-        let err = check_not_an_option("ref", "--upload-pack=x", "git")
-            .expect_err("must be refused");
-        assert!(err.to_string().contains("git"), "{err}");
-
-        let err = check_not_an_option("host", "-x", "ssh")
-            .expect_err("must be refused");
-        assert!(err.to_string().contains("ssh"), "{err}");
+        //
+        // The whole message per row rather than a fragment,
+        // because a `contains` check steps over a sentence that
+        // has come apart around the pieces it looks for.
+        let cases = [
+            (
+                "ref",
+                "--upload-pack=x",
+                "git",
+                "invalid `ref`: must not start with `-`, which git \
+                 would treat as an option",
+            ),
+            (
+                "host",
+                "-x",
+                "ssh",
+                "invalid `host`: must not start with `-`, which ssh \
+                 would treat as an option",
+            ),
+        ];
+        for (field, value, tool, expected) in cases {
+            let err = check_not_an_option(field, value, tool)
+                .expect_err("must be refused");
+            assert_eq!(err.to_string(), expected);
+        }
 
         assert!(check_not_an_option("ref", "main", "git").is_ok());
-    }
-
-    #[test]
-    fn the_option_message_reads_the_same_for_one_tool_or_two() {
-        // `tool` is an arbitrary string, so a caller may name
-        // two programs at once and the sentence has to stay
-        // grammatical when one does. No caller does today. This
-        // asserts the whole message rather than a fragment,
-        // because a broken verb is exactly what a `contains`
-        // check steps over.
-        let err = check_not_an_option("host", "-x", "ssh and scp")
-            .expect_err("must be refused");
-        assert_eq!(
-            err.to_string(),
-            "invalid `host`: must not start with `-`, which ssh \
-             and scp would treat as an option"
-        );
     }
 }

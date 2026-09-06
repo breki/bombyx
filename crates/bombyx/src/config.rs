@@ -89,27 +89,58 @@ mod vm;
 
 pub use transport::Transport;
 
-/// The `[vm]` and `[source]` tables every project entry needs.
+/// Every `[vm]` and `[source]` field a project entry must
+/// state, as (table, field, the line that states it).
 ///
-/// At module scope rather than inside a test module because two
-/// sibling test modules share it, `tests` and
-/// `load_project_tests`, and neither can reach into the other.
+/// This file has two `#[cfg(test)]` modules, `tests` and
+/// `load_project_tests`, and a module cannot see an item
+/// private to its sibling. Both need these fixtures -- `tests`
+/// reads the list itself, `load_project_tests` reaches it
+/// through `test_registry` -- so the list and
+/// [`required_tables`] sit at file scope, where `use super::*`
+/// reaches both.
 ///
-/// Writing the eleven lines out per test module would mean
-/// editing each module to add a required field, and a module
-/// somebody missed would fail in a test about something else
-/// entirely.
+/// One list, so a field added to [`Vm`] or [`Source`] is added
+/// here once. A second literal table is the hazard: a test
+/// omitting a `[vm]` field would start failing on a new
+/// `[source]` field while its message blamed the `[vm]` one.
 #[cfg(test)]
-const REQUIRED_TABLES: &str = "\n[vm]\n\
-     provider = \"libvirt\"\n\
-     box = \"generic/ubuntu2204\"\n\
-     cpus = 2\n\
-     memory = 2048\n\
-     \n\
-     [source]\n\
-     repo = \"https://example.invalid/myproject.git\"\n\
-     ref = \"main\"\n\
-     script = \"vagrant/provision.sh\"\n";
+const TABLE_FIELDS: [(&str, &str, &str); 7] = [
+    ("vm", "provider", "provider = \"libvirt\""),
+    ("vm", "box", "box = \"generic/ubuntu2204\""),
+    ("vm", "cpus", "cpus = 2"),
+    ("vm", "memory", "memory = 2048"),
+    (
+        "source",
+        "repo",
+        "repo = \"https://example.invalid/myproject.git\"",
+    ),
+    ("source", "ref", "ref = \"main\""),
+    ("source", "script", "script = \"vagrant/provision.sh\""),
+];
+
+/// Renders project `name`'s two required tables from
+/// [`TABLE_FIELDS`], leaving `omitted` out.
+///
+/// `omitted` is one [`TABLE_FIELDS`] entry's `(table, field)`
+/// pair, and `None` leaves out nothing. The pair rather than
+/// the field name alone: one name can sit in both tables, and
+/// dropping it from both is the failure [`TABLE_FIELDS`] exists
+/// to prevent.
+#[cfg(test)]
+fn required_tables(name: &str, omitted: Option<(&str, &str)>) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for table in ["vm", "source"] {
+        let _ = write!(out, "\n[projects.{name}.{table}]\n");
+        for (owner, field, line) in TABLE_FIELDS {
+            if owner == table && Some((owner, field)) != omitted {
+                let _ = writeln!(out, "{line}");
+            }
+        }
+    }
+    out
+}
 
 /// One `[projects.<name>]` table, for a test.
 ///
@@ -118,11 +149,8 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
 /// like.
 ///
 /// The `[vm]` and `[source]` tables come from
-/// [`REQUIRED_TABLES`], renamed into the project's namespace,
-/// because a `[projects.<name>]` table without them does not
-/// parse. Renaming rather than writing them out again means a
-/// field added to [`Vm`] or [`Source`] does not break a test
-/// about something else.
+/// [`required_tables`], because a `[projects.<name>]` table
+/// without them does not parse.
 ///
 /// The heading is written out rather than asked of
 /// `registry::heading`: a fixture and the message checked
@@ -144,9 +172,7 @@ fn test_entry(name: &str, project_host: Option<&str>) -> String {
 /// `deny_unknown_fields` somewhere unrelated.
 #[cfg(test)]
 fn test_entry_with(name: &str, keys: &str) -> String {
-    let tables = REQUIRED_TABLES
-        .replace("[vm]", &format!("[projects.{name}.vm]"))
-        .replace("[source]", &format!("[projects.{name}.source]"));
+    let tables = required_tables(name, None);
     format!("[projects.{name}]\n{keys}{tables}")
 }
 
@@ -166,7 +192,8 @@ pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
 };
 pub(crate) use host::{is_anchored_dir, registry_place};
-pub use registry::{Project, Registry, USER_CONFIG_FILE};
+pub(crate) use registry::Registry;
+pub use registry::USER_CONFIG_FILE;
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
 pub use vm::{BoxName, Provider, Vm};
@@ -251,9 +278,9 @@ pub struct Config {
     /// script here.
     ///
     /// Private, unlike every field above it, and read through
-    /// [`Config::transport`]. No key supplies this one:
-    /// `config::transport` derives it from `host` as the config
-    /// loads, and privacy is what stops a caller choosing the
+    /// [`Config::transport`]. `config::transport` derives it
+    /// from `host` as the config loads rather than reading a key
+    /// for it, and privacy is what stops a caller choosing the
     /// route for itself.
     ///
     /// **It does not make the route and `host` agree.** `host`
@@ -781,45 +808,16 @@ mod tests {
         result.is_ok()
     }
 
-    /// Every `[vm]` and `[source]` field, with the line that
-    /// states it.
-    ///
-    /// The requiredness tests below omit one entry at a time
-    /// and write the rest, so both tables come from here rather
-    /// than from a literal in each test. A literal sibling
-    /// table is the hazard: adding a required `[source]` field
-    /// later would make the `[vm]` test fail on the new field
-    /// while its message blamed whichever `[vm]` field it had
-    /// omitted.
-    const TABLE_FIELDS: [(&str, &str, &str); 7] = [
-        ("vm", "provider", "provider = \"libvirt\""),
-        ("vm", "box", "box = \"generic/ubuntu2204\""),
-        ("vm", "cpus", "cpus = 2"),
-        ("vm", "memory", "memory = 2048"),
-        ("source", "repo", "repo = \"https://example.invalid/p.git\""),
-        ("source", "ref", "ref = \"main\""),
-        ("source", "script", "script = \"vagrant/provision.sh\""),
-    ];
-
     /// A registry stating every required field except `omitted`,
     /// which names one entry of [`TABLE_FIELDS`].
     ///
-    /// Pass `""` to omit nothing, which is what the tests about
-    /// a *missing table* start from.
-    fn entry_without(omitted: &str) -> String {
-        let mut src = String::from("host = \"vmhost\"\n\n");
-        src.push_str("[projects.myproject]\n");
-        for table in ["vm", "source"] {
-            use std::fmt::Write as _;
-            let _ = writeln!(src, "\n[projects.myproject.{table}]");
-            for (owner, field, line) in TABLE_FIELDS {
-                if owner == table && field != omitted {
-                    src.push_str(line);
-                    src.push('\n');
-                }
-            }
-        }
-        src
+    /// Pass `None` to omit nothing, which is what the tests
+    /// about a *missing table* start from.
+    fn entry_without(omitted: Option<(&str, &str)>) -> String {
+        format!(
+            "host = \"vmhost\"\n\n[projects.myproject]\n{}",
+            required_tables("myproject", omitted)
+        )
     }
 
     #[test]
@@ -849,11 +847,13 @@ mod tests {
         // implements `Default`, so an absent key is libvirt.
         for (owner, omitted, _) in TABLE_FIELDS {
             if (owner, omitted) == ("vm", "provider") {
-                let cfg = parse_whole(&entry_without(omitted)).unwrap();
+                let cfg = parse_whole(&entry_without(Some((owner, omitted))))
+                    .unwrap();
                 assert_eq!(cfg.vm.provider, Provider::Libvirt);
                 continue;
             }
-            let err = parse_whole(&entry_without(omitted)).unwrap_err();
+            let err = parse_whole(&entry_without(Some((owner, omitted))))
+                .unwrap_err();
             let text = err.to_string();
             assert!(
                 matches!(err, ConfigError::Parse { .. }),
@@ -882,7 +882,7 @@ mod tests {
             let header = format!("[projects.myproject.{missing}]");
             let mut source = String::new();
             let mut skipping = false;
-            for line in entry_without("").lines() {
+            for line in entry_without(None).lines() {
                 if line.starts_with('[') {
                     skipping = line == header;
                 }
@@ -912,7 +912,7 @@ mod tests {
     /// rather than a table someone forgot. The raised values are
     /// what let a test tell a stated number from a default one.
     fn full_registry() -> String {
-        entry_without("")
+        entry_without(None)
             .replace("cpus = 2", "cpus = 4")
             .replace("memory = 2048", "memory = 8192")
     }
@@ -924,7 +924,10 @@ mod tests {
         assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus.get(), 4);
         assert_eq!(cfg.vm.memory.get(), 8192);
-        assert_eq!(cfg.source.repo.as_str(), "https://example.invalid/p.git");
+        assert_eq!(
+            cfg.source.repo.as_str(),
+            "https://example.invalid/myproject.git"
+        );
         assert_eq!(cfg.source.git_ref.as_str(), "main");
         assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
     }
@@ -1043,7 +1046,7 @@ mod load_project_tests {
     /// text, keeping the [`HostOrigin`] `Config::parse_registry`
     /// drops.
     ///
-    /// No file is written. `Config::load_project`'s own reading
+    /// This helper writes no file. `Config::load_project`'s reading
     /// is covered by the tests that do write one, and every test
     /// about ranking or assembly goes through here.
     fn load(

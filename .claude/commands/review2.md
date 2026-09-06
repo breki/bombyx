@@ -212,10 +212,9 @@ defect and we fixed it.** So:
   ends the stage. Fix them, then go to stage 3.
 - A round whose behaviour defects were all **deferred or
   declined** also ends it. The tree did not move, so the next
-  round reads the same code and returns the same findings. On
-  the previous run both behaviour defects were deferred
-  deliberately, because the step that deletes the file deletes
-  them with it.
+  round reads the same code and returns the same findings. A
+  defect in code a later step of the same plan deletes is the
+  usual reason to defer one deliberately.
 
 **Stop early when earlier fixes are breaking**, and go to
 `/review` under **When it stops converging**: more than one
@@ -228,14 +227,31 @@ and for its reason -- one branch ran five rounds at 60, 42, 36,
 convergence. Reaching the ceiling means the rule above failed,
 so say so rather than reporting the run as finished.
 
-**This stop rule has never been exercised.** It replaced
-`/review`'s round-three rule without a run to measure it
-against, and the previous version of it could only be satisfied
-by a code finding, which is the mirror of a condition reverted
-in `bd52dcd` a day earlier. Until a code review has run it,
-take a finding against it to a backlog rather than editing it
-here -- the discipline `/review` was held to for the same
-reason.
+**A run has now exercised this stop rule.** The 2026-09-06
+backlog sweep: stage 1 raised ten findings and fixed all ten,
+and stage 2's first round raised thirteen with **no behaviour
+defect among them** -- six were defects in stage 1's own fixes.
+So both stopping conditions fired on the same round. What it
+showed:
+
+- **The two conditions are not independent.** A stage whose
+  findings are all prose is also a stage whose fixes are all
+  prose, and rewriting a comment is how the next round's
+  findings get made. Expect them together.
+- **Sharpening prose is what makes it falsifiable.** Stage 1
+  asked for vague and historical comments to be rewritten
+  precisely. Each precise sentence was then checkable, and six
+  were wrong. None of the six was reachable before the rewrite,
+  so the second round was not re-reading the first -- it was
+  reading claims the first round created.
+- **Verify each claim with a command as you write it.** That is
+  what the operator chose after the stop, and it is the cheap
+  half of the lesson. `docs/todo.md` carries
+  `comment-claims-have-no-gate` for the expensive half.
+
+So a finding against this rule can now be acted on rather than
+logged. Change it only against a run like that one, and say
+which run.
 
 ## Stage 3 -- `fresh-reader`, prose only
 

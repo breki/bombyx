@@ -56,8 +56,9 @@ would have started on the host. `Config::transport()` reports
 which route is in force. It is the one private field on
 `Config`, which stops a caller choosing the route. `host` is
 public and is a `HostName`, so an assignment to it carries a
-checked value, but nothing re-derives the route beside it and
-the two can be made to disagree.
+checked value. bombyx derives the route once, while the config
+loads, and never again, so an assignment to `host` can leave
+`transport` naming the other route.
 
 The VM host's own filesystem holds no project file; the guest
 clones the repository itself once it is running. The
@@ -106,8 +107,11 @@ defaults to `config.toml` in the config directory), `--dry-run`
 One file, and it is the operator's own: `config.toml` in the
 config directory, called **the registry** because it carries a
 table per project. `--config <path>` reads a different file
-instead. Nothing is committed and nothing in the project's
-directory is opened.
+instead. The operator commits that file nowhere, and bombyx
+opens no file in the project's directory of its own accord --
+`--config` and `BOMBYX_CONFIG_HOME` both point the loader
+elsewhere, and `docs/trust-boundary.md` owns that
+qualification.
 
 `config.toml.sample` in the repository root is the only full
 example, and a test loads it as shipped. The keys, in the order

@@ -4,6 +4,54 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-06
 
+**Clearing the reviewer backlogs, and what the sweep cost**
+
+The three reviewer logs held 85 deferred findings across four
+working days, and nothing had closed since 2026-08-18. They are
+at 38 now. About a third was already dead: the whole `fr-09-02`
+run reviewed a plan document whose chunks had all shipped, and
+several entries carried their own closing line and had never
+been deleted. Three items are worth keeping.
+
+**Sharpening prose is what makes it falsifiable.** `artisan`
+asked for the vague and historical comments to be rewritten
+precisely. Each precise sentence then became checkable, and
+`red-team` found six of them false -- that one builder skips
+`vagrant_script` when two do, that a named list of tests fails
+when a fixture field is added, that `Project` is public after
+the same change had made it crate-internal. None of the six was
+reachable before the rewrite. The second round was not
+re-reading the first, it was reading claims the first had
+created, and both of `/review2`'s stopping conditions fired on
+it at once. The cheap half of the answer is to run the `grep`
+or the count before writing the sentence, which caught me once
+more the same session: I typed `WORKSPACE_THRESHOLD` into
+`CLAUDE.md` from memory and the constant is `OVERALL_THRESHOLD`.
+`comment-claims-have-no-gate` in `docs/todo.md` holds the
+expensive half.
+
+**Two reviewers and I agreed on a wrong CHANGELOG entry, and
+`/commit`'s own check caught it.** Narrowing `config::Registry`
+and `config::Project` out of the public API reads as a breaking
+removal, and that is what `red-team` filed and what I relayed.
+`git show v0.4.1:crates/bombyx/src/config/registry.rs` says the
+file did not exist at the last release, so neither type ever
+shipped and nothing was removed from anybody's view. The right
+edit was correcting the `[Unreleased]` bullet that had announced
+them. The step exists because a never-shipped removal feeds a
+spurious major bump, and it earned its place here.
+
+**Deleting 47 backlog entries left four dead citations that a
+passing `validate` never saw.** `docs/issues/` cites backlog IDs
+and `cargo xtask canon-check` fails on one that resolves
+nowhere, but it reads four inputs -- `CLAUDE.md`, `llms.txt`,
+`.claude/commands/` and `.claude/agents/` -- and `docs/` is not
+among them. A fifth citation has been dangling since the August
+sweep with nothing reporting it. `CLAUDE.md`'s gate 3 described
+that check as reading `.claude/`, which is also how
+`.claude/skills/` came to drift unnoticed;
+`backlog-ids-dangle-in-docs` holds the widening.
+
 **The review rounds on the config-typing work**
 
 Three reviewers, four rounds, 34 findings. Two things are worth

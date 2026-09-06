@@ -30,9 +30,11 @@ and this project adheres to
   needs `repo`, `ref` and `script`. Of those seven keys only `provider` has a
   default, `libvirt`, so bombyx guesses neither a base image nor a repository
   to clone.
-- Library API: `config::Registry`, `config::Project` and `name::ProjectName`,
-  plus a `ConfigError::ProjectNotFound` variant for a registry with no entry for
-  the project asked for.
+- Library API: `name::ProjectName`, plus a `ConfigError::ProjectNotFound`
+  variant for a registry with no entry for the project asked for. The registry
+  types themselves stay crate-internal: nothing outside bombyx needs one, and a
+  `Project` handed out directly would carry a `host` whose rule belongs to
+  `Registry`.
 - A `[projects.<name>]` table accepts an optional `host`, naming the machine
   that one project runs on. It outranks the file-wide `host`, and bombyx prints
   a line on stderr naming the table whenever it wins.
