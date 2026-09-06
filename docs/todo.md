@@ -94,36 +94,6 @@ plan, decisions, and outcome.
   later without changing callers. The CLI is the first consumer, a dashboard is
   possible afterwards.
 
-- **newtype-remaining-config-fields** -- types for the five checked fields
-  Five config values carried validation rules while staying a bare `String`
-  or `u32`: `project`, `box` and `ref`, plus `cpus`/`memory` whose only rule
-  is a floor. `RemoteRoot`, `HostName`, `RepoUrl`, `ScriptPath` and
-  `ScratchName` showed the shape. `Config`, `Vm` and `Source` all have public
-  fields, so every one of the five could be set by hand with no check
-  running. The checks lived in `Config::validate`, `vm::validate` and
-  `source::validate`, which only the loading path called. GitHub #43.
-
-  **Done on the branch for #43; this entry moves to `## Done` when the PR
-  merges.** All five have types, and those three functions are deleted along
-  with `Project::validate` and `Config::validate_generated`.
-
-  `Config::project` is a field type change rather than a new type:
-  `crate::name::ProjectName` already exists and is what the registry keys
-  its project map by. `cpus` and `memory` become `std::num::NonZeroU32`,
-  decided by the operator while #17 was scoped. That decision came with a
-  premise the work then disproved: serde refuses `0` for that type but does
-  **not** name the key, because `toml` reports a span for a bad value and
-  bombyx prints its `message()` rather than its `Display`. The two fields
-  are read through a `#[serde(deserialize_with = ...)]` function instead,
-  which names them.
-
-  `remote_root` and `host` were the two at the front of this queue and are
-  done, under #17. `remote_root` reaches `rm -rf` and now holds every rule
-  it has in `RemoteRoot`; `host` reaches `ssh` as a bare positional argument
-  and now holds its three in `HostName`. `host`'s check had been placed
-  twice in two weeks and argued about three times before that, which is what
-  a missing type looks like.
-
 - **self-update-resolves-tar-late** -- two downloads before it notices no tar
   Found by the red-team review of 92c2e74 (RT-7), verified by reading the call
   sites rather than by running it. bombyx resolves every program a plan needs up
@@ -368,6 +338,9 @@ plan, decisions, and outcome.
   meantime, so this is not urgent.
 
 ## Done
+
+- **newtype-remaining-config-fields** -- types for the five checked fields
+  (2026-09-06)
 
 - **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
   (2026-09-05)
