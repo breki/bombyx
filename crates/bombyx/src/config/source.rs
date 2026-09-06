@@ -10,12 +10,11 @@
 //! carry the checks that cannot be expressed as "a non-empty
 //! string".
 
-use std::fmt;
-
 use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards;
+use crate::newtype::checked_str_newtype;
 
 /// Where the guest fetches the project from, as `[source]`.
 ///
@@ -99,25 +98,12 @@ impl RepoUrl {
         check_repo(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// The value, as `git` and the Vagrantfile see it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for RepoUrl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for RepoUrl {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+checked_str_newtype!(
+    RepoUrl,
+    "The value, as `git` and the Vagrantfile see it."
+);
 
 impl TryFrom<String> for RepoUrl {
     type Error = FieldError;
@@ -168,25 +154,9 @@ impl ScriptPath {
         check_script(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// The value, as the guest's shell sees it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for ScriptPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for ScriptPath {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+checked_str_newtype!(ScriptPath, "The value, as the guest's shell sees it.");
 
 impl TryFrom<String> for ScriptPath {
     type Error = FieldError;
@@ -230,25 +200,9 @@ impl GitRef {
         check_git_ref(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// The value, as `git` and the Vagrantfile see it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for GitRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for GitRef {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+checked_str_newtype!(GitRef, "The value, as `git` and the Vagrantfile see it.");
 
 impl TryFrom<String> for GitRef {
     type Error = FieldError;
@@ -364,85 +318,21 @@ fn check_script(value: &str) -> Result<(), FieldError> {
 mod tests {
     use super::*;
 
-    /// Builds either newtype from a string and throws the value
-    /// away, so a rule both share can be tested against both.
-    type Build = fn(&str) -> Result<(), FieldError>;
-
-    /// The three newtypes, as field name, constructor, and a
-    /// value that constructor accepts.
-    ///
-    /// The accepted value is in the row rather than worked out
-    /// from the field name, so a test needing one reads it here.
-    /// A fourth newtype is then one more row, instead of one
-    /// more branch inside every test.
-    ///
-    /// The closures capture nothing, so they become plain
-    /// function pointers and the array has one type.
-    fn every_newtype() -> [(&'static str, Build, &'static str); 3] {
-        [
-            (
-                "repo",
-                |s| RepoUrl::parse(s).map(|_| ()),
-                "https://example.invalid/p.git",
-            ),
-            (
-                "script",
-                |s| ScriptPath::parse(s).map(|_| ()),
-                "vagrant/provision.sh",
-            ),
-            ("ref", |s| GitRef::parse(s).map(|_| ()), "main"),
-        ]
-    }
-
     /// Asserts `bad` is refused with a message mentioning
     /// `reason`.
     ///
-    /// Pinning the reason, not just the failure, is what makes
-    /// these tests notice a deleted rule. A value refused by
-    /// some *other* check would still fail `is_err()`, so a
-    /// weaker assertion goes green while the rule it covered
-    /// is gone.
-    fn refused_because(build: Build, bad: &str, reason: &str) {
+    /// The rules these three types share are tested against all
+    /// four checked newtypes at once, in `super::guards`'s test
+    /// module, where those rules live. What is left here is each
+    /// type's own rule, so this helper takes a constructor
+    /// rather than a table.
+    fn refused_because(
+        build: fn(&str) -> Result<(), FieldError>,
+        bad: &str,
+        reason: &str,
+    ) {
         let err = build(bad).expect_err("must be refused").to_string();
         assert!(err.contains(reason), "{bad:?}: want {reason:?}, got {err}");
-    }
-
-    #[test]
-    fn every_newtype_refuses_a_blank_value() {
-        for (field, build, _) in every_newtype() {
-            for bad in ["", "   "] {
-                refused_because(build, bad, "must not be empty");
-                // The field name is the only part of the error
-                // telling an operator which key to edit, and it
-                // now travels through a guard, a `FieldError`
-                // and a `ConfigError` before it is printed.
-                // Swap two of them and only this line notices.
-                refused_because(build, bad, field);
-            }
-        }
-    }
-
-    #[test]
-    fn every_newtype_refuses_surrounding_whitespace() {
-        // A copy-paste artifact that otherwise fails inside the
-        // guest, long after bombyx could have said so.
-        for (_, build, good) in every_newtype() {
-            for bad in [format!(" {good}"), format!("{good} ")] {
-                refused_because(build, &bad, "whitespace");
-            }
-        }
-    }
-
-    #[test]
-    fn every_newtype_refuses_characters_that_break_the_ruby() {
-        // Both characters reach a Ruby string literal in the
-        // generated Vagrantfile: a quote ends it early, a
-        // backslash escapes whatever follows.
-        for (_, build, good) in every_newtype() {
-            for bad in [format!("{good}a\"b"), format!("{good}a\\b")] {
-                refused_because(build, &bad, "would end or escape");
-            }
-        }
     }
 
     #[test]
@@ -457,21 +347,6 @@ mod tests {
             "\\windows\\x",
             "would end or escape",
         );
-    }
-
-    #[test]
-    fn every_newtype_refuses_a_value_git_would_treat_as_an_option() {
-        // `-oProxyCommand=id:x` is the case that pins this rule
-        // for `repo`. One colon, no `://`, so the URL check
-        // reads it as the SSH shorthand `host:path` and accepts
-        // it outright -- delete the dash rule and that value is
-        // not refused at all.
-        for (_, build, _) in every_newtype() {
-            for bad in ["-x", "-oProxyCommand=id:x", "--upload-pack=/bin/sh:x"]
-            {
-                refused_because(build, bad, "git would treat as an option");
-            }
-        }
     }
 
     #[test]
@@ -534,18 +409,6 @@ mod tests {
         assert_eq!(git_ref.as_str(), "main");
         assert_eq!(git_ref.to_string(), "main");
         assert_eq!(git_ref.as_ref(), "main");
-    }
-
-    #[test]
-    fn a_control_character_in_a_ref_is_reported_as_one() {
-        // Separate message from the quote case: a BEL neither
-        // ends nor escapes a Ruby literal, and saying it does
-        // sends an operator hunting a quoting problem.
-        let err = GitRef::parse("ma\u{7}in").expect_err("must be refused");
-        let FieldError::Invalid { reason, .. } = &err else {
-            panic!("{err:?}");
-        };
-        assert!(reason.contains("control character"), "{reason}");
     }
 
     #[test]

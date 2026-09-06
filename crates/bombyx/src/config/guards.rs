@@ -188,6 +188,167 @@ pub(super) fn check_renderable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{BoxName, GitRef, RepoUrl, ScriptPath};
+
+    /// Builds one of the checked newtypes from a string and
+    /// throws the value away, so a rule several of them share
+    /// can be tested against every one of them.
+    type Build = fn(&str) -> Result<(), FieldError>;
+
+    /// The four newtypes whose rules are [`check_renderable`]
+    /// and, for three of them, [`check_not_an_option`] -- as
+    /// field name, constructor, a value that constructor
+    /// accepts, and whether the value reaches a command line.
+    ///
+    /// **Two other newtypes use rules from this module and are
+    /// deliberately not rows.** `RemoteRoot` and `HostName` are
+    /// built on `check_not_empty`, `check_not_an_option` and
+    /// `check_charset`, never on `check_renderable`, and each
+    /// carries anchoring or charset rules of its own that no
+    /// column here could express. `super::root` and
+    /// `super::host` test them, the dash rule included. So this
+    /// table is not the answer to "which types use this
+    /// module"; it is the answer to "which types share one rule
+    /// set", and a new field sharing that set is one more row.
+    ///
+    /// The table lives here rather than beside any one type,
+    /// because the rules live here. A fifth newtype sharing the
+    /// set is then one more row, wherever the type itself
+    /// lives.
+    ///
+    /// The accepted value is in the row rather than worked out
+    /// from the field name, so a test needing one reads it here.
+    /// The last column decides which rows
+    /// [`check_not_an_option`] applies to: `box` is resolved by
+    /// vagrant and never becomes an argument bombyx composes,
+    /// so it is the one row that does not carry that rule.
+    ///
+    /// The closures capture nothing, so they become plain
+    /// function pointers and the array has one type.
+    fn renderable_newtypes() -> [(&'static str, Build, &'static str, bool); 4] {
+        [
+            (
+                "repo",
+                |s| RepoUrl::parse(s).map(|_| ()),
+                "https://example.invalid/p.git",
+                true,
+            ),
+            (
+                "script",
+                |s| ScriptPath::parse(s).map(|_| ()),
+                "vagrant/provision.sh",
+                true,
+            ),
+            ("ref", |s| GitRef::parse(s).map(|_| ()), "main", true),
+            (
+                "box",
+                |s| BoxName::parse(s).map(|_| ()),
+                "generic/ubuntu2204",
+                false,
+            ),
+        ]
+    }
+
+    /// Asserts `bad` is refused with a message mentioning
+    /// `reason`.
+    ///
+    /// Pinning the reason, not just the failure, is what makes
+    /// these tests notice a deleted rule. A value refused by
+    /// some *other* check would still fail `is_err()`, so a
+    /// weaker assertion goes green while the rule it covered
+    /// is gone.
+    fn refused_because(build: Build, bad: &str, reason: &str) {
+        let err = build(bad).expect_err("must be refused").to_string();
+        assert!(err.contains(reason), "{bad:?}: want {reason:?}, got {err}");
+    }
+
+    #[test]
+    fn every_renderable_newtype_refuses_a_blank_value() {
+        for (field, build, _, _) in renderable_newtypes() {
+            for bad in ["", "   "] {
+                refused_because(build, bad, "must not be empty");
+                // The field name is the only part of the error
+                // telling an operator which key to edit, and it
+                // travels through a guard, a `FieldError` and a
+                // `ConfigError` before it is printed. Swap two
+                // of them and only this line notices.
+                refused_because(build, bad, field);
+            }
+        }
+    }
+
+    #[test]
+    fn every_renderable_newtype_refuses_surrounding_whitespace() {
+        // A copy-paste artifact that otherwise fails inside the
+        // guest, long after bombyx could have said so.
+        for (_, build, good, _) in renderable_newtypes() {
+            for bad in [format!(" {good}"), format!("{good} ")] {
+                refused_because(build, &bad, "whitespace");
+            }
+        }
+    }
+
+    #[test]
+    fn every_renderable_newtype_refuses_characters_that_break_the_ruby() {
+        // Both characters reach a Ruby string literal in the
+        // generated Vagrantfile: a quote ends it early, a
+        // backslash escapes whatever follows.
+        for (_, build, good, _) in renderable_newtypes() {
+            for bad in [format!("{good}a\"b"), format!("{good}a\\b")] {
+                refused_because(build, &bad, "would end or escape");
+            }
+        }
+    }
+
+    #[test]
+    fn every_renderable_newtype_reports_a_control_character_as_one() {
+        // Separate message from the quote case: a BEL neither
+        // ends nor escapes a Ruby literal, and saying it does
+        // sends an operator hunting a quoting problem they do
+        // not have.
+        for (_, build, good, _) in renderable_newtypes() {
+            let bad = format!("{good}a\u{7}b");
+            refused_because(build, &bad, "control character");
+        }
+    }
+
+    #[test]
+    fn a_renderable_newtype_reaching_a_command_line_refuses_an_option() {
+        // `-oProxyCommand=id:x` is the case that pins this rule
+        // for `repo`. One colon, no `://`, so the URL check
+        // reads it as the SSH shorthand `host:path` and accepts
+        // it outright -- delete the dash rule and that value is
+        // not refused at all.
+        for (field, build, good, reaches_a_command_line) in
+            renderable_newtypes()
+        {
+            // The row's last column is read once, here, rather
+            // than inside the loop over bad values, so the
+            // branch reads as the per-type decision it is.
+            if !reaches_a_command_line {
+                // `box` is the row without the rule, and it is
+                // asserted rather than skipped: otherwise this
+                // test would go green on a table where every row
+                // had lost its last column.
+                let dashed = format!("-{good}");
+                assert!(
+                    build(&dashed).is_ok(),
+                    "{field} carries no option rule, so {dashed:?} \
+                     must be accepted"
+                );
+                continue;
+            }
+            for bad in ["-x", "-oProxyCommand=id:x", "--upload-pack=/bin/sh:x"]
+            {
+                // The tool name is asserted, not just the rule,
+                // because each constructor chooses which program
+                // to name. All three of these hand their value
+                // to `git`, and a constructor changed to name
+                // something else is what this line catches.
+                refused_because(build, bad, "git would treat as an option");
+            }
+        }
+    }
 
     #[test]
     fn the_option_message_names_the_tool_that_would_be_fooled() {

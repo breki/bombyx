@@ -23,10 +23,10 @@
 //! map key needs -- serde, ordering, and `Borrow<str>` for
 //! lookups -- and [`ScratchName`] needs none of them.
 
-use std::fmt;
-
 use serde::Deserialize;
 use thiserror::Error;
+
+use crate::newtype::checked_str_newtype;
 
 /// Longest accepted name.
 pub const MAX_NAME_LEN: usize = 64;
@@ -69,13 +69,10 @@ fn is_segment_char(c: char) -> bool {
 /// path segment on the VM host.
 ///
 /// Every rule for such a name is here, length included, and
-/// four callers share it: [`ScratchName`], [`ProjectName`], the
-/// `project` field of `super::config::Config`, and the registry
-/// lookup, which checks the name it was asked for before
-/// reporting that no table carries it. Each of those ends up as
-/// a single directory name on the host, so a rule one of them
-/// applied alone would let the same name through one path and
-/// refuse it on another.
+/// several callers share it. Each of them ends up as a single
+/// directory name on the VM host, so a rule one of them applied
+/// alone would let the same name through one path and refuse it
+/// on another.
 ///
 /// # Errors
 ///
@@ -132,13 +129,9 @@ impl ProjectName {
         check_segment(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// Returns the validated name.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
+
+checked_str_newtype!(ProjectName, "Returns the validated name.");
 
 impl TryFrom<String> for ProjectName {
     type Error = NameError;
@@ -158,12 +151,6 @@ impl std::borrow::Borrow<str> for ProjectName {
     /// for anybody who typed one wrong.
     fn borrow(&self) -> &str {
         &self.0
-    }
-}
-
-impl fmt::Display for ProjectName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
     }
 }
 
@@ -189,19 +176,9 @@ impl ScratchName {
         check_segment(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// Returns the validated name.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for ScratchName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+checked_str_newtype!(ScratchName, "Returns the validated name.");
 
 #[cfg(test)]
 mod tests {

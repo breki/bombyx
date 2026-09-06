@@ -4,6 +4,74 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-06
 
+**The review rounds on the config-typing work**
+
+Three reviewers, four rounds, 34 findings. Two things are worth
+keeping out of it.
+
+**The first is a fix that reported itself as landed and was
+not.** A `python` string replace against `config.rs` matched
+nothing, because `cargo xtask fmt` had reflowed the anchor line
+between writing the fix and applying it. The replace was a
+silent no-op, and I read the test passing afterwards as proof it
+had worked. The test passed because it was unchanged. `red-team`
+found the comment claiming an assertion the test did not make,
+one round later.
+
+Two more of the same turned up on the sweep: an `llms.txt`
+sentence about "both `validate` functions" that was fixed twice
+and applied neither time. So a scripted replace here now goes
+through a helper that raises when the pattern is absent, and the
+result gets read back. `CLAUDE.md` already warns that a scripted
+string replace over Rust is a hazard next to a `///` block; what
+it does not say, and what cost three edits this time, is that a
+*silent* no-op is worse than a wrong match. A wrong match shows
+up in the diff. A no-op shows up nowhere, and every gate stays
+green.
+
+**The second is that the false claims clustered in the prose we
+had just corrected.** `red-team`'s first round found `Cpus` and
+`Memory` described as real types in three documents -- types
+that existed for about twenty minutes, written as one fix and
+replaced by another before the prose caught up. Its second round
+then found four more stale counts and one false claim in the
+paragraphs the first round had rewritten, including one I put
+into `CLAUDE.md` itself: that `Registry::project_host` hands out
+a host with no rule run on it, which is the opposite of what the
+code does. The method runs no rule; the value has had one run on
+it by `parse`.
+
+`fresh-reader` then read the same paragraphs cold and reported
+them as sediment rather than explanation. Its FR-4 is the one to
+remember: `error.rs` refused to give a count in one paragraph
+and then built three more out of "six of the eight", "five of
+those six" and "two", with the eight enumerated only in a
+private module. Naming the two exceptions instead of subtracting
+them says the same thing and needs no denominator.
+
+**On the work itself, two operator decisions changed the
+shape.** The message for a bad `cpus` had got worse, not better:
+the deleted `vm::validate` named the key and `NonZeroU32` does
+not, because the key survives only in `toml`'s `Display`, which
+bombyx deliberately drops. Fixing that with a
+`#[serde(deserialize_with = ...)]` function keeps `NonZeroU32`
+as the field type, which is what makes a zero unrepresentable,
+and adds the name back. `red-team` then found the fix covered
+only the zero -- `-1`, a value past `u32::MAX`, `"4"` and `2.5`
+still arrived anonymous -- so `at_least_one` now re-wraps
+whatever `u32::deserialize` refuses.
+
+And the duplication gate failed at 6.4%, because every newtype
+needs `as_str`, `Display` and `AsRef`, and `main` was already at
+5.7% for the same reason. The gate was firing on the pattern the
+codebase mandates. Given the choice between raising the
+threshold, stopping the tool counting three-line units, and
+generating the boilerplate, the operator chose the macro.
+`newtype.rs` now serves all eight string newtypes and
+duplication is 4.0%, below where `main` sits.
+
+### 2026-09-06
+
 **The last five config values grew types, and every checking
 function went with them**
 

@@ -70,22 +70,26 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// table key supplies that, so a project cannot disagree with
 /// itself about what it is called.
 ///
-/// The fields are checked in three different places, and which
+/// The fields are checked in two different places, and which
 /// one depends on what carries the rule.
 ///
-/// `remote_root`, `repo` and `script` are checked by their own
-/// types as the table parses: they are a [`super::RemoteRoot`],
-/// a [`super::RepoUrl`] and a [`super::ScriptPath`], so a bad
-/// value fails the parse and names the line.
+/// Every field but `host` is checked by its own type as the
+/// table parses. `remote_root` is a [`super::RemoteRoot`],
+/// `repo` a [`super::RepoUrl`], `script` a
+/// [`super::ScriptPath`], `box` a [`super::BoxName`] and `ref`
+/// a [`super::GitRef`], and `cpus` and `memory` are read
+/// through `super::vm`'s `positive_cpus` and `positive_memory`
+/// (named rather than linked: both are private). A bad one
+/// fails the parse and names the line.
 ///
-/// The optional `host` is checked by `parse`, once the table
-/// has parsed and before any `Registry` exists, along with every
-/// other `host` in the file.
+/// The optional `host` is the exception. It is checked by this
+/// module's `parse`, once the table has parsed and before any
+/// `Registry` exists, along with every other `host` in the
+/// file. The field below says why it is a `String` rather than
+/// a type.
 ///
-/// The rest -- `box`, `cpus`, `memory` and `ref` inside the two
-/// tables -- are checked types as well, so serde refuses a bad
-/// one while the same parse runs. Nothing is left for a
-/// function to check afterwards.
+/// serde has run every one of those rules by the time this
+/// struct exists.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -312,12 +316,19 @@ impl Registry {
     /// and a guessed entry that boots the wrong VM is worse than
     /// a message saying what to type.
     ///
-    /// **No value rule waits until here.** Every value in an
-    /// entry is a type that checks itself, so a table that
-    /// breaks any rule fails the whole file while it is read,
-    /// whichever project was asked for. The project name is a
-    /// map key, and serde builds the map before any code here
-    /// runs, so [`ProjectName`] checks it during the parse too.
+    /// **This method runs no value rule of its own.** Every
+    /// value in an entry but `host` is a type that checks
+    /// itself, so a table breaking one of those rules fails the
+    /// whole file while it is read, whichever project was asked
+    /// for. The project name is a map key, and serde builds the
+    /// map before any code here runs, so [`ProjectName`] checks
+    /// it during the parse too.
+    ///
+    /// `host` is a `String` here on purpose -- the field says
+    /// why -- and this module's `parse` applies its rule to
+    /// every `host` in the file, so it too has passed before
+    /// this runs. (Named rather than linked: `parse` is private,
+    /// and rustdoc refuses a public page pointing at one.)
     ///
     /// The key comes back beside the entry, so a caller
     /// building a `super::Config` gets a [`ProjectName`] the

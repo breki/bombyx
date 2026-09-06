@@ -20,6 +20,7 @@
 pub mod config;
 pub mod doctor;
 pub mod name;
+mod newtype;
 pub mod plan;
 pub mod remote;
 pub mod term;

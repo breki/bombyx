@@ -21,15 +21,29 @@
 //! operator is editing.
 //!
 //! **Every field is checked by its *type*, so none can be built
-//! wrong at all.** `remote_root`, `host`, `repo`, `script`,
-//! `box`, `ref` and `project` are newtypes; see [`RepoUrl`] for
-//! how the pattern works. `cpus` and `memory` are
-//! `std::num::NonZeroU32`, because a floor of one is all either
-//! has and that is what the standard type means.
+//! wrong at all.** Seven are newtypes of bombyx's own:
+//! `remote_root`, `host`, `repo`, `script`, `box`, `ref` and
+//! `project`. See [`RepoUrl`] for how the pattern works.
+//!
+//! `cpus` and `memory` are `std::num::NonZeroU32`, which is the
+//! whole rule either has. That standard type follows none of
+//! that pattern -- no `parse`, no [`FieldError`] -- so serde
+//! reads the two through `vm::positive_cpus` and
+//! `positive_memory`, which is what makes a refusal name the
+//! key.
 //!
 //! All of them but `host` run their rules as serde reads the
 //! file. `host` runs its own as the two `host` keys are ranked,
 //! and `config::host` says why it differs.
+//!
+//! **`project` is checked twice**, because two different values
+//! carry it. The table key in the registry is a
+//! [`ProjectName`], checked as serde builds the map. The
+//! `--project` argument is a plain string the operator typed,
+//! and [`Config::load_project`] runs `crate::name::check_segment`
+//! on it before it opens any file -- so a name no table key
+//! could hold is refused before a message can advise writing
+//! one.
 //!
 //! So there is no separate function to call. `Config` has
 //! public fields, and a caller assigning to one gets the same
@@ -50,7 +64,8 @@
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
 //! - `root` -- every rule `remote_root` must pass.
-//! - `source` -- the `[source]` table and its two checked types.
+//! - `source` -- the `[source]` table and its three checked
+//!   types.
 //! - `transport` -- whether `host` names this very machine, and
 //!   what bombyx does when it does.
 //! - `vm` -- the `[vm]` table.
@@ -60,7 +75,7 @@
 
 use std::path::Path;
 
-use crate::name::{ProjectName, ScratchName, check_segment};
+use crate::name::{ScratchName, check_segment};
 
 mod error;
 mod guards;
@@ -145,6 +160,7 @@ fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
     format!("host = {host:?}\n\n{}", test_entry(name, project_host))
 }
 
+pub use crate::name::ProjectName;
 pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -929,11 +945,12 @@ mod tests {
         // One field at a time, so a type on `cpus` alone cannot
         // pass by way of the `memory` case.
         //
-        // Both are `NonZeroU32`, so serde refuses the `0` while
-        // the file is being read and the error arrives as
-        // `Parse`. The message is asserted rather than the
-        // variant, because what an operator needs from it is the
-        // key and the rule, and `Parse` also names the line.
+        // serde reads both fields through `vm::positive_cpus`
+        // and `positive_memory`, so the error arrives as
+        // `Parse`, carrying the position as well as the field
+        // and the rule. Both halves are asserted: the position
+        // is what sends the operator to the line, and the key is
+        // what tells them which of the two to change.
         for (field, from, to) in [
             ("cpus", "cpus = 4", "cpus = 0"),
             ("memory", "memory = 8192", "memory = 0"),
@@ -942,7 +959,20 @@ mod tests {
             let err = parse_whole(&source).unwrap_err();
             assert!(matches!(&err, ConfigError::Parse { .. }), "{err:?}");
             let text = err.to_string();
-            assert!(text.contains("nonzero"), "{field}: {text}");
+            assert!(
+                text.contains(&format!(
+                    "invalid `{field}`: must be at least 1"
+                )),
+                "{text}"
+            );
+            // The position is asserted as well as the key. It
+            // is the half `toml` supplies rather than bombyx,
+            // and the half a `deserialize_with` could silently
+            // lose: a custom error carrying no span falls into
+            // `read::toml_summary`'s `None` arm and the line
+            // vanishes from the message.
+            assert!(text.contains("line "), "{text}");
+            assert!(text.contains("column "), "{text}");
         }
     }
 
@@ -1177,19 +1207,11 @@ mod load_project_tests {
         // operator is told about. It is the one they can act on
         // with the file already open, and the host message would
         // send them to that same file for a second edit.
-        //
-        // `NonZeroU32` is the one checked type whose message
-        // does not name its key: the `toml` crate reports a
-        // span for a bad value and leaves the key out, where
-        // every newtype here writes its own field name into the
-        // message. So the position is what an operator gets, and
-        // `line 6, column 8` is the `0` in `cpus = 0`.
         let source =
             test_entry("myproject", None).replace("cpus = 2", "cpus = 0");
         let err = load(&source, "myproject").unwrap_err();
         let text = err.to_string();
-        assert!(text.contains("line 6, column 8"), "{text}");
-        assert!(text.contains("nonzero"), "{text}");
+        assert!(text.contains("invalid `cpus`"), "{text}");
         assert!(
             !matches!(err, ConfigError::HostMissing { .. }),
             "the host message wins only if the entry is read second: {text}"

@@ -568,9 +568,9 @@ to be opened.
   deliberately. A list beats a paragraph when the thing being
   described is a list -- `config.rs`'s header names its two
   loaders as two items. And an absence needs stating and then
-  locating: `Registry::project_host` hands a host out with no
-  rule run on it, on purpose, so the comment says so and says
-  where the rule ran instead.
+  locating: `Registry::project_host` runs no rule itself, on
+  purpose, so the comment says so and says where the rule ran
+  instead.
 - **One reason, not the chain.** Give the reason the code sits
   where it does, and stop. The reader reaches the consequence
   without being walked through it. A guard placed before a

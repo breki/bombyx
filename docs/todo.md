@@ -95,20 +95,27 @@ plan, decisions, and outcome.
   possible afterwards.
 
 - **newtype-remaining-config-fields** -- types for the five checked fields
-  Five config values carry validation rules and are still bare `String` or
-  `u32`: `project`, `box` and `ref`, plus `cpus`/`memory` whose only rule is
-  a floor. `RemoteRoot`, `HostName`, `RepoUrl`, `ScriptPath` and
-  `ScratchName` show the shape. `Config`, `Vm` and `Source` all have public
-  fields, so every one of the five can be set by hand with no check running.
-  The checks for `project` live in `Config::validate`, and those for `box`,
-  `ref`, `cpus` and `memory` in `vm::validate` and `source::validate`, all of
-  which only the loading path calls. GitHub #43.
+  Five config values carried validation rules while staying a bare `String`
+  or `u32`: `project`, `box` and `ref`, plus `cpus`/`memory` whose only rule
+  is a floor. `RemoteRoot`, `HostName`, `RepoUrl`, `ScriptPath` and
+  `ScratchName` showed the shape. `Config`, `Vm` and `Source` all have public
+  fields, so every one of the five could be set by hand with no check
+  running. The checks lived in `Config::validate`, `vm::validate` and
+  `source::validate`, which only the loading path called. GitHub #43.
+
+  **Done on the branch for #43; this entry moves to `## Done` when the PR
+  merges.** All five have types, and those three functions are deleted along
+  with `Project::validate` and `Config::validate_generated`.
 
   `Config::project` is a field type change rather than a new type:
   `crate::name::ProjectName` already exists and is what the registry keys
   its project map by. `cpus` and `memory` become `std::num::NonZeroU32`,
-  decided by the operator while #17 was scoped -- serde already refuses `0`
-  for that type and names the key, so a bespoke `Cpus` would buy nothing.
+  decided by the operator while #17 was scoped. That decision came with a
+  premise the work then disproved: serde refuses `0` for that type but does
+  **not** name the key, because `toml` reports a span for a bad value and
+  bombyx prints its `message()` rather than its `Display`. The two fields
+  are read through a `#[serde(deserialize_with = ...)]` function instead,
+  which names them.
 
   `remote_root` and `host` were the two at the front of this queue and are
   done, under #17. `remote_root` reaches `rm -rf` and now holds every rule
@@ -332,6 +339,33 @@ plan, decisions, and outcome.
   every row green plus one skip, and `bombyx up` then fails. Writing the probe
   honestly needs a Windows VM host, which nobody has, so this is blocked rather
   than merely unwritten -- the skip row is the honest report until then.
+
+- **project-parsed-at-cli-edge** -- the project name is checked twice
+  Found by the artisan review of the #43 branch (AQ-5). The `--project` value
+  arrives as a `String` in `main.rs` and stays one into the library, where
+  `check_segment` runs on it twice on the ordinary path: once in
+  `Config::load_project` before the registry is opened, and again in
+  `Registry::project` before the map is consulted. The sibling value already
+  does better -- `vm_name` parses the scratch name into a `ScratchName` at the
+  CLI edge. Parsing the project name into a `ProjectName` there and taking
+  `&ProjectName` in both functions would leave one check. The trade to weigh:
+  the message for a bad name moves from `ConfigError::Invalid { field: "project"
+  }` to the CLI layer, and the parse has to stay ahead of any file being opened,
+  because `ProjectNotFound` advises writing a table heading the parser would
+  refuse.
+
+- **split-source-module** -- source.rs holds three unrelated newtypes
+  Found by the artisan review of the #43 branch (AQ-6). `config/source.rs`
+  crossed 500 lines when `GitRef` was added, and holds three independent
+  newtypes -- `RepoUrl`, `ScriptPath` and `GitRef` -- plus the `Source` struct,
+  three private rule functions and a test module. Its only cohesion is "the
+  `[source]` table", and each further field type adds another block a reader
+  scrolls past to reach the one they want. Splitting it into `config/source.rs`
+  for the struct and the module doc, with `config/source/repo.rs`,
+  `config/source/script.rs` and `config/source/git_ref.rs` beside it, leaves the
+  public paths `bombyx::config::{RepoUrl, ScriptPath, GitRef}` unchanged. The
+  `checked_str_newtype!` macro took roughly 40 lines back out of the file in the
+  meantime, so this is not urgent.
 
 ## Done
 

@@ -455,28 +455,29 @@ inside one. Either way the values are then repo-supplied.
 So the allowlist is a boundary rather than a typo check. Each
 of those rules is what stops a repo-supplied value reaching
 `ssh` or `rm -rf`, so none of them is there to catch a typo.
-Six values reach the generated files and so the guest -- `box`,
-`repo`, `ref`, `script`, `cpus` and `memory` -- and
-`remote_root` reaches `rm -rf` on the VM host. A registry out of
-a clone with `remote_root = "/etc"` gets `rm -rf /etc/<project>`
-there, which is `RemoteRoot`'s depth floor doing the work it
-exists for.
+Membership of the guarded set turns on one question: does the
+operator choose the value's text? Six such values reach the
+generated files and so the guest -- `box`, `repo`, `ref`,
+`script`, `cpus` and `memory` -- and `remote_root` reaches
+`rm -rf` on the VM host. A registry out of a clone with
+`remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
+is `RemoteRoot`'s depth floor doing the work it exists for.
+`cpus` and `memory` belong to that set although they are not
+strings, because the operator still chooses the number, and a
+floor is what guards them.
 
-`provider` reaches both the generated Vagrantfile and the
-command line bombyx hands to `ssh` or to `sh -c`, where bombyx
-sets `VAGRANT_DEFAULT_PROVIDER` so vagrant uses the named
-provider rather than choosing one. Only `vagrant up` carries it;
+`provider` is the one value that answers the question the other
+way, so it carries no guard. It reaches as far as any of them --
+into the generated Vagrantfile, and onto the command line
+bombyx hands to `ssh` or to `sh -c`, where
+`VAGRANT_DEFAULT_PROVIDER` tells vagrant which provider to use
+rather than letting it choose. Only `vagrant up` carries it;
 `remote::creates_a_machine` holds that rule and
-`remote::PROVIDER_ENV` argues it.
-
-`provider` is absent from the list above because `Provider` is a
-closed enum. Serde admits only the two words `libvirt` and
-`hyperv` while the file is being read, so no operator text
-reaches the shell or the guest, and there is nothing left for a
-guard to check. `cpus` and `memory` are in the list although
-they are not strings either, because an operator still chooses
-their values; a floor is what guards those.
-`remote::vagrant_command` quotes the provider regardless, so the
+`remote::PROVIDER_ENV` argues it. But `Provider` is a closed
+enum, and serde admits only the two words `libvirt` and
+`hyperv` while the file is read, so nothing an operator typed
+reaches the shell or the guest and a guard would have nothing to
+check. `remote::vagrant_command` quotes it regardless, so the
 assignment matches every other one in the script.
 
 What the guards do *not* stop is the redirect itself: bombyx
@@ -485,25 +486,33 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Every value is enforced by its type. `remote_root` is a
-`RemoteRoot`, `repo` a `RepoUrl`, `script` a `ScriptPath`,
-`box` a `BoxName`, `ref` a `GitRef`, `project` a `ProjectName`
-and `host` a `HostName`. Each is a newtype whose constructor
-holds the rules, so an invalid one cannot be built -- by a
-config file or by a library caller. All of them but `host` run
-their constructor as serde deserializes, so a bad value is
-refused before a `Config` exists and the error identifies the
-line.
+Seven values are enforced by a newtype of bombyx's own:
+`remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
+`ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `project` a
+`ProjectName` and `host` a `HostName`. Each constructor holds
+the rules, so an invalid one cannot be built -- by a config file
+or by a library caller. All seven but `host` run their
+constructor as serde deserializes, so a bad value is refused
+before a `Config` exists and the error identifies the line.
 
-`cpus` and `memory` are the two that are not newtypes of ours.
-Their only rule is a floor of one, which is exactly what
-`std::num::NonZeroU32` means, so the standard type carries it
-and serde refuses a `0` while the file is read. It is the one
-checked type whose message does not name its key: the `toml`
-crate reports a span for a bad value and leaves the key out,
-where every newtype writes its own field name into the message.
-So the operator gets a line and a column instead, pointing at
-the offending value itself.
+`cpus` and `memory` are `std::num::NonZeroU32`, which is the
+whole rule either has and makes a zero unrepresentable for a
+library caller as surely as a newtype would. What the standard
+type does not do is say *which* key was wrong: serde's message
+for it reads `invalid value: integer 0, expected a nonzero u32`.
+bombyx prints `toml`'s `message()` rather than its `Display`,
+because `Display` quotes the source line into the output, and
+the key appears only in that quoted line. So the two would have
+been the only config values whose refusal did not name a key.
+
+`config::vm::positive_cpus` and `positive_memory` are what put
+the name back. serde reads each field through one of them, and
+both delegate to `at_least_one`, which reads a plain `u32` and
+turns every refusal -- the zero, a negative, a value past
+`u32::MAX`, a quoted number -- into a `FieldError` naming the
+field. The operator reads
+``invalid `cpus`: must be at least 1`` with the line and column
+beside it.
 
 `HostName` is the exception, and it has no `#[serde(try_from =
 "String")]`. The registry carries a `host` key per project and
@@ -514,12 +523,19 @@ supply one because it does not know which key it is reading.
 Trading that answer for a line number would be the worse deal,
 so the host rule runs where the origin is known.
 
-**No checking function survives.** `Config::validate`,
-`Project::validate`, `vm::validate` and `source::validate` all
-had nothing left to run once the last five values grew types,
-and issue #43 deleted them. A `Vm`, a `Source`, a `Project` or
-a `Config` that exists at all is one whose values passed,
-whoever built it and however.
+**No value is checked after parsing.** serde has run every rule
+by the time a `Config` exists, so a `Vm`, a `Source`, a
+`Project` or a `Config` that exists at all is one whose values
+passed,
+whoever built it and however -- with one exception.
+`Project::host` is a bare `Option<String>`, and its rule runs
+in `registry::parse` rather than in a type, because the field
+name cannot say which of the two `host` keys carried the value.
+So a `Project` built by hand outside this crate has had no rule
+run on its `host`. Nothing can reach a command that way, since
+`Registry` cannot be assembled from outside and
+`Project::to_config` is `pub(super)`, but the guarantee is
+narrower than the sentence above it.
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`, which is its table key.
@@ -567,10 +583,10 @@ parse has always cost.
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it. `Vm`,
 `Source` and `Project` have nothing but public fields, so any
-code can build one by hand, and a private `validate` is not
-something a library caller could call even if it wanted to.
-That is why the rules moved into the types and the functions
-went away.
+code can build one by hand and reach the guest without calling
+anything, and a private checking function is not something a
+library caller could reach for even if it wanted to. That is
+why every rule here belongs to a type.
 
 `Config` is one step better and not two. Its private
 `transport` field stops a struct literal outside this crate, so
@@ -650,11 +666,10 @@ fail at the requirement rather than at compile time.
 
 ### Every field of a Config carries its own rule
 
-`Config` and its two tables hold nine values, and issue #43
-closed the last five. Every one of them is now a type that
-refuses a bad value in its constructor, so a caller assigning
-to a public field of a loaded `Config` gets the same check the
-config file got.
+`Config` and its two tables hold nine values. Every one of them
+is a type that refuses a bad value as it is built, so a caller
+assigning to a public field of a loaded `Config` gets the same
+check the config file got.
 
 That matters because `load_project` hands the caller an owned
 `Config` with public fields. `cfg.project = ProjectName::parse(
@@ -678,10 +693,27 @@ because no config can reach it.
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
-| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. All three carry the rule in their constructors: `project`'s comes from `check_segment`, which refuses any first character that is not a letter or a digit. For `host` it is live — it is `ssh`'s first positional argument. Running on the VM host itself no argv position holds it, but the rule still applies, because the same `config.toml` carried to another machine takes the `ssh` route. For the other two it is a precaution, since both are shell-quoted before the far shell receives them |
+| `host` `project` `remote_root` | leading `-` | the program each one reaches would read it as an option |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
+
+The dash rule is the one row where what it buys differs by
+field, and all three carry it in a constructor. `project`
+inherits it from `check_segment`, which refuses any first
+character that is not a letter or a digit.
+
+For `host` the rule is live: the value is `ssh`'s first
+positional argument, so `-oProxyCommand=...` would run as an
+instruction. Running on the VM host itself no argv position
+holds it, and the rule still applies there, because the same
+`config.toml` carried to another machine takes the `ssh` route.
+
+For `project` and `remote_root` it is a precaution. Both are
+shell-quoted before the far shell receives them, so the dash
+cannot be read as an option today. The rule is kept because that
+quoting lives in another file, where somebody may rewrite it
+without knowing it is what makes these two safe.
 
 `project` and `remote_root` have rules of their own beyond the
 table above, and each runs them in its own constructor.

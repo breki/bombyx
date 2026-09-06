@@ -22,12 +22,30 @@
 //! than 64 KiB" variant would make matching on the result
 //! meaningless.
 //!
-//! **Nothing converts one into the other.** Every newtype runs
-//! its constructor while serde deserializes, so a `FieldError`
-//! raised during loading is wrapped by serde and reaches the
-//! caller inside [`ConfigError::Parse`], which names the line
-//! as well as the field. A conversion would have produced the
-//! same message with the position thrown away.
+//! **There is no blanket conversion from one to the other**,
+//! and exactly one value converts by hand.
+//!
+//! Every checked type but `config::HostName` and
+//! `name::ScratchName` runs its constructor while serde
+//! deserializes, so a refusal it raises is wrapped by serde and
+//! reaches the caller inside [`ConfigError::Parse`], which names
+//! the line as well as the field. A blanket `From` would have
+//! produced that same message with the position thrown away.
+//! (`name::ProjectName` raises a `name::NameError` rather than a
+//! [`FieldError`], because it shares its rule with
+//! `name::ScratchName`, which has nothing to do with a config
+//! file. Serde wraps either one the same way.)
+//!
+//! The two exceptions differ from each other. `ScratchName` is
+//! built from the command line and never appears in the
+//! registry, so no config error is involved at all. `HostName`
+//! is the one that converts by hand: the value is ranked after
+//! the file parses, and `config::host::with_origin` turns its
+//! `FieldError` into [`ConfigError::InvalidHost`] rather than
+//! `Parse`. The registry holds a `host` key per project and one
+//! below them all, so that message names the source that
+//! supplied the value instead of the field. A caller matching
+//! only `Parse` to catch a bad config value will miss it.
 
 use std::path::PathBuf;
 

@@ -147,8 +147,8 @@ Every `host` in the registry is checked while the file is being
 read, by `config::registry::parse` -- the file-wide key and
 every project's, not only the one a command wants. Holding a
 `Registry` is therefore the proof every host in it passed, so
-`Registry::host`, `Registry::project_host` and both `validate`
-functions run no host rule of their own. `config::host::rank`
+`Registry::host` and `Registry::project_host` run no host rule
+of their own. `config::host::rank`
 does run it again, to build the winner into a `HostName`. Why
 the rule runs in two places is argued once, in
 `docs/architecture.md` under the heading "The host rule runs in
@@ -195,30 +195,33 @@ one directory below that anchor. bombyx creates, writes into and
 value, so a root that resolves to a top-level directory is
 refused when the config loads.
 
-Seven config values are newtypes rather than strings, and each
-constructor holds every rule its field has: `RemoteRoot` in
-`config/root.rs`, `HostName` in `config/host.rs`, `RepoUrl`,
-`ScriptPath` and `GitRef` in `config/source.rs`, `BoxName` in
-`config/vm.rs`, and `ProjectName` in `name.rs`. All of them but
-`HostName` carry `#[serde(try_from = "String")]`, so serde
-refuses a bad value while the file parses. `HostName` does not,
+Seven config values are newtypes, and each constructor holds
+every rule its field has: `RemoteRoot` in `config/root.rs`,
+`HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
+`GitRef` in `config/source.rs`, `BoxName` in `config/vm.rs`, and
+`ProjectName` in `name.rs`. All of them but `HostName` carry
+`#[serde(try_from = "String")]`, so serde refuses a bad value
+while the file parses. `HostName` does not,
 because the message for a bad host names the source key rather
 than the field and serde cannot say which key it is reading;
 `config::host::checked` attaches the `HostOrigin` instead.
 `RemoteRoot` also drops a trailing slash, so the stored value is
 always in the form a path join needs.
 
-`Vm::cpus` and `Vm::memory` are `std::num::NonZeroU32`. Their
-only rule is a floor of one, which is what that standard type
-means, so serde refuses a `0` as the file parses. It is the one
-checked type whose message does not name its key: `toml`
-reports a span for a bad value, so the operator gets a line and
-a column pointing at the value itself.
+`Vm::cpus` and `Vm::memory` are `std::num::NonZeroU32`, which
+is the whole rule either has. serde reads them through
+`config::vm::positive_cpus` and `positive_memory`, declared with
+`#[serde(deserialize_with = ...)]` rather than `try_from`. Both
+delegate to `at_least_one`, which reads a plain `u32` and turns
+every refusal into a `FieldError` naming the field. Why the
+standard type alone would not name it is argued once, in
+`docs/architecture.md` under the heading "What config values are
+checked".
 
-No value is checked after parsing any more. `Config::validate`,
-`Project::validate`, `config::vm::validate` and
-`config::source::validate` had nothing left to run and were
-deleted by issue #43.
+serde has therefore run every rule by the time a `Config`
+exists, and no function checks a value afterwards. A `Vm`, a
+`Source`, a `Project` or a `Config` that exists at all is one
+whose values passed.
 
 ## Build Commands
 
