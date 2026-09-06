@@ -72,15 +72,27 @@ because it cannot run libvirt. The route would still get far
 enough to write files into the MSYS home and later delete them,
 which is worse than failing.
 
-One more difference is not in the script and is worth knowing.
-`sh -c` is a child of bombyx and inherits its whole
-environment, where `sshd` builds the far side's fresh. Three
-vagrant variables -- `VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and
-`VAGRANT_DOTFILE_PATH` -- override the directory every script
-bounds itself with, so `remote`'s local branch unsets them
-before the script runs. Without that, an operator with
-`VAGRANT_CWD` exported would have `destroy` check one project
-and destroy another. The script is identical either way,
+One thing both routes share is worth knowing, because it looks
+at first like a difference. Three vagrant variables --
+`VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and `VAGRANT_DOTFILE_PATH`
+-- override the directory every script bounds itself with, and
+two more decide the provider. An operator with `VAGRANT_CWD`
+exported would have `destroy` check one project and destroy
+another. So `remote::transport` writes an `unset` of all five
+in front of every script, on both routes.
+
+The reason differs per route even though the precaution does
+not. `sh -c` is a child of bombyx and inherits its whole
+environment, so anything the operator exported here arrives.
+Over `ssh` bombyx's own environment stays behind, but the VM
+host builds one of its own: `pam_env` applies
+`/etc/environment` to a non-interactive command, a `zsh` login
+shell reads `~/.zshenv` for `zsh -c`, and a `bash` export
+placed above the non-interactive return guard in `~/.bashrc`
+survives. A variable set on the VM host is as dangerous as one
+set here.
+
+Past that `unset` the script is identical on both routes,
 because every command bombyx builds is a POSIX shell script
 string and `sh -c` starts the same shell `ssh` would have
 started on the host. `config::transport` holds the comparison
@@ -392,13 +404,14 @@ all -- it is the operator seeing a working machine.
 snapshots, so the script tests its output rather than its
 status.
 
-**The boot's `vagrant` call carries one variable the others do
-not.** Every project call carries the two `BOMBYX_VM_*` names
-telling the guest which machine it runs on; `vagrant up` also
-carries `VAGRANT_DEFAULT_PROVIDER`, which is how bombyx selects
-a provider rather than merely configuring one. **What config
-values are checked** below holds the argument for both the
-choice and its scope.
+**Every project `vagrant` call carries the same three
+variables.** Two are the `BOMBYX_VM_*` names telling the guest
+which machine it runs on. The third is
+`VAGRANT_DEFAULT_PROVIDER`, which is how bombyx selects a
+provider rather than merely configuring one; it goes on every
+call because the `unset` described above cleared whatever the
+host had. **What config values are checked** below holds the
+argument for the choice.
 
 Pretty-printed, and with the environment prefix left off each
 `vagrant` call, that script is:
@@ -470,9 +483,8 @@ way, so it carries no guard. It reaches as far as any of them --
 into the generated Vagrantfile, and onto the command line
 bombyx hands to `ssh` or to `sh -c`, where
 `VAGRANT_DEFAULT_PROVIDER` tells vagrant which provider to use
-rather than letting it choose. Only `vagrant up` carries it;
-`remote::creates_a_machine` holds that rule and
-`remote::PROVIDER_ENV` argues it. But `Provider` is a closed
+rather than letting it choose. Every vagrant call carries it,
+and `remote::PROVIDER_ENV` argues why. But `Provider` is a closed
 enum, and serde admits only the two words `libvirt` and
 `hyperv` while the file is read, so nothing an operator typed
 reaches the shell or the guest and a guard would have nothing to

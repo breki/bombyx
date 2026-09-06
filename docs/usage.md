@@ -300,17 +300,27 @@ invocation instead of running it:
 
 ```console
 $ bombyx --dry-run up
-ssh vmhost "mkdir -p ~/'vms/myproject'"
-ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
-ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
-ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
 Each generated file prints as one line naming its heredoc and
 how many lines were dropped. Printing both in full would bury
 the five-step plan they belong to; the host receives the whole
 content regardless.
+
+Every line begins with the same `unset`. Five vagrant variables
+redirect a command to a different directory, a different
+Vagrantfile or a different provider, and a value for any of
+them on the VM host would otherwise decide where bombyx's own
+commands land. Clearing them first is what makes the `cd` on
+each line mean what it says. bombyx writes the project's own
+`VAGRANT_DEFAULT_PROVIDER` back in front of each `vagrant`
+call, which is the assignment you can see further along the
+line.
 
 The fifth line is the snapshot guard, and it is one command
 rather than two: the host's shell runs the listing, tests it and

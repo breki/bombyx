@@ -202,6 +202,16 @@ trap in [vm-host-setup.md](vm-host-setup.md). bombyx runs
 interactive nor a login shell and reads neither file. sshd applies
 `/etc/environment` through PAM, which those commands do get.
 
+**bombyx does not rely on this setting, and deliberately
+discards it.** Every script bombyx sends begins by unsetting the
+five vagrant variables that redirect a command, this one among
+them, because a value on the VM host would otherwise point a
+`destroy` at the wrong machine. bombyx then writes the
+project's own `provider` back in front of each `vagrant` call,
+so vagrant is named a provider either way. The setting above is
+still worth making: it is what makes a vagrant command *you*
+type by hand behave the same as one bombyx sends.
+
 Confirm it the way bombyx will see it, not from a login shell:
 
 ```bash

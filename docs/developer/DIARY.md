@@ -4,6 +4,53 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-06
 
+**The VM host's own environment reached vagrant, and closing it
+moved the provider onto every call**
+
+bombyx cleared five vagrant variables before running a script,
+but only on the local route. The argument was that sshd builds
+the far side's environment and bombyx's own does not cross the
+connection. True, and it misses the threat: the VM host has its
+own sources for an exported variable. `pam_env` applies
+`/etc/environment` to a non-interactive `ssh host "cmd"`, a
+`zsh` login shell reads `~/.zshenv`, and a `bash` export placed
+above the usual non-interactive return guard in `~/.bashrc`
+survives. `VAGRANT_CWD` set on the VM host made `bombyx destroy`
+test one project's directory and destroy the machine defined in
+another.
+
+The fix itself is three lines: build the prefixed script once,
+before the match in `transport`, so all three arms carry it.
+
+**What it cost was the second half.** Clearing
+`VAGRANT_DEFAULT_PROVIDER` on the VM host undoes a workaround
+`docs/vm-host-wsl2.md` tells operators to apply. A WSL2
+distribution has no PowerShell, the Hyper-V provider shells out
+to one when vagrant probes for a usable default, and
+`VAGRANT_DEFAULT_PROVIDER=libvirt` in `/etc/environment` is
+what stops the probe happening. Without it, a `bombyx status`
+run before the first `up` refuses on such a host. The operator
+chose to write the configured provider back in front of every
+vagrant call rather than accept the loss. So
+`remote::creates_a_machine` is gone and the rule it held --
+the provider belongs on the boot and nowhere else -- is
+reversed. bombyx's own assignment comes after the `unset` and
+wins, so the operator's exported value never decides anything.
+
+**About two dozen tests read a script's exact head.** The plan
+said three. Both test modules grew a helper that strips the
+prefix, so the pins stay about the command rather than about a
+hundred characters of `unset`;
+`remote::tests::raw_script` is the one accessor that does not
+strip, and the disarm test is its only caller.
+
+Not verified against a real VM host: `ssh frosti` fails host key
+verification from this session. What was exercised is the
+emitted script through a real `sh` against a stub `vagrant`,
+with a hostile `VAGRANT_CWD` and `VAGRANT_DEFAULT_PROVIDER`
+exported -- the stub reported bombyx's directory and the
+configured provider.
+
 **Clearing the reviewer backlogs, and what the sweep cost**
 
 The three reviewer logs held 85 deferred findings across four
