@@ -278,7 +278,8 @@ plan, decisions, and outcome.
 
 - **provider-change-on-existing-vm** -- a provider edit needs a destroy first
   Found by red-team in round 3 of the review on issue #45. bombyx sets
-  VAGRANT_DEFAULT_PROVIDER on `vagrant up`, which makes vagrant refuse rather
+  VAGRANT_DEFAULT_PROVIDER on every project call but the teardown, which makes
+  vagrant refuse rather
   than substitute -- but only for a machine that does not exist yet. Measured on
   frosti: with a machine already created, vagrant reads the provider it recorded
   and ignores the variable, so `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status`

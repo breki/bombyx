@@ -352,7 +352,9 @@ supply it fails the boot rather than quietly building a libvirt
 machine, as long as the VM does not exist yet -- vagrant
 records the provider it built a machine with and reads that
 back afterwards, so changing the key later needs a
-`bombyx destroy` first. That refusal was run on a Linux host
+`bombyx destroy` first. `bombyx destroy` itself names no
+provider, which is what keeps it able to clear the directory a
+refused boot left behind. That refusal was run on a Linux host
 and it works. Whether a Windows VM host then boots the machine
 is *(unverified)*: nobody has run bombyx against one.
 

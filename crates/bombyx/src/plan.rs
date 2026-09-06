@@ -377,29 +377,26 @@ mod tests {
         plan(action, &cfg(), Tty::NoPty)
     }
 
+    /// Each command of `action`'s plan as `--dry-run` prints
+    /// it, without the `unset` prefix.
     fn scripts(action: &Action) -> Vec<String> {
         run(action)
             .iter()
-            .map(|c| {
-                c.to_string()
-                    .replace(crate::remote::DISARM_VAGRANT_REDIRECTS, "")
-            })
+            .map(remote::rendered_without_disarm)
             .collect()
     }
 
     /// The script of one command, without the `unset` prefix.
     ///
-    /// `remote::tests` owns the prefix and asserts it on every
-    /// builder. Repeating it in the pins here would put a
-    /// hundred characters of `unset` in front of every expected
-    /// string and hide the command order these tests are about.
+    /// `remote` does the stripping, so this module and
+    /// `remote::tests` cannot disagree about how strict it is.
+    /// `remote` owns the prefix and asserts it on every builder
+    /// and every probe; repeating it in the pins here would put
+    /// a hundred characters of `unset` in front of every
+    /// expected string and hide the command order these tests
+    /// are about.
     fn script(c: &RemoteCommand) -> String {
-        c.args
-            .last()
-            .expect("a remote command")
-            .strip_prefix(crate::remote::DISARM_VAGRANT_REDIRECTS)
-            .expect("every script carries the disarming prefix")
-            .to_owned()
+        remote::script_without_disarm(c)
     }
 
     /// Like [`scripts`], with each entry cut at its first line.
@@ -748,7 +745,7 @@ mod tests {
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f \
                  Vagrantfile ]; then {} vagrant 'destroy' '-f'; fi",
-                vagrant_env()
+                vm_env()
             )
         );
         assert_eq!(
@@ -766,7 +763,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
-                vagrant_env()
+                vm_env()
             )
         );
         assert_eq!(script(&cmds[1]), "rm -rf ~/'vms/myproject'");
@@ -850,9 +847,12 @@ mod tests {
                 continue;
             }
             for cmd in run(&action) {
-                let script = cmd.args[cmd.args.len() - 1].clone();
-                if script.contains(" vagrant '") {
-                    found.push((action.clone(), script));
+                // Stripped, so an assertion about a variable
+                // being set cannot pass on the `unset` that
+                // clears the same name two words earlier.
+                let s = script(&cmd);
+                if s.contains(" vagrant '") {
+                    found.push((action.clone(), s));
                 }
             }
         }
@@ -861,7 +861,35 @@ mod tests {
     }
 
     #[test]
-    fn every_project_vagrant_call_names_the_provider() {
+    fn the_teardown_verb_names_no_provider() {
+        // Measured on a libvirt host, in a directory with a
+        // Vagrantfile and no machine: `vagrant destroy -f`
+        // under `VAGRANT_DEFAULT_PROVIDER=hyperv` is refused
+        // and exits 1, and with no such variable it reports
+        // "Domain is not created" and exits 0. `execute` stops
+        // at the first failing step, so the refused version
+        // leaves the `rm -rf` behind it unrun and nothing else
+        // clears the directory.
+        //
+        // A refusal can only happen when no machine exists,
+        // because vagrant reads an existing one's recorded
+        // provider and ignores this variable. So omitting it
+        // here cannot pick the wrong provider for a machine
+        // that is really there.
+        let want = format!("{}='", remote::PROVIDER_ENV);
+        for (action, script) in project_vagrant_scripts() {
+            if !script.contains("vagrant 'destroy'") {
+                continue;
+            }
+            assert!(
+                !script.contains(&want),
+                "{action:?} names a provider on the teardown: {script}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_other_project_vagrant_call_names_the_provider() {
         // `remote::PROVIDER_ENV` holds the argument. The short
         // version: bombyx clears the operator's exported value
         // before every script, so a verb that does not write
@@ -870,6 +898,9 @@ mod tests {
         // even answer a probe, that refuses the command.
         let want = format!("{}='{}'", remote::PROVIDER_ENV, cfg().vm.provider);
         for (action, script) in project_vagrant_scripts() {
+            if script.contains("vagrant 'destroy'") {
+                continue;
+            }
             assert!(
                 script.contains(&want),
                 "{action:?} runs vagrant without the provider: {script}"

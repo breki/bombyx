@@ -91,13 +91,17 @@ remote_root = "~/vms"
 # any size it picked would be wrong on either a laptop or a
 # workstation. `provider` is optional and defaults to libvirt.
 [projects.myproject.vm]
-# The virtualization backend. bombyx passes this to vagrant, so
-# a host that cannot supply it fails the boot rather than
-# quietly building a machine of a different kind.
+# The virtualization backend. bombyx passes this to vagrant on
+# every project call, so a host that cannot supply it fails
+# rather than quietly building a machine of a different kind.
 #
 # That holds while the machine does not exist yet. Once it does,
 # vagrant reads the provider it recorded and ignores this key,
 # so changing it means `bombyx destroy` first.
+#
+# `bombyx destroy` is the one call that does not name it. A
+# refused destroy would leave the directory behind, since the
+# removal runs only after it.
 #
 # `hyperv` is accepted and has never been run: it was written
 # from Hyper-V's documentation, and bombyx has only ever booted

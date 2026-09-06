@@ -103,25 +103,40 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// because the two spell the same choice and only `up` accepts
 /// the argument.
 ///
-/// **Every vagrant call carries it, not only the boot.** The
-/// reason is the `unset` in `DISARM_VAGRANT_REDIRECTS`, which
-/// clears the operator's own exported value in front of every
-/// script. A verb that did not write the configured one back
-/// would leave vagrant choosing for itself, and on a host where
-/// the other provider cannot answer a probe -- a WSL2
-/// distribution with no PowerShell for the Hyper-V provider to
-/// call -- vagrant refuses the command instead.
-/// `docs/vm-host-wsl2.md` describes that host. Not a doc link:
-/// the constant is private, and rustdoc rejects a public page
-/// pointing at a private item.
+/// **Every project vagrant call carries it except the
+/// teardown.** The reason it goes on more than the boot is the
+/// `unset` in `DISARM_VAGRANT_REDIRECTS`, which clears the
+/// operator's own exported value in front of every script. A
+/// verb that did not write the configured one back would leave
+/// vagrant choosing for itself, and on a host where the other
+/// provider cannot answer a probe -- a WSL2 distribution with
+/// no PowerShell for the Hyper-V provider to call -- vagrant
+/// refuses the command instead. `docs/vm-host-wsl2.md`
+/// describes that host. Not a doc link: the constant is
+/// private, and rustdoc rejects a public page pointing at a
+/// private item.
 ///
-/// Two measured facts about vagrant, both checked on a libvirt
-/// host, bound what this can do. With a machine already created
-/// vagrant reads the provider it recorded and ignores this
-/// variable. With no machine yet an unusable provider makes it
-/// refuse `status`, `halt` and `destroy` as readily as `up`.
-/// bombyx writes the project's own provider, so the value it
-/// sets is the usable one wherever it matters.
+/// `doctor`'s probe is not a project call and carries none:
+/// `vagrant plugin list` ignores this variable, measured under
+/// `hyperv` on Linux and under a provider name that does not
+/// exist.
+///
+/// **The teardown is the exception, and `tears_down` holds
+/// it.** Three measured facts about vagrant, all checked on a
+/// libvirt host. With a machine already created vagrant reads
+/// the provider it recorded and ignores this variable. With no
+/// machine yet an unusable provider makes it refuse `status`,
+/// `halt` and `destroy` as readily as `up`. And with no such
+/// variable set, `destroy` in a directory holding a
+/// Vagrantfile and no machine reports "Domain is not created"
+/// and exits 0.
+///
+/// So naming a provider on `destroy` can only ever refuse it,
+/// and `execute` stops at the first failing step, which leaves
+/// the directory removal behind it unrun and nothing else to
+/// clear the directory. Omitting it there is safe for the same
+/// reason: a refusal implies no machine exists, so there is no
+/// recorded provider to disagree with.
 ///
 /// The first of those facts is also a limit worth knowing:
 /// editing `provider` and re-running `up` on a project that
@@ -177,21 +192,36 @@ fn vm_host_env(cfg: &Config) -> String {
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
     use std::fmt::Write as _;
     let mut cmd = vm_host_env(cfg);
-    // `Provider` renders one of two fixed lowercase words, so
-    // there is no operator input here for a quote to protect.
-    // It is quoted anyway, so the assignment matches every
-    // other one in the script.
-    let _ = write!(
-        cmd,
-        " {PROVIDER_ENV}={}",
-        shell_quote(cfg.vm.provider.as_str())
-    );
+    if !tears_down(args) {
+        // `Provider` renders one of two fixed lowercase words,
+        // so there is no operator input here for a quote to
+        // protect. It is quoted anyway, so the assignment
+        // matches every other one in the script.
+        let _ = write!(
+            cmd,
+            " {PROVIDER_ENV}={}",
+            shell_quote(cfg.vm.provider.as_str())
+        );
+    }
     cmd.push_str(" vagrant");
     for arg in args {
         cmd.push(' ');
         cmd.push_str(&shell_quote(arg));
     }
     cmd
+}
+
+/// Whether `args` names the vagrant verb that removes a
+/// machine.
+///
+/// Read from the verb rather than passed in by the caller. The
+/// callers hand `vagrant` its arguments, so a rule derived from
+/// those arguments cannot disagree with the command that gets
+/// run, while a separate flag could be set wrongly on a new
+/// call site. [`PROVIDER_ENV`] holds why the teardown is the
+/// one verb that names no provider.
+fn tears_down(args: &[&str]) -> bool {
+    args.first() == Some(&"destroy")
 }
 
 /// Builds the remote script that enters `dir` and runs
@@ -325,17 +355,60 @@ impl Tty {
 /// **Both routes need it, for different reasons.** `sh -c` is a
 /// child of bombyx and inherits everything the operator
 /// exported. bombyx's own environment does not cross `ssh`, but
-/// the VM host builds one of its own: `pam_env` applies
-/// `/etc/environment` to a non-interactive command, a `zsh`
-/// login shell reads `~/.zshenv` for `zsh -c`, and a `bash`
-/// export above the non-interactive return guard in `~/.bashrc`
-/// survives.
+/// the VM host builds one of its own. Three sources reach the
+/// command sshd runs: `pam_env` applies `/etc/environment`,
+/// `zsh` sources `~/.zshenv` on every invocation and so on
+/// `zsh -c` too, and a `bash` export placed above the
+/// non-interactive return guard in `~/.bashrc` survives.
+///
+/// The `ssh` command is neither interactive nor a login shell,
+/// which is why the list names those three and not `~/.profile`.
+/// The `zsh` and `bash` halves are read from those shells'
+/// documented startup order rather than measured
+/// *(unverified)*.
 ///
 /// Ends in `; ` so it prefixes any script, `cat` heredoc
 /// included.
-pub(crate) const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
+const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
      VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH \
      VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; ";
+
+/// The script `c` carries, without the prefix every route puts
+/// in front of it.
+///
+/// One accessor rather than a strip in each test module, so the
+/// two cannot disagree on how strict the strip is. It panics on
+/// a command without the prefix, which is the assertion:
+/// `every_route_disarms_the_vagrant_redirects` and
+/// `every_probe_disarms_the_vagrant_redirects_on_both_routes`
+/// state the rule, and this is what every other test relies on
+/// having held.
+#[cfg(test)]
+pub(crate) fn script_without_disarm(c: &RemoteCommand) -> String {
+    c.args
+        .last()
+        .expect("a remote command")
+        .strip_prefix(DISARM_VAGRANT_REDIRECTS)
+        .expect("every script carries the disarming prefix")
+        .to_owned()
+}
+
+/// `c` as [`Display`](std::fmt::Display) renders it, with the
+/// same prefix removed.
+///
+/// The whole command rather than the script alone, for a test
+/// asserting on the line `--dry-run` prints. It panics on a
+/// command without the prefix, for the reason
+/// [`script_without_disarm`] gives.
+#[cfg(test)]
+pub(crate) fn rendered_without_disarm(c: &RemoteCommand) -> String {
+    let shown = c.to_string();
+    assert!(
+        shown.contains(DISARM_VAGRANT_REDIRECTS),
+        "every command carries the disarming prefix: {shown}"
+    );
+    shown.replacen(DISARM_VAGRANT_REDIRECTS, "", 1)
+}
 
 /// Wraps `script` in the command that runs it on the VM host.
 ///
@@ -355,7 +428,8 @@ pub(crate) const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
 /// every route, because the shell running it can carry an
 /// exported vagrant variable on either one.
 fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
-    let script = &format!("{DISARM_VAGRANT_REDIRECTS}{script}");
+    let disarmed = format!("{DISARM_VAGRANT_REDIRECTS}{script}");
+    let script = disarmed.as_str();
     match (cfg.transport(), tty) {
         (Transport::Local, _) => RemoteCommand::new("sh", &["-c", script]),
         (Transport::Ssh, Tty::Allocate) => RemoteCommand::new(
@@ -606,10 +680,7 @@ mod tests {
     /// `every_route_disarms_the_vagrant_redirects` is the one
     /// test that reads the prefix, and it uses `raw_script`.
     fn remote_script(c: &RemoteCommand) -> String {
-        raw_script(c)
-            .strip_prefix(DISARM_VAGRANT_REDIRECTS)
-            .expect("every script carries the disarming prefix")
-            .to_owned()
+        script_without_disarm(c)
     }
 
     fn local_cfg() -> Config {
@@ -665,7 +736,9 @@ mod tests {
         // Over `ssh` bombyx's own environment stays behind, but
         // the VM host builds one of its own: `pam_env` applies
         // `/etc/environment` to a non-interactive command, and
-        // a `zsh` login shell reads `~/.zshenv`. Either way
+        // `zsh` sources `~/.zshenv` on every invocation, and
+        // a `bash` export above the non-interactive return
+        // guard in `~/.bashrc` survives. Either way
         // three vagrant variables override the directory the
         // script just `cd`'d into, so `destroy` would test
         // `[ -f Vagrantfile ]` in one project and destroy the
@@ -679,7 +752,17 @@ mod tests {
                 ensure_dir(&route, "~/vms"),
                 write_file(&route, "~/vms", "Vagrantfile", "x\n"),
             ] {
-                let script = raw_script(&c);
+                // The prefix alone, not the whole script.
+                // `vagrant_command` writes `PROVIDER_ENV` into
+                // the same string, so a search over everything
+                // would find that assignment and report the
+                // variable disarmed with the `unset` gone.
+                let raw = raw_script(&c);
+                let prefix = raw
+                    .split_once("; ")
+                    .expect("the script carries the unset prefix")
+                    .0;
+                assert!(prefix.starts_with("unset "), "{raw}");
                 for var in [
                     "VAGRANT_CWD",
                     "VAGRANT_VAGRANTFILE",
@@ -688,8 +771,8 @@ mod tests {
                     "VAGRANT_PREFERRED_PROVIDERS",
                 ] {
                     assert!(
-                        script.starts_with("unset ") && script.contains(var),
-                        "{var} not disarmed: {script}"
+                        prefix.contains(var),
+                        "{var} not disarmed: {prefix}"
                     );
                 }
             }
@@ -954,7 +1037,10 @@ mod tests {
             &["destroy", "-f"],
             Tty::NoPty,
         );
-        let env = vagrant_env();
+        // The teardown names no provider; the sibling test
+        // `the_teardown_verb_names_no_provider` in `plan` holds
+        // that rule across the actions.
+        let env = vm_env();
         assert_eq!(
             remote_script(&c),
             format!(
@@ -1022,7 +1108,7 @@ mod tests {
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
-                vagrant_env()
+                vm_env()
             )
         );
     }

@@ -63,8 +63,14 @@ fn probe(cfg: &Config, script: &str) -> RemoteCommand {
         // Running here, none of the options below has anything
         // to configure: there is no connection to time out, no
         // session to keep alive and no banner to suppress. The
-        // script is unchanged, so the shared wrapper builds it.
+        // script is unchanged, so the shared wrapper builds it
+        // -- and it is the wrapper that adds the `unset`.
         Transport::Local => super::transport(cfg, script, super::Tty::NoPty),
+        // This arm builds its own command, so it adds the
+        // `unset` itself. `doctor` reports the environment
+        // bombyx's own commands run in, so a probe reading an
+        // environment bombyx clears would answer about a state
+        // no other command ever sees.
         Transport::Ssh => RemoteCommand::new(
             "ssh",
             &[
@@ -79,7 +85,7 @@ fn probe(cfg: &Config, script: &str) -> RemoteCommand {
                 "-o",
                 "ServerAliveCountMax=3",
                 cfg.host.as_str(),
-                script,
+                &format!("{}{script}", super::DISARM_VAGRANT_REDIRECTS),
             ],
         ),
     }
@@ -254,11 +260,11 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 ///
 /// **Deliberately without either environment prefix.**
 /// `remote::vagrant_script` puts the two VM-host identity
-/// variables on every other project call, and the provider
-/// selection on `vagrant up` alone. This probe gets neither:
-/// `vagrant plugin list` evaluates no `Vagrantfile`, so nothing
-/// here could read the identity, and it creates no machine, so
-/// it asks vagrant for no provider. That holds wherever the
+/// variables and the provider selection on every other project
+/// call. This probe gets neither: `vagrant plugin list`
+/// evaluates no `Vagrantfile`, so nothing here could read the
+/// identity, and it reports the installed plugins whichever
+/// provider vagrant would pick. That holds wherever the
 /// command starts, which matters because the two routes stand
 /// in different directories: over `ssh` the login directory,
 /// and running here whatever directory bombyx was started in.
@@ -279,6 +285,7 @@ pub fn provider(cfg: &Config) -> RemoteCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::script_without_disarm;
 
     fn cfg() -> Config {
         Config::for_tests()
@@ -320,8 +327,28 @@ mod tests {
     }
 
     #[test]
+    fn every_probe_disarms_the_vagrant_redirects_on_both_routes() {
+        // `doctor` reports the environment bombyx's own commands
+        // will run in, so a probe that skips the `unset` answers
+        // a question about a different environment. The two
+        // routes reach the shell differently -- `sh -c` inherits
+        // bombyx's environment, and the VM host builds its own
+        // for an `ssh` command -- and neither is a reason to
+        // report from an environment bombyx does not use.
+        for route in [cfg(), Config::for_tests_local()] {
+            for c in all(&route) {
+                let script = c.args.last().expect("a probe script");
+                assert!(
+                    script.starts_with(super::super::DISARM_VAGRANT_REDIRECTS),
+                    "probe not disarmed: {script}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn reachable_runs_true_on_the_host() {
-        assert_eq!(reachable(&cfg()).args.last().unwrap(), "true");
+        assert_eq!(script_without_disarm(&reachable(&cfg())), "true");
     }
 
     #[test]
@@ -329,7 +356,7 @@ mod tests {
         // `command -v` over a plain ssh call is the whole
         // point: it reports the PATH bombyx actually gets.
         let c = command(&cfg(), "vagrant");
-        assert_eq!(c.args.last().unwrap(), "command -v 'vagrant'");
+        assert_eq!(script_without_disarm(&c), "command -v 'vagrant'");
     }
 
     #[test]
@@ -343,7 +370,7 @@ mod tests {
     #[test]
     fn dir_writable_walks_up_and_never_creates() {
         let c = dir_writable(&cfg(), "~/vms/myproject");
-        let script = c.args.last().unwrap();
+        let script = script_without_disarm(&c);
         assert!(script.starts_with("d=~/'vms/myproject';"), "{script}");
         // Each failure names itself, so five distinct host
         // states stop collapsing into one "not found".

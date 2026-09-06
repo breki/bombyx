@@ -65,10 +65,11 @@ and this project adheres to
   `VAGRANT_PREFERRED_PROVIDERS` before each script, since all five redirect
   which directory, which machine or which provider vagrant acts on. `sh -c`
   inherits bombyx's own environment; over `ssh` bombyx's environment stays
-  behind, but the VM host builds one of its own from `/etc/environment` through
-  PAM, from `~/.zshenv` for a `zsh` login shell, and from an export placed
-  above the non-interactive return guard in `~/.bashrc`. Either way a value on
-  the far side would otherwise make `bombyx destroy` check one project's
+  behind, but the VM host builds one of its own: from `/etc/environment`
+  through PAM, from `~/.zshenv` which `zsh` sources on every invocation, and
+  from an export placed above the non-interactive return guard in `~/.bashrc`.
+  Either way a value on the far side would otherwise make `bombyx destroy`
+  check one project's
   directory and destroy the machine defined in another.
 - `bombyx snapshot` saves the project VM's `fresh-install` snapshot, replacing
   one that is already there. It is how you move the point `reset` returns to,
@@ -77,7 +78,12 @@ and this project adheres to
   behind `remote_root` and `host`. `RemoteRoot` also drops a trailing slash, so
   the value is always in the form a path join needs.
 - bombyx passes the project's provider to vagrant as `VAGRANT_DEFAULT_PROVIDER`
-  in front of every vagrant call. Rendering a provider block in the generated
+  in front of every project vagrant call except the teardown. `bombyx doctor`'s
+  probe is not a project call and carries none, since `vagrant plugin list`
+  ignores the variable. `bombyx destroy` omits it because naming a provider the
+  host cannot supply makes vagrant refuse the destroy, and the directory
+  removal behind it would then never run -- while omitting it is safe, since a
+  machine that exists carries its own recorded provider. Rendering a provider block in the generated
   Vagrantfile only configures that provider; vagrant chooses one itself, from
   what the host offers. So a project asking for `hyperv` on a libvirt-only host
   got a libvirt machine with its `cpus` and `memory` ignored, and nothing said

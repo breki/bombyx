@@ -13,9 +13,9 @@ the far side's environment and bombyx's own does not cross the
 connection. True, and it misses the threat: the VM host has its
 own sources for an exported variable. `pam_env` applies
 `/etc/environment` to a non-interactive `ssh host "cmd"`, a
-`zsh` login shell reads `~/.zshenv`, and a `bash` export placed
-above the usual non-interactive return guard in `~/.bashrc`
-survives. `VAGRANT_CWD` set on the VM host made `bombyx destroy`
+`zsh` sources `~/.zshenv` on every invocation, and a `bash`
+export placed above the usual non-interactive return guard in
+`~/.bashrc` survives. `VAGRANT_CWD` set on the VM host made `bombyx destroy`
 test one project's directory and destroy the machine defined in
 another.
 
@@ -44,12 +44,24 @@ hundred characters of `unset`;
 `remote::tests::raw_script` is the one accessor that does not
 strip, and the disarm test is its only caller.
 
-Not verified against a real VM host: `ssh frosti` fails host key
-verification from this session. What was exercised is the
-emitted script through a real `sh` against a stub `vagrant`,
-with a hostile `VAGRANT_CWD` and `VAGRANT_DEFAULT_PROVIDER`
-exported -- the stub reported bombyx's directory and the
-configured provider.
+**Definition of Done item 3 was met on the local route.** This
+workstation is `frosti`, the host the registry names, so bombyx
+runs vagrant here. Against a real vagrant 2.4.9 with
+`vagrant-libvirt` 0.12.2 and the real `vmtest` domain,
+`bombyx status` and `bombyx doctor` both answered correctly with
+`VAGRANT_CWD=/tmp` and `VAGRANT_DEFAULT_PROVIDER=hyperv`
+exported, while a bare `vagrant status` in the same directory
+with the same `VAGRANT_CWD` exits 1. The `ssh` route was not
+exercised against a remote host, because the registry names
+none.
+
+**I destroyed the `vmtest` domain while checking a review
+finding.** Reproducing a *refused* `vagrant destroy` needed a
+directory with a Vagrantfile and no machine; I ran it in
+`~/vms/vmtest`, which had one, and the destroy succeeded. The
+directory and both generated files survived, the domain and its
+`fresh-install` snapshot did not. The rest of that measurement
+ran in a scratch copy, which is where it should have started.
 
 **Clearing the reviewer backlogs, and what the sweep cost**
 

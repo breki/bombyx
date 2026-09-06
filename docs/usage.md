@@ -218,11 +218,15 @@ counts it.
 
 Setting `provider = "hyperv"` still does not get you a Hyper-V
 VM on a Linux host, but it now fails rather than substituting.
-bombyx passes the provider to vagrant on the boot, so
+bombyx passes the provider to vagrant on every project call, so
 `bombyx up` stops with `The Hyper-V provider only works on
 Windows` instead of quietly building a libvirt VM at vagrant's
-default size. `bombyx destroy` clears the directory that failed
-boot left behind, because only the boot names the provider.
+default size. `bombyx status` and `bombyx halt` stop the same
+way while the machine does not exist yet. `bombyx destroy`
+still clears the directory that failed boot left behind,
+because the teardown is the one call that names no provider --
+were it to name one, vagrant would refuse it too and the
+removal behind it would never run.
 
 **Changing `provider` on a project that already has a VM does
 nothing until you destroy it.** Vagrant records the provider it

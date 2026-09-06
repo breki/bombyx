@@ -17,7 +17,8 @@ exported variable, and the VM host has its own sources for one.
 
 - `pam_env` applies `/etc/environment` to a non-interactive
   `ssh host "cmd"`.
-- A `zsh` login shell reads `~/.zshenv` for `zsh -c`.
+- `zsh` sources `~/.zshenv` on every invocation, `zsh -c`
+  included, so an export there reaches the command sshd runs.
 - A `bash` export placed above the usual non-interactive return
   guard in `~/.bashrc` survives.
 
@@ -102,9 +103,21 @@ recorded under **Outcome**.
   The probes run `true`, `command -v vagrant`, a writability
   check and `vagrant plugin list`. None of the five variables
   decides what any of those answers, so the prefix would add
-  noise to the report's own commands and protect nothing. If a
-  probe later runs a directory-bound vagrant command, it moves
-  under this rule with it.
+  noise to the report's own commands and protect nothing.
+  **Reversed the same day**, see the next bullet.
+
+- **2026-09-06 -- the probes carry the prefix too.** `artisan`
+  found the decision above had left the crate inconsistent
+  rather than deliberately narrow. `probe`'s local arm
+  delegates to `transport` and so gained the prefix, while its
+  `ssh` arm builds its own command and did not, so one
+  `bombyx doctor` sent a different script on each route -- and
+  `DISARM_VAGRANT_REDIRECTS`'s own new doc said "on either
+  route", which was then false. The argument that settles it:
+  `doctor` reports the environment bombyx's own commands run
+  in, so a probe reading an environment bombyx clears answers
+  about a state no other command sees. Both arms of `probe`
+  now build from the prefixed script.
 
 - **2026-09-06 -- the provider goes in front of every vagrant
   call, not only the boot.** Clearing
@@ -113,14 +126,47 @@ recorded under **Outcome**.
   `VAGRANT_DEFAULT_PROVIDER=libvirt` in `/etc/environment`, so
   vagrant never probes the Hyper-V provider, which shells out
   to a PowerShell a hardened WSL distribution does not have.
-  Without that value a `bombyx status` or `doctor` run before
-  the first `up` would refuse on such a host. Two other routes
+  Without that value a `bombyx status` run before the first
+  `up` would refuse on such a host. Not `doctor`: its one
+  vagrant call is `vagrant plugin list`, measured here to
+  ignore the variable completely -- it printed the same plugin
+  list under `hyperv` and under a provider name that does not
+  exist. Two other routes
   were offered -- ship as is and document the loss, or leave
   the two provider variables out of the `unset` -- and the
   operator chose to write the configured provider back. The
   operator's exported value never wins, and vagrant is named a
   provider on every verb. This reverses the rule
   `remote::creates_a_machine` held; that function is gone.
+
+- **2026-09-06 -- the teardown verb names no provider.**
+  `red-team` found that writing it on every call re-introduced
+  a defect commit `777fa0e` had removed the day before, after
+  measuring it on this machine. Re-measured here in a scratch
+  directory holding a Vagrantfile and no machine:
+  `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant destroy -f` is
+  refused and exits 1, while the same command with no such
+  variable reports "Domain is not created" and exits 0.
+  `execute` stops at the first failing step, so the refused
+  version leaves the `rm -rf` behind it unrun. Two facts make
+  the exemption safe: a refusal can only happen when no machine
+  exists, and a machine that exists carries its own recorded
+  provider. `remote::tears_down` holds the rule, and
+  `the_teardown_verb_names_no_provider` states it across the
+  actions.
+
+  The option of keeping it everywhere and widening the teardown
+  guard to skip vagrant when no machine exists was offered and
+  not taken: it is new logic beyond what this issue asked for.
+
+- **2026-09-06 -- `doctor` was never the WSL2 risk.** The
+  decision above was argued partly from a `bombyx doctor` run
+  on a WSL2 host. Measured here: `vagrant plugin list` prints
+  the same list under `VAGRANT_DEFAULT_PROVIDER=hyperv` on
+  Linux and under a provider name that does not exist, so it
+  never reaches the usability probe. Only `status` and `halt`
+  were at risk, and the four prose sites that claimed
+  otherwise are corrected.
 
 ## Progress log
 
@@ -135,6 +181,13 @@ recorded under **Outcome**.
   that strips the prefix. `remote::tests::raw_script` is what
   the disarm test itself uses.
 - **2026-09-06** -- all ten gates pass.
+- **2026-09-06** -- review stage 1 (`artisan`): six findings,
+  six fixed, including the probe inconsistency above.
+- **2026-09-06** -- review stage 2 (`red-team`) round 1: seven
+  findings. One behaviour defect, the teardown provider, fixed
+  with its test first and then run end to end against a real
+  vagrant: a `hyperv` project's `up` is refused and leaves the
+  directory, and `bombyx destroy` then exits 0 and removes it.
 
 ## Outcome
 
@@ -161,8 +214,26 @@ the bombyx directory, an empty `VAGRANT_CWD` and
 the same prefix was run and the file landed with `$(...)`
 unexpanded.
 
-**Not verified.** Definition of Done item 3 has not been met.
-`ssh frosti` fails host key verification from this session, so
-nothing here ran against a real VM host, and no WSL2 host was
+**Definition of Done item 3, on the local route.** This
+workstation is `frosti`, which is the host the operator's own
+registry names, so bombyx takes the local route against it and
+a real vagrant 2.4.9 with `vagrant-libvirt` 0.12.2 is
+installed. `bombyx --project vmtest doctor` reports six rows,
+all `ok` or `skip`. `bombyx --project vmtest status` reports
+the real `vmtest` domain as running. Run again with
+`VAGRANT_CWD=/tmp` and `VAGRANT_DEFAULT_PROVIDER=hyperv`
+exported it returns the same correct answer, while a bare
+`vagrant status` in the same directory with the same
+`VAGRANT_CWD` exits 1 with "A Vagrant environment or target
+machine is required". So the guard was seen to work, and the
+counterfactual was seen to fail.
+
+**Not verified.** The `ssh` route was not exercised against a
+remote VM host: the only host in the registry is this machine,
+and `ssh frosti` fails host key verification here. Both routes
+emit one script, pinned by
+`the_local_route_runs_the_same_script_through_sh`, so what
+remains unproven is only that a remote sshd's shell accepts the
+prefixed string -- it is the same POSIX shell. No WSL2 host was
 available to confirm that the written-back provider fixes the
 case that decision was made for.

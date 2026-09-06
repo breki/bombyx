@@ -207,10 +207,18 @@ discards it.** Every script bombyx sends begins by unsetting the
 five vagrant variables that redirect a command, this one among
 them, because a value on the VM host would otherwise point a
 `destroy` at the wrong machine. bombyx then writes the
-project's own `provider` back in front of each `vagrant` call,
-so vagrant is named a provider either way. The setting above is
-still worth making: it is what makes a vagrant command *you*
-type by hand behave the same as one bombyx sends.
+project's own `provider` back in front of each project
+`vagrant` call, so vagrant is named a provider either way.
+
+`bombyx doctor` is the exception, and it needs none: its only
+vagrant call is `vagrant plugin list`, which ignores
+`VAGRANT_DEFAULT_PROVIDER` -- it prints the same list under
+`hyperv` on Linux and under a provider name that does not
+exist, so it never reaches the usability probe described above.
+
+The setting is still worth making: it is what makes a vagrant
+command *you* type by hand behave the same as one bombyx
+sends.
 
 Confirm it the way bombyx will see it, not from a login shell:
 

@@ -85,12 +85,16 @@ The reason differs per route even though the precaution does
 not. `sh -c` is a child of bombyx and inherits its whole
 environment, so anything the operator exported here arrives.
 Over `ssh` bombyx's own environment stays behind, but the VM
-host builds one of its own: `pam_env` applies
-`/etc/environment` to a non-interactive command, a `zsh` login
-shell reads `~/.zshenv` for `zsh -c`, and a `bash` export
-placed above the non-interactive return guard in `~/.bashrc`
-survives. A variable set on the VM host is as dangerous as one
-set here.
+host builds one of its own. Three sources reach the command
+sshd runs: `pam_env` applies `/etc/environment`, `zsh` sources
+`~/.zshenv` on every invocation and so on `zsh -c` too, and a
+`bash` export placed above the non-interactive return guard in
+`~/.bashrc` survives. The command sshd runs is neither
+interactive nor a login shell, which is why `~/.profile` is not
+in that list. A variable set on the VM host is as dangerous as
+one set here. The `zsh` and `bash` halves are read from those
+shells' documented startup order rather than measured
+*(unverified)*.
 
 Past that `unset` the script is identical on both routes,
 because every command bombyx builds is a POSIX shell script
