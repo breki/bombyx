@@ -20,9 +20,14 @@
 //! a string from anywhere, with no config file in sight. Handing
 //! their callers an error type with a "config file is larger
 //! than 64 KiB" variant would make matching on the result
-//! meaningless. A `FieldError` converts into a `ConfigError`
-//! when one does turn up during loading, so nothing downstream
-//! has to know which kind it started as.
+//! meaningless.
+//!
+//! **Nothing converts one into the other.** Every newtype runs
+//! its constructor while serde deserializes, so a `FieldError`
+//! raised during loading is wrapped by serde and reaches the
+//! caller inside [`ConfigError::Parse`], which names the line
+//! as well as the field. A conversion would have produced the
+//! same message with the position thrown away.
 
 use std::path::PathBuf;
 
@@ -136,14 +141,14 @@ pub enum ConfigError {
         summary: String,
     },
 
-    /// A required field was present but empty.
-    #[error("`{field}` must not be empty")]
-    Empty {
-        /// Name of the offending field.
-        field: &'static str,
-    },
-
     /// A field held a value outside its allowed shape.
+    ///
+    /// Only `project` reaches this variant. Every other value
+    /// is checked by its type while serde reads the file, so a
+    /// bad one arrives as [`ConfigError::Parse`]. `project` is
+    /// different because it comes from the command line, and
+    /// `crate::name::check_segment` runs on it before the
+    /// registry is opened.
     #[error("invalid `{field}`: {reason}")]
     Invalid {
         /// Name of the offending field.
@@ -234,21 +239,4 @@ pub enum ConfigError {
         /// What rule the value broke.
         reason: String,
     },
-}
-
-/// Widens a one-field failure into a loading failure.
-///
-/// The two variants map across unchanged, so a caller matching
-/// `ConfigError::Invalid { field, .. }` sees the same thing
-/// whether the check ran during loading or inside a newtype
-/// constructor.
-impl From<FieldError> for ConfigError {
-    fn from(err: FieldError) -> Self {
-        match err {
-            FieldError::Empty { field } => Self::Empty { field },
-            FieldError::Invalid { field, reason } => {
-                Self::Invalid { field, reason }
-            }
-        }
-    }
 }

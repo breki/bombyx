@@ -185,25 +185,34 @@ What a project declares:
 classDiagram
   class Config {
     +HostName host
-    +String project
+    +ProjectName project
     +RemoteRoot remote_root
     -Transport transport
   }
   class Vm {
     +Provider provider
-    +String box_name
-    +u32 cpus
-    +u32 memory
+    +BoxName box_name
+    +NonZeroU32 cpus
+    +NonZeroU32 memory
   }
   class Source {
     +RepoUrl repo
-    +String git_ref
+    +GitRef git_ref
     +ScriptPath script
   }
   class RepoUrl {
     +String value
   }
   class ScriptPath {
+    +String value
+  }
+  class GitRef {
+    +String value
+  }
+  class BoxName {
+    +String value
+  }
+  class ProjectName {
     +String value
   }
   class RemoteRoot {
@@ -245,6 +254,9 @@ classDiagram
   Vm --> Provider
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
+  Source *-- GitRef : ref
+  Vm *-- BoxName : box
+  Config *-- ProjectName : project
   Registry ..> HostOrigin : ranked to produce one
 ```
 
@@ -346,7 +358,7 @@ sequenceDiagram
   participant git as git host
 
   op->>cli: bombyx --project p up
-  cli->>cli: read config.toml, validate
+  cli->>cli: read config.toml, check every value
   cli->>host: mkdir -p the project dir
   cli->>host: cat > Vagrantfile (heredoc)
   cli->>host: cat > bootstrap.sh (heredoc)
@@ -473,13 +485,25 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Four values are enforced by their type: `remote_root` is a
-`RemoteRoot`, `repo` a `RepoUrl`, `script` a `ScriptPath` and
-`host` a `HostName`. Each is a newtype whose constructor holds
-the rules, so an invalid one cannot be built -- by a config file
-or by a library caller. For the first three, serde runs the
-constructor while deserializing, so a bad value is refused
-before a `Config` exists and the error identifies the line.
+Every value is enforced by its type. `remote_root` is a
+`RemoteRoot`, `repo` a `RepoUrl`, `script` a `ScriptPath`,
+`box` a `BoxName`, `ref` a `GitRef`, `project` a `ProjectName`
+and `host` a `HostName`. Each is a newtype whose constructor
+holds the rules, so an invalid one cannot be built -- by a
+config file or by a library caller. All of them but `host` run
+their constructor as serde deserializes, so a bad value is
+refused before a `Config` exists and the error identifies the
+line.
+
+`cpus` and `memory` are the two that are not newtypes of ours.
+Their only rule is a floor of one, which is exactly what
+`std::num::NonZeroU32` means, so the standard type carries it
+and serde refuses a `0` while the file is read. It is the one
+checked type whose message does not name its key: the `toml`
+crate reports a span for a bad value and leaves the key out,
+where every newtype writes its own field name into the message.
+So the operator gets a line and a column instead, pointing at
+the offending value itself.
 
 `HostName` is the exception, and it has no `#[serde(try_from =
 "String")]`. The registry carries a `host` key per project and
@@ -490,13 +514,12 @@ supply one because it does not know which key it is reading.
 Trading that answer for a line number would be the worse deal,
 so the host rule runs where the origin is known.
 
-The remaining four -- `box`, `ref`, `cpus` and `memory` -- are
-only *checked* after parsing, in `vm::validate` and
-`source::validate`, and so is `project` in `Config::validate`.
-`Vm`, `Source` and `Config` all have public fields, so a hand-
-built one never reaches those functions. **That is a gap, not a
-decision we would make again**, and issue #43 is the work that
-closes it.
+**No checking function survives.** `Config::validate`,
+`Project::validate`, `vm::validate` and `source::validate` all
+had nothing left to run once the last five values grew types,
+and issue #43 deleted them. A `Vm`, a `Source`, a `Project` or
+a `Config` that exists at all is one whose values passed,
+whoever built it and however.
 
 `Project`, the registry's per-project entry, carries the same
 values less `project`, which is its table key.
@@ -528,33 +551,26 @@ one. `rank`'s doc comment says so rather than implying an error
 an operator could provoke.
 
 `Registry::host` and `Registry::project_host` hand raw values
-out without running the rule, and neither `Project::validate`
-nor `Config::validate` checks `host`. `host` is the one field
-absent from both, which looks like an omission and is not.
+out without running the rule. They can, because
+`config::registry::parse` already ran it on every `host` in the
+file, and `parse` is the only way to build a `Registry`.
 
-`Config::load_project` then runs `Config::validate` over the
-value it assembles, so an entry's fields are checked twice. That
-is deliberate rather than an oversight: `validate` is what every
-path building a `Config` calls, so a field added to `Config`
-without a matching check on the entry is still refused.
-
-Five values in an entry are checked before any lookup: the
-project name, because it is the table key and a `ProjectName`;
-`remote_root`, `repo` and `script`, because their types refuse a
-bad value while the table parses; and `host`, by the pass
-described above. The rest are checked when `Registry::project`
-hands the entry out, so a rule broken in one project's table is
-reported when that project is asked for. A table that does not
-*parse* is not like that: the whole file fails, whichever
-project it belongs to.
+**Every value in an entry is now checked before any lookup.**
+The project name, because it is the table key and a
+`ProjectName`; `host`, by the pass described above; and the
+rest, because their types refuse a bad value while the table
+parses. So one project's broken table fails the whole file,
+whichever project the operator asked for. That is the price of
+the guarantee, and it is the same price a table that does not
+parse has always cost.
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it. `Vm`,
 `Source` and `Project` have nothing but public fields, so any
-code can build one by hand and reach the guest without
-`validate` ever being called -- and a field whose rules are dull
-is as exposed as one whose rules are sharp. `validate` is also
-private, so a library caller cannot even choose to call it.
+code can build one by hand, and a private `validate` is not
+something a library caller could call even if it wanted to.
+That is why the rules moved into the types and the functions
+went away.
 
 `Config` is one step better and not two. Its private
 `transport` field stops a struct literal outside this crate, so
@@ -632,34 +648,27 @@ already returned. A third config-less subcommand added to `Cmd`
 gets that for free; one added to `VmCmd` does not, and would
 fail at the requirement rather than at compile time.
 
-### The unchecked-field gap, and what limits it
+### Every field of a Config carries its own rule
 
-Five fields of `Config` and its two tables are still a plain
-`String` or `u32`: `project`, `box`, `ref`, `cpus` and
-`memory`. Every field of `Config` is public except the
-transport, so a caller holding a loaded one can assign any of
-the five and nothing re-checks. Issue #43 is the work that
-gives each of them a type.
+`Config` and its two tables hold nine values, and issue #43
+closed the last five. Every one of them is now a type that
+refuses a bad value in its constructor, so a caller assigning
+to a public field of a loaded `Config` gets the same check the
+config file got.
 
-Three things keep that survivable in the meantime. `render`
-escapes for Ruby whatever it is handed. `bootstrap.sh` passes
-`--` before the ref. And inside this crate the only place that
-builds a `Config` is `Project::to_config`, whose caller runs
-`validate` immediately -- so for bombyx's own commands the check
-does run.
+That matters because `load_project` hands the caller an owned
+`Config` with public fields. `cfg.project = ProjectName::parse(
+"...")?` compiles; `cfg.project = "../etc".to_owned()` does not.
+A type carries its proof to every use site, and a checking
+function carried it only to the paths that called it.
 
-A library consumer is not covered by that, and the public fields
-are why. `load_project` hands the caller an owned `Config`, and
-assigning `cfg.project = "..."` on it compiles and reaches
-`plan` with nothing having checked the new value. That is the
-whole argument for the remaining types: a type carries its proof
-to every use site, and a checking function carries it only to
-the paths that call it.
-
-The two sharpest values already have their types. `remote_root`
-reaches `rm -rf` and `host` reaches `ssh`, and each holds its
-rules in a constructor: `RemoteRoot` in `config::root` and
-`HostName` in `config::host`.
+Two defences behind the types are worth keeping anyway.
+`vagrantfile::render` escapes for Ruby whatever it is handed,
+and `bootstrap.sh` passes `--` before the ref. Neither is
+reachable through a checked value any more, which is what makes
+them precautions: they hold if a rule is ever loosened, and
+`vagrantfile`'s own test exercises the escaping directly
+because no config can reach it.
 
 | Field | Refused | Because |
 |-------|---------|---------|
@@ -669,17 +678,18 @@ rules in a constructor: `RemoteRoot` in `config::root` and
 | `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
 | `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
-| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. `host` and `remote_root` carry the rule in their constructors, `project` in `Config::validate`. For `host` it is live — it is `ssh`'s first positional argument. Running on the VM host itself no argv position holds it, but the rule still applies, because the same `config.toml` carried to another machine takes the `ssh` route. For the other two it is a precaution, since both are shell-quoted before the far shell receives them |
+| `host` `project` `remote_root` | leading `-` | the program each one reaches would treat it as an option. All three carry the rule in their constructors: `project`'s comes from `check_segment`, which refuses any first character that is not a letter or a digit. For `host` it is live — it is `ssh`'s first positional argument. Running on the VM host itself no argv position holds it, but the rule still applies, because the same `config.toml` carried to another machine takes the `ssh` route. For the other two it is a precaution, since both are shell-quoted before the far shell receives them |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
 `project` and `remote_root` have rules of their own beyond the
-table above, and they run in different places. `project`'s run
-in `Config::validate`, and it must be one path segment, because
-it becomes one directory name on the VM host. `remote_root`'s
-run once, in `RemoteRoot`'s constructor, which serde calls while
-the table parses.
+table above, and each runs them in its own constructor.
+`project` must be one path segment, because it becomes one
+directory name on the VM host, and `ProjectName` shares that
+rule with `ScratchName` through `name::check_segment`.
+`RemoteRoot`'s rules run when serde builds it, while the table
+parses.
 
 `remote_root` has the strictest rules of the three, because
 bombyx runs `rm -rf` on a path derived from it. All of them live
@@ -712,31 +722,31 @@ while resolving to `/etc`.
 ```mermaid
 flowchart TD
   toml["config.toml"]
-  val["config::validate"]
+  val["config::load_project"]
   render["vagrantfile::render"]
   write["remote::write_file"]
   out["Vagrantfile<br/>on the VM host"]
 
   toml --> val
-  val -- "validated Config" --> render
+  val -- "checked Config" --> render
   render -- "Ruby text" --> write
   write -- "quoted heredoc" --> out
 ```
 
 Each stage is safe on its own rather than trusting the one
 before it. `render` escapes every `"`, `\` and `#` even though
-`validate` already refused them. `write_file` lengthens its
+`BoxName`, `RepoUrl`, `GitRef` and `ScriptPath` already refused
+them. `write_file` lengthens its
 heredoc delimiter until no payload line equals it, rather than
 assuming the payload came from `render`.
 
 The repetition is not redundant, and the newtypes narrowed it
-rather than removing it. A library caller can no longer build a
-bad `repo` or `script`, because those fields hold `RepoUrl` and
-`ScriptPath` and their inner values are private. `box` and
-`git_ref` are still plain `String` fields on a public struct, so
-`render` can still be handed a quote, and `write_file` can still
-be handed a payload no renderer produced. A guard that lives in
-another module is the one a new field gets added without.
+rather than removing it. A library caller can no longer hand
+`render` a quote at all: every value it writes into the Ruby is
+a newtype whose inner value is private. What survives is the
+stage below it -- `write_file` can still be handed a payload no
+renderer produced -- and the fact that a guard living in another
+module is the one a new field gets added without.
 
 ## Quality gates
 

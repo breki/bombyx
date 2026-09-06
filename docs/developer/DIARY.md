@@ -2,6 +2,66 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-06
+
+**The last five config values grew types, and every checking
+function went with them**
+
+`project`, `box`, `ref`, `cpus` and `memory` were the values
+still held as a bare `String` or `u32`. `project` becomes a
+`ProjectName`, the type the registry already keys its project
+map by; `box` becomes a new `BoxName`; `ref` becomes a new
+`GitRef`; and `cpus` and `memory` become `std::num::NonZeroU32`.
+
+The point of the exercise is not the rules, which are dull. It
+is that the rules now *ran*. `Config`, `Vm` and `Source` all
+have public fields, so a caller could build one by hand and
+reach the guest without `validate` ever being called, and a
+private `validate` was not something a library caller could ask
+for even if it wanted to. So `Config::validate`,
+`Config::validate_generated`, `Project::validate`,
+`vm::validate` and `source::validate` all had nothing left to
+run, and all five are gone.
+
+Two things fell out of that removal. `ConfigError::Empty` lost
+its last producer, and `From<FieldError> for ConfigError` lost
+its last caller, so both are deleted. And the arm in `main` that
+added `in <file>` context to a field error is gone with them: a
+value breaking its type's rule is now refused by serde and
+arrives as `ConfigError::Parse`, which already names the path
+and the line.
+
+**The issue's premise about `NonZeroU32` was wrong, and it is
+worth recording.** #43 said serde "already refuses `0` for that
+type and names the key". It refuses the `0`, but the `toml`
+crate reports a span for a bad value and leaves the key out, so
+the operator gets `line 6, column 8: invalid value: integer 0,
+expected a nonzero u32`. Every newtype here writes its own field
+name into its message; `NonZeroU32` is the one checked type that
+does not. The position points at the offending value itself,
+which is arguably the better answer, but it is not what the
+issue predicted and the test now asserts the real message.
+
+The cost we accepted: a bad value anywhere in `config.toml` now
+fails the whole file, so a broken entry for one project stops
+work on another. That was already true for `remote_root`,
+`host`, `repo` and `script`, whose types refuse a value while
+the file parses, so this makes the remaining five behave the
+same way rather than introducing anything new. The test
+`a_host_survives_a_broken_value_elsewhere_in_its_entry` lost its
+subject and was deleted -- no broken value survives the parse
+any more.
+
+`vagrantfile`'s escaping test changed subject for the same
+reason. It used to build a `Config` with a quote in `box_name`
+and check the rendered Ruby; no config can hold one now, so it
+tests `ruby_string` directly. The escaping stays, as a
+precaution that holds if a rule is ever loosened.
+
+Verified against the VM host, which is this machine: `bombyx up`
+on the running `vmtest` VM rewrote the generated files and
+`vagrant` parsed and accepted them, exit 0.
+
 ### 2026-09-05
 
 **Three review rounds, three narrowing versions of one bug**

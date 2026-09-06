@@ -2,7 +2,7 @@
 //! came from.
 //!
 //! A rule that several fields share lives here once, so widening
-//! it reaches all of them at the same time. Six fields use the
+//! it reaches all of them at the same time. Five fields use the
 //! leading-dash rule, four use the Ruby-literal rule, and both
 //! the blank check and the character check have several callers.
 //!
@@ -38,8 +38,8 @@ pub(super) fn check_not_empty(
 ///
 /// `tool` names the program in the message, because the answer
 /// to "which program?" is what tells the operator where to
-/// look: `host` reaches `ssh`, `ref` and `repo` reach `git`,
-/// and `project` reaches the shell script `ssh` runs.
+/// look: `host` and `remote_root` reach `ssh`, and `ref`,
+/// `repo` and `script` reach `git`.
 ///
 /// **For `ref` this is the second of two guards, not the only
 /// one.** The guest runs
@@ -55,8 +55,11 @@ pub(super) fn check_not_empty(
 /// run on the other end, rather than as a branch name.
 ///
 /// **Add a field whose value reaches a command line, and it
-/// requires this check too.** Six use it today: `host`,
-/// `project`, `remote_root`, `ref`, `repo` and `script`.
+/// requires this check too.** Five use it today: `host`,
+/// `remote_root`, `ref`, `repo` and `script`. `project` needs
+/// no separate call: it is a `crate::name::ProjectName`, whose
+/// rule refuses any first character that is not a letter or a
+/// digit, and that covers a leading dash.
 pub(super) fn check_not_an_option(
     field: &'static str,
     value: &str,

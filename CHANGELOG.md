@@ -180,6 +180,11 @@ and this project adheres to
   were a `String`. Each type's constructor holds every rule its field has, so a
   value that exists has passed them. Code reading a field needs `.as_str()`;
   code assigning one needs the constructor, which returns a `Result`.
+- Every config value is now enforced by its type. `project` is a `ProjectName`,
+  `box` a `BoxName`, `ref` a `GitRef`, and `cpus` and `memory` are `NonZeroU32`.
+  A value breaking its rule is refused while `config.toml` is being read, so the
+  error names the line -- and a bad value in any project's table now fails the
+  whole file rather than only the lookup of that project.
 
 ### Fixed
 

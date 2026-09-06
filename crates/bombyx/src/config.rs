@@ -20,22 +20,21 @@
 //! the guest and a typo there is worth reporting where the
 //! operator is editing.
 //!
-//! Four of them are checked by their *type* and cannot be built
-//! wrong at all: `remote_root`, `host`, `repo` and `script`.
-//! See [`RepoUrl`] for how the pattern works. Three of the four
-//! run their rules as serde reads the file; `host` runs its own
-//! as the two `host` keys are ranked, and `config::host` says
-//! why it differs.
+//! **Every field is checked by its *type*, so none can be built
+//! wrong at all.** `remote_root`, `host`, `repo`, `script`,
+//! `box`, `ref` and `project` are newtypes; see [`RepoUrl`] for
+//! how the pattern works. `cpus` and `memory` are
+//! `std::num::NonZeroU32`, because a floor of one is all either
+//! has and that is what the standard type means.
 //!
-//! The rest -- `project`, `box`, `ref`, `cpus` and `memory` --
-//! are checked by `Config::validate`, which the loading path
-//! runs. `Config` has public fields, so a value that has been
-//! through `validate` can still be edited afterwards and nothing
-//! re-checks it. That is a gap rather than a decision, argued
-//! once in `docs/architecture.md` under "What config values
-//! are checked". (`validate` is named rather than linked because
-//! it is private, and rustdoc rejects a public page pointing
-//! at a private item.)
+//! All of them but `host` run their rules as serde reads the
+//! file. `host` runs its own as the two `host` keys are ranked,
+//! and `config::host` says why it differs.
+//!
+//! So there is no separate function to call. `Config` has
+//! public fields, and a caller assigning to one gets the same
+//! check the config file got, because the value it has to
+//! supply is already of the checked type.
 //!
 //! # Where each rule lives
 //!
@@ -61,7 +60,7 @@
 
 use std::path::Path;
 
-use crate::name::{ScratchName, check_segment};
+use crate::name::{ProjectName, ScratchName, check_segment};
 
 mod error;
 mod guards;
@@ -153,8 +152,8 @@ pub use host::{
 pub(crate) use host::{is_anchored_dir, registry_place};
 pub use registry::{Project, Registry, USER_CONFIG_FILE};
 pub use root::RemoteRoot;
-pub use source::{RepoUrl, ScriptPath, Source};
-pub use vm::{Provider, Vm};
+pub use source::{GitRef, RepoUrl, ScriptPath, Source};
+pub use vm::{BoxName, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
@@ -205,7 +204,15 @@ pub struct Config {
 
     /// Project name. Doubles as the directory name on the
     /// VM host.
-    pub project: String,
+    ///
+    /// A [`ProjectName`], so `crate::name::check_segment` has
+    /// run against whatever is in here. bombyx joins the value
+    /// onto `remote_root` and creates the result on the VM host
+    /// with `mkdir`, so it has to be one path segment and
+    /// nothing else. This field is public, which is why the
+    /// rule belongs to a type rather than to a function a
+    /// caller has to remember.
+    pub project: ProjectName,
 
     /// Root directory on the VM host under which project
     /// directories are created.
@@ -347,9 +354,10 @@ impl Config {
     /// no table for `name`, [`ConfigError::Read`],
     /// [`ConfigError::NotAFile`], [`ConfigError::TooLarge`] or
     /// [`ConfigError::Parse`] if the file cannot be read or
-    /// understood, [`ConfigError::HostMissing`] if neither
-    /// `host` key names one, and [`ConfigError::Empty`] /
-    /// [`ConfigError::Invalid`] if a field fails validation.
+    /// understood -- which is also how a value breaking its own
+    /// type's rule arrives, since serde runs the constructor --
+    /// and [`ConfigError::HostMissing`] if neither `host` key
+    /// names one.
     pub fn load_project(
         name: &str,
         registry: Option<&Path>,
@@ -392,64 +400,14 @@ impl Config {
         name: &str,
         this_machine: Option<&str>,
     ) -> Result<(Self, HostOrigin), ConfigError> {
-        let project = registry.project(name)?;
+        let (key, project) = registry.project(name)?;
 
         // Ranked for the same `name` the entry came from, so the
         // host and the settings always come from one project.
         let (host, origin) = host::rank(registry, name)?;
 
         let route = transport::resolve(host.as_str(), this_machine);
-        let cfg = project.to_config(name, host, route);
-
-        // Deliberately checks the entry's fields a second
-        // time: a field added to `Config` with no matching
-        // entry check is still refused here.
-        cfg.validate()?;
-        Ok((cfg, origin))
-    }
-
-    /// Rejects values that are empty or outside their allowed
-    /// shape.
-    ///
-    /// **`host` and `remote_root` are not among them**, on
-    /// purpose. `config::registry`'s parse checks every `host`
-    /// key as it reads the file, and `remote_root` is a
-    /// [`RemoteRoot`], whose constructor holds every rule it
-    /// has. Neither leaves anything to run here.
-    fn validate(&self) -> Result<(), ConfigError> {
-        // `project` reaches `ssh`, and the leading-dash rule
-        // here is a precaution rather than a live hole: the
-        // value goes through `quote_remote_path` into the shell
-        // script `ssh` runs, so it arrives quoted. The rule is
-        // kept because that protection lives in another file,
-        // where somebody may rewrite it without knowing it is
-        // what makes this value safe.
-        guards::check_not_empty("project", &self.project)?;
-        guards::check_not_an_option("project", &self.project, "ssh")?;
-
-        // `project` becomes one directory name on the host.
-        check_segment(&self.project).map_err(|e| ConfigError::Invalid {
-            field: "project",
-            reason: e.to_string(),
-        })?;
-
-        self.validate_generated()
-    }
-
-    /// Runs the `[vm]` and `[source]` checks that types cannot.
-    ///
-    /// Each table's rules live in the module that owns it, and
-    /// this is the only place either is called from, so no
-    /// caller can run one half of the checks without the other.
-    ///
-    /// Split out of [`Config::validate`] because that function
-    /// outgrew the 100-line limit.
-    fn validate_generated(&self) -> Result<(), ConfigError> {
-        // The `?` widens each `FieldError` into a `ConfigError`.
-        // See the `From` impl in `config::error`.
-        vm::validate(&self.vm)?;
-        source::validate(&self.source)?;
-        Ok(())
+        Ok((project.to_config(key, host, route), origin))
     }
 
     /// Returns the project directory on the VM host, e.g.
@@ -947,11 +905,11 @@ mod tests {
     fn reads_the_vm_and_source_tables() {
         let cfg = parse_whole(&full_registry()).unwrap();
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
-        assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
-        assert_eq!(cfg.vm.cpus, 4);
-        assert_eq!(cfg.vm.memory, 8192);
+        assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
+        assert_eq!(cfg.vm.cpus.get(), 4);
+        assert_eq!(cfg.vm.memory.get(), 8192);
         assert_eq!(cfg.source.repo.as_str(), "https://example.invalid/p.git");
-        assert_eq!(cfg.source.git_ref, "main");
+        assert_eq!(cfg.source.git_ref.as_str(), "main");
         assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
     }
 
@@ -968,19 +926,23 @@ mod tests {
 
     #[test]
     fn rejects_a_machine_with_nothing_to_run_on() {
-        // One field at a time, so a guard covering only `cpus`
-        // cannot pass by way of the `memory` case.
+        // One field at a time, so a type on `cpus` alone cannot
+        // pass by way of the `memory` case.
+        //
+        // Both are `NonZeroU32`, so serde refuses the `0` while
+        // the file is being read and the error arrives as
+        // `Parse`. The message is asserted rather than the
+        // variant, because what an operator needs from it is the
+        // key and the rule, and `Parse` also names the line.
         for (field, from, to) in [
             ("cpus", "cpus = 4", "cpus = 0"),
             ("memory", "memory = 8192", "memory = 0"),
         ] {
             let source = full_registry().replace(from, to);
             let err = parse_whole(&source).unwrap_err();
-            assert!(
-                matches!(&err, ConfigError::Invalid { field: f, .. }
-                    if *f == field),
-                "{field}: {err:?}"
-            );
+            assert!(matches!(&err, ConfigError::Parse { .. }), "{err:?}");
+            let text = err.to_string();
+            assert!(text.contains("nonzero"), "{field}: {text}");
         }
     }
 
@@ -1019,13 +981,11 @@ mod tests {
                     source.contains(&format!("{field} = ")),
                     "{field} is not a key in the fixture"
                 );
-                // The message is asserted, not the variant,
-                // because the two differ by field. `repo` and
-                // `script` are newtypes checked while serde
-                // deserializes, so a bad one arrives wrapped as
-                // `Parse`, which also names the line. `box` and
-                // `ref` are checked after parsing, as `Invalid`.
-                // Both spellings carry the field and the reason.
+                // The message is asserted rather than the
+                // variant. All four fields are newtypes checked
+                // while serde deserializes, so a bad one arrives
+                // wrapped as `Parse`, which names the line as
+                // well as the field and the reason.
                 //
                 // The reason has to be asserted as well as the
                 // field. `toml` backticks field names in its own
@@ -1096,15 +1056,15 @@ mod load_project_tests {
 
         // The table key becomes the project name: the entry does
         // not carry one, so the two cannot disagree.
-        assert_eq!(cfg.project, "myproject");
+        assert_eq!(cfg.project.as_str(), "myproject");
         assert_eq!(cfg.host.as_str(), "vmhost");
         // Absent from the entry, so the default applies.
         assert_eq!(cfg.remote_root.as_str(), DEFAULT_REMOTE_ROOT);
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
-        assert_eq!(cfg.vm.box_name, "generic/ubuntu2204");
-        assert_eq!(cfg.vm.cpus, 2);
-        assert_eq!(cfg.vm.memory, 2048);
-        assert_eq!(cfg.source.git_ref, "main");
+        assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
+        assert_eq!(cfg.vm.cpus.get(), 2);
+        assert_eq!(cfg.vm.memory.get(), 2048);
+        assert_eq!(cfg.source.git_ref.as_str(), "main");
         assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
         // The entry names no host of its own, so the file-wide
         // key won.
@@ -1210,16 +1170,26 @@ mod load_project_tests {
     #[test]
     fn a_broken_entry_is_reported_before_a_missing_host() {
         // Both are wrong at once: the entry says `cpus = 0` and
-        // neither `host` key names a machine. The entry is read
-        // first, so the entry's problem is what the operator is
-        // told about. It is the one they can act on with the file
-        // already open, and the host message would send them to
-        // that same file for a second edit.
+        // neither `host` key names a machine. The entry's values
+        // are checked types, so serde refuses the `0` while the
+        // file is being parsed -- before anything ranks the two
+        // `host` keys. So the entry's problem is what the
+        // operator is told about. It is the one they can act on
+        // with the file already open, and the host message would
+        // send them to that same file for a second edit.
+        //
+        // `NonZeroU32` is the one checked type whose message
+        // does not name its key: the `toml` crate reports a
+        // span for a bad value and leaves the key out, where
+        // every newtype here writes its own field name into the
+        // message. So the position is what an operator gets, and
+        // `line 6, column 8` is the `0` in `cpus = 0`.
         let source =
             test_entry("myproject", None).replace("cpus = 2", "cpus = 0");
         let err = load(&source, "myproject").unwrap_err();
         let text = err.to_string();
-        assert!(text.contains("cpus"), "{text}");
+        assert!(text.contains("line 6, column 8"), "{text}");
+        assert!(text.contains("nonzero"), "{text}");
         assert!(
             !matches!(err, ConfigError::HostMissing { .. }),
             "the host message wins only if the entry is read second: {text}"
@@ -1246,7 +1216,7 @@ mod load_project_tests {
         std::fs::write(&path, plain()).unwrap();
         let (cfg, origin) =
             Config::load_project("myproject", Some(&path)).unwrap();
-        assert_eq!(cfg.project, "myproject");
+        assert_eq!(cfg.project.as_str(), "myproject");
         assert_eq!(cfg.host.as_str(), "vmhost");
         assert_eq!(origin, HostOrigin::UserFile);
     }

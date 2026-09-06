@@ -306,34 +306,17 @@ fn run() -> Result<Ran> {
     // file in whichever config directory the environment names.
     let registry = cli.config.or_else(bombyx::config::registry_file);
 
-    // `Empty` and `Invalid` are the two variants that name no
-    // file: they come from `FieldError`, and `config::error`
-    // keeps that type free of files. So the file is named here.
-    //
-    // `project` is the exception among them, and it comes first
-    // for that reason. That value arrived on the command line,
-    // and the registry cannot carry a bad one -- a table key is
-    // a `ProjectName`, refused while the file parses. Naming the
+    // No arm names the registry file here. Every error that
+    // could want one names it already: a value breaking its
+    // type's rule is refused by serde and arrives as
+    // `ConfigError::Parse`, which carries the path and the
+    // line. The one variant that names no file is
+    // `Invalid { field: "project" }`, and that value came from
+    // the command line rather than from the file, so naming the
     // file would send the operator to edit the one place the
     // value is not.
     let (cfg, host_origin) =
-        Config::load_project(&project, registry.as_deref()).map_err(|err| {
-            match err {
-                e @ bombyx::config::ConfigError::Invalid {
-                    field: "project",
-                    ..
-                } => anyhow!(e),
-                e @ (bombyx::config::ConfigError::Empty { .. }
-                | bombyx::config::ConfigError::Invalid { .. }) => {
-                    let file = registry.as_deref().map_or_else(
-                        || "the registry".to_owned(),
-                        |p| p.display().to_string(),
-                    );
-                    anyhow::Error::new(e).context(format!("in {file}"))
-                }
-                e => anyhow!(e),
-            }
-        })?;
+        Config::load_project(&project, registry.as_deref())?;
 
     // Say which source the host came from, using the winner
     // the library reports rather than re-testing the sources
@@ -677,14 +660,14 @@ fn vm_name(raw: &str) -> Result<ScratchName> {
 fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
     let target = format!("{}:{}", cfg.host, cfg.remote_project_dir());
     match given {
-        Some(name) if name == cfg.project => {
+        Some(name) if name == cfg.project.as_str() => {
             eprintln!("bombyx: destroying {target}");
             Ok(())
         }
         Some(name) => bail!(
             "{name:?} does not match the project being destroyed \
              ({:?}); refusing to destroy {target}",
-            cfg.project
+            cfg.project.as_str()
         ),
         // Says what to add rather than spelling a whole
         // command. A reconstructed one drops every other
@@ -694,7 +677,7 @@ fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
             "destroy needs the project name to confirm: re-run \
              the same command with {:?} as its last argument -- \
              target is {target}",
-            cfg.project
+            cfg.project.as_str()
         ),
     }
 }
