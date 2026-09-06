@@ -568,8 +568,8 @@ to be opened.
   deliberately. A list beats a paragraph when the thing being
   described is a list -- `config.rs`'s header names its two
   loaders as two items. And an absence needs stating and then
-  locating: `host` is missing from `Project::validate` on
-  purpose, so the comment says so and says where the rule went
+  locating: `Registry::project_host` runs no rule itself, on
+  purpose, so the comment says so and says where the rule ran
   instead.
 - **One reason, not the chain.** Give the reason the code sits
   where it does, and stop. The reader reaches the consequence
@@ -682,7 +682,7 @@ to be opened.
 - Maximum code line width: 80 characters (`rustfmt.toml`)
 - **Validate a field's invariants where the field
   lives.** Put the rule in the module that owns the
-  value -- `Config::validate` for a config field --
+  value -- `RemoteRoot`'s constructor for `remote_root` --
   not at each use site. A check bolted onto one
   call site leaves every other path disagreeing with
   it: a depth floor placed on the removal path once

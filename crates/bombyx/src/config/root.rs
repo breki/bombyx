@@ -10,12 +10,11 @@
 //! a value reaches the rest of bombyx as a [`RemoteRoot`] or not
 //! at all, and holding one is the proof that every rule ran.
 
-use std::fmt;
-
 use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards;
+use crate::newtype::checked_str_newtype;
 
 /// A directory on the VM host that bombyx may create project
 /// directories under, and delete them from.
@@ -66,13 +65,12 @@ impl RemoteRoot {
         check(raw)?;
         Ok(Self(normalized(raw)))
     }
-
-    /// The value, ready to have a `/` and a name joined onto it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
+
+checked_str_newtype!(
+    RemoteRoot,
+    "The value, ready to have a `/` and a name joined onto it."
+);
 
 /// A checked root in the one form the rest of bombyx uses.
 ///
@@ -88,18 +86,6 @@ impl RemoteRoot {
 /// value down to nothing.
 fn normalized(checked: &str) -> String {
     checked.trim_end_matches('/').to_owned()
-}
-
-impl fmt::Display for RemoteRoot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for RemoteRoot {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
 }
 
 impl TryFrom<String> for RemoteRoot {

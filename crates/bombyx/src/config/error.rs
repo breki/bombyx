@@ -20,9 +20,32 @@
 //! a string from anywhere, with no config file in sight. Handing
 //! their callers an error type with a "config file is larger
 //! than 64 KiB" variant would make matching on the result
-//! meaningless. A `FieldError` converts into a `ConfigError`
-//! when one does turn up during loading, so nothing downstream
-//! has to know which kind it started as.
+//! meaningless.
+//!
+//! **There is no blanket conversion from one to the other**,
+//! and exactly one value converts by hand.
+//!
+//! Every checked type but `config::HostName` and
+//! `name::ScratchName` runs its constructor while serde
+//! deserializes, so a refusal it raises is wrapped by serde and
+//! reaches the caller inside [`ConfigError::Parse`], which names
+//! the line as well as the field. A blanket `From` would have
+//! produced that same message with the position thrown away.
+//! (`name::ProjectName` raises a `name::NameError` rather than a
+//! [`FieldError`], because it shares its rule with
+//! `name::ScratchName`, which has nothing to do with a config
+//! file. Serde wraps either one the same way.)
+//!
+//! The two exceptions differ from each other. `ScratchName` is
+//! built from the command line and never appears in the
+//! registry, so no config error is involved at all. `HostName`
+//! is the one that converts by hand: the value is ranked after
+//! the file parses, and `config::host::with_origin` turns its
+//! `FieldError` into [`ConfigError::InvalidHost`] rather than
+//! `Parse`. The registry holds a `host` key per project and one
+//! below them all, so that message names the source that
+//! supplied the value instead of the field. A caller matching
+//! only `Parse` to catch a bad config value will miss it.
 
 use std::path::PathBuf;
 
@@ -136,14 +159,14 @@ pub enum ConfigError {
         summary: String,
     },
 
-    /// A required field was present but empty.
-    #[error("`{field}` must not be empty")]
-    Empty {
-        /// Name of the offending field.
-        field: &'static str,
-    },
-
     /// A field held a value outside its allowed shape.
+    ///
+    /// Only `project` reaches this variant. Every other value
+    /// is checked by its type while serde reads the file, so a
+    /// bad one arrives as [`ConfigError::Parse`]. `project` is
+    /// different because it comes from the command line, and
+    /// `crate::name::check_segment` runs on it before the
+    /// registry is opened.
     #[error("invalid `{field}`: {reason}")]
     Invalid {
         /// Name of the offending field.
@@ -234,21 +257,4 @@ pub enum ConfigError {
         /// What rule the value broke.
         reason: String,
     },
-}
-
-/// Widens a one-field failure into a loading failure.
-///
-/// The two variants map across unchanged, so a caller matching
-/// `ConfigError::Invalid { field, .. }` sees the same thing
-/// whether the check ran during loading or inside a newtype
-/// constructor.
-impl From<FieldError> for ConfigError {
-    fn from(err: FieldError) -> Self {
-        match err {
-            FieldError::Empty { field } => Self::Empty { field },
-            FieldError::Invalid { field, reason } => {
-                Self::Invalid { field, reason }
-            }
-        }
-    }
 }

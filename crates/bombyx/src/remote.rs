@@ -534,7 +534,7 @@ pub fn save_snapshot_if_absent(
         name = shell_quote(FRESH_SNAPSHOT),
         save = vagrant_command(cfg, &["snapshot", "save", FRESH_SNAPSHOT]),
         name_bare = FRESH_SNAPSHOT,
-        project = shell_quote(&cfg.project),
+        project = shell_quote(cfg.project.as_str()),
     );
     transport(cfg, &script, tty)
 }

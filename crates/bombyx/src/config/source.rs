@@ -1,21 +1,20 @@
 //! The `[source]` table: where the guest fetches the project
-//! from, and the two checked types that hold its values.
+//! from, and the three checked types that hold its values.
 //!
-//! Both types are *newtypes* -- a struct wrapping one private
+//! All three are *newtypes* -- a struct wrapping one private
 //! `String`, buildable only through a function that checks the
 //! value first. [`RepoUrl`] explains the pattern in full; read
 //! that one first.
 //!
-//! These two values are the ones that reach `git` and the
-//! guest's shell, so they carry the checks that cannot be
-//! expressed as "a non-empty string".
-
-use std::fmt;
+//! All three values reach `git` and the guest's shell, so they
+//! carry the checks that cannot be expressed as "a non-empty
+//! string".
 
 use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards;
+use crate::newtype::checked_str_newtype;
 
 /// Where the guest fetches the project from, as `[source]`.
 ///
@@ -31,7 +30,7 @@ pub struct Source {
     ///
     /// Named `git_ref` because `ref` is a Rust keyword.
     #[serde(rename = "ref")]
-    pub git_ref: String,
+    pub git_ref: GitRef,
     /// Provisioning script to run, relative to the clone root.
     pub script: ScriptPath,
 }
@@ -99,25 +98,12 @@ impl RepoUrl {
         check_repo(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// The value, as `git` and the Vagrantfile see it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for RepoUrl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for RepoUrl {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+checked_str_newtype!(
+    RepoUrl,
+    "The value, as `git` and the Vagrantfile see it."
+);
 
 impl TryFrom<String> for RepoUrl {
     type Error = FieldError;
@@ -168,25 +154,9 @@ impl ScriptPath {
         check_script(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// The value, as the guest's shell sees it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for ScriptPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for ScriptPath {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+checked_str_newtype!(ScriptPath, "The value, as the guest's shell sees it.");
 
 impl TryFrom<String> for ScriptPath {
     type Error = FieldError;
@@ -196,6 +166,64 @@ impl TryFrom<String> for ScriptPath {
         check_script(&raw)?;
         Ok(Self(raw))
     }
+}
+
+/// A branch or tag name that `git` will fetch, and not read as
+/// an option.
+///
+/// A newtype for the same reason as [`RepoUrl`]: the rules live
+/// in [`GitRef::parse`], so holding one means they have run.
+///
+/// The value is written into the generated Vagrantfile and then
+/// handed to `git` inside the guest, so it gets both the
+/// Ruby-literal rules and the leading-dash rule.
+///
+/// **The dash rule here is the second of two guards.** The
+/// guest runs `git fetch --depth 1 origin -- "$BOMBYX_REF"`,
+/// and that `--` already tells `git` that whatever follows is a
+/// value rather than an option. `super::guards::check_not_an_option`
+/// says why the rule is kept anyway.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct GitRef(String);
+
+impl GitRef {
+    /// Checks `raw` and wraps it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError::Empty`] when `raw` is blank, and
+    /// [`FieldError::Invalid`] when it begins or ends with
+    /// whitespace, would break the generated Vagrantfile, or
+    /// would be read by `git` as an option.
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        check_git_ref(raw)?;
+        Ok(Self(raw.to_owned()))
+    }
+}
+
+checked_str_newtype!(GitRef, "The value, as `git` and the Vagrantfile see it.");
+
+impl TryFrom<String> for GitRef {
+    type Error = FieldError;
+
+    /// What serde calls; see [`RepoUrl::try_from`].
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        check_git_ref(&raw)?;
+        Ok(Self(raw))
+    }
+}
+
+/// Every rule a `ref` value must pass, in one place.
+///
+/// Both [`GitRef::parse`] and [`GitRef::try_from`] call this,
+/// so neither can run a different set. Both rules are shared
+/// with other fields: the value is written into a Ruby file,
+/// and it reaches `git` on a command line.
+fn check_git_ref(value: &str) -> Result<(), FieldError> {
+    guards::check_renderable("ref", value)?;
+    guards::check_not_an_option("ref", value, "git")?;
+    Ok(())
 }
 
 /// Every rule a `repo` value must pass, in one place.
@@ -286,118 +314,25 @@ fn check_script(value: &str) -> Result<(), FieldError> {
     }
 }
 
-/// Checks the `[source]` values that types cannot.
-///
-/// Only `ref`. `repo` and `script` are [`RepoUrl`] and
-/// [`ScriptPath`], and those types run their checks when they
-/// are built, so one that exists at all is one that passed --
-/// there is nothing left here to check.
-///
-/// `ref` is still a plain `String`, and that is a gap rather
-/// than a decision. A type would promise its checks *ran*,
-/// which is worth having whether or not the checks are
-/// interesting. `Source` has public fields and
-/// `Config::validate` is private, so a hand-built `Source`
-/// never reaches this function and cannot ask for it. See
-/// `newtype-remaining-config-fields` in `docs/todo.md`.
-pub(super) fn validate(source: &Source) -> Result<(), FieldError> {
-    guards::check_renderable("ref", &source.git_ref)?;
-    guards::check_not_an_option("ref", &source.git_ref, "git")?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn source() -> Source {
-        Source {
-            repo: RepoUrl::parse("https://example.invalid/p.git")
-                .expect("a valid fixture URL"),
-            git_ref: "main".to_owned(),
-            script: ScriptPath::parse("vagrant/provision.sh")
-                .expect("a valid fixture path"),
-        }
-    }
-
-    /// Builds either newtype from a string and throws the value
-    /// away, so a rule both share can be tested against both.
-    type Build = fn(&str) -> Result<(), FieldError>;
-
-    /// The two newtypes, as field name, constructor, and a value
-    /// that constructor accepts.
-    ///
-    /// The accepted value is in the row rather than worked out
-    /// from the field name, so a test needing one reads it here.
-    /// A third newtype is then one more row, instead of one more
-    /// branch inside every test.
-    ///
-    /// The closures capture nothing, so they become plain
-    /// function pointers and the array has one type.
-    fn both_newtypes() -> [(&'static str, Build, &'static str); 2] {
-        [
-            (
-                "repo",
-                |s| RepoUrl::parse(s).map(|_| ()),
-                "https://example.invalid/p.git",
-            ),
-            (
-                "script",
-                |s| ScriptPath::parse(s).map(|_| ()),
-                "vagrant/provision.sh",
-            ),
-        ]
-    }
-
     /// Asserts `bad` is refused with a message mentioning
     /// `reason`.
     ///
-    /// Pinning the reason, not just the failure, is what makes
-    /// these tests notice a deleted rule. A value refused by
-    /// some *other* check would still fail `is_err()`, so a
-    /// weaker assertion goes green while the rule it covered
-    /// is gone.
-    fn refused_because(build: Build, bad: &str, reason: &str) {
+    /// The rules these three types share are tested against all
+    /// four checked newtypes at once, in `super::guards`'s test
+    /// module, where those rules live. What is left here is each
+    /// type's own rule, so this helper takes a constructor
+    /// rather than a table.
+    fn refused_because(
+        build: fn(&str) -> Result<(), FieldError>,
+        bad: &str,
+        reason: &str,
+    ) {
         let err = build(bad).expect_err("must be refused").to_string();
         assert!(err.contains(reason), "{bad:?}: want {reason:?}, got {err}");
-    }
-
-    #[test]
-    fn both_newtypes_refuse_a_blank_value() {
-        for (field, build, _) in both_newtypes() {
-            for bad in ["", "   "] {
-                refused_because(build, bad, "must not be empty");
-                // The field name is the only part of the error
-                // telling an operator which key to edit, and it
-                // now travels through a guard, a `FieldError`
-                // and a `ConfigError` before it is printed.
-                // Swap two of them and only this line notices.
-                refused_because(build, bad, field);
-            }
-        }
-    }
-
-    #[test]
-    fn both_newtypes_refuse_surrounding_whitespace() {
-        // A copy-paste artifact that otherwise fails inside the
-        // guest, long after bombyx could have said so.
-        for (_, build, good) in both_newtypes() {
-            for bad in [format!(" {good}"), format!("{good} ")] {
-                refused_because(build, &bad, "whitespace");
-            }
-        }
-    }
-
-    #[test]
-    fn both_newtypes_refuse_characters_that_break_the_ruby() {
-        // Both characters reach a Ruby string literal in the
-        // generated Vagrantfile: a quote ends it early, a
-        // backslash escapes whatever follows.
-        for (_, build, good) in both_newtypes() {
-            for bad in [format!("{good}a\"b"), format!("{good}a\\b")] {
-                refused_because(build, &bad, "would end or escape");
-            }
-        }
     }
 
     #[test]
@@ -412,21 +347,6 @@ mod tests {
             "\\windows\\x",
             "would end or escape",
         );
-    }
-
-    #[test]
-    fn both_newtypes_refuse_a_value_git_would_treat_as_an_option() {
-        // `-oProxyCommand=id:x` is the case that pins this rule
-        // for `repo`. One colon, no `://`, so the URL check
-        // reads it as the SSH shorthand `host:path` and accepts
-        // it outright -- delete the dash rule and that value is
-        // not refused at all.
-        for (_, build, _) in both_newtypes() {
-            for bad in ["-x", "-oProxyCommand=id:x", "--upload-pack=/bin/sh:x"]
-            {
-                refused_because(build, bad, "git would treat as an option");
-            }
-        }
     }
 
     #[test]
@@ -484,38 +404,45 @@ mod tests {
         let script = ScriptPath::parse("vagrant/provision.sh").unwrap();
         assert_eq!(script.to_string(), "vagrant/provision.sh");
         assert_eq!(script.as_ref(), "vagrant/provision.sh");
-    }
-    #[test]
-    fn refuses_a_ref_git_would_treat_as_an_option() {
-        // `ref` is the one `[source]` field `validate` checks.
-        // `repo` and `script` are newtypes, so their rules live
-        // in their constructors and the tests above cover them.
-        //
-        // `bootstrap.sh` passes `--` before the ref, so this is
-        // the second of two guards rather than the only one. See
-        // `check_not_an_option` for why both are kept.
-        for bad in ["-x", "--upload-pack=/bin/sh", "--exec=x"] {
-            let mut s = source();
-            s.git_ref = bad.to_owned();
-            let err = validate(&s).unwrap_err();
-            assert!(
-                matches!(&err, FieldError::Invalid { field: "ref", .. }),
-                "ref must refuse {bad:?}, got {err:?}"
-            );
-        }
+
+        let git_ref = GitRef::parse("main").unwrap();
+        assert_eq!(git_ref.as_str(), "main");
+        assert_eq!(git_ref.to_string(), "main");
+        assert_eq!(git_ref.as_ref(), "main");
     }
 
     #[test]
-    fn a_control_character_in_a_ref_is_reported_as_one() {
-        // Separate message from the quote case: a BEL neither
-        // ends nor escapes a Ruby literal, and saying it does
-        // sends an operator hunting a quoting problem.
-        let mut s = source();
-        s.git_ref = "ma\u{7}in".to_owned();
-        let err = validate(&s).unwrap_err();
-        let FieldError::Invalid { reason, .. } = &err else {
-            panic!("{err:?}");
-        };
-        assert!(reason.contains("control character"), "{reason}");
+    fn serde_runs_every_check_while_the_table_is_read() {
+        // `try_from` is a second entry point into each type, and
+        // the attribute that selects it is easy to drop. Without
+        // it serde assigns the private field and no check runs
+        // at all, so this asserts against the deserializer
+        // rather than against the three `parse` functions.
+        let good = "repo = \"https://example.invalid/p.git\"\n\
+                    ref = \"main\"\n\
+                    script = \"vagrant/provision.sh\"\n";
+        toml::from_str::<Source>(good).expect("the fixture must load");
+
+        for (from, to, reason) in [
+            (
+                "https://example.invalid/p.git",
+                "ext::sh -c id",
+                "must be an https",
+            ),
+            (
+                "ref = \"main\"",
+                "ref = \"--upload-pack=x\"",
+                "as an option",
+            ),
+            (
+                "vagrant/provision.sh",
+                "/usr/bin/env",
+                "relative to the clone",
+            ),
+        ] {
+            let err = toml::from_str::<Source>(&good.replace(from, to))
+                .expect_err("must be refused");
+            assert!(err.to_string().contains(reason), "{to}: {err}");
+        }
     }
 }

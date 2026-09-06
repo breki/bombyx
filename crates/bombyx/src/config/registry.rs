@@ -70,21 +70,26 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// table key supplies that, so a project cannot disagree with
 /// itself about what it is called.
 ///
-/// The fields are checked in three different places, and which
+/// The fields are checked in two different places, and which
 /// one depends on what carries the rule.
 ///
-/// `remote_root`, `repo` and `script` are checked by their own
-/// types as the table parses: they are a [`super::RemoteRoot`],
-/// a [`super::RepoUrl`] and a [`super::ScriptPath`], so a bad
-/// value fails the parse and names the line.
+/// Every field but `host` is checked by its own type as the
+/// table parses. `remote_root` is a [`super::RemoteRoot`],
+/// `repo` a [`super::RepoUrl`], `script` a
+/// [`super::ScriptPath`], `box` a [`super::BoxName`] and `ref`
+/// a [`super::GitRef`], and `cpus` and `memory` are read
+/// through `super::vm`'s `positive_cpus` and `positive_memory`
+/// (named rather than linked: both are private). A bad one
+/// fails the parse and names the line.
 ///
-/// The optional `host` is checked by `parse`, once the table
-/// has parsed and before any `Registry` exists, along with every
-/// other `host` in the file.
+/// The optional `host` is the exception. It is checked by this
+/// module's `parse`, once the table has parsed and before any
+/// `Registry` exists, along with every other `host` in the
+/// file. The field below says why it is a `String` rather than
+/// a type.
 ///
-/// The rest -- `box`, `cpus`, `memory` and `ref` inside the two
-/// tables -- are checked by `Project::validate`, which
-/// [`Registry::project`] calls before handing an entry out.
+/// serde has run every one of those rules by the time this
+/// struct exists.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -178,7 +183,10 @@ impl Project {
     /// `name` is the table key this entry was found under, and
     /// becomes `Config::project`. The entry does not carry the
     /// name itself, so a project cannot disagree with itself
-    /// about what it is called.
+    /// about what it is called. It arrives as the key rather
+    /// than as the string the caller asked for, so nothing
+    /// re-checks a value the map lookup has already proved
+    /// legal.
     ///
     /// `host` comes from the caller because two keys can supply
     /// one and this entry carries only the first, and
@@ -193,40 +201,18 @@ impl Project {
     /// module holding one would carry -- buys nothing.
     pub(super) fn to_config(
         &self,
-        name: &str,
+        name: &ProjectName,
         host: super::HostName,
         transport: super::Transport,
     ) -> super::Config {
         super::Config {
             host,
-            project: name.to_owned(),
+            project: name.clone(),
             remote_root: self.remote_root.clone(),
             vm: self.vm.clone(),
             source: self.source.clone(),
             transport,
         }
-    }
-
-    /// Runs the rules no type on these fields carries: the
-    /// `[vm]` and `[source]` checks.
-    ///
-    /// **`remote_root` is not among them.** It is a
-    /// [`super::RemoteRoot`], so serde ran every rule it has
-    /// while the table parsed.
-    ///
-    /// **`host` is not among them.** [`parse`] applies that rule
-    /// to every key in the file as it is read, so by the time
-    /// anything calls this, the entry's host has passed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigError::Empty`] or
-    /// [`ConfigError::Invalid`], naming the field that broke its
-    /// rule.
-    fn validate(&self) -> Result<(), ConfigError> {
-        super::vm::validate(&self.vm)?;
-        super::source::validate(&self.source)?;
-        Ok(())
     }
 }
 
@@ -302,12 +288,10 @@ impl Registry {
     /// that a leading `-` never reaches `ssh` does not rest on
     /// what this method's callers remember to do.
     ///
-    /// **The rest of `Project::validate` has not run.** An entry
-    /// whose `cpus` is zero still supplies its host here,
-    /// deliberately: refusing would demote that project to the
-    /// file-wide host and boot its VM on the wrong machine,
-    /// while the broken `cpus` is reported anyway the moment
-    /// anything asks [`Registry::project`] for the entry.
+    /// **Every other value in the entry has passed too.** They
+    /// are all checked types, so a `Registry` holding an entry
+    /// with a zero `cpus` or a quote in its `box` never exists:
+    /// such a file fails the parse outright.
     ///
     /// `pub(crate)` all the same. Nothing outside the crate has
     /// a use for one project's preferred host without the rest
@@ -332,23 +316,34 @@ impl Registry {
     /// and a guessed entry that boots the wrong VM is worse than
     /// a message saying what to type.
     ///
-    /// **Only the value rules wait until here.** A table that
-    /// does not parse fails the whole file, whichever project
-    /// was asked for, and so does a bad `host` anywhere in it.
+    /// **This method runs no value rule of its own.** Every
+    /// value in an entry but `host` is a type that checks
+    /// itself, so a table breaking one of those rules fails the
+    /// whole file while it is read, whichever project was asked
+    /// for. The project name is a map key, and serde builds the
+    /// map before any code here runs, so [`ProjectName`] checks
+    /// it during the parse too.
     ///
-    /// What waits is whatever `Project::validate` runs. The
-    /// project name waits for nothing: it is a map key, and
-    /// serde builds the map before any code here runs, so
-    /// [`ProjectName`] checks it during the parse.
+    /// `host` is a `String` here on purpose -- the field says
+    /// why -- and this module's `parse` applies its rule to
+    /// every `host` in the file, so it too has passed before
+    /// this runs. (Named rather than linked: `parse` is private,
+    /// and rustdoc refuses a public page pointing at one.)
+    ///
+    /// The key comes back beside the entry, so a caller
+    /// building a `super::Config` gets a [`ProjectName`] the
+    /// lookup has already proved legal rather than re-parsing
+    /// the string it asked with.
     ///
     /// # Errors
     ///
     /// Returns [`ConfigError::Invalid`] when `name` is not a
-    /// legal project name, [`ConfigError::ProjectNotFound`] when
-    /// the file has no table for it, and
-    /// [`ConfigError::Empty`] / [`ConfigError::Invalid`] when
-    /// the entry it does have breaks a rule.
-    pub fn project(&self, name: &str) -> Result<&Project, ConfigError> {
+    /// legal project name, and [`ConfigError::ProjectNotFound`]
+    /// when the file has no table for it.
+    pub fn project(
+        &self,
+        name: &str,
+    ) -> Result<(&ProjectName, &Project), ConfigError> {
         // Checked before the map is consulted, because
         // `ProjectNotFound` tells the operator to add
         // `[projects.<name>]` -- and for a name no key can hold,
@@ -358,14 +353,12 @@ impl Registry {
             field: "project",
             reason: e.to_string(),
         })?;
-        let project = self.projects.get(name).ok_or_else(|| {
+        self.projects.get_key_value(name).ok_or_else(|| {
             ConfigError::ProjectNotFound {
                 name: name.to_owned(),
                 path: self.path.clone(),
             }
-        })?;
-        project.validate()?;
-        Ok(project)
+        })
     }
 }
 
@@ -512,12 +505,15 @@ mod tests {
     #[test]
     fn an_entry_carries_the_settings_that_describe_one_vm() {
         let registry = parsed(&registry_toml());
-        let project = registry.project("myproject").unwrap();
+        let (key, project) = registry.project("myproject").unwrap();
+        // The key comes back so a caller need not re-parse the
+        // name it asked with.
+        assert_eq!(key.as_str(), "myproject");
         assert_eq!(project.remote_root.as_str(), "~/vms");
         assert_eq!(project.vm.provider, Provider::Libvirt);
-        assert_eq!(project.vm.cpus, 4);
-        assert_eq!(project.vm.memory, 8192);
-        assert_eq!(project.source.git_ref, "main");
+        assert_eq!(project.vm.cpus.get(), 4);
+        assert_eq!(project.vm.memory.get(), 8192);
+        assert_eq!(project.source.git_ref.as_str(), "main");
         assert_eq!(project.source.script.as_str(), "vagrant/provision.sh");
     }
 
@@ -544,19 +540,18 @@ mod tests {
     }
 
     #[test]
-    fn a_looked_up_entry_has_had_its_values_checked() {
-        // Holding a `&Project` has to be proof the values
-        // passed, the way holding a `Config` is. Each of these
+    fn reading_the_file_refuses_a_bad_value_anywhere_in_an_entry() {
+        // Every value in an entry is now a checked type, so
+        // serde runs its rule while the file is being read and
+        // a `Registry` never holds a bad one. Each row below
         // breaks a rule owned by a different module.
         //
-        // `host` and `remote_root` are not in the table, and
-        // their absence is the point: both are refused earlier,
-        // while the file is read, so a registry carrying a bad
-        // one never becomes a `Registry` for anything to look an
-        // entry up in. `reading_the_file_refuses_a_bad_host_in_an_entry`
-        // and `reading_the_file_refuses_a_bad_remote_root` cover
-        // them. Between the three tests every value in an entry
-        // is checked before a caller can act on it.
+        // `host` and `remote_root` are absent from the list
+        // because they have tests of their own:
+        // `reading_the_file_refuses_a_bad_host_in_an_entry` and
+        // `reading_the_file_refuses_a_bad_remote_root`. Between
+        // the three tests every value in an entry is refused
+        // before anything can look the entry up.
         for (from, to) in [
             ("cpus = 4", "cpus = 0"),
             ("memory = 8192", "memory = 0"),
@@ -567,9 +562,8 @@ mod tests {
             ("ref = \"main\"", "ref = \"\""),
         ] {
             let source = registry_toml().replace(from, to);
-            let registry = parsed(&source);
             assert!(
-                registry.project("myproject").is_err(),
+                parse_at(&source, "/home/dev/config.toml").is_err(),
                 "{to} was accepted"
             );
         }
@@ -579,8 +573,7 @@ mod tests {
     fn reading_the_file_refuses_a_bad_remote_root() {
         // `remote_root` is a `RemoteRoot`, and serde runs its
         // constructor, so the value is refused while the table
-        // parses rather than by `Project::validate`. An entry
-        // holding one never exists.
+        // parses. An entry holding a bad one never exists.
         //
         // The whole family of bad roots is enumerated in
         // `super::root`. What this covers is the seam: the
@@ -629,28 +622,10 @@ mod tests {
     }
 
     #[test]
-    fn a_host_survives_a_broken_value_elsewhere_in_its_entry() {
-        // `project_host` runs no checks, exactly as `host`
-        // runs none. Were it to validate, an entry with a bad
-        // `cpus` would quietly demote its host to the
-        // file-wide one and boot the VM on the wrong machine.
-        // The entry's own error still arrives, from `project`.
-        let source = registry_toml()
-            .replace(
-                "[projects.myproject]\n",
-                "[projects.myproject]\nhost = \"otherbox\"\n",
-            )
-            .replace("cpus = 4", "cpus = 0");
-        let registry = parsed(&source);
-        assert_eq!(host_of(&registry, "myproject"), Some("otherbox"));
-        assert!(registry.project("myproject").is_err());
-    }
-
-    #[test]
     fn remote_root_falls_back_to_the_default() {
         let source = registry_toml().replace("remote_root = \"~/vms\"\n", "");
         let registry = parsed(&source);
-        let project = registry.project("myproject").unwrap();
+        let (_key, project) = registry.project("myproject").unwrap();
         assert_eq!(project.remote_root, default_remote_root());
     }
 

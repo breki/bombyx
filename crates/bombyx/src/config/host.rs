@@ -24,13 +24,13 @@
 //! the VM host out of whatever repository bombyx was run in,
 //! which is the one thing this design removes.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::error::FieldError;
 use super::registry::{self, USER_CONFIG_FILE};
 use super::{ConfigError, guards};
 use crate::name::ProjectName;
+use crate::newtype::checked_str_newtype;
 
 /// Characters allowed in an SSH destination.
 ///
@@ -100,25 +100,9 @@ impl HostName {
         check(raw)?;
         Ok(Self(raw.to_owned()))
     }
-
-    /// The value, as `ssh` sees it.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
-impl fmt::Display for HostName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl AsRef<str> for HostName {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+checked_str_newtype!(HostName, "The value, as `ssh` sees it.");
 
 /// Every rule a host value must pass, in one place.
 ///

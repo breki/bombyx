@@ -84,6 +84,10 @@ and this project adheres to
   `config::Provider::as_str`, which borrows the lowercase name instead of
   allocating one; and `impl Default for Provider`, which is `Libvirt` and is
   what makes an absent `provider` key mean libvirt.
+- Library API: `config::BoxName` and `config::GitRef`, the checked types now
+  holding `box` and `ref`, and `config::ProjectName` as a re-export of
+  `name::ProjectName`. Building a `Vm` or a `Source` by hand means calling their
+  constructors.
 
 ### Changed
 
@@ -180,6 +184,21 @@ and this project adheres to
   were a `String`. Each type's constructor holds every rule its field has, so a
   value that exists has passed them. Code reading a field needs `.as_str()`;
   code assigning one needs the constructor, which returns a `Result`.
+- **BREAKING:** Every config value is now enforced by its type. `project` is a
+  `ProjectName`, `box` a `BoxName`, `ref` a `GitRef`, and `cpus` and `memory`
+  are `NonZeroU32`, where all five were a `String` or a `u32`. A value breaking
+  its rule is refused while `config.toml` is being read, so the error names the
+  line -- and a bad value in any project's table now fails the whole file rather
+  than only the lookup of that project. Code reading one of these fields needs
+  `.as_str()` or `.get()`; code assigning one needs the constructor.
+- A zero `cpus` or `memory` is refused with the key named, as ``invalid `cpus`:
+  must be at least 1``, alongside the line and column. serde's own message for a
+  nonzero integer type does not say which key carried the value.
+- **BREAKING:** `config::Registry::project` returns the table key beside the
+  entry, as `(&ProjectName, &Project)` where it returned `&Project`. Callers
+  destructure the pair. The key is a `ProjectName` the lookup has already proved
+  legal, so code building a `Config` from an entry no longer re-parses the
+  string it asked with.
 
 ### Fixed
 
@@ -259,6 +278,12 @@ and this project adheres to
   the `ConfigError::NotFound` and `ConfigError::HostInProjectFile` variants.
   `Config::load_project(name, registry)` replaces the loader, and neither error
   type is `#[non_exhaustive]`, so a downstream `match` must drop those arms.
+- **BREAKING:** `ConfigError::Empty` and the `From<FieldError> for
+  ConfigError` conversion.
+  Every config value is now checked by its type while serde reads the file, so a
+  blank one arrives as `ConfigError::Parse` naming the line. Neither item had a
+  producer or a caller left. This is a change to the library's public API; a
+  user of the `bombyx` command sees no difference.
 
 
 ## [0.4.1] - 2026-08-18

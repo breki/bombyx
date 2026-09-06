@@ -138,13 +138,13 @@ Vagrant.configure(\"2\") do |config|
 end
 ",
         version = env!("CARGO_PKG_VERSION"),
-        box_name = ruby_string(&vm.box_name),
+        box_name = ruby_string(vm.box_name.as_str()),
         provider = vm.provider,
         cpus = vm.cpus,
         memory = vm.memory,
         bootstrap = ruby_string(BOOTSTRAP_NAME),
         repo = ruby_string(source.repo.as_str()),
-        git_ref = ruby_string(&source.git_ref),
+        git_ref = ruby_string(source.git_ref.as_str()),
         script = ruby_string(source.script.as_str()),
         host_env = crate::remote::VM_HOST_ENV,
         hostname_env = crate::remote::VM_HOSTNAME_ENV,
@@ -174,20 +174,25 @@ pub fn files(cfg: &Config) -> [(&'static str, String); 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Provider, RepoUrl, ScriptPath, Source, Vm};
+    use std::num::NonZeroU32;
+
+    use crate::config::{
+        BoxName, GitRef, Provider, RepoUrl, ScriptPath, Source, Vm,
+    };
 
     fn cfg_with(provider: Provider) -> Config {
         let mut cfg = Config::for_tests();
         cfg.vm = Vm {
             provider,
-            box_name: "generic/ubuntu2204".to_owned(),
-            cpus: 4,
-            memory: 8192,
+            box_name: BoxName::parse("generic/ubuntu2204")
+                .expect("a valid fixture box name"),
+            cpus: NonZeroU32::new(4).expect("a positive fixture count"),
+            memory: NonZeroU32::new(8192).expect("a positive fixture size"),
         };
         cfg.source = Source {
             repo: RepoUrl::parse("https://example.invalid/p.git")
                 .expect("a valid fixture URL"),
-            git_ref: "main".to_owned(),
+            git_ref: GitRef::parse("main").expect("a valid fixture ref"),
             script: ScriptPath::parse("vagrant/provision.sh")
                 .expect("a valid fixture path"),
         };
@@ -274,16 +279,20 @@ mod tests {
     }
 
     #[test]
-    fn escapes_a_quote_that_validation_would_have_refused() {
-        // `Config::validate` refuses these fields outright, so
-        // this path is unreachable through a loaded config. It is
-        // reachable through the library, whose `Config` fields
-        // are public, and an unescaped quote there would end the
-        // Ruby literal and change what the file means.
-        let mut cfg = cfg_with(Provider::Libvirt);
-        cfg.vm.box_name = "a\"b".to_owned();
-        let out = render(&cfg);
-        assert!(out.contains("a\\\"b"), "{out}");
+    fn a_ruby_string_escapes_what_would_change_what_the_file_means() {
+        // Every value `render` passes through this function is
+        // a checked type that refuses all three characters, so
+        // no config can reach the escaping. It is tested
+        // directly because the escaping is what makes the
+        // refusal a precaution rather than the only thing
+        // standing between a config value and Ruby code.
+        //
+        // A quote ends the literal, a backslash escapes what
+        // follows it, and `#` begins the interpolation `#{`.
+        assert_eq!(ruby_string("a\"b"), "\"a\\\"b\"");
+        assert_eq!(ruby_string("a\\b"), "\"a\\\\b\"");
+        assert_eq!(ruby_string("a#{x}"), "\"a\\#{x}\"");
+        assert_eq!(ruby_string("plain"), "\"plain\"");
     }
 
     #[test]
