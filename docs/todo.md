@@ -257,25 +257,6 @@ plan, decisions, and outcome.
   rather than causing its size. Deferred there because re-cutting a 930-line
   config module inside that branch is the churn #17 itself warned about.
 
-- **disarm-on-the-ssh-route** -- the VM host's own environment reaches vagrant
-  `DISARM_VAGRANT_REDIRECTS` is applied only on the local route, on the argument
-  that sshd builds the far side's environment and bombyx's own is not in it.
-  True and incomplete: the threat is an exported variable, and the VM host has
-  its own sources for one. pam_env applies /etc/environment to a non-interactive
-  `ssh host "cmd"`, zsh sources ~/.zshenv on every invocation, and a bash
-  export placed above the usual non-interactive return guard in ~/.bashrc
-  survives. So VAGRANT_CWD or VAGRANT_VAGRANTFILE on the VM host makes `bombyx
-  destroy` test one project's directory and destroy another machine, and
-  VAGRANT_DEFAULT_PROVIDER=hyperv there gets a refused `vagrant destroy`, which
-  strands the directory because `execute` stops at the first failing step. Found
-  by red-team in round 3 of the review on issue #45, read from the code and from
-  sshd's documented PAM and shell startup, not measured -- the VM host was not
-  reachable from that session. The fix is to prefix DISARM_VAGRANT_REDIRECTS in
-  all three `transport` arms rather than the local one, and cut the comment down
-  to what is really route-specific. It costs one `unset` per remote command. It
-  reverses a decision the test `the_ssh_route_disarms_nothing` records
-  deliberately, which is why it was not folded into #45.
-
 - **provider-change-on-existing-vm** -- a provider edit needs a destroy first
   Found by red-team in round 3 of the review on issue #45. bombyx sets
   VAGRANT_DEFAULT_PROVIDER on every project call but the teardown, which makes
@@ -411,6 +392,10 @@ plan, decisions, and outcome.
   what comment-claims-have-no-gate records.
 
 ## Done
+
+- [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)
+  -- the VM host's own environment reaches vagrant
+  (2026-09-07)
 
 - **comments-narrating-the-past** -- the eight comments that entry named
   (2026-09-06)
