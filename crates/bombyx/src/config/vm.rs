@@ -15,8 +15,8 @@
 //!
 //! - Written into the Vagrantfile, which is a Ruby file.
 //! - Passed to `git` on the command line, inside the guest.
-//! - Used as a path that gets made executable and run as root,
-//!   also inside the guest.
+//! - Used as a path that the agent's own user makes
+//!   executable and then runs, also inside the guest.
 //!
 //! So "is this string safe" has no single answer. It depends
 //! on which of the three you mean, and a value can be fine for

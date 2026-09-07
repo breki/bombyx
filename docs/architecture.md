@@ -478,6 +478,43 @@ plan to run.
 which exists because vagrant runs provisioners only when it
 first creates a machine.
 
+### Who runs the project's script
+
+`bootstrap.sh` runs as root, and hands over to the project's
+own script as the unprivileged user the box logs in as --
+`vagrant` on every box bombyx assumes. The script resolves
+`runuser`'s path once into `$runuser_bin`, refusing the run if
+it cannot find it, and its last line is
+`exec -- "$runuser_bin" -u "$OWNER" -- "$script_real"`.
+
+The split follows what each half actually needs. Three things
+in that script need root: creating, removing and chowning the
+clone directory, which lives under root-owned `/opt`; clearing
+a key an earlier bombyx left in `/root/.ssh`; and being able to
+drop privilege at all. The project's script is not one of them,
+and running it as root has a consequence that is easy to miss: whatever it
+installs -- a language toolchain, an agent's own configuration,
+a shell profile -- lands in `/root` instead of in the home
+directory of the account the agent logs in as. The agent then
+finds none of it, and nothing fails while that happens.
+
+That is not hypothetical. It is how the first real run against
+a project went, and the symptom was a `/root/.rustup` and a
+second clone at `/root/jutro` in a VM whose agent works as
+`vagrant`.
+
+Root is still reachable from the project's script through
+`sudo`, which every Vagrant box configures for that user. That
+is the right shape: a script asks for root at the steps that
+need it rather than holding it throughout.
+
+The hand-over uses `runuser` and not `sudo`, because `runuser`
+is a root-only tool that needs no sudoers entry, so it works on
+a box with `sudo` locked down. It sets `HOME`, `USER`,
+`LOGNAME` and `SHELL` for the target user and passes the rest
+of the environment through, which is what the `BOMBYX_*`
+variables depend on.
+
 ## What config values are checked
 
 **The registry is usually the operator's own file, and bombyx
@@ -776,7 +813,7 @@ because no config can reach it.
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
 | `host` `project` `remote_root` | leading `-` | the program each one reaches would read it as an option |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
-| `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
+| `script` | leading `/`, a `..` segment | root makes it executable, and it is then run inside the clone |
 | `deploy_key` | anything but a `/` or `~/` anchor | `vagrant` runs in the project's directory on the VM host, so a relative path would look for the key under a directory bombyx creates, writes and deletes |
 | `deploy_key` | a `.` or `..` segment, `//`, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |

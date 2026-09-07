@@ -22,7 +22,7 @@ and this project adheres to
   inside the clone.
 - The guest refuses a `source.script` that resolves outside the cloned project.
   `chmod` and `exec` follow symlinks, so a repository could otherwise point the
-  script at a system file and have it made executable as root.
+  script at a system file and have it made executable.
 - The per-developer `config.toml` carries a `[projects.<name>]` table per
   project -- `remote_root`, `[vm]` and `[source]` -- and it is the only place a
   project is described. `--project <name>` picks the table. `[vm]` needs
@@ -99,8 +99,10 @@ and this project adheres to
   constructors.
 - `deploy_key` in `[source]`: an optional path, on the VM host, naming the
   private key the guest clones a private repository with. `vagrant` uploads it
-  into the guest before provisioning, `bootstrap.sh` moves it to a root-owned
-  0600 file in `/root/.ssh` and hands it to `git` through `GIT_SSH_COMMAND`, and
+  into the guest before provisioning, `bootstrap.sh` leaves it where Vagrant's
+  provisioner uploaded it, owned by that user, and tightens it to 0600, then
+  hands it to `git` through `GIT_SSH_COMMAND` and the
+  clone's `core.sshCommand`, so the agent can push with it. And
   `up`, `provision` and `scratch` refuse to create anything when the VM host
   does not have the file, or cannot read it. Removing the key from a config
   deletes it from the guest's live disk on the next provision, though the
@@ -218,6 +220,13 @@ and this project adheres to
   destructure the pair. The key is a `ProjectName` the lookup has already proved
   legal, so code building a `Config` from an entry no longer re-parses the
   string it asked with.
+- The project's provisioning script runs as the guest's unprivileged user rather
+  than as root. `bootstrap.sh` still starts as root -- the clone directory lives
+  under root-owned `/opt`, and an earlier bombyx left a key in
+  `/root/.ssh` to clear -- and hands over with `runuser`, so whatever the script
+  installs lands in the home directory of the account the agent logs in as
+  instead of in `/root`. Root stays available to that script through `sudo`. A
+  box without `runuser` is refused with a message naming it.
 
 ### Fixed
 

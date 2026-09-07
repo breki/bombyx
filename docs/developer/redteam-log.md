@@ -8,10 +8,15 @@ Security (Red Team) review findings. Newest first.
 
 **Category:** Behaviour defect deferred deliberately
 
-`bootstrap.sh` deletes `/root/.ssh/bombyx-deploy-key` when the
-config names no key, so removing `deploy_key` and re-running
-`bombyx provision` takes the credential out of the guest's live
-disk. `bombyx reset` puts it back.
+`bootstrap.sh` deletes the deploy key when the config names
+none, so removing `deploy_key` and re-running `bombyx provision`
+takes the credential out of the guest's live disk. `bombyx
+reset` puts it back.
+
+The key's path moved after this entry was written: it now lives
+at `/home/vagrant/.ssh/bombyx-deploy-key`, in the agent's own
+home, because the agent has to push with it. The finding is
+unaffected -- a snapshot holds whatever the disk held.
 
 `Action::Up` takes the `fresh-install` snapshot *after*
 provisioning, so that snapshot's disk holds the key. `Action::
@@ -22,8 +27,9 @@ does not refresh it either. The revoked key therefore comes
 back on every reset for the life of the VM.
 
 Verified on frosti, 2026-09-07: with the key removed from the
-config and deleted from the guest, `bombyx reset` restored
-`/root/.ssh/bombyx-deploy-key` with its original timestamp.
+config and deleted from the guest, `bombyx reset` restored the
+key with its original timestamp. It sat at
+`/root/.ssh/bombyx-deploy-key` when that was measured.
 
 Deferred rather than fixed. Closing it means either `reset`
 re-provisioning after the restore, or `up` re-taking the
@@ -307,7 +313,20 @@ A stub `ssh` first on `PATH` is the lever that works on both.
 
 ### rt-2026-08-31-chmod-symlink-race
 
-**Category:** TOCTOU / privilege escalation (guest)
+**Category:** CLOSED 2026-09-07 -- was TOCTOU / privilege
+escalation (guest)
+
+**Closed** by the branch that made the project's script run as
+the agent. `bootstrap.sh` now runs the `chmod +x` through
+`runuser -u "$OWNER"`, so root never sets an execute bit on a
+path the agent controls, and the comment beside it says the
+race is closed rather than accepted. The cost this entry
+weighed -- losing the shebang, or losing the readability of the
+one file meant to be read straight through -- was avoided by a
+third option it did not consider: drop the privilege instead of
+the mechanism. The entry is kept because that is the lesson.
+
+The original entry follows.
 
 `bootstrap.sh` resolves the configured provisioning script with
 `readlink -f`, checks the result is inside the clone, then

@@ -4,6 +4,100 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**Thirty-nine review findings on the run-as-the-agent work, and
+the reviewers kept finding my fixes rather than my code**
+
+Four passes: `artisan` 8, `red-team` 21 over three rounds,
+`fresh-reader` 18. Stage 2 stopped at the cap rather than by
+converging -- round 3 still found a behaviour defect -- and
+**seven findings were defects in an earlier round's own fix**.
+
+The one worth remembering. `artisan` asked for the `runuser`
+check to move earlier, so I moved the resolution and the
+refusal together, above the deploy-key block -- whose own
+comment, in the same file, says any `exit` above it strands the
+uploaded key for the life of the VM. One fix recreated the
+hazard the neighbouring rule existed to prevent, and I left the
+comment asserting otherwise sitting there. **The test meant to
+catch it was satisfied by a comment**, because it located the
+key block by a string whose first occurrence is fifty lines of
+prose above the code.
+
+**A guard I wrote three times, two of which leaked.** It checks
+that no `git` command in the shipped script runs as root, which
+matters because root running `git` in a tree the agent owns was
+a measured escalation. Version one saw `git` only at the start
+of a line; version two split on a list of shell separators and
+was *vacuous* on the real file -- no line ever reached its
+assertion -- while missing seven evasions and failing on three
+correct lines. Version three is deliberately crude: any line
+holding `git` as a word must hold `$runuser_bin`, with a
+three-item allow-list. A test cannot parse shell, so it errs
+wide and the failure message says so. The lesson is narrower
+than "write better tests": **a guard proven against one input
+is proven for one input.** I had called version two "proven to
+fail" on the strength of a single removed prefix.
+
+**And I had been writing the review's history into the code.**
+`fresh-reader` found three comments narrating implementations
+that no longer exist -- nine lines on two dead versions of that
+guard, "what used to remain", "the second is the one that
+changed", fourteen lines arguing with a reviewer's proposal.
+None of it was reachable by a cold reader. All of it is gone
+and no fact went with it.
+
+**The best single finding cost nothing to fix.** Four places
+gave a reason for the script running as root that the script
+contradicts, the header among them. The true answer sat 300
+lines down, so a reader was misled first and corrected later. I
+got the real list by enumerating every root command left in the
+file, which took one command.
+
+**bombyx ran the project's script as root, and the first real
+project showed what that costs**
+
+Going to rebuild jutro from `config.toml` now that #50 unblocked
+it, and the first thing found was not a jutro problem. bombyx
+`exec`s the project's script as root. jutro's script is written
+for the agent's unprivileged user and calls `sudo` where it
+needs more -- its old Vagrantfile said `privileged: false` with
+the reason written next to it, that rustup and the node
+toolchain must land in the account the agent works as.
+
+So the first bombyx run put `/root/.rustup` and a second clone
+at `/root/jutro` into a VM whose agent logs in as `vagrant`, and
+nothing failed while it happened. That is the worst shape a bug
+can have: a successful provision that installed everything where
+nobody will look for it. The hand-over is now
+`exec -- runuser -u "$OWNER" -- "$script_real"`.
+
+**And that exposed a second thing, which was my own doing.** The
+deploy key was being moved to a root-owned 0600 file in
+`/root/.ssh` -- my idea in the first implementation, refined by
+three review rounds. With the project script no longer running
+as root, the agent could not read the key. Which is fatal,
+because `bootstrap.sh`'s own comment says a commit made in the
+guest does not survive a provision and pushing is what does: an
+agent that cannot read the key cannot push, so the key had been
+hardened into uselessness. It is now left at 0600 where it
+lands -- owned by the agent already, because Vagrant's
+provisioner uploads as that user -- and the clone records
+`core.sshCommand` so `git push` works without the project
+arranging it.
+
+Worth keeping the shape of that mistake. Three review rounds
+went over the `/root` move and none of them asked what the
+*agent* needed, because every reviewer was looking at the threat
+model and not at the job. The question that would have caught it
+is "who has to use this, and can they?" -- and it only came up
+because a real project's script was finally pointed at it.
+
+**Verified as the agent, not inferred.** In the guest as
+`vagrant`: the key is `0600 vagrant:vagrant`, `core.sshCommand`
+is on the clone, the tree and `.git/config` are owned by
+`vagrant`, and `git ls-remote origin` against the private
+repository answers.
+
 **The guest can clone a private repository, and the loud
 failure had to move out of the Vagrantfile to get there**
 
@@ -11,10 +105,11 @@ Issue #50. jutro's old hand-written Vagrantfile uploaded a
 read-only deploy key from the VM host into the guest, and the
 generated one could not express it, so jutro could be driven by
 bombyx and not rebuilt from `config.toml`. `deploy_key` in
-`[source]` is now the field for it: a path on the VM host,
+`[source]` became the field for it: a path on the VM host,
 uploaded by a `file` provisioner, moved by `bootstrap.sh` to a
 root-owned 0600 file in `/root/.ssh`, and handed to `git`
-through `GIT_SSH_COMMAND`.
+through `GIT_SSH_COMMAND`. The entry above, written later the
+same day, is why the key no longer moves there.
 
 **The obvious place for the existence check is the one place it
 cannot go.** The operator chose a loud failure over jutro's

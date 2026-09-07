@@ -9,6 +9,42 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-07-explanations-worth-keeping-two
+
+**Category:** What worked -- do not trim
+
+From the comprehension review of the branch that made the
+project's script run as the agent. Five passages were named as
+carrying a reason rather than padding.
+
+`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
+table and the `${VAR:?message}` paragraph: three flags with one
+consequence each, then a concrete failure that names the
+mechanism, and the bare `:` explained before three lines that
+would otherwise read as statements with no verb. The reviewer
+called it the shape the rest of the file should be measured
+against.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
+showing four spellings of one repository address collapse to one
+string.
+
+`crates/bombyx/src/config/guards.rs`, the argument for the
+leading-dash rule: `git` accepts options after positionals,
+which most tools do not. It is the one forward reference out of
+the script that answered the question the reader arrives with.
+
+`docs/architecture.md`, "That is not hypothetical" with
+`/root/.rustup` and `/root/jutro` named. One measured symptom
+turns a preference into an incident report; the paths are the
+load-bearing part.
+
+`docs/trust-boundary.md`, the paragraph on what an on-path
+attacker does *not* get: the wrong intuition named first, then
+the mechanism, then the real consequence.
+
+---
+
 ### fr-2026-09-07-explanations-worth-keeping
 
 **Category:** What worked -- do not trim
