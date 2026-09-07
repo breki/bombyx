@@ -32,22 +32,86 @@ of the `mkdir`, and the upload in the Vagrantfile is
 conditional. bombyx knows which verb it is running; the
 Vagrantfile does not.
 
-**Two shell mistakes, both invisible in the file.** The
-`GIT_SSH_COMMAND` assignment was first written across continued
-lines, and inside double quotes a backslash before a newline
-removes both -- joining the key path onto the next option with
-no space, which reading the file back does not show. The
-options are now assembled a piece at a time. And a scripted
+**One shell mistake, and one I talked myself into.** A scripted
 `python` replace ate the line continuations in a Rust `format!`
-string the same way, leaving runs of spaces inside a shell
-script; the test comparing the whole script is what caught it.
+string, leaving runs of spaces inside a shell script; the test
+comparing the whole script caught it. That one was real, and it
+happened twice more before the day was out.
+
+The other was not. I restructured the `GIT_SSH_COMMAND`
+assignment away from continued lines and wrote a comment saying
+a backslash before a newline joins the key path onto the next
+option with no space. A reviewer asked me to measure it: with a
+space before the backslash -- which is what I had written --
+bash keeps the space and the value is correct. The no-space
+result needs the backslash directly against the value. So I
+"fixed" a spelling that was already right and then documented a
+hazard it did not have. The piece-at-a-time assembly stays,
+because it has no condition to remember, but the comment now
+states the real one. Two lessons, and the second is the
+expensive one: measure the shell claim before writing it down,
+and a fix with no failing case behind it is a guess.
 
 **Verified against the real private repository.** A VM booted
 on frosti cloned `git@github.com:breki/jutro.git` with the
 existing `~/.secrets/jutro-deploy-key`, which is the case the
 issue said was impossible. Removing `deploy_key` from a config
-now deletes the key from the guest on the next provision, so a
-credential nobody remembers granting does not survive.
+now deletes the key from the guest's live disk on the next
+provision -- but not from the `fresh-install` snapshot, which
+`bombyx reset` then restores. Reviewers found that and it is
+deferred, logged and written into the document.
+
+**Fifty findings over four review passes on the deploy-key
+work, and eleven of them were damage from earlier fixes**
+
+`/review2` on issue #50. `artisan` 13, `red-team` 13 over three
+rounds, `fresh-reader` 15. Stage 2 stopped at the three-round
+cap rather than by converging, which is worth recording as
+such: round 3 still found a behaviour defect, and by the rule
+that earns a fourth round.
+
+**The fix-damage share rose across the rounds** -- 2 of 14,
+then 6 of 8, then 4 of 7. Sharpening a comment is what makes it
+falsifiable, so each precise sentence became checkable and some
+were wrong; that much was expected. What was not is how often a
+reword landed in one copy of three. The SSH-user assumption
+took three separate findings to get consistent across
+`vagrantfile.rs`, `bootstrap.sh` and `docs/trust-boundary.md`,
+and "never raises" was corrected in one place while two others
+kept the absolute. The mechanism was usually the same: a
+scripted `python` replace aborting on one failed assert, with
+the earlier replacements in that same script silently not
+written. Checking each file after a multi-edit script is
+cheaper than a reviewer finding half of it applied.
+
+**Three defects were real exposures, not prose.** The guest
+decided whether a key was configured, by testing for a file in
+a directory its own user owns -- so an interrupted provision,
+or one `touch`, kept reinstalling a credential the operator had
+removed. Announcing it through the Vagrantfile fixed that, and
+then the announcement was itself forgeable in the no-key
+direction, because rendering nothing left `/etc/profile.d` free
+to answer; it is now always set, `1` or `0`. And the key block
+sat below the `git` check, so on a box without `git` -- which
+is the box jutro uses -- the uploaded key stayed in the agent's
+own directory for the life of the VM.
+
+**A snapshot bug is deferred, verified rather than argued.**
+`up` takes `fresh-install` after provisioning, so the snapshot
+holds the key and `bombyx reset` restores it. Removing
+`deploy_key` clears the live disk only. Confirmed on frosti,
+and then the *documentation* of the workaround turned out to be
+worse than the bug: `bombyx snapshot` only helps in one
+ordering, and I had not said so.
+
+**I documented a hazard that did not exist.** The
+`GIT_SSH_COMMAND` assignment was fine as first written; a space
+before a line-continuation backslash survives. I restructured
+working code and wrote a comment asserting the fault, and the
+comment then grew to 79 lines above 37 of code before a reader
+asked what it was warning about. Measure the shell claim before
+writing it down, and a fix with no failing case behind it is a
+guess.
 
 **Twenty findings on the disarm work, and the one that cost the
 most was a decision made on incomplete information**

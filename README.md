@@ -41,8 +41,9 @@ on a machine that is not your laptop.
 and the distinction matters. A VM that fetches a private
 repository by itself needs a credential of its own to do it,
 and code inside the VM can read it. bombyx has a field for
-that credential, `deploy_key`, which names a read-only deploy
-key on the VM host. See
+that credential, `deploy_key`, which names a key file on the VM
+host -- make it a read-only deploy key, because nothing but
+your own choice of file keeps it to one. See
 [trust-boundary.md](docs/trust-boundary.md) for what having it
 inside the guest costs and why that is accepted.
 
@@ -144,7 +145,7 @@ What a project's table holds:
 | Key | |
 |-----|---|
 | `[vm]` | required; `box` (must have `git`), `cpus`, `memory`. `provider` is optional, `libvirt` |
-| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones |
+| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host |
 | `remote_root` | optional, `~/vms`; must sit above the two tables |
 | `host` | optional; only for a project that runs elsewhere |
 

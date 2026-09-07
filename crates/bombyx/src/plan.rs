@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::Config;
+use crate::config::{Config, DeployKeyPath};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -188,12 +188,14 @@ fn write_then(
     // does not have leaves no directory and no Vagrantfile
     // behind. The generated Vagrantfile cannot hold this check
     // itself -- `remote::require_file` says why.
-    let mut cmds: Vec<RemoteCommand> = cfg
-        .source
-        .deploy_key
-        .iter()
-        .map(|key| remote::require_file(cfg, key.as_str(), "deploy_key"))
-        .collect();
+    let mut cmds = Vec::new();
+    if let Some(key) = &cfg.source.deploy_key {
+        cmds.push(remote::require_file(
+            cfg,
+            key.as_str(),
+            DeployKeyPath::FIELD,
+        ));
+    }
     cmds.push(remote::ensure_dir(cfg, dir));
     for (name, contents) in vagrantfile::files(cfg) {
         cmds.push(remote::write_file(cfg, dir, name, &contents));
@@ -539,8 +541,7 @@ mod tests {
     fn cfg_with_key() -> Config {
         let mut cfg = cfg();
         cfg.source.deploy_key = Some(
-            crate::config::DeployKeyPath::parse("~/.secrets/k")
-                .expect("a valid fixture path"),
+            DeployKeyPath::parse("~/.secrets/k").expect("a valid fixture path"),
         );
         cfg
     }
@@ -558,7 +559,7 @@ mod tests {
         ] {
             let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
             assert!(
-                script(&cmds[0]).contains("deploy_key names"),
+                script(&cmds[0]).contains("'deploy_key'"),
                 "{action:?}: the key check is not the first step"
             );
         }
@@ -570,25 +571,34 @@ mod tests {
         // path to name and the step would test the empty
         // string.
         //
-        // The needle is the check's own message, not the field
-        // name: `bootstrap.sh` mentions `deploy_key` in a
-        // comment, and one of these commands writes that file.
+        // The needle is the shell-quoted field name the check
+        // passes to `printf`. `bootstrap.sh` mentions
+        // `deploy_key` in a comment and one of these commands
+        // writes that file, so the bare name would match the
+        // write step.
         for action in all_actions() {
             let cmds = plan(&action, &cfg(), Tty::NoPty);
             assert!(
-                !cmds.iter().any(|c| script(c).contains("deploy_key names")),
+                !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: a check was built with no key configured"
             );
         }
     }
 
     #[test]
-    fn teardown_never_checks_the_deploy_key() {
+    fn only_the_verbs_that_boot_check_the_deploy_key() {
+        // Two groups, for two reasons.
+        //
         // `destroy` and `discard` have to work on a directory
-        // whose key has gone. A check here would stop the
-        // teardown at its first step and leave the directory
-        // behind -- which is the whole reason the Vagrantfile
-        // does not raise either.
+        // whose key has gone: a check would stop the teardown
+        // at its first step and leave the directory behind,
+        // which is the whole reason the Vagrantfile does not
+        // raise either.
+        //
+        // `down` and `status` need no key because they touch a
+        // machine that already exists. A check there would
+        // refuse a `status` for a reason having nothing to do
+        // with answering it.
         for action in [
             Action::Destroy,
             Action::Discard(scratch("pr-1234")),
@@ -597,7 +607,7 @@ mod tests {
         ] {
             let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
             assert!(
-                !cmds.iter().any(|c| script(c).contains("deploy_key names")),
+                !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: teardown must not check the key"
             );
         }

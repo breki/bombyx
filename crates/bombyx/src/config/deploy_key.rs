@@ -6,9 +6,16 @@
 //!
 //! bombyx never opens the file. The path is written into the
 //! generated Vagrantfile, and `vagrant` -- running on the VM
-//! host -- expands it, checks it is there and uploads it into
-//! the guest. So the key stays on the VM host until the guest
-//! exists, and the workstation never holds it.
+//! host -- expands it and uploads the file into the guest. So
+//! the key stays on the VM host until the guest exists, and the
+//! workstation never holds it.
+//!
+//! What refuses a path the VM host does not have is
+//! `crate::remote::require_file`, before bombyx writes the
+//! Vagrantfile at all. The upload in the Vagrantfile is
+//! conditional and carries no `raise` of its own.
+//! `crate::vagrantfile` records why, and `docs/architecture.md`
+//! under **What config values are checked** holds the argument.
 //!
 //! Every rule is enforced in one function, the private `check`
 //! below, and [`DeployKeyPath`] is the only thing that calls
@@ -20,13 +27,6 @@ use super::error::FieldError;
 use super::guards;
 use super::path_segments;
 use crate::newtype::checked_str_newtype;
-
-/// The config key these errors name.
-///
-/// Written once because every rule below reports against the
-/// same field. The name is the only part of the message that
-/// tells an operator which line of their file to edit.
-const FIELD: &str = "deploy_key";
 
 /// A private key file on the VM host, ready to be written into
 /// the generated Vagrantfile.
@@ -53,6 +53,17 @@ const FIELD: &str = "deploy_key";
 pub struct DeployKeyPath(String);
 
 impl DeployKeyPath {
+    /// The config key this type reads, and the name every one
+    /// of its errors reports against.
+    ///
+    /// Public because it is also what tells an operator which
+    /// line to edit, and `crate::plan` needs it for the
+    /// message `crate::remote::require_file` prints. Written
+    /// on the type rather than as a bare literal in each
+    /// place, so renaming the TOML key cannot leave one caller
+    /// naming a key the config no longer has.
+    pub const FIELD: &'static str = "deploy_key";
+
     /// Checks `raw` against every rule here and wraps it.
     ///
     /// Takes `&str` so a caller holding a borrowed value need
@@ -95,20 +106,21 @@ impl TryFrom<String> for DeployKeyPath {
 /// [`FieldError::Invalid`] naming `deploy_key` when the value
 /// would break the generated Vagrantfile, holds a character
 /// outside the allowed set, does not start with `/` or `~/`,
-/// names no file below that anchor, contains a `.` or `..`
-/// segment, ends in `/`, or spells `~` anywhere but first.
+/// names no file below that anchor, contains `//` or a `.` or
+/// `..` segment, ends in `/`, or spells `~` anywhere but
+/// first.
 fn check(value: &str) -> Result<(), FieldError> {
     // The path is written into the generated Vagrantfile
     // inside a double-quoted Ruby string, so it carries the
-    // same rule the four other rendered fields do. The charset
-    // rule below is narrower and would refuse everything this
-    // one does -- but that rule is shared with `remote_root`,
-    // whose value reaches a shell rather than Ruby, so
-    // widening it for one field would silently drop the Ruby
-    // rule for this one. Stating both here is what stops that.
-    guards::check_renderable(FIELD, value)?;
+    // same rule the four other rendered fields do.
+    //
+    // Both calls are needed because the charset rule says
+    // nothing about a blank value: `check_charset` looks for a
+    // character it disallows, and an empty string has none to
+    // find. `check_renderable` is what refuses one.
+    guards::check_renderable(DeployKeyPath::FIELD, value)?;
     guards::check_charset(
-        FIELD,
+        DeployKeyPath::FIELD,
         value,
         guards::is_remote_path_char,
         "letters, digits, `.`, `_`, `-`, `/` or `~`",
@@ -140,6 +152,20 @@ fn check(value: &str) -> Result<(), FieldError> {
         ));
     }
 
+    // `path_segments` filters empty segments away, so without
+    // this rule `~//k` counts as depth one and reaches the VM
+    // host as `~/'/keys/k'` -- `quote_remote_path` keeps the
+    // `~/` outside the quotes. A path starting with exactly two
+    // slashes is implementation-defined in POSIX and need not
+    // name the same file as one slash, which is why this is a
+    // refusal rather than something to tidy up.
+    if value.contains("//") {
+        return Err(invalid(
+            "must not contain `//`; the path is expanded on the VM \
+             host, where you cannot see what it resolved to",
+        ));
+    }
+
     // Reported separately from the rule above, because the
     // value does name a file and only its spelling says
     // otherwise.
@@ -150,11 +176,17 @@ fn check(value: &str) -> Result<(), FieldError> {
         ));
     }
 
-    // Not a containment guarantee: bombyx only ever reads this
-    // file and there is no removal behind it. The rule is that
-    // the path says plainly which directory it reads, because
-    // the VM host expands it and the operator never sees the
-    // result.
+    // This rule is not a containment guarantee, and it does
+    // not need to be. `vagrant` copies this file's contents
+    // into the guest rather than deleting anything, so a
+    // config naming the wrong path leaks a file instead of
+    // destroying one -- and no rule here restricts which file
+    // it names. `docs/architecture.md` under **What config
+    // values are checked** holds that.
+    //
+    // What the rule buys is that the path says plainly which
+    // directory it reads, because the VM host expands it and
+    // the operator never sees the result.
     if let Some(bad) = segments.iter().find(|s| **s == "." || **s == "..") {
         return Err(invalid(format!(
             "must not contain a `{bad}` segment; the path is expanded \
@@ -176,7 +208,7 @@ fn check(value: &str) -> Result<(), FieldError> {
 /// same field.
 fn invalid(reason: impl Into<String>) -> FieldError {
     FieldError::Invalid {
-        field: FIELD,
+        field: DeployKeyPath::FIELD,
         reason: reason.into(),
     }
 }
@@ -231,7 +263,7 @@ mod tests {
             // telling an operator which key to edit, and it
             // travels through a guard and two error types
             // before it is printed.
-            refused(bad, FIELD);
+            refused(bad, DeployKeyPath::FIELD);
         }
     }
 
@@ -303,13 +335,30 @@ mod tests {
     }
 
     #[test]
+    fn a_doubled_slash_is_refused() {
+        // `path_segments` filters empty segments away, so
+        // without this rule `~//k` counts as depth one and
+        // passes every other check. It also survives into the
+        // script bombyx sends: `quote_remote_path` keeps the
+        // `~/` outside the quotes, so `~//keys/k` is emitted
+        // as `~/'/keys/k'`.
+        //
+        // A leading `//` is the case worth refusing rather than
+        // tidying: POSIX leaves a path beginning with exactly
+        // two slashes implementation-defined, so it need not
+        // resolve to the same file as one slash.
+        for bad in ["~//k", "/srv//keys/k", "//etc/keys/k"] {
+            refused(bad, "must not contain `//`");
+        }
+    }
+
+    #[test]
     fn a_dot_or_dot_dot_segment_is_refused() {
-        // Not a containment guarantee -- bombyx only ever
-        // reads this file, and there is no removal behind it.
         // The rule is that the path says plainly which
         // directory it reads, because it is expanded on
         // another machine and the operator never sees the
-        // result.
+        // result. `check` says what the field really does with
+        // the file, which is not read it.
         for bad in ["~/./k", "~/.secrets/../k", "/srv/keys/.."] {
             refused(bad, "segment");
         }
@@ -327,10 +376,11 @@ mod tests {
     #[test]
     fn a_leading_dash_cannot_arise() {
         // `super::guards::check_not_an_option` is deliberately
-        // not called here. The value never becomes an argument
-        // bombyx composes -- it reaches Ruby and nothing else
-        // -- and the anchoring rule already refuses every
-        // value that could read as an option.
+        // not called here. The value reaches a Ruby literal
+        // and, through `crate::remote::require_file`, a shell
+        // assignment that `quote_remote_path` quotes. Neither
+        // is an argv position, and the anchoring rule already
+        // refuses every value that could read as an option.
         refused("-x", "must start with `/` or `~/`");
     }
 

@@ -191,9 +191,22 @@ mod tests {
     type Build = fn(&str) -> Result<(), FieldError>;
 
     /// The four newtypes whose rules are [`check_renderable`]
-    /// and, for three of them, [`check_not_an_option`] -- as
-    /// field name, constructor, a value that constructor
-    /// accepts, and whether the value reaches a command line.
+    /// and, for three of them, [`check_not_an_option`].
+    ///
+    /// Each row is a field name, its constructor, a value that
+    /// constructor accepts, and whether the value reaches a
+    /// command line. The accepted value is written in the row
+    /// rather than worked out from the field name, so a test
+    /// needing one reads it here. The last column decides which
+    /// rows [`check_not_an_option`] applies to: `box` is
+    /// resolved by vagrant and never becomes an argument bombyx
+    /// composes, so it is the one row that does not carry that
+    /// rule.
+    ///
+    /// The table lives here rather than beside any one type,
+    /// because the rules live here. So a new field sharing that
+    /// rule set is one more row, wherever the type itself
+    /// lives.
     ///
     /// **Three other newtypes use rules from this module and
     /// are deliberately not rows.** `RemoteRoot` and `HostName`
@@ -201,26 +214,18 @@ mod tests {
     /// and `check_charset`, never on `check_renderable`, and
     /// each carries anchoring or charset rules of its own that
     /// no column here could express. `DeployKeyPath` does call
-    /// `check_renderable`, and is still not a row: its
-    /// anchoring rule refuses `-x`, which is the value the last
-    /// column's `false` branch below asserts is *accepted*.
-    /// `super::root`, `super::host` and `super::deploy_key`
-    /// test all three, the dash rule included. So this table is
-    /// not the answer to "which types use this module"; it is
-    /// the answer to "which types share one rule set", and a
-    /// new field sharing that set is one more row.
+    /// `check_renderable`, and is still not a row because
+    /// neither value of the last column fits it: `false` would
+    /// assert that a `-` prepended to `~/.secrets/k` is
+    /// *accepted*, and its anchoring rule refuses that, while
+    /// `true` would require the message to name `git`, which
+    /// this field never reaches. `super::root`, `super::host`
+    /// and `super::deploy_key` test all three, the dash rule
+    /// included.
     ///
-    /// The table lives here rather than beside any one type,
-    /// because the rules live here. A fifth newtype sharing the
-    /// set is then one more row, wherever the type itself
-    /// lives.
-    ///
-    /// The accepted value is in the row rather than worked out
-    /// from the field name, so a test needing one reads it here.
-    /// The last column decides which rows
-    /// [`check_not_an_option`] applies to: `box` is resolved by
-    /// vagrant and never becomes an argument bombyx composes,
-    /// so it is the one row that does not carry that rule.
+    /// So this table is not the answer to "which types use this
+    /// module"; it is the answer to "which types share one rule
+    /// set".
     ///
     /// The closures capture nothing, so they become plain
     /// function pointers and the array has one type.

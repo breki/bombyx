@@ -162,10 +162,14 @@ script = "vagrant/provision.sh"   # path inside the clone
 # directory and not yours. bombyx checks the file is there
 # before `up`, `provision` or `scratch` creates anything, so a
 # path the VM host does not have stops the run with a message
-# naming it rather than booting a VM whose clone then fails.
+# naming it rather than booting a VM whose clone then fails. A
+# key that is there but that the VM host's login user cannot
+# read is refused the same way.
 #
 # The value must be anchored -- it starts with `/` or `~/` --
 # and name a file below that anchor. No `.` or `..` segment, no
-# trailing slash, and `~` only as the first character.
+# `//`, no trailing slash, and `~` only as the first character.
+# Every character has to be a letter, a digit, `.`, `_`, `-`,
+# `/` or `~`, so a key path with a space in it is refused.
 #
 # deploy_key = "~/.secrets/myproject-deploy-key"

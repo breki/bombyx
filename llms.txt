@@ -147,9 +147,11 @@ header above it:
   `/home/vagrant/.ssh/bombyx-deploy-key` before `bootstrap.sh`
   runs, and `bootstrap.sh` moves it to a root-owned 0600 file
   in `/root/.ssh` and exports `GIT_SSH_COMMAND`. The upload is
-  conditional and never raises, because `vagrant destroy`
-  loads the Vagrantfile too. Left out, no upload is rendered
-  and no check is planned
+  conditional and carries no `raise` of its own, because
+  `vagrant destroy` loads the Vagrantfile too. Whether a key
+  was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,
+  always set, so the guest's own environment cannot answer it.
+  Left out, no upload is rendered and no check is planned
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a

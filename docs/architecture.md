@@ -492,15 +492,30 @@ So the allowlist is a boundary rather than a typo check. Each
 of those rules is what stops a repo-supplied value reaching
 `ssh` or `rm -rf`, so none of them is there to catch a typo.
 Membership of the guarded set turns on one question: does the
-operator choose the value's text? Six such values reach the
-generated files and so the guest -- `box`, `repo`, `ref`,
-`script`, `cpus` and `memory` -- and `remote_root` reaches
-`rm -rf` on the VM host. A registry out of a clone with
-`remote_root = "/etc"` gets `rm -rf /etc/<project>` there, which
-is `RemoteRoot`'s depth floor doing the work it exists for.
-`cpus` and `memory` belong to that set although they are not
-strings, because the operator still chooses the number, and a
-floor is what guards them.
+operator choose the value's text? Six of them reach the
+generated files and so the guest: `box`, `repo`, `ref`,
+`script`, `cpus` and `memory`. The last two are on that list
+although they are not strings, because the operator still
+chooses the number and a floor is what guards them.
+
+`remote_root` reaches `rm -rf` on the VM host. A config out of
+a clone naming `remote_root = "/etc"` gets
+`rm -rf /etc/<project>` there, which is `RemoteRoot`'s depth
+floor doing the work it exists for.
+
+`deploy_key` belongs to neither of those groups. Its text
+reaches the generated Vagrantfile and the `ssh` script
+`remote::require_file` composes, and stops on the VM host --
+what reaches the guest is the *file's contents*, at a path
+bombyx fixes. So it is the one value whose effect is to move a
+file rather than to run a command, and whoever writes the
+config chooses which file. Nothing in `DeployKeyPath`
+constrains that: a config out of a clone naming
+`deploy_key = "~/.ssh/id_ed25519"` uploads the VM host's own
+SSH key into a VM the project's code is about to run in. The
+rules check the path's *shape*, never what it names, which is
+why "do not pass `--config` a path inside a repository you did
+not write" is what carries this one.
 
 `provider` is the one value that answers the question the other
 way, so it carries no guard. It reaches as far as any of them --
@@ -508,10 +523,11 @@ into the generated Vagrantfile, and onto the command line
 bombyx hands to `ssh` or to `sh -c`, where
 `VAGRANT_DEFAULT_PROVIDER` tells vagrant which provider to use
 rather than letting it choose. Every project vagrant call but
-the teardown carries it; the paragraph above holds why, and
-`remote::is_teardown` is the exemption. But `Provider` is a
-closed
-enum, and serde admits only the two words `libvirt` and
+the teardown carries it, and **`bombyx up`, end to end** above
+holds why: `remote::is_teardown` is the exemption, argued there
+from three facts measured on a libvirt host. But `Provider` is
+a closed enum, and serde admits only the two words `libvirt`
+and
 `hyperv` while the file is read, so nothing an operator typed
 reaches the shell or the guest and a guard would have nothing to
 check. `remote::vagrant_command` quotes it regardless, so the
@@ -538,15 +554,19 @@ error identifies the line.
 repository leaves the key out, the generated Vagrantfile
 carries no upload block, and the plan carries no check step.
 
-What the type checks is what the *Ruby* and the *VM host* need
-rather than what a shell needs: the value reaches neither `ssh`
-nor `git` as an argument. It is written into the Vagrantfile
-inside a double-quoted string, and `vagrant` on the VM host
-expands it with `File.expand_path`. So `config/deploy_key.rs`
-runs the Ruby-literal rule, the remote-path charset, and
-anchoring rules of its own -- and deliberately not the
-leading-dash rule, because anchoring already refuses every
-value that could read as an option.
+The value reaches two places and neither is an argv slot. One
+is a double-quoted Ruby literal in the generated Vagrantfile,
+which `vagrant` expands with `File.expand_path`. The other is a
+quoted shell assignment in the script `remote::require_file`
+builds, which travels over `ssh` like every other script bombyx
+composes -- so shell safety does matter here, and
+`quote_remote_path` is what provides it.
+
+So `config/deploy_key.rs` runs the Ruby-literal rule, the
+remote-path charset, and anchoring rules of its own. It leaves
+out the leading-dash rule, because no program is handed the
+value as an argument and anchoring already refuses every value
+that could read as an option.
 
 **Where the key's existence is checked is a decision, not an
 accident.** `plan::write_then` puts `remote::require_file`
@@ -758,7 +778,7 @@ because no config can reach it.
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
 | `deploy_key` | anything but a `/` or `~/` anchor | `vagrant` runs in the project's directory on the VM host, so a relative path would look for the key under a directory bombyx creates, writes and deletes |
-| `deploy_key` | a `.` or `..` segment, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
+| `deploy_key` | a `.` or `..` segment, `//`, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
 The dash rule is the one row where what it buys differs by
