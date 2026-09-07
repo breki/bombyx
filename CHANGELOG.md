@@ -221,9 +221,9 @@ and this project adheres to
   legal, so code building a `Config` from an entry no longer re-parses the
   string it asked with.
 - The project's provisioning script runs as the guest's unprivileged user rather
-  than as root. `bootstrap.sh` still starts as root -- the clone directory lives
-  under root-owned `/opt`, and an earlier bombyx left a key in
-  `/root/.ssh` to clear -- and hands over with `runuser`, so whatever the script
+  than as root. `bootstrap.sh` still starts as root -- an earlier bombyx left a
+  key in `/root/.ssh` to clear, and dropping privilege needs root -- and hands
+  over with `runuser`, so whatever the script
   installs lands in the home directory of the account the agent logs in as
   instead of in `/root`. Root stays available to that script through `sudo`. A
   box without `runuser` is refused with a message naming it.
@@ -231,9 +231,17 @@ and this project adheres to
   directory of the account the agent works as, read from that account's passwd
   entry, rather than into `/opt/project`. `/opt` belongs to root, so the old
   placement forced root to create, remove and chown a directory the agent then
-  owned; now the agent does all three and root touches the project tree not at
-  all. A project script referring to `/opt/project` must change, and an existing
-  guest keeps a stale clone at the old path that bombyx does not remove.
+  owned; now the agent creates and removes it, nothing chowns anything, and root
+  modifies nothing under it. A project script referring to `/opt/project` must
+  change, and an existing guest keeps a stale clone at the old path that bombyx
+  does not remove.
+- Every refusal in the guest's bootstrap script removes the uploaded deploy key
+  before exiting. A refusal that exited without it left a credential in a guest
+  that never finished provisioning. bombyx also refuses, by name rather than
+  with a bare `git` error: a box with no account for the guest's SSH user, a
+  home directory that does not exist or that the agent cannot create a directory
+  in, a clone the agent cannot update because something in it belongs to another
+  user, and a leftover directory at the clone path.
 
 ### Fixed
 

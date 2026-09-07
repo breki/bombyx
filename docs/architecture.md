@@ -492,12 +492,18 @@ that script need root: clearing a key an earlier bombyx left in
 `/root/.ssh`, and being able to drop privilege at all.
 
 The clone is not one of them. It lives in the agent's own home,
-read from that account's passwd entry, so the agent creates it,
-removes it and owns everything in it -- which is what took the
-last root operation off a tree the agent controls. It used to
-sit in `/opt/project`, and because `/opt` belongs to root, every
-provision had root create, remove and chown a directory the
-agent then owned.
+read from that account's passwd entry, so the agent creates and
+removes it and every command bombyx runs that modifies it runs
+as that user -- which is what took the last root operation off a
+tree the agent controls.
+
+The project's own script has `sudo` and runs with that tree as
+its working directory, so it can leave content bombyx's own
+commands then cannot change -- a root-owned file, a directory
+with no write bit, a mount point. Every place bombyx updates or
+removes the clone therefore checks whether it succeeded and
+says what to clear when it did not, rather than letting a bare
+`git` or `rm` message be the whole diagnosis.
 
 The project's script is not one either, and running it as root
 has a consequence that is easy to miss: whatever it

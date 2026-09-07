@@ -4,6 +4,72 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**Forty-three review findings on the clone-in-home work, and I
+made the same mistake three times**
+
+`/review2` on #60: `artisan` 10, `red-team` 25 over three
+rounds, `fresh-reader` 16. Eight were defects in an earlier
+round's own fixes. Stage 2 stopped by cap *and* by
+non-convergence -- every round found damage from the round
+before, which is the condition `/review` names.
+
+**The repeated mistake was a refusal that cannot run.** Three
+times: `owner_home=$(getent ... | cut ...)` aborts under
+`pipefail` before its own message; a `getent` refusal placed
+after the first `runuser` call, which fails first; and
+`"$DEPLOY_KEY"` expanded eleven lines before its declaration,
+fatal under `set -u`. Each time the message named the exact
+misconfiguration and each time it could not print. Each time
+every text test passed, because they compare offsets of things
+that are present rather than asking whether the shell can run
+the file. The last one also left the uploaded key in the guest,
+which is what the file's own rule exists to prevent.
+
+**So that rule is structural now.** A `refuse` function clears
+both key placements, prints the message and exits; a test
+refuses a bare `exit 1` anywhere else. Reading the finding that
+prompted it turned up four *more* refusals breaking the same
+rule -- the home-field, shape, existence and writability checks
+all fired before the key block. A rule stated in prose was
+broken seven times in one file by the person who wrote it.
+
+**A guard I wrote four times, three of which leaked.** It
+asserts no `git` and no root modification reaches the clone
+tree. Version one keyed on `$CLONE_DIR`; `${CLONE_DIR}` walked
+past it. Version two normalised the braces; seven of ten
+evasions still passed, including the plainest -- a literal
+`/home/vagrant/project`. Version three selects on the
+identifier and over-approximates, with allowance lists
+**generated from the script**, because three rounds of my
+hand-escaped needles were wrong. The lesson is not "write
+better tests": **a guard proven against one input is proven for
+one input.** I called version two "proven to fail" on the
+strength of a single removed prefix.
+
+**And a guard that was simply the wrong idea.** Round 2 added a
+`find ! -user` sweep before the git work. Round 3 found three
+defects in it: it refused provisions over build output no git
+command touches, could not report itself when `find` met an
+unsearchable directory, and a symlink at the clone skipped it.
+Replaced with status checks on the two commands that can
+actually fail. Deleting a guard was the fix.
+
+**Only the real VM caught two of the bugs.** Both `set -u`
+aborts -- `$DEPLOY_KEY` and then `runuser_bin` referenced before
+declaration -- passed every text test and failed instantly on
+the guest with "unbound variable". Definition of Done item 3
+earned its place twice in ten minutes.
+
+**Four findings deferred, and the reason is the same for all
+four.** The shipped script's comments have accreted: three
+topics in one 63-line block, a 27-line comment 120 lines from
+its code, the clone's placement explained five times, 34 lines
+above one `chmod`. Right findings, wrong moment -- that file had
+six commits in a day and this review restructured its refusal
+paths again. A consolidation pass wants a branch where nothing
+else is moving, and `docs/architecture.md` should own the shared
+explanation.
+
 **The clone moved into the agent's home, and root's work on the
 project tree became none**
 

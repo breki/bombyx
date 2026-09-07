@@ -569,28 +569,102 @@ mod tests {
     }
 
     #[test]
-    fn nothing_exits_before_the_key_is_dealt_with() {
-        // Vagrant has already uploaded the key by the time this
-        // script starts, so *any* `exit` above the point where
-        // the key is tightened or removed leaves a credential
-        // in the agent's own directory for the life of the VM.
+    fn every_variable_is_declared_before_it_is_expanded() {
+        // `set -u` makes expanding an unset variable fatal, so
+        // a refusal that removes the deploy key before its path
+        // is declared aborts with "unbound variable" -- the
+        // message never prints and the key stays. That has now
+        // happened twice in this file, both times while moving
+        // a block to satisfy an ordering rule, and both times
+        // every text test passed because they compare offsets
+        // of things that are present rather than asking whether
+        // the shell can run them.
         //
-        // The predecessor of this test compared against
-        // `command -v git` and located the key block by the
-        // string `BOMBYX_DEPLOY_KEY`, whose first occurrence is
-        // a comment 50 lines above the block -- so it passed
-        // while a `runuser` refusal sat above the key. This one
-        // takes the first `exit` in the file and the first line
-        // that actually removes the key.
+        // Checked for the two the script declares itself.
+        // `readonly` lines are the declarations; anything of
+        // the form `$NAME` or `"$NAME"` before one is a use.
+        let flat = flat_bootstrap_lines();
+        for name in ["DEPLOY_KEY", "CLONE_DIR", "OWNER"] {
+            let decl = flat
+                .iter()
+                .position(|l| l.starts_with(&format!("readonly {name}=")))
+                .unwrap_or_else(|| panic!("{name} must be declared"));
+            let first_use = flat.iter().position(|l| {
+                !l.starts_with('#') && l.contains(&format!("${name}"))
+            });
+            if let Some(u) = first_use {
+                assert!(
+                    decl <= u,
+                    "${name} is expanded at line {} and declared at {}",
+                    u + 1,
+                    decl + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_account_is_resolved_before_anything_uses_it() {
+        // `runuser -u "$OWNER"` fails when that account does
+        // not exist -- measured -- and under `set -e` that
+        // aborts. So a passwd lookup placed *after* the first
+        // `runuser` can never report anything: the script is
+        // already gone. Worse, on the no-key path the aborting
+        // command is the key removal, so a leftover credential
+        // stays in the guest.
+        //
+        // `nothing_exits_before_the_key_is_dealt_with` cannot
+        // see this: it compares the offsets of `exit 1` and the
+        // removal, and an abort is neither.
         let flat = flat_bootstrap();
-        let first_exit =
-            flat.find("exit 1").expect("the script refuses somewhere");
-        let removes_key = flat
-            .find("rm -f \"$DEPLOY_KEY\"")
-            .expect("the script must be able to remove the key");
+        let lookup = flat
+            .find("if ! owner_passwd=$(getent passwd")
+            .expect("the account must be resolved");
+        let first_runuser = flat
+            .find("\"$runuser_bin\" -u \"$OWNER\"")
+            .expect("runuser must be used");
         assert!(
-            removes_key < first_exit,
-            "an exit above the key handling strands the uploaded key"
+            lookup < first_runuser,
+            "the account must be resolved before runuser relies on it"
+        );
+    }
+
+    #[test]
+    fn every_refusal_clears_the_uploaded_key() {
+        // Vagrant uploads the key before this script starts, so
+        // a refusal that exits without removing it leaves a
+        // credential at whatever mode `scp` gave it, in a guest
+        // that never provisioned.
+        //
+        // The rule was written as prose and broken four times
+        // by the file's own refusals -- the home-field, shape,
+        // existence and writability checks all fired before the
+        // key block. So it is structural now: `refuse` removes
+        // the key and exits, and no bare `exit 1` is allowed
+        // outside it.
+        let mut inside = false;
+        for line in flat_bootstrap_lines() {
+            if line.starts_with("refuse() {") {
+                inside = true;
+                continue;
+            }
+            if inside && line == "}" {
+                inside = false;
+                continue;
+            }
+            if line.starts_with('#') || !line.contains("exit 1") {
+                continue;
+            }
+            assert!(
+                inside,
+                "a refusal that does not clear the key: {line}\n\
+                 Call `refuse \"message\"` instead of exiting."
+            );
+        }
+        assert!(
+            flat_bootstrap()
+                .contains("rm -f \"$DEPLOY_KEY\" /root/.ssh/bombyx-deploy-key"),
+            "refuse must remove both key placements"
         );
     }
 
@@ -644,8 +718,8 @@ mod tests {
     fn runuser_is_resolved_and_checked_before_the_clone() {
         // A box without it currently downloads a shallow
         // clone, takes delivery of a private-repo credential
-        // and chowns a tree before refusing -- everything the
-        // refusal was meant to prevent, already done.
+        // before refusing -- everything the refusal was meant
+        // to prevent, already done.
         let check = BOOTSTRAP
             .find("runuser_bin=")
             .expect("the binary must be resolved");
@@ -705,22 +779,23 @@ mod tests {
         // **This over-approximates on purpose.** A line that
         // merely mentions git -- an assignment holding a path,
         // an error message -- fails until it is named below.
-        // That is the trade: a test cannot parse shell, and the
-        // two attempts that tried to approximate it both let
-        // the escalation shape through. Being told to justify a
-        // new mention of `git` in a file that runs as root in
-        // the guest is cheap; the failure message says so, so
+        // That is the trade: a test cannot parse shell, and
+        // anything that tries to approximate one lets the
+        // escalation shape through. Being told to justify a new
+        // mention of `git` in a file that runs as root in the
+        // guest is cheap, and the failure message says so, so
         // nobody reads it as the test being broken.
-        const ALLOWED_WITHOUT_RUNUSER: [&str; 3] = [
-            // Asks whether git exists. Runs nothing.
+        const ALLOWED_WITHOUT_RUNUSER: [&str; 2] = [
             "if ! command -v git >/dev/null 2>&1; then",
-            // Two error messages. The second is written
-            // across continued lines and joins into one.
-            "echo \"bombyx: git is not installed in this box.\" >&2",
-            "echo \"bombyx: install it in the box, or choose one with\" \
-             \"git, so the guest can clone the project.\" >&2",
+            "refuse \"git is not installed in this box. Install it in\" \"the \
+             box, or choose one with git, so the guest can\" \"clone the \
+             project.\"",
         ];
-        let mut allowed_seen = [false; 3];
+        // Length from the array, not written twice: a fourth
+        // entry added without editing a second literal would
+        // give an index panic naming neither the list nor the
+        // reason.
+        let mut allowed_seen = [false; ALLOWED_WITHOUT_RUNUSER.len()];
 
         for line in flat_bootstrap_lines() {
             if line.starts_with('#') {
@@ -729,9 +804,9 @@ mod tests {
             // The word `git`, not the letters. `.` and `/`
             // count as part of a word so that `${a%.git}` and
             // `"$CLONE_DIR/.git"` are not read as the command
-            // `git`, while `/usr/bin/git` still is. That
-            // distinction is why the earlier versions of this
-            // test failed on correct lines.
+            // `git`, while `/usr/bin/git` still is. Without
+            // that distinction the check fails on correct
+            // lines.
             let word_char = |c: char| {
                 c.is_alphanumeric() || c == '_' || c == '/' || c == '.'
             };
@@ -752,9 +827,11 @@ mod tests {
                 "this line may run git as root:\n  {line}\n\
                  Run it through `\"$runuser_bin\" -u \"$OWNER\" --`. \
                  If it does not invoke git at all -- an \
-                 assignment, a message -- add it verbatim to \
-                 ALLOWED_WITHOUT_RUNUSER above, which is \
-                 deliberately a list somebody has to read."
+                 assignment, a message -- add it to \
+                 ALLOWED_WITHOUT_RUNUSER above, copying the \
+                 line printed here rather than the one in the \
+                 script: entries are the flattened form, with \
+                 continuations joined and whitespace collapsed."
             );
         }
 
@@ -771,43 +848,224 @@ mod tests {
     }
 
     #[test]
-    fn the_clone_lives_in_the_agents_home_and_root_never_touches_it() {
-        // `/opt` belongs to root, so a clone under it forced
-        // root to create, remove and chown the directory -- the
-        // last root operations on a tree the agent owns. In the
-        // agent's own home the agent does all three itself, and
-        // root's work on that tree becomes none.
+    fn a_fetch_or_checkout_that_cannot_finish_says_so() {
+        // Both run as $OWNER and both fail on a tracked file
+        // inside a directory $OWNER cannot write. `git checkout
+        // --force` exits 1 with "unable to unlink old ...
+        // Permission denied" *after* printing "Switched to
+        // branch" -- measured -- so the worktree is
+        // half-changed and `set -e` then aborts with nothing
+        // naming bombyx.
         //
-        // The home directory is read from the owner's passwd
-        // entry rather than written out, so it is right
-        // whatever the box calls that user. `$HOME` would be
-        // wrong here: this script runs as root, so `$HOME` is
-        // `/root`.
+        // Checked here rather than by sweeping the tree for
+        // foreign ownership beforehand. A sweep refuses
+        // provisions over build output no git command touches,
+        // cannot report itself when it meets an unsearchable
+        // directory, and a symlink at the clone skips it.
+        let flat = flat_bootstrap();
+        for needle in [
+            "if ! \"$runuser_bin\" -u \"$OWNER\" -- \
+             git -C \"$CLONE_DIR\" fetch",
+            "if ! \"$runuser_bin\" -u \"$OWNER\" -- \
+             git -C \"$CLONE_DIR\" checkout",
+        ] {
+            assert!(flat.contains(needle), "unchecked: {needle}");
+        }
+        assert!(
+            flat.contains("could not update the clone"),
+            "a failure must name the path and say what to do"
+        );
+    }
+
+    #[test]
+    fn a_reclone_over_a_leftover_directory_says_so() {
+        // A discard that failed part-way may already have
+        // deleted `.git`, so the next provision skips the
+        // mismatch branch entirely -- the message that
+        // diagnosed it is unreachable -- and `git clone` dies
+        // with "destination path already exists and is not an
+        // empty directory". Measured.
         let flat = flat_bootstrap();
         assert!(
-            flat.contains("getent passwd \"$OWNER\""),
-            "the clone's home must come from the passwd entry"
+            flat.contains("is not empty"),
+            "a non-empty clone directory must be refused by name"
+        );
+    }
+
+    #[test]
+    fn a_discard_that_cannot_finish_says_so() {
+        // `rm -rf` as $OWNER fails on a directory inside the
+        // clone that $OWNER cannot write, and GNU `rm` does not
+        // chmod its way in. Measured: exit 1, "Permission
+        // denied", and a partly deleted tree. Nothing
+        // normalises such content, deliberately: a root
+        // `chown -R` on a tree the agent owns is the
+        // escalation this arrangement removes.
+        //
+        // A project script running one `sudo` step inside its
+        // own checkout is enough to reach it -- and
+        // `docs/tutorial.md` documents `sudo` as available. So
+        // the status is tested and the operator is told what to
+        // remove, rather than `set -e` aborting after the
+        // "discarding the clone" message has already printed.
+        let flat = flat_bootstrap();
+        assert!(
+            flat.contains("if ! \"$runuser_bin\" -u \"$OWNER\" -- rm -rf"),
+            "the discard's failure must be caught"
         );
         assert!(
-            !flat.contains("CLONE_DIR=/opt"),
-            "the clone must not live under root-owned /opt"
+            flat.contains("could not remove"),
+            "a failed discard must name the path and say what to do"
+        );
+    }
+
+    #[test]
+    fn the_home_lookup_can_report_its_own_failures() {
+        // `getent` exits 2 for an unknown name, and under
+        // `set -euo pipefail` the assignment inherits that
+        // through the pipe -- so a plain
+        // `x=$(getent ... | cut ...)` aborts the script before
+        // any message can print. Measured: exit 2 and no
+        // output at all, which is the one refusal in this file
+        // that would give the operator nothing to read.
+        //
+        // So the lookup and the field extraction are separate,
+        // with the lookup's status tested rather than its
+        // output.
+        let flat = flat_bootstrap();
+        assert!(
+            flat.contains("if ! owner_passwd=$(getent passwd \"$OWNER\")"),
+            "the lookup's failure must be catchable"
+        );
+        assert!(
+            !flat.contains("owner_home=$(getent"),
+            "a piped assignment aborts before it can report"
+        );
+        // And the value has to be usable as a path, not merely
+        // non-empty: a relative home puts the clone wherever
+        // root's provisioner happened to start.
+        // The pattern, not just that a `case` exists:
+        // changing `/?*)` to `?*)` re-admits every relative
+        // home, which is the defect this guard was raised for,
+        // and a needle stopping at `in` would not notice.
+        assert!(
+            flat.contains("case \"$owner_home\" in /?*) ;;"),
+            "the shape check must refuse a relative home"
+        );
+        // And that it exists and is writable, which the shape
+        // says nothing about. `git clone` would otherwise
+        // create the home itself, or die with a bare git error.
+        assert!(
+            flat.contains("if [ ! -d \"$owner_home\" ]; then"),
+            "the home must be required to exist"
+        );
+        // Writable *and* searchable: mode 0600 passes
+        // `test -w` while `mkdir` in it fails.
+        assert!(
+            flat.contains("test -w \"$1\" && test -x \"$1\""),
+            "the home must be writable and searchable by the agent"
+        );
+    }
+
+    #[test]
+    fn the_clone_lives_in_the_agents_home_and_root_never_modifies_it() {
+        // The lines that name the clone tree and legitimately
+        // do not drop privilege, because they only read. Any
+        // other line naming it must go through `runuser`.
+        //
+        // This enumerates the exceptions rather than the
+        // commands root must not use: a list of forbidden
+        // commands misses the next one, and
+        // `no_git_command_in_the_guest_runs_as_root`'s comment
+        // makes the same argument at greater length.
+        const READ_ONLY_WITHOUT_RUNUSER: [&str; 10] = [
+            "readonly CLONE_DIR=\"$owner_home/project\"",
+            "if [ -d \"$CLONE_DIR/.git\" ]; then",
+            "echo \"bombyx: discarding the clone and starting\" \"again. \
+             Uncommitted work in $CLONE_DIR is lost.\" >&2",
+            "refuse \"could not remove the clone. The\" \"message above says \
+             what stopped it. Clear\" \"it in the guest, then provision \
+             again:\" \"$CLONE_DIR\"",
+            "refuse \"could not update the clone. The message above\" \"says \
+             why. If something in it belongs to another\" \"user, clear it in \
+             the guest: $CLONE_DIR\"",
+            "refuse \"could not update the clone. The message above\" \"says \
+             why, and the checkout may be half-changed.\" \"If something in \
+             it belongs to another user, clear\" \"it in the guest: \
+             $CLONE_DIR\"",
+            "if [ -d \"$CLONE_DIR\" ] && [ -n \"$(ls -A \"$CLONE_DIR\")\" ]; \
+             then",
+            "refuse \"$CLONE_DIR is not empty and holds no\" \"checkout, so \
+             it is a leftover. Remove it in the\" \"guest, then provision \
+             again.\"",
+            "cd \"$CLONE_DIR\"",
+            "clone_real=$(readlink -f -- \"$CLONE_DIR\")",
+        ];
+
+        // The clone is in the agent's own home, so the agent
+        // creates it, removes it and owns everything in it and
+        // root has no work to do on a tree the agent controls.
+        //
+        // The derivation is pinned as a literal rather than by
+        // the presence of `getent` somewhere in the file:
+        // leaving that line in place while writing
+        // `CLONE_DIR=/srv/project` underneath it would
+        // otherwise pass.
+        let flat = flat_bootstrap();
+        assert!(
+            flat.contains(
+                "owner_home=$(printf '%s\\n' \"$owner_passwd\" | cut -d: -f6)"
+            ),
+            "the home must come from the passwd entry"
+        );
+        assert!(
+            flat.contains("readonly CLONE_DIR=\"$owner_home/project\""),
+            "the clone must sit in that home"
         );
 
-        // Nothing root does may reach that tree. The needles
-        // are the three commands the old placement needed.
+        // Root must not reach that tree.
+        let mut seen = [false; READ_ONLY_WITHOUT_RUNUSER.len()];
+
         for line in flat_bootstrap_lines() {
-            if line.starts_with('#') || !line.contains("$CLONE_DIR") {
+            // Selected on the *identifier* rather than on any
+            // expansion of it. A rule keyed on one spelling
+            // lets through `${CLONE_DIR%/}`, `${CLONE_DIR:?}`,
+            // `"$owner_home"/project`, a variable assigned from
+            // it, the literal `/home/vagrant/project` and
+            // `~vagrant/project`.
+            //
+            // This over-approximates, which is the same trade
+            // `no_git_command_in_the_guest_runs_as_root` makes
+            // and the reason both have an allowance list: the
+            // list is readable, a spelling rule is not.
+            let names_tree = ["CLONE_DIR", "/project", "~vagrant"]
+                .iter()
+                .any(|n| line.contains(*n));
+            if line.starts_with('#') || !names_tree {
                 continue;
             }
-            let touches = ["mkdir ", "chown ", "rm -rf "]
-                .iter()
-                .any(|c| line.contains(*c));
-            if !touches {
+            if let Some(i) =
+                READ_ONLY_WITHOUT_RUNUSER.iter().position(|a| *a == line)
+            {
+                seen[i] = true;
                 continue;
             }
             assert!(
                 line.contains("$runuser_bin"),
-                "root touches the clone tree here: {line}"
+                "this line may let root modify the clone tree:\n  {line}\n\
+                 Run it through `\"$runuser_bin\" -u \"$OWNER\" --`. If \
+                 it only reads, add it to \
+                 READ_ONLY_WITHOUT_RUNUSER above, copying the \
+                 line printed here rather than the one in the \
+                 script: entries are the flattened form."
+            );
+        }
+
+        for (i, s) in seen.iter().enumerate() {
+            assert!(
+                *s,
+                "stale allowance, no line matches: {}",
+                READ_ONLY_WITHOUT_RUNUSER[i]
             );
         }
     }
@@ -945,9 +1203,11 @@ mod tests {
 
     #[test]
     fn the_project_script_runs_as_the_agent_not_as_root() {
-        // Everything above the hand-over needs root: the
-        // clone, the chown, the deploy key. The project's own
-        // script does not, and running it as root puts its
+        // Only two things above the hand-over need root:
+        // clearing a key an earlier bombyx left in
+        // `/root/.ssh`, and dropping privilege at all. The
+        // project's own script needs neither, and running it
+        // as root puts its
         // toolchain in root's home rather than in the account
         // the agent logs in as. `docs/architecture.md` under
         // **Who runs the project's script** holds the

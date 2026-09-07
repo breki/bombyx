@@ -9,6 +9,35 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-07-clone-in-home-what-worked
+
+**Category:** What worked -- do not trim
+
+From the comprehension review of the clone-in-home work. Four
+passages were named as carrying a reason rather than padding.
+
+`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
+table with its worked failure, named as the model the rest of
+that file should follow.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
+showing four spellings of one address collapse to one string.
+
+`crates/bombyx/templates/bootstrap.sh` and its mirror in
+`crates/bombyx/src/vagrantfile.rs`, the `safe.directory`
+paragraph: git normally refuses another user's repository, that
+guard does not apply under `sudo`, and a `post-checkout` hook
+was measured running at `uid=0`. The reviewer called it the only
+passage that explains why the privilege arrangement exists at
+all -- without it the rest reads as ceremony.
+
+`crates/bombyx/templates/bootstrap.sh`, the "deliberately no
+`git clean`" paragraph, the only place stating that committing
+inside the guest does not survive a provision and that pushing
+is what does. Four other comments depend on that fact.
+
+---
+
 ### fr-2026-09-07-explanations-worth-keeping-two
 
 **Category:** What worked -- do not trim

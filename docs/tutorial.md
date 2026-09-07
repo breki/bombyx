@@ -558,8 +558,9 @@ mistake this arrangement exists to avoid.
 why every privileged line in the example below has it.
 
 Its working directory is the clone, at `~/project` in that
-user's home. That is also where `bombyx shell` leaves you, and
-it is the only copy of your code in the VM.
+user's home -- `bombyx shell` leaves you one directory above
+it, in that home, which is measured rather than assumed. It is
+the only copy of your code in the VM.
 
 Write the script to be **re-runnable**. `bombyx provision` runs
 it again on an existing VM, so every step should either be
