@@ -36,7 +36,13 @@ Cargo workspace, CLI only:
   - `bin/bombyx/main.rs` — clap parsing, host-provenance
     reporting, process spawning, the self-update ordering
   - `crates/bombyx/templates/bootstrap.sh` — the script the
-    guest runs, identical for every project
+    guest runs, identical for every project. Starts as root
+    and `exec`s the project's own script as the box's SSH user
+    through `runuser`, so a toolchain it installs lands in
+    that account's home rather than in `/root`. Every `git`
+    command runs as that user too, because root running `git`
+    in a tree the agent owns is an escalation. A box without
+    `runuser` is refused by name
 - `xtask` — build automation (not published)
 
 No web crate, no frontend, no E2E suite, no deploy
@@ -134,9 +140,8 @@ header above it:
   `VAGRANT_DEFAULT_PROVIDER`, in front of every project vagrant
   call but the teardown, so a host that cannot supply it fails
   the boot. Vagrant ignores it once a machine exists, so
-  changing the key needs a destroy
-  first.
-  `hyperv` parses and has never been run
+  changing the key needs a destroy first. `hyperv` parses and
+  has never been run
 - `[projects.<name>.source]` — required: `repo`, `ref`,
   `script`, what the guest clones and runs. `deploy_key` is
   optional: a path on the VM host naming the private key the
@@ -145,11 +150,12 @@ header above it:
   creating anything (`remote::require_file`), the generated
   Vagrantfile uploads it to
   `/home/vagrant/.ssh/bombyx-deploy-key` before `bootstrap.sh`
-  runs, and `bootstrap.sh` chowns it to the agent's own user at
-  0600, exports `GIT_SSH_COMMAND`, and records the same command
+  runs, and `bootstrap.sh` tightens it to 0600 where the
+  provisioner uploaded it -- owned by that user already --
+  exports `GIT_SSH_COMMAND`, and records the same command
   on the clone as `core.sshCommand` so the agent can push with
-  it. The upload is
-  conditional and carries no `raise` of its own, because
+  it. The upload is conditional and carries no `raise` of its
+  own, because
   `vagrant destroy` loads the Vagrantfile too. Whether a key
   was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,
   always set, so the guest's own environment cannot answer it.

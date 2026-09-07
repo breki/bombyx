@@ -440,20 +440,11 @@ mod tests {
         ScratchName::parse(name).unwrap()
     }
 
-    // This test and `provision_writes_the_files_then_reprovisions`
-    // spell out
-    // the same four-command script, differing only in the trailing
-    // `vagrant 'up'` versus `vagrant 'provision'`. A review proposed
-    // an `expected_script(dir, subcommand)` helper and the duplication
-    // is kept deliberately: these blocks are meant to be dumb pins
-    // that read as the exact shell bombyx emits, and two
-    // independently written expectations cannot both drift the same
-    // wrong way, which one shared builder can.
-    // `provision_and_up_take_the_same_shape` below carries the
-    // "these two differ only in their last step" claim the helper
-    // would have made visible. Revisit if a third caller of
-    // `write_then` gains its own exact-script test -- three copies
-    // change the judgement.
+    // A dumb pin, on purpose: it reads as the exact shell
+    // bombyx emits. `provision_writes_the_files_then_reprovisions`
+    // spells out almost the same script, and the duplication is
+    // the point -- two expectations written independently cannot
+    // drift the same wrong way, which one shared builder can.
     #[test]
     fn up_makes_the_dir_writes_the_files_then_boots() {
         // Order is the point. `vagrant up` reads the Vagrantfile

@@ -225,10 +225,10 @@ bombyx checks on the VM host that the file is there and stops
 with a message naming the expanded path when it is not. The
 generated Vagrantfile then uploads the key with a `file`
 provisioner that Vagrant runs before the bootstrap script, and
-`bootstrap.sh` chowns it to the agent's own user at `0600`,
-exports `GIT_SSH_COMMAND` so `git` uses that key and no other,
-and records the same command on the clone so the agent can push
-with it.
+`bootstrap.sh` tightens it to `0600` where the provisioner
+uploaded it, exports `GIT_SSH_COMMAND` so `git` uses that key
+and no other, and records the same command on the clone so the
+agent can push with it.
 
 Where that check runs is worth a sentence, because the obvious
 place is wrong. The Vagrantfile could test the file itself and
@@ -240,8 +240,11 @@ behind it. bombyx knows which verb it is running, and the
 Vagrantfile does not, so the check belongs to bombyx and the
 upload in the Vagrantfile stays conditional.
 
-Four properties are worth stating, because each is a
-deliberate limit rather than an oversight.
+### Four properties of that credential
+
+Each is a deliberate limit rather than an oversight, and all
+four belong to the cost above rather than being costs of their
+own.
 
 **The workstation never holds the key.** bombyx does not open the
 file and does not send it: the path travels in the
@@ -254,8 +257,12 @@ put the secret in a third place.
 **The agent's own user can read the key, and that is
 deliberate.** Vagrant's `file` provisioner uploads as the box's
 SSH user, `vagrant` on the boxes bombyx assumes, which is the
-user the agent works as. `bootstrap.sh` chowns the key to that
-user at `0600` and leaves it there.
+user the agent works as, so the key arrives owned by it -- and
+that, rather than anything bombyx does, is why the agent can
+read it. `bootstrap.sh` only tightens the mode to `0600` and
+leaves the file where it is. A box setting a different
+`config.ssh.username` would break the assumption, and
+`vagrantfile.rs` records it on the constant naming the path.
 
 Putting it out of the agent's reach was tried and does not
 survive contact with the job. Work leaves this VM by being
@@ -265,12 +272,25 @@ means an agent that cannot push at all. So `bootstrap.sh` also
 records the key on the clone as `core.sshCommand`, which is the
 opposite of hiding it.
 
-What the chown and the `0600` buy is narrower than it looks: no
-*other* account in the guest can read the key, which matters
-because `scp` uploads at the box's umask and that is
-world-readable on some boxes. Against the agent itself they buy
-nothing, and nothing can -- an agent that can push is an agent
-that holds the credential.
+What the `0600` buys is narrower than it looks: no *other*
+account in the guest can read the key. Two cases make it worth
+doing, and the box's umask is not one of them -- `scp` sends
+the source file's own mode, and a umask only clears bits, so
+the uploaded key is never looser than the key on the VM host.
+What it does catch is a loosely-permissioned key on the VM
+host, delivered as it is, and a file already sitting at that
+path, whose mode `scp` does not touch -- so a world-readable
+leftover stays that way until bombyx tightens it.
+
+Against the agent itself the mode buys nothing, and nothing
+can: an agent that can push is an agent that holds the
+credential.
+
+Nor does running as the agent rather than as root put root out
+of reach. On the boxes bombyx assumes, that user has
+passwordless `sudo`. What the hand-over changes is which step
+has to ask for root, not what is reachable from inside the
+guest.
 
 **`StrictHostKeyChecking=accept-new` trades a first-contact
 check for an unattended clone.** The guest has no `known_hosts`
@@ -290,8 +310,9 @@ What they get is the ability to impersonate the git host and
 serve a repository of their own. `bootstrap.sh` clones what it
 is served and runs the script named by `script` from that
 clone. That script runs as the agent's own user rather than as
-root, which narrows what the first step reaches and not the
-outcome: the key belongs to that very user. So the key does go,
+root, so its first command has the agent's authority and no
+more -- which narrows what it reaches and not the outcome,
+because the key belongs to that very user. So the key does go,
 by way of code execution rather than by way of the handshake.
 
 The egress rules under `host-network-isolation` are what would
@@ -321,7 +342,7 @@ take `deploy_key` out of the config, run `bombyx provision` so
 the guest deletes it, then `bombyx snapshot`. A `snapshot`
 before the provision captures the key again, and so does one
 taken after a `reset` -- the restore puts the key back, as
-above. Nothing warns you about either order.
+above. bombyx warns you about neither order.
 
 Whichever route, revoke the key at the git host as well. That
 is the only step that does not depend on a guest doing what it
@@ -336,7 +357,7 @@ reboot and cannot run unattended. A fetch proxy on the VM host,
 or source baked into a base image, would move the credential
 out of the guest altogether.
 
-**Nothing can size the VM before the VM exists.** A project
+**bombyx cannot size the VM before the VM exists.** A project
 that declares its memory and CPU needs in its own repository
 hits the same ordering problem the Vagrantfile does: bombyx
 cannot read those numbers until after the machine it needs them

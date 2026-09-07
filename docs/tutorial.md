@@ -545,8 +545,24 @@ there, which is the file the next section covers.
 
 ### `vagrant/provision.sh`
 
-Write this to be **re-runnable**. `bombyx provision` runs it
-again on an existing VM, so every step should either be
+Three facts about how this script runs, because they decide how
+you write it.
+
+It runs as `vagrant`, the guest's ordinary user and the account
+the agent works as. So anything it installs into a home
+directory lands where the agent will find it. Running it as
+root instead would put a toolchain in `/root`, which is the
+mistake this arrangement exists to avoid.
+
+`sudo` is available for the steps that do need root, which is
+why every privileged line in the example below has it.
+
+Its working directory is the clone, at `/opt/project`. That is
+also where `bombyx shell` leaves you, and it is the only copy
+of your code in the VM.
+
+Write the script to be **re-runnable**. `bombyx provision` runs
+it again on an existing VM, so every step should either be
 idempotent or check before acting.
 
 ```bash

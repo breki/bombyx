@@ -39,8 +39,7 @@ pub const VAGRANTFILE_NAME: &str = "Vagrantfile";
 /// stated once here.
 pub const BOOTSTRAP_NAME: &str = "bootstrap.sh";
 
-/// Where the Vagrantfile's file provisioner drops the deploy
-/// key inside the guest.
+/// Where the deploy key lives inside the guest.
 ///
 /// Two files have to agree on this path and neither can read
 /// the other: [`render`] writes it as the upload's
@@ -58,15 +57,23 @@ pub const BOOTSTRAP_NAME: &str = "bootstrap.sh";
 /// guest is this module's business, and making it public would
 /// invite a caller to depend on it.
 ///
-/// The file provisioner runs as the box's SSH user, so the
+/// The Vagrantfile's file provisioner drops it here and
+/// `bootstrap.sh` leaves it here, at `0600` and owned by the
+/// box's SSH user, for the life of the VM. It is not moved
+/// anywhere more private on purpose: the agent works as that
+/// user and has to push with this key, so a placement it could
+/// not read would be a key that cannot do its job.
+/// `docs/trust-boundary.md` under **What this costs** holds
+/// what that exposes.
+///
+/// The provisioner runs as the box's SSH user, so the
 /// destination has to be somewhere that user can write. This
 /// path assumes that user is `vagrant`, which is Vagrant's
 /// default for `config.ssh.username` rather than a rule -- a
 /// box is free to set another, and some do. `bootstrap.sh`'s
 /// `OWNER` rests on the same assumption. On a box that sets a
 /// different user the upload fails inside Vagrant, a long way
-/// from `box` in the config. `bootstrap.sh` moves the key out
-/// of here before the clone.
+/// from `box` in the config.
 const DEPLOY_KEY_GUEST_PATH: &str = "/home/vagrant/.ssh/bombyx-deploy-key";
 
 /// Environment variable telling the guest that the operator's
@@ -312,6 +319,35 @@ mod tests {
     /// the tests below and the expected Ruby agree.
     const KEY: &str = "~/.secrets/myproject-deploy-key";
 
+    /// [`BOOTSTRAP`] with line continuations joined and every
+    /// whitespace run collapsed to one space.
+    ///
+    /// Needed because a command in that file may be wrapped
+    /// across lines, so the text a reader sees as one command
+    /// is not a contiguous substring -- the same wrap trap
+    /// `CLAUDE.md` warns about for grepping canon prose.
+    fn flat_bootstrap() -> String {
+        BOOTSTRAP
+            .replace("\\\n", " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// [`BOOTSTRAP`] as lines, each with its continuations
+    /// joined and its whitespace collapsed.
+    ///
+    /// [`flat_bootstrap`] answers "does this text appear
+    /// anywhere"; this one answers "what does each command look
+    /// like", which is what a per-line invariant needs.
+    fn flat_bootstrap_lines() -> Vec<String> {
+        BOOTSTRAP
+            .replace("\\\n", " ")
+            .lines()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    }
+
     fn cfg_with(provider: Provider) -> Config {
         let mut cfg = Config::for_tests();
         cfg.vm = Vm {
@@ -369,8 +405,7 @@ mod tests {
         // and holds only what bombyx generated, so the mount
         // leaks nothing -- but it hangs on a host whose firewall
         // refuses NFS from the guest bridge, which
-        // docs/vm-host-setup.md warns
-        // about.
+        // docs/vm-host-setup.md warns about.
         for provider in [Provider::Libvirt, Provider::Hyperv] {
             let out = render(&cfg_with(provider));
             assert!(
@@ -534,22 +569,28 @@ mod tests {
     }
 
     #[test]
-    fn the_key_is_dealt_with_before_anything_can_exit_early() {
+    fn nothing_exits_before_the_key_is_dealt_with() {
         // Vagrant has already uploaded the key by the time this
-        // script starts, into a directory the agent's own user
-        // owns. Any `exit` above the key block leaves it there,
-        // readable by that user for the life of the VM -- and
-        // the `git` check is exactly such an exit, reachable
-        // with a box that has no `git`.
-        let key = BOOTSTRAP
-            .find("BOMBYX_DEPLOY_KEY")
-            .expect("the key block must be in the script");
-        let git = BOOTSTRAP
-            .find("command -v git")
-            .expect("the git check must be in the script");
+        // script starts, so *any* `exit` above the point where
+        // the key is tightened or removed leaves a credential
+        // in the agent's own directory for the life of the VM.
+        //
+        // The predecessor of this test compared against
+        // `command -v git` and located the key block by the
+        // string `BOMBYX_DEPLOY_KEY`, whose first occurrence is
+        // a comment 50 lines above the block -- so it passed
+        // while a `runuser` refusal sat above the key. This one
+        // takes the first `exit` in the file and the first line
+        // that actually removes the key.
+        let flat = flat_bootstrap();
+        let first_exit =
+            flat.find("exit 1").expect("the script refuses somewhere");
+        let removes_key = flat
+            .find("rm -f \"$DEPLOY_KEY\"")
+            .expect("the script must be able to remove the key");
         assert!(
-            key < git,
-            "the key block must come before the first early exit"
+            removes_key < first_exit,
+            "an exit above the key handling strands the uploaded key"
         );
     }
 
@@ -577,28 +618,285 @@ mod tests {
     }
 
     #[test]
+    fn root_never_changes_metadata_on_a_path_the_agent_owns() {
+        // `chmod` and `chown` follow symlinks, and the key
+        // lands in a directory the agent's own user owns. Root
+        // running either one there lets the agent point it at
+        // any file in the guest and have root act on that
+        // instead. Doing the work as $OWNER removes the
+        // asymmetry: a symlink then buys nothing the agent did
+        // not already have.
+        let forbidden = "chown \"$OWNER:$OWNER\" \"$DEPLOY_KEY\"";
+        assert!(
+            !BOOTSTRAP.contains(forbidden),
+            "{forbidden} would run as root on an agent-owned path"
+        );
+        for needed in [
+            "\"$runuser_bin\" -u \"$OWNER\" -- chmod 600 \"$DEPLOY_KEY\"",
+            "\"$runuser_bin\" -u \"$OWNER\" -- rm -f \"$DEPLOY_KEY\"",
+            "\"$runuser_bin\" -u \"$OWNER\" -- chmod +x \"$script_real\"",
+        ] {
+            assert!(BOOTSTRAP.contains(needed), "{needed} is missing");
+        }
+    }
+
+    #[test]
+    fn runuser_is_resolved_and_checked_before_the_clone() {
+        // A box without it currently downloads a shallow
+        // clone, takes delivery of a private-repo credential
+        // and chowns a tree before refusing -- everything the
+        // refusal was meant to prevent, already done.
+        let check = BOOTSTRAP
+            .find("runuser_bin=")
+            .expect("the binary must be resolved");
+        // The real command, not the comment above that
+        // mentions `git clone` in passing.
+        let clone = BOOTSTRAP
+            .find("git clone --depth 1")
+            .expect("the clone must be in the script");
+        assert!(check < clone, "resolve runuser before cloning");
+
+        // `command -v` searches PATH, and runuser lives in
+        // /usr/sbin. A root login shell has it; a root
+        // environment somebody else arranged need not, and the
+        // message must not blame a missing package then.
+        assert!(BOOTSTRAP.contains("/usr/sbin/runuser"), "{BOOTSTRAP}");
+        assert!(BOOTSTRAP.contains("was not found on PATH"), "{BOOTSTRAP}");
+    }
+
+    #[test]
+    fn only_one_user_ever_verifies_the_git_host() {
+        // Every git command runs as the agent, so one user
+        // clones and pushes and ssh uses that user's own
+        // `~/.ssh/known_hosts`. Naming a file here would only
+        // split the host-key trust across two principals
+        // again: root would record the key on the clone and
+        // the agent would meet the host afresh on its first
+        // push, or they would share a file the agent can
+        // rewrite.
+        assert!(
+            !BOOTSTRAP.contains("UserKnownHostsFile"),
+            "a shared known_hosts is not needed any more"
+        );
+    }
+
+    #[test]
+    fn no_git_command_in_the_guest_runs_as_root() {
+        // Root running `git` inside a tree the agent owns is a
+        // measured escalation, not a theoretical one: git
+        // trusts the uid in `SUDO_UID` as well as root's own
+        // (see `safe.directory` in git-config(1)) and Vagrant
+        // runs this script through `sudo`. A `post-checkout`
+        // hook planted as the agent was seen running with
+        // `uid=0`. This test is the only thing standing between
+        // a future edit and its return.
+        //
+        // The rule is deliberately crude: every line holding
+        // `git` as a word must also hold `$runuser_bin`, and
+        // the lines that legitimately do not are named here.
+        //
+        // Crude because a test cannot parse shell. Anything
+        // cleverer has to decide where a command starts, and
+        // `git` can start one after `=`, after `$(`, after
+        // `while` or `!`, inside `{ }`, or behind `env`,
+        // `eval`, `xargs` or a variable holding its path. A
+        // check that enumerates those misses the next one.
+        //
+        // **This over-approximates on purpose.** A line that
+        // merely mentions git -- an assignment holding a path,
+        // an error message -- fails until it is named below.
+        // That is the trade: a test cannot parse shell, and the
+        // two attempts that tried to approximate it both let
+        // the escalation shape through. Being told to justify a
+        // new mention of `git` in a file that runs as root in
+        // the guest is cheap; the failure message says so, so
+        // nobody reads it as the test being broken.
+        const ALLOWED_WITHOUT_RUNUSER: [&str; 3] = [
+            // Asks whether git exists. Runs nothing.
+            "if ! command -v git >/dev/null 2>&1; then",
+            // Two error messages. The second is written
+            // across continued lines and joins into one.
+            "echo \"bombyx: git is not installed in this box.\" >&2",
+            "echo \"bombyx: install it in the box, or choose one with\" \
+             \"git, so the guest can clone the project.\" >&2",
+        ];
+        let mut allowed_seen = [false; 3];
+
+        for line in flat_bootstrap_lines() {
+            if line.starts_with('#') {
+                continue;
+            }
+            // The word `git`, not the letters. `.` and `/`
+            // count as part of a word so that `${a%.git}` and
+            // `"$CLONE_DIR/.git"` are not read as the command
+            // `git`, while `/usr/bin/git` still is. That
+            // distinction is why the earlier versions of this
+            // test failed on correct lines.
+            let word_char = |c: char| {
+                c.is_alphanumeric() || c == '_' || c == '/' || c == '.'
+            };
+            let is_word = line
+                .split(|c: char| !word_char(c))
+                .any(|w| w == "git" || w.ends_with("/git"));
+            if !is_word {
+                continue;
+            }
+            if let Some(i) =
+                ALLOWED_WITHOUT_RUNUSER.iter().position(|a| *a == line)
+            {
+                allowed_seen[i] = true;
+                continue;
+            }
+            assert!(
+                line.contains("$runuser_bin"),
+                "this line may run git as root:\n  {line}\n\
+                 Run it through `\"$runuser_bin\" -u \"$OWNER\" --`. \
+                 If it does not invoke git at all -- an \
+                 assignment, a message -- add it verbatim to \
+                 ALLOWED_WITHOUT_RUNUSER above, which is \
+                 deliberately a list somebody has to read."
+            );
+        }
+
+        // Every allowance is still earned. One that stops
+        // matching is a line that changed, and it should be
+        // re-read rather than left in the list.
+        for (i, seen) in allowed_seen.iter().enumerate() {
+            assert!(
+                *seen,
+                "stale allowance, no line matches: {}",
+                ALLOWED_WITHOUT_RUNUSER[i]
+            );
+        }
+    }
+
+    #[test]
+    fn root_prepares_the_clone_directory_and_nothing_else() {
+        // `/opt` belongs to root, so only root can create the
+        // directory or remove it. Everything inside it is the
+        // agent's, which is why the recursive chown comes
+        // first rather than last: it normalises a tree an
+        // earlier bombyx left with root-owned files in it.
+        let mkdir = BOOTSTRAP
+            .find("mkdir -p \"$CLONE_DIR\"")
+            .expect("root must create the clone directory");
+        let chown = BOOTSTRAP
+            .find("chown -R \"$OWNER:$OWNER\" \"$CLONE_DIR\"")
+            .expect("root must hand the directory over");
+        let clone = BOOTSTRAP
+            .find("git clone --depth 1")
+            .expect("the clone must be in the script");
+        assert!(mkdir < chown, "create before handing over");
+        assert!(chown < clone, "hand over before cloning");
+    }
+
+    #[test]
+    fn the_placement_an_earlier_bombyx_used_is_cleared() {
+        // Guests built by an earlier bombyx have a root-owned
+        // key at the old path, and nothing would ever remove
+        // it -- so "removing `deploy_key` removes the key from
+        // the guest", which the CHANGELOG and
+        // `docs/trust-boundary.md` both promise, would be false
+        // on every VM that already exists.
+        //
+        // Root does the removal, and that is safe here in a way
+        // it would not be for the new path: `/root/.ssh` is
+        // root's own, so there is no directory the agent could
+        // put a symlink in.
+        assert!(
+            BOOTSTRAP.contains("rm -f /root/.ssh/bombyx-deploy-key"),
+            "the old key placement is never cleared"
+        );
+    }
+
+    #[test]
+    fn the_clone_is_pinned_from_the_config_not_the_environment() {
+        // `GIT_SSH_COMMAND` is inherited, and this file's own
+        // header says whether a key was configured must never
+        // be re-derived from the guest -- a `/etc/profile.d`
+        // export reaches a login shell provisioner. Deciding
+        // the `core.sshCommand` write from it would let the
+        // guest re-pin the clone to a key the operator had just
+        // removed.
+        //
+        // `--replace-all`, because a plain set refuses with
+        // "cannot overwrite multiple values" and exits 5 when
+        // the key already has two -- measured -- which `set -e`
+        // would turn into an aborted provision after the clone
+        // and fetch had already run.
+        let flat = flat_bootstrap();
+        assert!(
+            flat.contains("config --replace-all core.sshCommand"),
+            "the pin must use --replace-all"
+        );
+        assert!(
+            !flat.contains("if [ -n \"${GIT_SSH_COMMAND:-}\" ]"),
+            "the write must not be gated on the inherited value"
+        );
+        assert!(
+            flat.contains("if [ \"${BOMBYX_DEPLOY_KEY:-}\" = 1 ]"),
+            "the authoritative flag must be what decides"
+        );
+    }
+
+    #[test]
+    fn removing_the_key_unpins_the_clone_from_it() {
+        // The mirror of the comment about a key nothing points
+        // at: a pointer to no key. `core.sshCommand` names the
+        // deleted identity, and `IdentitiesOnly=yes` with
+        // `-F /dev/null` stops git falling back to one the
+        // agent does hold -- so every fetch and push fails with
+        // an ssh error naming nothing about bombyx.
+        // `--unset-all`, not `--unset`: measured, `--unset`
+        // against two values warns, exits 5 and removes
+        // nothing -- indistinguishable from the exit 5 that
+        // means "there was nothing to unset".
+        let flat = flat_bootstrap();
+        assert!(
+            flat.contains("config --unset-all core.sshCommand"),
+            "the clone keeps pointing at a key that is gone"
+        );
+        // And it has to run after the chown that normalises a
+        // tree an earlier bombyx left root-owned files in,
+        // because git as $OWNER refuses a repository it does
+        // not own.
+        let chown = flat
+            .find("chown -R \"$OWNER:$OWNER\" \"$CLONE_DIR\"")
+            .expect("the normalising chown must be there");
+        let unset = flat
+            .find("config --unset-all core.sshCommand")
+            .expect("the unset must be there");
+        assert!(chown < unset, "normalise ownership before unsetting");
+    }
+
+    #[test]
     fn the_deploy_key_ends_up_readable_by_the_agent() {
         // The agent has to push with this key: `bootstrap.sh`
         // says committing in the guest does not survive a
         // provision and pushing is what does. A root-owned key
         // the agent cannot read makes that impossible, so the
-        // key is chowned to $OWNER at 0600 rather than moved
-        // out of reach. `docs/trust-boundary.md` under **What
-        // this costs** states what that does and does not buy.
-        assert!(
-            BOOTSTRAP.contains("chown \"$OWNER:$OWNER\" \"$DEPLOY_KEY\""),
-            "the key must end up owned by the agent"
-        );
+        // key is left at 0600 where the provisioner put it
+        // rather than moved out of reach.
+        //
+        // It is owned by the agent because Vagrant's file
+        // provisioner uploads as that user -- not because
+        // bombyx chowns it. There is therefore no chown to
+        // assert, and root must not run one here, which
+        // `root_never_changes_metadata_on_a_path_the_agent_owns`
+        // pins. `docs/trust-boundary.md` under **What this
+        // costs** states what the mode does and does not buy.
         assert!(
             BOOTSTRAP.contains("chmod 600 \"$DEPLOY_KEY\""),
             "the key must end up at 0600"
         );
-        // And not in root's home, which the agent cannot read
-        // into whatever `sudo` policy the box happens to have.
-        assert!(
-            !BOOTSTRAP.contains("/root/.ssh"),
-            "the key must not live in root's home"
-        );
+        // The negatives name the commands the old placement
+        // used, not the path: forbidding the string `/root/.ssh`
+        // would also forbid a comment explaining why the key is
+        // not there, which is a test failing for a correct
+        // change.
+        for gone in ["-o root", "install -m 600"] {
+            assert!(!BOOTSTRAP.contains(gone), "{gone} is back");
+        }
     }
 
     #[test]
@@ -608,7 +906,7 @@ mod tests {
         // clone means a plain `git push` in the guest works
         // without the project's script arranging anything.
         assert!(
-            BOOTSTRAP.contains("config core.sshCommand"),
+            flat_bootstrap().contains("config --replace-all core.sshCommand"),
             "the clone must record the ssh command"
         );
     }
@@ -639,8 +937,9 @@ mod tests {
         // dropped the `runuser` would still contain both words
         // somewhere in the file.
         assert!(
-            BOOTSTRAP
-                .contains("exec -- runuser -u \"$OWNER\" -- \"$script_real\""),
+            BOOTSTRAP.contains(
+                "exec -- \"$runuser_bin\" -u \"$OWNER\" -- \"$script_real\""
+            ),
             "the hand-over must drop to $OWNER"
         );
     }
@@ -648,7 +947,7 @@ mod tests {
     #[test]
     fn the_bootstrap_script_guards_every_variable_it_needs() {
         // Without the `:?` guards an unset variable clones into
-        // an empty path as root.
+        // an empty path.
         for guard in ["BOMBYX_REPO:?", "BOMBYX_REF:?", "BOMBYX_SCRIPT:?"] {
             assert!(BOOTSTRAP.contains(guard), "{guard} missing");
         }

@@ -211,9 +211,9 @@ usernames or keys itself.
 
 **bombyx takes no configuration from a file inside a
 repository.** A project is shared; a VM host is not. Every
-developer has their own
-hardware on their own network, so a committed `host` could only
-ever be right for the person who wrote it, and would be wrong
+developer has their own hardware on their own network, so a
+committed `host` could only ever be right for the person who
+wrote it, and would be wrong
 for everyone who cloned after them. That is not a cosmetic
 problem: `bombyx destroy` runs `vagrant destroy` and `rm -rf`
 on whatever host is in force.

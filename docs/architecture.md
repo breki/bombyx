@@ -482,13 +482,17 @@ first creates a machine.
 
 `bootstrap.sh` runs as root, and hands over to the project's
 own script as the unprivileged user the box logs in as --
-`vagrant` on every box bombyx assumes. The last line of that
-file is `exec -- runuser -u "$OWNER" -- "$script_real"`.
+`vagrant` on every box bombyx assumes. The script resolves
+`runuser`'s path once into `$runuser_bin`, refusing the run if
+it cannot find it, and its last line is
+`exec -- "$runuser_bin" -u "$OWNER" -- "$script_real"`.
 
-The split follows what each half actually needs. Installing the
-deploy key, cloning into `/opt/project` and chowning the tree
-all need root. The project's script does not, and running it as
-root has a consequence that is easy to miss: whatever it
+The split follows what each half actually needs. Three things
+in that script need root: creating, removing and chowning the
+clone directory, which lives under root-owned `/opt`; clearing
+a key an earlier bombyx left in `/root/.ssh`; and being able to
+drop privilege at all. The project's script is not one of them,
+and running it as root has a consequence that is easy to miss: whatever it
 installs -- a language toolchain, an agent's own configuration,
 a shell profile -- lands in `/root` instead of in the home
 directory of the account the agent logs in as. The agent then
@@ -504,9 +508,9 @@ Root is still reachable from the project's script through
 is the right shape: a script asks for root at the steps that
 need it rather than holding it throughout.
 
-`runuser` rather than `sudo` for the hand-over itself, because
-it is a root-only tool needing no sudoers entry, so a box with
-`sudo` locked down still works. It sets `HOME`, `USER`,
+The hand-over uses `runuser` and not `sudo`, because `runuser`
+is a root-only tool that needs no sudoers entry, so it works on
+a box with `sudo` locked down. It sets `HOME`, `USER`,
 `LOGNAME` and `SHELL` for the target user and passes the rest
 of the environment through, which is what the `BOMBYX_*`
 variables depend on.
