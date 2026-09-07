@@ -21,7 +21,9 @@
 //! config values into a shell script is where quoting bugs and
 //! injection holes come from, so we simply never do it.
 
-use crate::config::{Config, DeployKeyPath};
+use std::collections::BTreeMap;
+
+use crate::config::{Config, DeployKeyPath, EnvName, EnvValue};
 
 /// The provisioning script, shipped to the host unchanged.
 ///
@@ -141,6 +143,33 @@ fn ruby_string(value: &str) -> String {
     out
 }
 
+/// Renders the project's own variables as the tail of the
+/// provisioner's `env:` hash.
+///
+/// Returns the empty string when the project names none, so the
+/// entry above it stays the last one and the literal closes
+/// without a stray comma.
+///
+/// Each entry is written on its own line, prefixed with the
+/// comma that separates it from whatever came before. Building
+/// it that way rather than joining and appending means the
+/// no-variables case needs no special handling at the call
+/// site.
+///
+/// A `BTreeMap` iterates in key order, so the output is sorted
+/// by name and a re-run with an unchanged config produces a
+/// byte-identical file.
+fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
+    let mut out = String::new();
+    for (name, value) in env {
+        out.push_str(",\n      ");
+        out.push_str(&ruby_string(name.as_str()));
+        out.push_str(" => ");
+        out.push_str(&ruby_string(value.as_str()));
+    }
+    out
+}
+
 /// Builds the text of the Vagrantfile for `cfg`.
 ///
 /// Returns a `String`. Nothing is written to disk here, and
@@ -198,7 +227,7 @@ Vagrant.configure(\"2\") do |config|
       # environment into a guest, so this hand-over is what
       # makes the two readable inside the VM.
       \"{host_env}\" => ENV.fetch(\"{host_env}\", \"unknown\"),
-      \"{hostname_env}\" => ENV.fetch(\"{hostname_env}\", \"unknown\")
+      \"{hostname_env}\" => ENV.fetch(\"{hostname_env}\", \"unknown\"){project_env}
     }}
 end
 ",
@@ -211,6 +240,7 @@ end
         cpus = vm.cpus,
         memory = vm.memory,
         bootstrap = ruby_string(BOOTSTRAP_NAME),
+        project_env = project_env_block(&cfg.env),
         repo = ruby_string(source.repo.as_str()),
         git_ref = ruby_string(source.git_ref.as_str()),
         script = ruby_string(source.script.as_str()),
@@ -311,8 +341,8 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::config::{
-        BoxName, DeployKeyPath, GitRef, Provider, RepoUrl, ScriptPath, Source,
-        Vm,
+        BoxName, DeployKeyPath, EnvName, EnvValue, GitRef, Provider, RepoUrl,
+        ScriptPath, Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
@@ -368,12 +398,69 @@ mod tests {
         cfg
     }
 
+    /// [`cfg_with`] on libvirt, carrying an `[env]` table.
+    ///
+    /// The two names are written out of order on purpose: the
+    /// rendering has to sort them, so a fixture already in
+    /// order could not tell a sorted rendering from an
+    /// unsorted one.
+    fn cfg_with_env() -> Config {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        for (name, value) in [
+            ("NODE_MAJOR", "22"),
+            ("GIT_USER_NAME", "Igor Brejc (agent VM)"),
+        ] {
+            cfg.env.insert(
+                EnvName::parse(name).expect("a valid fixture name"),
+                EnvValue::parse(value).expect("a valid fixture value"),
+            );
+        }
+        cfg
+    }
+
     /// [`cfg_with`] on libvirt, carrying a `deploy_key`.
     fn cfg_with_key() -> Config {
         let mut cfg = cfg_with(Provider::Libvirt);
         cfg.source.deploy_key =
             Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
         cfg
+    }
+
+    #[test]
+    fn carries_the_projects_own_variables() {
+        // Whole rendered lines, for the reason
+        // `carries_every_configured_value` gives below.
+        let out = render(&cfg_with_env());
+        for needle in [
+            "\"GIT_USER_NAME\" => \"Igor Brejc (agent VM)\"",
+            "\"NODE_MAJOR\" => \"22\"",
+        ] {
+            assert!(out.contains(needle), "{needle} missing from:\n{out}");
+        }
+    }
+
+    #[test]
+    fn renders_the_projects_variables_in_name_order() {
+        // Vagrant does not care about the order. A reader
+        // diffing two generated files does, and so does anyone
+        // asking whether a re-run changed anything.
+        let out = render(&cfg_with_env());
+        let git = out.find("GIT_USER_NAME").expect("the first name");
+        let node = out.find("NODE_MAJOR").expect("the second name");
+        assert!(git < node, "not in name order:\n{out}");
+    }
+
+    #[test]
+    fn a_project_with_no_variables_renders_bombyxs_own_set() {
+        // The absent table must not leave a stray comma or an
+        // empty line behind in the hash literal.
+        let out = render(&cfg_with(Provider::Libvirt));
+        assert!(
+            out.contains(
+                "\"BOMBYX_VM_HOSTNAME\" => ENV.fetch(\"BOMBYX_VM_HOSTNAME\", \"unknown\")\n    }"
+            ),
+            "the hash literal does not close cleanly:\n{out}"
+        );
     }
 
     #[test]

@@ -241,6 +241,12 @@ classDiagram
   class HostName {
     +String value
   }
+  class EnvName {
+    +String value
+  }
+  class EnvValue {
+    +String value
+  }
   class Provider {
     <<enumeration>>
     Libvirt
@@ -278,6 +284,10 @@ classDiagram
   Source *-- DeployKeyPath : deploy_key
   Vm *-- BoxName : box
   Config *-- ProjectName : project
+  Config *-- EnvName : env keys
+  Config *-- EnvValue : env values
+  Project *-- EnvName : env keys
+  Project *-- EnvValue : env values
   Registry ..> HostOrigin : ranked to produce one
 ```
 
@@ -590,15 +600,21 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Eight values are enforced by a newtype of bombyx's own:
+Ten values are enforced by a newtype of bombyx's own:
 `remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
 `ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `deploy_key`
-a `DeployKeyPath`, `project` a `ProjectName` and `host` a
-`HostName`. Each constructor holds the rules, so an invalid one
+a `DeployKeyPath`, `project` a `ProjectName`, `host` a
+`HostName`, and each `[env]` entry is an `EnvName` keying an
+`EnvValue`. Each constructor holds the rules, so an invalid one
 cannot be built -- by a config file or by a library caller. All
-eight but `host` run their constructor as serde deserializes,
+ten but `host` run their constructor as serde deserializes,
 so a bad value is refused before a `Config` exists and the
 error identifies the line.
+
+`EnvName` is the second newtype in bombyx that arrives as a map
+key rather than as a field, `ProjectName` being the first. That
+is the reason it is a type: nothing calls a checking function
+on a key while serde is building the map.
 
 `deploy_key` is the only optional one. It is an
 `Option<DeployKeyPath>`, so a project cloning a public
@@ -819,17 +835,19 @@ because no config can reach it.
 
 | Field | Refused | Because |
 |-------|---------|---------|
-| `box` `repo` `ref` `script` `deploy_key` | empty or blank | no meaning when blank |
-| `box` `repo` `ref` `script` `deploy_key` | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
-| `box` `repo` `ref` `script` `deploy_key` | control characters | end the line in a Ruby file |
-| `box` `repo` `ref` `script` `deploy_key` | `"` or `\` | end or escape the Ruby literal |
-| `box` `repo` `ref` `script` `deploy_key` | `#{` | Ruby interpolation is evaluated |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | empty or blank | no meaning when blank |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | control characters | end the line in a Ruby file |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | `"` or `\` | end or escape the Ruby literal |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
 | `host` `project` `remote_root` | leading `-` | the program each one reaches would read it as an option |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | root makes it executable, and it is then run inside the clone |
 | `deploy_key` | anything but a `/` or `~/` anchor | `vagrant` runs in the project's directory on the VM host, so a relative path would look for the key under a directory bombyx creates, writes and deletes |
 | `deploy_key` | a `.` or `..` segment, `//`, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
+| `[env]` names | anything but a leading letter or `_` followed by letters, digits and `_` | the guest exports each one as a shell variable, and `9LIVES=1` is a syntax error while `WITH-DASH=1` is read as a command to run |
+| `[env]` names | a leading `BOMBYX_` | the generated Vagrantfile writes bombyx's own variables and the project's into one Ruby hash literal, and a repeated key there takes its last value, so a project could otherwise choose which script bombyx runs |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
 The dash rule is the one row where what it buys differs by

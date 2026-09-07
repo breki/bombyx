@@ -98,9 +98,10 @@ pub(super) fn check_charset(
 /// writes, or arrive somewhere with whitespace nobody meant.
 ///
 /// bombyx generates a Vagrantfile, which is a Ruby file, and
-/// five config values get written into it inside double quotes:
-/// `box`, `repo`, `ref`, `script` and `deploy_key`. Something
-/// like `box = "generic/ubuntu2204"` in the config becomes
+/// config values get written into it inside double quotes:
+/// `box`, `repo`, `ref`, `script`, `deploy_key`, and every
+/// value in the `[env]` table. Something like
+/// `box = "generic/ubuntu2204"` in the config becomes
 /// `config.vm.box = "generic/ubuntu2204"` in the Ruby.
 ///
 /// Four kinds of character break that. All four are refused,
@@ -118,7 +119,7 @@ pub(super) fn check_charset(
 ///
 /// Two more refusals are about the value being wrong rather
 /// than the Ruby being wrong, and they come first. A blank
-/// value means nothing for any of these five fields. And
+/// value means nothing for any of these fields. And
 /// leading or trailing whitespace is almost always a
 /// copy-paste artifact, which fails obscurely and far from
 /// here -- a trailing space on `repo` comes back from the guest

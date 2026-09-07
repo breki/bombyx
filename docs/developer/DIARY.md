@@ -4,6 +4,50 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**A project can hand its own variables to its provisioning
+script**
+
+`[projects.<name>.env]`, one table holding both a project
+constant and a per-developer value. Splitting the two was
+considered and dropped: the registry is already one file per
+operator and is never committed, so a personal value has
+nowhere better to be, and nothing in bombyx acts on the
+distinction. Issue #54.
+
+Two newtypes, `EnvName` and `EnvValue` in `config/env.rs`.
+`EnvName` is the second one in bombyx that arrives as a map key
+rather than as a field, after `ProjectName`, and that is the
+reason it is a type at all -- nothing calls a checking function
+on a key while serde is building the map.
+
+The name rule is that the guest exports it as a shell variable,
+so `9LIVES=1` is a syntax error and `WITH-DASH=1` is read as a
+command to run. The interesting one is the other half: a name
+starting with `BOMBYX_` is refused. The generated Vagrantfile
+writes bombyx's own variables and the project's into one Ruby
+hash literal, and a repeated key in a Ruby hash takes its last
+value, so without that rule a project writing `BOMBYX_SCRIPT`
+would decide which script bombyx runs. The value rule is
+`check_renderable` unchanged, the one `box`, `repo`, `ref`,
+`script` and `deploy_key` already carry.
+
+The map is a `BTreeMap`, so the rendering is sorted by name and
+a re-run against an unchanged config writes a byte-identical
+Vagrantfile.
+
+`bootstrap.sh` needed no change, and finding that out was the
+part worth doing before writing any code. `runuser -u NAME --`
+passes the environment through, which the file already said it
+does for the `BOMBYX_*` variables; the project's own reach its
+script by the same mechanism.
+
+Verified against a real VM rather than a dry run: the
+jutro-rebuild guest on frosti provisioned with `NODE_MAJOR`,
+`GIT_USER_NAME` and `GIT_USER_EMAIL`, and the warning it had
+been printing about a missing git identity became a configured
+one. The `ssh` route is still unexercised -- frosti is this
+machine, so bombyx took the local `sh -c` route.
+
 **Forty-three review findings on the clone-in-home work, and I
 made the same mistake three times**
 

@@ -55,8 +55,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::{
-    ConfigError, RemoteRoot, Source, Vm, default_remote_root, from_toml,
-    read_optional,
+    ConfigError, EnvName, EnvValue, RemoteRoot, Source, Vm,
+    default_remote_root, from_toml, read_optional,
 };
 use crate::name::{ProjectName, check_segment};
 
@@ -122,6 +122,19 @@ pub struct Project {
 
     /// Where the guest clones the project from.
     pub source: Source,
+
+    /// Variables the project's own provisioning script reads.
+    ///
+    /// Empty when the config writes no `[env]` table, which is
+    /// what a project needing no variable of its own wants: the
+    /// generated Vagrantfile then carries bombyx's own set and
+    /// nothing else.
+    ///
+    /// A `BTreeMap` rather than a `HashMap` so the rendering is
+    /// ordered by name, which keeps the generated file
+    /// byte-identical between runs.
+    #[serde(default)]
+    pub env: BTreeMap<EnvName, EnvValue>,
 }
 
 /// The per-developer file, as it parses.
@@ -211,6 +224,7 @@ impl Project {
             remote_root: self.remote_root.clone(),
             vm: self.vm.clone(),
             source: self.source.clone(),
+            env: self.env.clone(),
             transport,
         }
     }

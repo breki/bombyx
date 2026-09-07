@@ -173,3 +173,42 @@ script = "vagrant/provision.sh"   # path inside the clone
 # `/` or `~`, so a key path with a space in it is refused.
 #
 # deploy_key = "~/.secrets/myproject-deploy-key"
+
+# Optional. Variables the project's own provisioning script
+# reads.
+#
+# bombyx already hands the guest its own set -- BOMBYX_REPO,
+# BOMBYX_REF, BOMBYX_SCRIPT, BOMBYX_DEPLOY_KEY, BOMBYX_VM_HOST
+# and BOMBYX_VM_HOSTNAME. This table is where a project adds
+# its own, and both kinds of value belong in it: a constant the
+# project always wants, and a value that differs per developer.
+# There is no separate place for the second kind because this
+# whole file is already the per-developer one.
+#
+# Every name here becomes a shell variable inside the guest, so
+# it has to be spellable as one: a letter or an underscore,
+# followed by letters, digits and underscores. `9LIVES` is a
+# shell syntax error and `WITH-DASH` is read as a command to
+# run, so both are refused while this file is read.
+#
+# A name starting with `BOMBYX_` is refused as well. The
+# generated Vagrantfile writes bombyx's variables and yours
+# into one Ruby hash, and a repeated key in a Ruby hash takes
+# its last value -- so `BOMBYX_SCRIPT` here would decide which
+# script bombyx runs.
+#
+# Values carry the same rule as `box`, `repo`, `ref`, `script`
+# and `deploy_key`: no quote, no backslash, no control
+# character, no `#{`, and no leading or trailing space. An
+# empty value is refused too. Leave the key out to make a
+# variable absent; there is no way to set one to the empty
+# string.
+#
+# The names are rendered in alphabetical order, so re-running
+# bombyx against an unchanged config writes a byte-identical
+# Vagrantfile.
+#
+# [projects.myproject.env]
+# NODE_MAJOR = "22"
+# GIT_USER_NAME = "Your Name"
+# GIT_USER_EMAIL = "you@example.com"

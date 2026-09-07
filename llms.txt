@@ -160,6 +160,17 @@ header above it:
   was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,
   always set, so the guest's own environment cannot answer it.
   Left out, no upload is rendered and no check is planned
+- `[projects.<name>.env]` — optional. Variables the project's
+  own provisioning script reads, rendered into the generated
+  Vagrantfile's provisioner beside bombyx's own set and sorted
+  by name, so a re-run with an unchanged config writes a
+  byte-identical file. A name has to be spellable as a shell
+  variable and must not start with `BOMBYX_`, because a
+  repeated key in a Ruby hash literal takes its last value and
+  a project could otherwise choose which script bombyx runs. A
+  value carries the same `check_renderable` rule as `box`,
+  `repo`, `ref`, `script` and `deploy_key`, so an empty one is
+  refused and a variable is made absent by leaving the key out
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a
@@ -226,8 +237,9 @@ Eight config values are newtypes, and each constructor holds
 every rule its field has: `RemoteRoot` in `config/root.rs`,
 `HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
 `GitRef` in `config/source.rs`, `DeployKeyPath` in
-`config/deploy_key.rs`, `BoxName` in `config/vm.rs`, and
-`ProjectName` in `name.rs`. All of them but `HostName` carry
+`config/deploy_key.rs`, `BoxName` in `config/vm.rs`, `EnvName`
+and `EnvValue` in `config/env.rs`, and `ProjectName` in
+`name.rs`. All of them but `HostName` carry
 `#[serde(try_from = "String")]`, so serde refuses a bad value
 while the file parses. `HostName` does not,
 because the message for a bad host names the source key rather

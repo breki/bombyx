@@ -740,8 +740,11 @@ fi
 # `runuser` rather than `sudo`: it is a root-only tool that
 # needs no sudoers entry, so a box with sudo locked down still
 # works. It sets HOME, USER, LOGNAME and SHELL for the target
-# user and passes the rest of the environment through, which is
-# what the BOMBYX_* variables above need.
+# user and passes the rest of the environment through. That is
+# what the BOMBYX_* variables above need, and it is also how a
+# project's own variables reach its script: the generated
+# Vagrantfile puts the `[env]` table into the same provisioner
+# environment, and nothing between there and here removes them.
 #
 # Root is still reachable from the project's script through
 # `sudo`, which every Vagrant box configures for this user. That
