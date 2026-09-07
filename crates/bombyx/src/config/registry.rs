@@ -76,11 +76,14 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// Every field but `host` is checked by its own type as the
 /// table parses. `remote_root` is a [`super::RemoteRoot`],
 /// `repo` a [`super::RepoUrl`], `script` a
-/// [`super::ScriptPath`], `box` a [`super::BoxName`] and `ref`
-/// a [`super::GitRef`], and `cpus` and `memory` are read
-/// through `super::vm`'s `positive_cpus` and `positive_memory`
-/// (named rather than linked: both are private). A bad one
-/// fails the parse and names the line.
+/// [`super::ScriptPath`], `box` a [`super::BoxName`], `ref` a
+/// [`super::GitRef`] and `deploy_key` a
+/// [`super::DeployKeyPath`]. Each `[env]` entry is checked on
+/// both halves, an [`super::EnvName`] keying an
+/// [`super::EnvValue`]. `cpus` and `memory` are read through
+/// `super::vm`'s `positive_cpus` and `positive_memory` (named
+/// rather than linked: both are private). A bad one fails the
+/// parse and names the line.
 ///
 /// The optional `host` is the exception. It is checked by this
 /// module's `parse`, once the table has parsed and before any

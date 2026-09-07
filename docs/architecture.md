@@ -553,11 +553,12 @@ So the allowlist is a boundary rather than a typo check. Each
 of those rules is what stops a repo-supplied value reaching
 `ssh` or `rm -rf`, so none of them is there to catch a typo.
 Membership of the guarded set turns on one question: does the
-operator choose the value's text? Six of them reach the
-generated files and so the guest: `box`, `repo`, `ref`,
-`script`, `cpus` and `memory`. The last two are on that list
-although they are not strings, because the operator still
-chooses the number and a floor is what guards them.
+operator choose the value's text? Seven reach the generated
+files and so the guest: `box`, `repo`, `ref`, `script`, `cpus`,
+`memory` and every value in the `[env]` table. `cpus` and
+`memory` are on that list although they are not strings,
+because the operator still chooses the number and a floor is
+what guards them.
 
 `remote_root` reaches `rm -rf` on the VM host. A config out of
 a clone naming `remote_root = "/etc"` gets
@@ -587,8 +588,7 @@ rather than letting it choose. Every project vagrant call but
 the teardown carries it, and **`bombyx up`, end to end** above
 holds why: `remote::is_teardown` is the exemption, argued there
 from three facts measured on a libvirt host. But `Provider` is
-a closed enum, and serde admits only the two words `libvirt`
-and
+a closed enum, and serde admits only the two words `libvirt` and
 `hyperv` while the file is read, so nothing an operator typed
 reaches the shell or the guest and a guard would have nothing to
 check. `remote::vagrant_command` quotes it regardless, so the
@@ -600,16 +600,17 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Ten values are enforced by a newtype of bombyx's own:
+Eight fields are enforced by a newtype of bombyx's own:
 `remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
 `ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `deploy_key`
-a `DeployKeyPath`, `project` a `ProjectName`, `host` a
-`HostName`, and each `[env]` entry is an `EnvName` keying an
-`EnvValue`. Each constructor holds the rules, so an invalid one
-cannot be built -- by a config file or by a library caller. All
-ten but `host` run their constructor as serde deserializes,
-so a bad value is refused before a `Config` exists and the
-error identifies the line.
+a `DeployKeyPath`, `project` a `ProjectName` and `host` a
+`HostName`. An `[env]` entry adds two more, because both halves
+are checked: an `EnvName` keying an `EnvValue`. Each constructor
+holds the rules, so an invalid one cannot be built -- by a
+config file or by a library caller. All of them but `host` run
+their constructor as serde deserializes, so a bad value is
+refused before a `Config` exists and the error identifies the
+line.
 
 `EnvName` is the second newtype in bombyx that arrives as a map
 key rather than as a field, `ProjectName` being the first. That
@@ -814,10 +815,13 @@ fail at the requirement rather than at compile time.
 
 ### Every field of a Config carries its own rule
 
-`Config` and its two tables hold nine values. Every one of them
-is a type that refuses a bad value as it is built, so a caller
-assigning to a public field of a loaded `Config` gets the same
-check the config file got.
+`Config`, its two tables and its `[env]` map hold every value
+the table below lists, and no number is given here because the
+table is the count. Each one is checked as it is built -- most
+by a newtype that refuses a bad value, `cpus` and `memory` by
+the deserializer named beside them -- so a caller assigning to
+a public field of a loaded `Config` gets the same check the
+config file got.
 
 That matters because `load_project` hands the caller an owned
 `Config` with public fields. `cfg.project = ProjectName::parse(

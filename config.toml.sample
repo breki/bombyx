@@ -204,9 +204,18 @@ script = "vagrant/provision.sh"   # path inside the clone
 # variable absent; there is no way to set one to the empty
 # string.
 #
-# The names are rendered in alphabetical order, so re-running
-# bombyx against an unchanged config writes a byte-identical
-# Vagrantfile.
+# The names are rendered in sorted order, byte by byte, so
+# re-running bombyx against an unchanged config writes a
+# byte-identical Vagrantfile. Byte order is not quite
+# alphabetical: every name in capitals comes before every name
+# in lower case, and a name starting with an underscore comes
+# after both.
+#
+# These variables exist for the provisioning run and for
+# nothing else. Vagrant sets them for the script it starts, so
+# they are gone by the time you open a shell in the guest. A
+# value a later interactive session needs is one the project's
+# own script has to write into a profile.
 #
 # [projects.myproject.env]
 # NODE_MAJOR = "22"

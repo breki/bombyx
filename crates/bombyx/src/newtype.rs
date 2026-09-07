@@ -4,7 +4,8 @@
 //! already checked: `config::RepoUrl`, `config::ScriptPath`,
 //! `config::GitRef`, `config::BoxName`, `config::RemoteRoot`,
 //! `config::HostName`, `config::DeployKeyPath`,
-//! `name::ProjectName` and `name::ScratchName`. Each explains
+//! `config::EnvName`, `config::EnvValue`, `name::ProjectName`
+//! and `name::ScratchName`. Each explains
 //! its own rules, and those explanations are the reason the
 //! types are worth reading.
 //!
@@ -33,9 +34,9 @@
 /// onto it", and those sentences say who reads the value.
 ///
 /// The type must have exactly one field, and it must be private
-/// and reachable as `self.0`. That is the shape all nine have,
-/// and a type without it fails to compile here rather than
-/// silently getting the wrong impls.
+/// and reachable as `self.0`. Every type listed above has that
+/// shape, and a type without it fails to compile here rather
+/// than silently getting the wrong impls.
 macro_rules! checked_str_newtype {
     ($ty:ident, $as_str_doc:literal) => {
         impl $ty {

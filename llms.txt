@@ -233,7 +233,7 @@ one directory below that anchor. bombyx creates, writes into and
 value, so a root that resolves to a top-level directory is
 refused when the config loads.
 
-Eight config values are newtypes, and each constructor holds
+Ten config values are newtypes, and each constructor holds
 every rule its field has: `RemoteRoot` in `config/root.rs`,
 `HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
 `GitRef` in `config/source.rs`, `DeployKeyPath` in
@@ -241,12 +241,12 @@ every rule its field has: `RemoteRoot` in `config/root.rs`,
 and `EnvValue` in `config/env.rs`, and `ProjectName` in
 `name.rs`. All of them but `HostName` carry
 `#[serde(try_from = "String")]`, so serde refuses a bad value
-while the file parses. `HostName` does not,
-because the message for a bad host names the source key rather
-than the field and serde cannot say which key it is reading;
-`config::host::checked` attaches the `HostOrigin` instead.
-`RemoteRoot` also drops a trailing slash, so the stored value is
-always in the form a path join needs.
+while the file parses. `HostName` does not, because the message
+for a bad host names the source key rather than the field and
+serde cannot say which key it is reading; `config::host::checked`
+attaches the `HostOrigin` instead. `RemoteRoot` also drops a
+trailing slash, so the stored value is always in the form a path
+join needs.
 
 `Vm::cpus` and `Vm::memory` are `std::num::NonZeroU32`, which
 is the whole rule either has. serde reads them through

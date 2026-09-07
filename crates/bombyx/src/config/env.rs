@@ -31,7 +31,7 @@ const FIELD: &str = "env";
 /// the project's into one Ruby hash literal, and a repeated key
 /// in such a literal takes its last value. So a project writing
 /// `BOMBYX_SCRIPT` would decide which script bombyx runs.
-const RESERVED_PREFIX: &str = "BOMBYX_";
+pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 
 /// The name of a variable the guest's shell will carry.
 ///
@@ -202,9 +202,8 @@ mod tests {
 
     #[test]
     fn refuses_a_name_bombyx_sets_itself() {
-        // Ruby's hash literal lets a later key win, so a
-        // project writing one of these would choose which
-        // script bombyx runs.
+        // Every name bombyx sets itself. `RESERVED_PREFIX`
+        // above holds why taking one over would matter.
         for name in [
             "BOMBYX_SCRIPT",
             "BOMBYX_REPO",
@@ -248,21 +247,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn refuses_a_value_that_would_break_the_vagrantfile() {
-        for value in [
-            "",
-            " leading",
-            "trailing ",
-            "with \" quote",
-            "with \\ backslash",
-            "with #{1+1} interpolation",
-            "with \n newline",
-        ] {
-            assert!(
-                EnvValue::parse(value).is_err(),
-                "should have refused {value:?}"
-            );
-        }
-    }
+    // No table of bad values here. `EnvValue` shares
+    // `check_renderable` with `box`, `repo`, `ref`, `script` and
+    // `deploy_key`, and `guards::tests::renderable_newtypes`
+    // exercises that rule set against every type it has a row
+    // for, this one included. A copy here would drift the first
+    // time a rule is added there.
 }

@@ -21,9 +21,11 @@
 //! operator is editing.
 //!
 //! **Every field is checked by its *type*, so none can be built
-//! wrong at all.** Seven are newtypes of bombyx's own:
-//! `remote_root`, `host`, `repo`, `script`, `box`, `ref` and
-//! `project`. See [`RepoUrl`] for how the pattern works.
+//! wrong at all.** Eight fields are newtypes of bombyx's own --
+//! `remote_root`, `host`, `repo`, `script`, `box`, `ref`,
+//! `deploy_key` and `project` -- and an `[env]` entry is two
+//! more, an [`EnvName`] keying an [`EnvValue`]. See [`RepoUrl`]
+//! for how the pattern works.
 //!
 //! `cpus` and `memory` are `std::num::NonZeroU32`, which is the
 //! whole rule either has. That standard type follows none of
@@ -60,6 +62,10 @@
 //!   error is summarised.
 //! - `registry` -- the operator's own `config.toml`: the VM
 //!   host, and a table per project.
+//! - `deploy_key` -- every rule the path to a private key on
+//!   the VM host must pass.
+//! - `env` -- the `[env]` table: a project's own variables, and
+//!   the two types holding a name and a value.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
@@ -197,6 +203,8 @@ fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
 
 pub use crate::name::ProjectName;
 pub use deploy_key::DeployKeyPath;
+#[cfg(test)]
+pub(crate) use env::RESERVED_PREFIX;
 pub use env::{EnvName, EnvValue};
 pub use error::{ConfigError, FieldError};
 pub use host::{
@@ -785,11 +793,11 @@ mod tests {
 
     #[test]
     fn a_directory_named_as_the_registry_is_not_a_file() {
-        // Was a `Read` error carrying whatever the OS said,
-        // which differs per platform ("Is a directory" on Unix,
-        // "Access is denied" on Windows) and explains nothing.
-        // The type check answers this case first and says what
-        // is actually wrong.
+        // The type check answers this case before the read is
+        // attempted, because the OS message differs per
+        // platform -- "Is a directory" on Unix, "Access is
+        // denied" on Windows -- and neither says what is
+        // actually wrong.
         let dir = tempfile::tempdir().unwrap();
         let err =
             Config::load_project("myproject", Some(dir.path())).unwrap_err();
@@ -1001,13 +1009,23 @@ mod tests {
                 full_registry()
             );
             let err = parse_whole(&source)
-                .expect_err("should have refused {entry}")
+                .err()
+                .unwrap_or_else(|| panic!("should have refused {entry}"))
                 .to_string();
             assert!(
                 err.contains(reason),
                 "{entry} should have been refused with {reason:?}, \
                  got {err}"
             );
+            // One `env` label covers both halves of the table,
+            // so the field name alone cannot say which entry is
+            // wrong. What names it is the position the TOML
+            // parser reports, and that is a claim about serde
+            // worth asserting rather than assuming -- for a bad
+            // value as much as for a bad name, since a value
+            // error quotes back neither the key nor the value.
+            assert!(err.contains("line "), "no line in {err}");
+            assert!(err.contains("column "), "no column in {err}");
         }
     }
 

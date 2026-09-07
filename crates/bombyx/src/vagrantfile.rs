@@ -105,6 +105,40 @@ const DEPLOY_KEY_GUEST_PATH: &str = "/home/vagrant/.ssh/bombyx-deploy-key";
 /// always means the config answers either way.
 const DEPLOY_KEY_ENV: &str = "BOMBYX_DEPLOY_KEY";
 
+/// Repository the guest clones, as the guest's shell sees it.
+const REPO_ENV: &str = "BOMBYX_REPO";
+
+/// Branch or tag the guest checks out.
+const REF_ENV: &str = "BOMBYX_REF";
+
+/// Provisioning script the guest runs out of the clone.
+const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
+
+/// Every variable bombyx sets in the provisioner itself.
+///
+/// Test-only, because nothing in the rendering reads it: the
+/// six names are written into the template one by one, in
+/// shapes that differ. What this array buys is a list to walk,
+/// and the test below is the only walker.
+///
+/// The `[env]` table refuses a name carrying the prefix
+/// `RESERVED_PREFIX` names, and `config::env` holds why. This
+/// array is what makes that reservation checkable: a test walks
+/// it and asserts each name is one the reservation covers.
+/// Without the list, the guard protects whichever names happen
+/// to start with the prefix, and a bombyx variable added
+/// without it would fall outside the reservation with every
+/// test still green.
+#[cfg(test)]
+const BOMBYX_ENV_NAMES: [&str; 6] = [
+    REPO_ENV,
+    REF_ENV,
+    SCRIPT_ENV,
+    DEPLOY_KEY_ENV,
+    crate::remote::VM_HOST_ENV,
+    crate::remote::VM_HOSTNAME_ENV,
+];
+
 /// Wraps `value` in double quotes, ready to drop into Ruby.
 ///
 /// Three characters would otherwise change what the Ruby means
@@ -154,7 +188,15 @@ fn ruby_string(value: &str) -> String {
 /// comma that separates it from whatever came before. Building
 /// it that way rather than joining and appending means the
 /// no-variables case needs no special handling at the call
-/// site.
+/// site. Two variables land like this, under the last entry
+/// bombyx writes itself:
+///
+/// ```text
+///       "BOMBYX_VM_HOSTNAME" => ENV.fetch(...),
+///       "GIT_USER_NAME" => "Igor Brejc",
+///       "NODE_MAJOR" => "22"
+///     }
+/// ```
 ///
 /// A `BTreeMap` iterates in key order, so the output is sorted
 /// by name and a re-run with an unchanged config produces a
@@ -218,9 +260,9 @@ Vagrant.configure(\"2\") do |config|
 {deploy_key}  config.vm.provision \"shell\",
     path: {bootstrap},
     env: {{
-      \"BOMBYX_REPO\" => {repo},
-      \"BOMBYX_REF\" => {git_ref},
-      \"BOMBYX_SCRIPT\" => {script},
+      \"{repo_env}\" => {repo},
+      \"{ref_env}\" => {git_ref},
+      \"{script_env}\" => {script},
       \"{deploy_key_env_name}\" => \"{deploy_key_env}\",
       # Read from the vagrant process on the VM host, which
       # bombyx sets. Vagrant does not export its own
@@ -233,6 +275,9 @@ end
 ",
         version = env!("CARGO_PKG_VERSION"),
         deploy_key = deploy_key_block(source.deploy_key.as_ref()),
+        repo_env = REPO_ENV,
+        ref_env = REF_ENV,
+        script_env = SCRIPT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
         box_name = ruby_string(vm.box_name.as_str()),
@@ -341,8 +386,8 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::config::{
-        BoxName, DeployKeyPath, EnvName, EnvValue, GitRef, Provider, RepoUrl,
-        ScriptPath, Source, Vm,
+        BoxName, DeployKeyPath, EnvName, EnvValue, GitRef, Provider,
+        RESERVED_PREFIX, RepoUrl, ScriptPath, Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
@@ -424,6 +469,45 @@ mod tests {
         cfg.source.deploy_key =
             Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
         cfg
+    }
+
+    #[test]
+    fn every_variable_bombyx_sets_is_one_the_env_table_refuses() {
+        // A prefix protects only the names that happen to
+        // carry it. This ties the two together: add a variable
+        // to the provisioner without the prefix and this fails.
+        // `config::env`'s `RESERVED_PREFIX` holds what a
+        // collision would cost.
+        for name in BOMBYX_ENV_NAMES {
+            assert!(
+                name.starts_with(RESERVED_PREFIX),
+                "{name} is set by bombyx and falls outside the \
+                 `[env]` reservation"
+            );
+            assert!(
+                EnvName::parse(name).is_err(),
+                "a project could write {name} and take it over"
+            );
+        }
+    }
+
+    #[test]
+    fn the_env_hash_closes_with_the_projects_variables_in_it() {
+        // The comma between entries is what keeps the Ruby hash
+        // parseable, and searching for one entry at a time
+        // cannot see it: delete the comma and every entry is
+        // still there. So the whole tail is one literal, which
+        // pins the separator, the indentation, the order and
+        // the closing brace together.
+        let out = render(&cfg_with_env());
+        let tail = concat!(
+            "\"BOMBYX_VM_HOSTNAME\" => ",
+            "ENV.fetch(\"BOMBYX_VM_HOSTNAME\", \"unknown\"),\n",
+            "      \"GIT_USER_NAME\" => \"Igor Brejc (agent VM)\",\n",
+            "      \"NODE_MAJOR\" => \"22\"\n",
+            "    }"
+        );
+        assert!(out.contains(tail), "tail missing from:\n{out}");
     }
 
     #[test]
