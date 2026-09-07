@@ -398,9 +398,31 @@ The checks are not only there for your typos. `--config <path>`
 reads whatever file you name, a repository can commit one, and
 `BOMBYX_CONFIG_HOME` needs only to be anchored -- so a
 per-directory environment tool can redirect bombyx from inside a
-clone. A registry that arrived that way chooses `remote_root`,
-which is the value `destroy` builds its `rm -rf` from. Do not
-pass `--config` a path inside a repository you did not write.
+clone. A registry that arrived that way chooses two values
+worth naming. `remote_root` is what `destroy` builds its
+`rm -rf` from. `deploy_key` names a file on the VM host that
+`vagrant` copies into the guest, and nothing restricts which
+file -- so a config you did not write can ask for the VM host's
+own SSH key and have it delivered into a VM about to run that
+project's code. Do not pass `--config` a path inside a
+repository you did not write.
+
+Because `deploy_key` is checked here and expanded on a machine
+you may not be sitting at, its rules are stricter than they
+look. It must be anchored (`/` or `~/`) and name a file below
+that anchor, with no `.` or `..` segment, no `//` and no
+trailing slash, and `~` only as its first character. Every
+character has to be a letter, a digit, `.`, `_`, `-`, `/` or
+`~`, so a path with a space in it is refused too.
+
+Before `up`, `provision` or `scratch` creates anything, bombyx
+checks on the VM host that the file is there and readable, and
+stops with a message naming the expanded path and the host when
+it is not. That check runs as the user the VM host logs you in
+as, which is the user `vagrant` runs as, so a key it cannot
+open is refused here rather than inside Vagrant. The teardown
+verbs check nothing, so `destroy` still clears a directory
+whose key has since gone.
 
 `host` gets the sharpest rule, because it is handed to `ssh` as
 its first argument and `ssh` reads a leading `-` as an option:
@@ -409,6 +431,10 @@ workstation from a bare `bombyx status`. Every `host` in the
 file is checked as the file is read -- the file-wide one and
 every project's, not only the one this command wants -- so a bad
 value is reported wherever it sits and the error names the line.
+
+`docs/trust-boundary.md` under **What this costs** says what
+having that key inside the guest costs, and it is not a small
+thing: code in the VM can reach it.
 
 bombyx opens no file inside the project's directory at all, and
 that is the property the design turns on. It is a rule about

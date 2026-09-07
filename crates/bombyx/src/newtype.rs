@@ -3,9 +3,10 @@
 //! These types wrap one private `String` that a constructor has
 //! already checked: `config::RepoUrl`, `config::ScriptPath`,
 //! `config::GitRef`, `config::BoxName`, `config::RemoteRoot`,
-//! `config::HostName`, `name::ProjectName` and
-//! `name::ScratchName`. Each explains its own rules, and those
-//! explanations are the reason the types are worth reading.
+//! `config::HostName`, `config::DeployKeyPath`,
+//! `name::ProjectName` and `name::ScratchName`. Each explains
+//! its own rules, and those explanations are the reason the
+//! types are worth reading.
 //!
 //! What none of them explains is how to hand the wrapped value
 //! back, because they all do it identically: `as_str` borrows
@@ -32,7 +33,7 @@
 /// onto it", and those sentences say who reads the value.
 ///
 /// The type must have exactly one field, and it must be private
-/// and reachable as `self.0`. That is the shape all eight have,
+/// and reachable as `self.0`. That is the shape all nine have,
 /// and a type without it fails to compile here rather than
 /// silently getting the wrong impls.
 macro_rules! checked_str_newtype {

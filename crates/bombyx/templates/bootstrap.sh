@@ -53,6 +53,105 @@ readonly CLONE_DIR=/opt/project
 # a VM built for editing code, in which the code is read-only.
 readonly OWNER=vagrant
 
+# THE DEPLOY KEY, when the operator's config named one.
+#
+# A private repository needs a credential inside the guest, and
+# this is how it arrives. Before this script runs, the
+# Vagrantfile has already had Vagrant upload the key to
+# UPLOADED_KEY below. Both paths here are fixed, so nothing
+# about them is pasted into this file -- see the header.
+#
+# WHETHER a key was configured arrives as BOMBYX_DEPLOY_KEY,
+# which the Vagrantfile sets to `1` or `0` on every render, and
+# is never read off this filesystem. The upload lands in the
+# `vagrant` user's own .ssh directory, and that user is the one
+# the agent works as -- so testing for the file would let the
+# guest answer a question about the operator's config. A
+# leftover from an interrupted provision, or one `touch` from
+# inside the VM, would keep reinstalling a credential the
+# operator had already removed.
+#
+# The guest cannot forge the variable either way, because a
+# provisioner's `env:` becomes a prefix on the command line and
+# is applied after any /etc/profile.d has been sourced. It is
+# read as `${VAR:-}` all the same: `set -u` above makes an
+# unset variable fatal, and the one thing that could leave it
+# unset is a Vagrantfile older than this script. Defaulting to
+# empty takes the deleting branch, which is the safe answer to
+# "these two files disagree".
+#
+# THIS BLOCK IS FIRST ON PURPOSE, ahead of the git check below.
+# Any `exit` above this point would leave the uploaded key
+# sitting in the agent's own directory for the life of the VM,
+# and a box without git is an ordinary way to reach such an
+# exit. Nothing here needs git.
+readonly UPLOADED_KEY=/home/vagrant/.ssh/bombyx-deploy-key
+readonly DEPLOY_KEY=/root/.ssh/bombyx-deploy-key
+
+if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
+    # The config named a key, so the upload must have happened.
+    # Failing here rather than carrying on: a missing file
+    # means the key went away on the VM host after bombyx
+    # checked for it, and the alternative is a clone that
+    # authenticates with nothing and a guest that reports
+    # success.
+    if [ ! -f "$UPLOADED_KEY" ]; then
+        echo "bombyx: the configured deploy key did not arrive" \
+            "at $UPLOADED_KEY. Check it is still on the VM" \
+            "host and re-run." >&2
+        exit 1
+    fi
+
+    # The key moves to root's own directory. The `file`
+    # provisioner uploaded it as the box's SSH user, `vagrant`
+    # on the boxes bombyx assumes, so a key
+    # left where it landed is one the agent's own code reads
+    # with no effort. A root-owned 0600 file means reading it
+    # takes root -- a narrowing and not a fix, because on most
+    # boxes that user has passwordless sudo.
+    # docs/trust-boundary.md says why that is accepted.
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    install -m 600 -o root -g root "$UPLOADED_KEY" "$DEPLOY_KEY"
+    rm -f "$UPLOADED_KEY"
+
+    # Then `git` is told to use it. GIT_SSH_COMMAND is what git
+    # passes to `ssh` for every connection it makes, and four
+    # options go with the key:
+    #
+    #   -i <key>                          use this identity
+    #   IdentitiesOnly=yes                and no other one found
+    #   -F /dev/null                      ignore every ssh_config
+    #   StrictHostKeyChecking=accept-new  trust the git host on
+    #                                     first sight
+    #
+    # The third is what makes the second true: `IdentitiesOnly`
+    # does not exclude an identity named by an `IdentityFile`
+    # line in a config file, so without it a box shipping its
+    # own /etc/ssh/ssh_config could authenticate with a key
+    # nobody here chose.
+    #
+    # The fourth trades a first-contact check for a clone that
+    # runs unattended. `accept-new` records the git host's key
+    # the first time it is seen and refuses a change afterwards;
+    # the strict default would stop at a prompt no operator is
+    # there to answer.
+    ssh_opts="-o IdentitiesOnly=yes -F /dev/null"
+    ssh_opts="$ssh_opts -o StrictHostKeyChecking=accept-new"
+    export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY $ssh_opts"
+else
+    # Taking `deploy_key` out of the config takes the
+    # credential out of the guest on the next provision. Left
+    # here, it would be a key nothing points at and nobody
+    # remembers granting.
+    #
+    # The uploaded copy goes too. Nothing writes it in this
+    # branch, so anything at that path is either a leftover
+    # from an interrupted provision or something the guest put
+    # there itself.
+    rm -f "$DEPLOY_KEY" "$UPLOADED_KEY"
+fi
+
 # Base images do not all come with git installed. Without this
 # check you would get a bare "command not found" from a script
 # running as root inside a VM, which tells you nothing about

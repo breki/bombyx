@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::Config;
+use crate::config::{Config, DeployKeyPath};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -172,13 +172,31 @@ fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
 /// [`remote::vagrant_in`]. A single string would turn a
 /// two-word invocation into one quoted argument, which fails on
 /// the host after the directory has already been created.
+///
+/// The three verbs sharing this helper are the three that boot
+/// or provision, and so the three that need the deploy key. The
+/// teardown verbs go through [`tear_down`] and check nothing,
+/// which is deliberate: a `destroy` refused because the key has
+/// gone would leave the directory it was asked to remove.
 fn write_then(
     cfg: &Config,
     dir: &str,
     args: &[&str],
     tty: Tty,
 ) -> Vec<RemoteCommand> {
-    let mut cmds = vec![remote::ensure_dir(cfg, dir)];
+    // Before the `mkdir`, so a config naming a key the VM host
+    // does not have leaves no directory and no Vagrantfile
+    // behind. The generated Vagrantfile cannot hold this check
+    // itself -- `remote::require_file` says why.
+    let mut cmds = Vec::new();
+    if let Some(key) = &cfg.source.deploy_key {
+        cmds.push(remote::require_file(
+            cfg,
+            key.as_str(),
+            DeployKeyPath::FIELD,
+        ));
+    }
+    cmds.push(remote::ensure_dir(cfg, dir));
     for (name, contents) in vagrantfile::files(cfg) {
         cmds.push(remote::write_file(cfg, dir, name, &contents));
     }
@@ -490,7 +508,10 @@ mod tests {
         // fail on a directory holding no Vagrantfile at all.
         //
         // The directory has to exist first as well, which is what
-        // pins `mkdir` at index 0.
+        // pins `mkdir` at index 0. The needle carries the quote
+        // the remote path is wrapped in, because `bootstrap.sh`
+        // has a `mkdir -p /root/.ssh` of its own and that file
+        // is written by one of these very commands.
         //
         // The boot is found by its own vagrant verb rather than
         // taken as the last step, because `up` has one step after
@@ -504,7 +525,7 @@ mod tests {
             let vagrantfile = only_at(&s, "/Vagrantfile'");
             let bootstrap = only_at(&s, "/bootstrap.sh'");
             let boot = only_at(&s, verb);
-            assert_eq!(only_at(&s, "mkdir -p"), 0, "{action:?}");
+            assert_eq!(only_at(&s, "mkdir -p ~/'"), 0, "{action:?}");
             assert!(
                 vagrantfile < boot,
                 "{action:?}: Vagrantfile written out of order"
@@ -512,6 +533,82 @@ mod tests {
             assert!(
                 bootstrap < boot,
                 "{action:?}: bootstrap written out of order"
+            );
+        }
+    }
+
+    /// [`cfg`] carrying a `deploy_key`.
+    fn cfg_with_key() -> Config {
+        let mut cfg = cfg();
+        cfg.source.deploy_key = Some(
+            DeployKeyPath::parse("~/.secrets/k").expect("a valid fixture path"),
+        );
+        cfg
+    }
+
+    #[test]
+    fn a_deploy_key_is_checked_before_anything_is_created() {
+        // First step or nothing. Checking after the `mkdir`
+        // would leave a directory behind on a config naming a
+        // key the VM host does not have, and checking after the
+        // writes would leave a Vagrantfile too.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
+            assert!(
+                script(&cmds[0]).contains("'deploy_key'"),
+                "{action:?}: the key check is not the first step"
+            );
+        }
+    }
+
+    #[test]
+    fn no_deploy_key_adds_no_check_step() {
+        // The check names a path, so a plan with no key has no
+        // path to name and the step would test the empty
+        // string.
+        //
+        // The needle is the shell-quoted field name the check
+        // passes to `printf`. `bootstrap.sh` mentions
+        // `deploy_key` in a comment and one of these commands
+        // writes that file, so the bare name would match the
+        // write step.
+        for action in all_actions() {
+            let cmds = plan(&action, &cfg(), Tty::NoPty);
+            assert!(
+                !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
+                "{action:?}: a check was built with no key configured"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_verbs_that_boot_check_the_deploy_key() {
+        // Two groups, for two reasons.
+        //
+        // `destroy` and `discard` have to work on a directory
+        // whose key has gone: a check would stop the teardown
+        // at its first step and leave the directory behind,
+        // which is the whole reason the Vagrantfile does not
+        // raise either.
+        //
+        // `down` and `status` need no key because they touch a
+        // machine that already exists. A check there would
+        // refuse a `status` for a reason having nothing to do
+        // with answering it.
+        for action in [
+            Action::Destroy,
+            Action::Discard(scratch("pr-1234")),
+            Action::Down,
+            Action::Status,
+        ] {
+            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
+            assert!(
+                !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
+                "{action:?}: teardown must not check the key"
             );
         }
     }

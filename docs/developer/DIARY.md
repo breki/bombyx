@@ -4,6 +4,115 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**The guest can clone a private repository, and the loud
+failure had to move out of the Vagrantfile to get there**
+
+Issue #50. jutro's old hand-written Vagrantfile uploaded a
+read-only deploy key from the VM host into the guest, and the
+generated one could not express it, so jutro could be driven by
+bombyx and not rebuilt from `config.toml`. `deploy_key` in
+`[source]` is now the field for it: a path on the VM host,
+uploaded by a `file` provisioner, moved by `bootstrap.sh` to a
+root-owned 0600 file in `/root/.ssh`, and handed to `git`
+through `GIT_SSH_COMMAND`.
+
+**The obvious place for the existence check is the one place it
+cannot go.** The operator chose a loud failure over jutro's
+silent skip, and the first cut put a `raise` in the generated
+Vagrantfile. It worked: a real `bombyx up` on frosti stopped
+with the path named, before any VM existed. Then `bombyx
+destroy` on that same directory failed too, because `vagrant
+destroy` loads the Vagrantfile as well -- so the raise stranded
+a directory no bombyx command could clear. `destroy_vm_if_present`
+already had that hazard written on it, for a Vagrantfile
+reading an environment variable with no default, and I read
+that comment while writing the raise without connecting the
+two. The check is now `remote::require_file`, a plan step ahead
+of the `mkdir`, and the upload in the Vagrantfile is
+conditional. bombyx knows which verb it is running; the
+Vagrantfile does not.
+
+**One shell mistake, and one I talked myself into.** A scripted
+`python` replace ate the line continuations in a Rust `format!`
+string, leaving runs of spaces inside a shell script; the test
+comparing the whole script caught it. That one was real, and it
+happened twice more before the day was out.
+
+The other was not. I restructured the `GIT_SSH_COMMAND`
+assignment away from continued lines and wrote a comment saying
+a backslash before a newline joins the key path onto the next
+option with no space. A reviewer asked me to measure it: with a
+space before the backslash -- which is what I had written --
+bash keeps the space and the value is correct. The no-space
+result needs the backslash directly against the value. So I
+"fixed" a spelling that was already right and then documented a
+hazard it did not have. The piece-at-a-time assembly stays,
+because it has no condition to remember, but the comment now
+states the real one. Two lessons, and the second is the
+expensive one: measure the shell claim before writing it down,
+and a fix with no failing case behind it is a guess.
+
+**Verified against the real private repository.** A VM booted
+on frosti cloned `git@github.com:breki/jutro.git` with the
+existing `~/.secrets/jutro-deploy-key`, which is the case the
+issue said was impossible. Removing `deploy_key` from a config
+now deletes the key from the guest's live disk on the next
+provision -- but not from the `fresh-install` snapshot, which
+`bombyx reset` then restores. Reviewers found that and it is
+deferred, logged and written into the document.
+
+**Fifty findings over four review passes on the deploy-key
+work, and eleven of them were damage from earlier fixes**
+
+`/review2` on issue #50. `artisan` 13, `red-team` 13 over three
+rounds, `fresh-reader` 15. Stage 2 stopped at the three-round
+cap rather than by converging, which is worth recording as
+such: round 3 still found a behaviour defect, and by the rule
+that earns a fourth round.
+
+**The fix-damage share rose across the rounds** -- 2 of 14,
+then 6 of 8, then 4 of 7. Sharpening a comment is what makes it
+falsifiable, so each precise sentence became checkable and some
+were wrong; that much was expected. What was not is how often a
+reword landed in one copy of three. The SSH-user assumption
+took three separate findings to get consistent across
+`vagrantfile.rs`, `bootstrap.sh` and `docs/trust-boundary.md`,
+and "never raises" was corrected in one place while two others
+kept the absolute. The mechanism was usually the same: a
+scripted `python` replace aborting on one failed assert, with
+the earlier replacements in that same script silently not
+written. Checking each file after a multi-edit script is
+cheaper than a reviewer finding half of it applied.
+
+**Three defects were real exposures, not prose.** The guest
+decided whether a key was configured, by testing for a file in
+a directory its own user owns -- so an interrupted provision,
+or one `touch`, kept reinstalling a credential the operator had
+removed. Announcing it through the Vagrantfile fixed that, and
+then the announcement was itself forgeable in the no-key
+direction, because rendering nothing left `/etc/profile.d` free
+to answer; it is now always set, `1` or `0`. And the key block
+sat below the `git` check, so on a box without `git` -- which
+is the box jutro uses -- the uploaded key stayed in the agent's
+own directory for the life of the VM.
+
+**A snapshot bug is deferred, verified rather than argued.**
+`up` takes `fresh-install` after provisioning, so the snapshot
+holds the key and `bombyx reset` restores it. Removing
+`deploy_key` clears the live disk only. Confirmed on frosti,
+and then the *documentation* of the workaround turned out to be
+worse than the bug: `bombyx snapshot` only helps in one
+ordering, and I had not said so.
+
+**I documented a hazard that did not exist.** The
+`GIT_SSH_COMMAND` assignment was fine as first written; a space
+before a line-continuation backslash survives. I restructured
+working code and wrote a comment asserting the fault, and the
+comment then grew to 79 lines above 37 of code before a reader
+asked what it was warning about. Measure the shell claim before
+writing it down, and a fix with no failing case behind it is a
+guess.
+
 **Twenty findings on the disarm work, and the one that cost the
 most was a decision made on incomplete information**
 

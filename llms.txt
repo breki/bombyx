@@ -138,7 +138,20 @@ header above it:
   first.
   `hyperv` parses and has never been run
 - `[projects.<name>.source]` — required: `repo`, `ref`,
-  `script`, what the guest clones and runs
+  `script`, what the guest clones and runs. `deploy_key` is
+  optional: a path on the VM host naming the private key the
+  guest clones a private repository with. `up`, `provision`
+  and `scratch` check the file is on the VM host before
+  creating anything (`remote::require_file`), the generated
+  Vagrantfile uploads it to
+  `/home/vagrant/.ssh/bombyx-deploy-key` before `bootstrap.sh`
+  runs, and `bootstrap.sh` moves it to a root-owned 0600 file
+  in `/root/.ssh` and exports `GIT_SSH_COMMAND`. The upload is
+  conditional and carries no `raise` of its own, because
+  `vagrant destroy` loads the Vagrantfile too. Whether a key
+  was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,
+  always set, so the guest's own environment cannot answer it.
+  Left out, no upload is rendered and no check is planned
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a
@@ -201,10 +214,11 @@ one directory below that anchor. bombyx creates, writes into and
 value, so a root that resolves to a top-level directory is
 refused when the config loads.
 
-Seven config values are newtypes, and each constructor holds
+Eight config values are newtypes, and each constructor holds
 every rule its field has: `RemoteRoot` in `config/root.rs`,
 `HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
-`GitRef` in `config/source.rs`, `BoxName` in `config/vm.rs`, and
+`GitRef` in `config/source.rs`, `DeployKeyPath` in
+`config/deploy_key.rs`, `BoxName` in `config/vm.rs`, and
 `ProjectName` in `name.rs`. All of them but `HostName` carry
 `#[serde(try_from = "String")]`, so serde refuses a bad value
 while the file parses. `HostName` does not,

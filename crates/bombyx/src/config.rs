@@ -77,6 +77,7 @@ use std::path::Path;
 
 use crate::name::{ScratchName, check_segment};
 
+mod deploy_key;
 mod error;
 mod guards;
 mod host;
@@ -100,10 +101,16 @@ pub use transport::Transport;
 /// [`required_tables`] sit at file scope, where `use super::*`
 /// reaches both.
 ///
-/// One list, so a field added to [`Vm`] or [`Source`] is added
-/// here once. A second literal table is the hazard: a test
-/// omitting a `[vm]` field would start failing on a new
-/// `[source]` field while its message blamed the `[vm]` one.
+/// One list, so a *required* field added to [`Vm`] or
+/// [`Source`] is added here once. A second literal table is the
+/// hazard: a test omitting a `[vm]` field would start failing
+/// on a new `[source]` field while its message blamed the
+/// `[vm]` one.
+///
+/// An optional field does not belong here. [`required_tables`]
+/// also builds the "this key is missing" fixtures, so listing
+/// `deploy_key` would assert a key that is optional is
+/// required.
 #[cfg(test)]
 const TABLE_FIELDS: [(&str, &str, &str); 7] = [
     ("vm", "provider", "provider = \"libvirt\""),
@@ -187,6 +194,7 @@ fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
 }
 
 pub use crate::name::ProjectName;
+pub use deploy_key::DeployKeyPath;
 pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -1054,6 +1062,54 @@ mod load_project_tests {
         name: &str,
     ) -> Result<(Config, HostOrigin), ConfigError> {
         load_on(source, name, None)
+    }
+
+    /// A registry whose `[source]` table carries one extra
+    /// key.
+    ///
+    /// The three required keys come from [`required_tables`],
+    /// so a test about an optional key does not repeat them.
+    fn registry_with_source_key(extra: &str) -> String {
+        format!("{}{extra}\n", test_registry("myproject", "vmhost", None))
+    }
+
+    #[test]
+    fn a_source_table_without_a_deploy_key_loads_none() {
+        // The ordinary case. A public repository needs no
+        // credential, so the key is optional and its absence
+        // is not an error.
+        let (cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("a registry with no deploy_key must load");
+        assert_eq!(cfg.source.deploy_key, None);
+    }
+
+    #[test]
+    fn a_deploy_key_reaches_the_loaded_config() {
+        let (cfg, _) = load(
+            &registry_with_source_key("deploy_key = \"~/.secrets/k\""),
+            "myproject",
+        )
+        .expect("a registry with a valid deploy_key must load");
+        assert_eq!(
+            cfg.source.deploy_key.as_ref().map(DeployKeyPath::as_str),
+            Some("~/.secrets/k")
+        );
+    }
+
+    #[test]
+    fn a_deploy_key_the_type_refuses_is_refused_by_the_loader() {
+        // The `try_from` attribute on `DeployKeyPath` is what
+        // makes this true: without it serde would assign the
+        // private field and the checks would never run on the
+        // path a config load actually takes.
+        let err = load(
+            &registry_with_source_key("deploy_key = \"keys/k\""),
+            "myproject",
+        )
+        .expect_err("an unanchored deploy_key must be refused");
+        let text = err.to_string();
+        assert!(text.contains("deploy_key"), "{text}");
     }
 
     /// [`load`], told what this machine is called.

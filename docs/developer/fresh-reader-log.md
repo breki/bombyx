@@ -9,6 +9,37 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-07-explanations-worth-keeping
+
+**Category:** What worked -- do not trim
+
+From the comprehension review of the `deploy_key` work. Four
+passages were named as carrying a reason rather than padding, so
+a later tidy-up has something to check against.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR:?message}`
+explanation: it states the mechanism before using it -- `:` is
+the shell's do-nothing command, so each line is a bare check
+that the variable arrived -- and draws the conclusion second.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
+that lays out the four spellings of one repository address.
+Three lines of example did what a paragraph could not, and it is
+the passage most at risk of reading as decoration.
+
+`config.toml.sample`, the `deploy_key` comment: it answers an
+operator's questions in the order they ask them, and the line
+"vagrant runs on the VM host, so `~` is that machine's home
+directory and not yours" is nine words of mechanism.
+
+`crates/bombyx/src/plan.rs`, the four-line comment on the
+deploy-key check step: local fact, then a name to follow for the
+reason, then stop. The same review found that reason argued in
+full in four places and half-argued in three more; this is the
+shape the others should have.
+
+---
+
 ### fr-2026-09-06-round-local-finding-ids-promise-a-record
 
 **Category:** A citation with nothing behind it

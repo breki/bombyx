@@ -4,6 +4,40 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-07-snapshot-outlives-the-deploy-key
+
+**Category:** Behaviour defect deferred deliberately
+
+`bootstrap.sh` deletes `/root/.ssh/bombyx-deploy-key` when the
+config names no key, so removing `deploy_key` and re-running
+`bombyx provision` takes the credential out of the guest's live
+disk. `bombyx reset` puts it back.
+
+`Action::Up` takes the `fresh-install` snapshot *after*
+provisioning, so that snapshot's disk holds the key. `Action::
+Reset` plans one command, `restore_snapshot`, and nothing
+re-runs `bootstrap.sh` afterwards. `save_snapshot_if_absent`
+skips a machine that already carries the name, so a later `up`
+does not refresh it either. The revoked key therefore comes
+back on every reset for the life of the VM.
+
+Verified on frosti, 2026-09-07: with the key removed from the
+config and deleted from the guest, `bombyx reset` restored
+`/root/.ssh/bombyx-deploy-key` with its original timestamp.
+
+Deferred rather than fixed. Closing it means either `reset`
+re-provisioning after the restore, or `up` re-taking the
+snapshot when the key set changed. Both change what bombyx does
+for every project, not only one with a `deploy_key`. That is a
+decision about the reset lifecycle rather than about
+credentials, so it wants its own issue.
+
+What landed instead: `docs/trust-boundary.md` under **What this
+costs** states the limit, and names `bombyx snapshot` and
+`bombyx destroy` as what actually removes the key.
+
+---
+
 ### rt-2026-09-06-two-program-tool-case-has-no-test
 
 **Category:** Test coverage declined deliberately

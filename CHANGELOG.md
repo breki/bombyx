@@ -27,9 +27,10 @@ and this project adheres to
   project -- `remote_root`, `[vm]` and `[source]` -- and it is the only place a
   project is described. `--project <name>` picks the table. `[vm]` needs
   `box`, `cpus` and `memory`, and takes an optional `provider`; `[source]`
-  needs `repo`, `ref` and `script`. Of those seven keys only `provider` has a
-  default, `libvirt`, so bombyx guesses neither a base image nor a repository
-  to clone.
+  needs `repo`, `ref` and `script`, and takes an optional `deploy_key`. Six of
+  those eight keys are required, so bombyx guesses neither a base image nor a
+  repository to clone; `provider` defaults to `libvirt`, and `deploy_key` has
+  no default because most projects need none.
 - Library API: `name::ProjectName`, plus a `ConfigError::ProjectNotFound`
   variant for a registry with no entry for the project asked for. The registry
   types themselves stay crate-internal: nothing outside bombyx needs one, and a
@@ -96,6 +97,16 @@ and this project adheres to
   holding `box` and `ref`, and `config::ProjectName` as a re-export of
   `name::ProjectName`. Building a `Vm` or a `Source` by hand means calling their
   constructors.
+- `deploy_key` in `[source]`: an optional path, on the VM host, naming the
+  private key the guest clones a private repository with. `vagrant` uploads it
+  into the guest before provisioning, `bootstrap.sh` moves it to a root-owned
+  0600 file in `/root/.ssh` and hands it to `git` through `GIT_SSH_COMMAND`, and
+  `up`, `provision` and `scratch` refuse to create anything when the VM host
+  does not have the file, or cannot read it. Removing the key from a config
+  deletes it from the guest's live disk on the next provision, though the
+  `fresh-install` snapshot still holds it and `bombyx reset` restores it -- see
+  `docs/trust-boundary.md` under **What this costs**. The workstation never
+  holds it.
 
 ### Changed
 

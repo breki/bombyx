@@ -488,6 +488,67 @@ pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
     transport(cfg, &script, Tty::NoPty)
 }
 
+/// Builds the command that fails when `path` is not a file on
+/// the VM host.
+///
+/// `field` is the config key the path came from, and it is in
+/// the message because the answer to "which line do I edit?" is
+/// what the operator needs. A bare `test -f` would exit 1 and
+/// say nothing.
+///
+/// It is `&'static str` so no value read at run time can reach
+/// it, and it is passed to `printf` as an argument rather than
+/// written into the format string: a `%` in there is read as a
+/// conversion specifier and consumes the path argument, and a
+/// `'` ends the format string early.
+///
+/// Unreadable counts as missing. The check runs as the VM
+/// host's login user -- the same one that will run `vagrant`
+/// there -- so a key that user cannot open is a mistake worth
+/// catching here, where the message still names the config
+/// key. Left to Vagrant's `file` provisioner it fails a long
+/// way from the line at fault.
+///
+/// The message names the VM host rather than saying "this
+/// machine". The `printf` runs on the far side of `ssh` while
+/// the text arrives in a terminal on the workstation, so "this
+/// machine" would name a machine the reader is not sitting at.
+/// The host is an argument too, for the same reason `field` is:
+/// `HostName`'s charset happens to exclude `%` and `'`, and a
+/// rule kept in another file is the one somebody widens.
+///
+/// **This is a check on the VM host, run by bombyx, and that is
+/// the point.** The generated Vagrantfile could test the file
+/// itself and `raise`, which is fewer moving parts and one
+/// fewer round trip. It cannot be done there: `vagrant destroy`
+/// loads that file too, so the `raise` would leave a directory
+/// no bombyx command could tear down --
+/// [`destroy_vm_if_present`] holds why. bombyx knows which verb
+/// it is running and the Vagrantfile does not.
+///
+/// The path is assigned to a shell variable first so that a
+/// leading `~` is expanded once, and the message then quotes
+/// the directory the far side really looked in rather than the
+/// `~` the operator wrote. POSIX expands a tilde at the start
+/// of an assignment's value, which `sh` and `dash` were both
+/// checked for.
+#[must_use]
+pub fn require_file(
+    cfg: &Config,
+    path: &str,
+    field: &'static str,
+) -> RemoteCommand {
+    let script = format!(
+        "p={quoted}; if [ ! -f \"$p\" ] || [ ! -r \"$p\" ]; then \
+         printf 'bombyx: %s names %s, which %s does not have or \
+         cannot read\\n' {field} \"$p\" {host} >&2; exit 1; fi",
+        quoted = quote_remote_path(path),
+        field = shell_quote(field),
+        host = shell_quote(cfg.host.as_str()),
+    );
+    transport(cfg, &script, Tty::NoPty)
+}
+
 /// Builds the command that destroys the VM defined in `dir`,
 /// doing nothing when there is no Vagrantfile there.
 ///
@@ -714,7 +775,7 @@ mod tests {
         /// One builder, named for the error message.
         type Builder = (&'static str, fn(&Config) -> RemoteCommand);
 
-        let builders: [Builder; 7] = [
+        let builders: [Builder; 8] = [
             ("vagrant", |c| vagrant(c, &["status"], Tty::NoPty)),
             ("ensure_dir", |c| ensure_dir(c, "~/vms")),
             ("remove_dir", |c| remove_dir(c, "~/vms/myproject")),
@@ -728,6 +789,15 @@ mod tests {
                 save_snapshot_if_absent(c, &c.remote_project_dir(), Tty::NoPty)
             }),
             ("write", |c| write_file(c, "~/vms", "Vagrantfile", "x\n")),
+            // A row because this builder reads `cfg.host`
+            // outside `vagrant_command`, so a script made
+            // conditional on the route here would go unnoticed.
+            // Note what it cannot catch: both fixtures carry
+            // the same `host`, so a host that *varied* by route
+            // would still compare equal.
+            ("require_file", |c| {
+                require_file(c, "~/.secrets/k", "deploy_key")
+            }),
         ];
         for (name, build) in builders {
             let over_ssh = build(&cfg());
@@ -1088,6 +1158,76 @@ mod tests {
     fn ensure_dir_quotes_an_absolute_dir() {
         let c = ensure_dir(&cfg(), "/srv/vms/p");
         assert_eq!(remote_script(&c), "mkdir -p '/srv/vms/p'");
+    }
+
+    #[test]
+    fn require_file_names_the_path_in_its_own_message() {
+        // The whole script, because the message is the point:
+        // an operator who sees only "exit status 1" has to go
+        // and read the generated Vagrantfile to find out which
+        // file was missing.
+        let c = require_file(&cfg(), "~/.secrets/k", "deploy_key");
+        assert_eq!(
+            remote_script(&c),
+            "p=~/'.secrets/k'; if [ ! -f \"$p\" ] || \
+             [ ! -r \"$p\" ]; then printf 'bombyx: %s names %s, \
+             which %s does not have or cannot read\\n' \
+             'deploy_key' \"$p\" 'vmhost' >&2; exit 1; fi"
+        );
+    }
+
+    #[test]
+    fn require_file_quotes_an_absolute_path() {
+        let c = require_file(&cfg(), "/etc/keys/k", "deploy_key");
+        assert!(
+            remote_script(&c).starts_with("p='/etc/keys/k';"),
+            "{}",
+            remote_script(&c)
+        );
+    }
+
+    #[test]
+    fn require_file_names_the_vm_host_rather_than_this_machine() {
+        // The `printf` runs on the far side of `ssh` and the
+        // text arrives in a terminal on the workstation, so
+        // "this machine" would name a machine the reader is not
+        // sitting at. On the local route the two coincide and
+        // the same wording still reads correctly.
+        for cfg in [cfg(), local_cfg()] {
+            let c = require_file(&cfg, "~/.secrets/k", "deploy_key");
+            assert!(
+                remote_script(&c).contains("'vmhost' >&2"),
+                "{}",
+                remote_script(&c)
+            );
+        }
+    }
+
+    #[test]
+    fn require_file_refuses_a_file_it_cannot_read() {
+        // The check runs as the user `vagrant` will run as, so
+        // an unreadable key is a mistake this step can catch at
+        // the one point where the message names the config key.
+        // Left to Vagrant's `file` provisioner it fails a long
+        // way from the config line at fault.
+        let script =
+            remote_script(&require_file(&cfg(), "~/.secrets/k", "deploy_key"));
+        assert!(script.contains("! -f"), "{script}");
+        assert!(script.contains("! -r"), "{script}");
+    }
+
+    #[test]
+    fn require_file_passes_the_field_name_as_an_argument() {
+        // Not interpolated into the `printf` format string. A
+        // field containing `%` would otherwise be read as a
+        // conversion specifier and eat the path argument, and
+        // one containing `'` would end the format string early.
+        let script = remote_script(&require_file(&cfg(), "/k", "de%s'ploy"));
+        assert!(script.contains(r"'de%s'\''ploy'"), "{script}");
+        assert!(
+            script.contains("'bombyx: %s names %s,"),
+            "the field name must not be in the format string: {script}"
+        );
     }
 
     #[test]
