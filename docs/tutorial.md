@@ -388,10 +388,13 @@ part the repository has to hold `vagrant/provision.sh`, on the
 branch you name in `ref`, pushed. Part 3 writes that file and
 ends with the step that pushes it.
 
-The guest clones with no credential of its own, so this tutorial
-uses a public repository. A private one needs a credential
-inside the VM, and code in the VM can read it -- see
-[trust-boundary.md](trust-boundary.md) for what that costs.
+This tutorial uses a public repository, so the guest clones
+with no credential of its own. A private one needs a
+credential inside the VM: name a deploy key on the VM host
+with `deploy_key` in `[source]`, and `vagrant` uploads it into
+the guest before provisioning. Code in the VM can read that
+key -- see [trust-boundary.md](trust-boundary.md) for what
+that costs.
 
 The layout, in two places:
 
@@ -483,11 +486,11 @@ parse as `projects.myproject.vm.remote_root` and the whole file
 would be refused.
 
 `[vm]` and `[source]` are required, and every key in them
-except `provider` is required too. bombyx builds the VM from
-the first and the guest clones the second, so there is nothing
-sensible for bombyx to guess: a base image is a choice, and a
-repository bombyx invented would be cloned into the guest and
-run as root.
+except `provider` and `deploy_key` is required too. bombyx
+builds the VM from the first and the guest clones the second,
+so there is nothing sensible for bombyx to guess: a base image
+is a choice, and a repository bombyx invented would be cloned
+into the guest and run as root.
 
 `remote_root` is optional, shown with its default.
 

@@ -79,7 +79,8 @@ bombyx/
 
 Parses the operator's `config.toml`: a file-wide `host`,
 and one `[projects.<name>]` table per project carrying
-`remote_root`, an optional `host`, `[vm]` and `[source]`.
+`remote_root`, an optional `host`, `[vm]` and `[source]`
+(whose `deploy_key` is optional).
 `Config::load_project(name, registry)` is the one loader,
 and `config::host::rank` picks between the two `host` keys,
 the project's own winning. Every `host` in the file is

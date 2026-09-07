@@ -177,7 +177,8 @@ probe commands, `doctor` decides what their output means.
 | `config::host` | where the VM host name comes from, and its shape |
 | `config::registry` | the operator's `config.toml` and its project tables |
 | `config::root` | what `remote_root` may be, and why it is strict |
-| `config::source` | `[source]`, and the two checked types it holds |
+| `config::deploy_key` | what `deploy_key` may be, and why |
+| `config::source` | `[source]`, and the three checked types it holds |
 | `config::transport` | whether `host` names this very machine |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
 | `vagrantfile` | rendering the Vagrantfile and the bootstrap |
@@ -214,6 +215,7 @@ classDiagram
     +RepoUrl repo
     +GitRef git_ref
     +ScriptPath script
+    +Option~DeployKeyPath~ deploy_key
   }
   class RepoUrl {
     +String value
@@ -231,6 +233,9 @@ classDiagram
     +String value
   }
   class RemoteRoot {
+    +String value
+  }
+  class DeployKeyPath {
     +String value
   }
   class HostName {
@@ -270,6 +275,7 @@ classDiagram
   Source *-- RepoUrl : repo
   Source *-- ScriptPath : script
   Source *-- GitRef : ref
+  Source *-- DeployKeyPath : deploy_key
   Vm *-- BoxName : box
   Config *-- ProjectName : project
   Registry ..> HostOrigin : ranked to produce one
@@ -517,14 +523,45 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Seven values are enforced by a newtype of bombyx's own:
+Eight values are enforced by a newtype of bombyx's own:
 `remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
-`ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `project` a
-`ProjectName` and `host` a `HostName`. Each constructor holds
-the rules, so an invalid one cannot be built -- by a config file
-or by a library caller. All seven but `host` run their
-constructor as serde deserializes, so a bad value is refused
-before a `Config` exists and the error identifies the line.
+`ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `deploy_key`
+a `DeployKeyPath`, `project` a `ProjectName` and `host` a
+`HostName`. Each constructor holds the rules, so an invalid one
+cannot be built -- by a config file or by a library caller. All
+eight but `host` run their constructor as serde deserializes,
+so a bad value is refused before a `Config` exists and the
+error identifies the line.
+
+`deploy_key` is the only optional one. It is an
+`Option<DeployKeyPath>`, so a project cloning a public
+repository leaves the key out, the generated Vagrantfile
+carries no upload block, and the plan carries no check step.
+
+What the type checks is what the *Ruby* and the *VM host* need
+rather than what a shell needs: the value reaches neither `ssh`
+nor `git` as an argument. It is written into the Vagrantfile
+inside a double-quoted string, and `vagrant` on the VM host
+expands it with `File.expand_path`. So `config/deploy_key.rs`
+runs the Ruby-literal rule, the remote-path charset, and
+anchoring rules of its own -- and deliberately not the
+leading-dash rule, because anchoring already refuses every
+value that could read as an option.
+
+**Where the key's existence is checked is a decision, not an
+accident.** `plan::write_then` puts `remote::require_file`
+ahead of the `mkdir`, so `up`, `provision` and `scratch` refuse
+a missing key before creating a directory or writing a file.
+The generated Vagrantfile could test the file itself and
+`raise`, saving a round trip, and must not: `vagrant destroy`
+loads that Vagrantfile too, so a raise there leaves a directory
+no bombyx command can remove -- teardown stops at the failing
+destroy and never reaches `remove_dir`.
+`remote::destroy_vm_if_present` records the same hazard for a
+Vagrantfile reading an environment variable with no default.
+bombyx knows which verb is running and the Vagrantfile does
+not, so the refusal lives in the plan and the upload stays
+conditional.
 
 `cpus` and `memory` are `std::num::NonZeroU32`, which is the
 whole rule either has and makes a zero unrepresentable for a
@@ -711,15 +748,17 @@ because no config can reach it.
 
 | Field | Refused | Because |
 |-------|---------|---------|
-| `box` `repo` `ref` `script` | empty or blank | no meaning when blank |
-| `box` `repo` `ref` `script` | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
-| `box` `repo` `ref` `script` | control characters | end the line in a Ruby file |
-| `box` `repo` `ref` `script` | `"` or `\` | end or escape the Ruby literal |
-| `box` `repo` `ref` `script` | `#{` | Ruby interpolation is evaluated |
+| `box` `repo` `ref` `script` `deploy_key` | empty or blank | no meaning when blank |
+| `box` `repo` `ref` `script` `deploy_key` | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
+| `box` `repo` `ref` `script` `deploy_key` | control characters | end the line in a Ruby file |
+| `box` `repo` `ref` `script` `deploy_key` | `"` or `\` | end or escape the Ruby literal |
+| `box` `repo` `ref` `script` `deploy_key` | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
 | `host` `project` `remote_root` | leading `-` | the program each one reaches would read it as an option |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | it is made executable and run as root inside the clone |
+| `deploy_key` | anything but a `/` or `~/` anchor | `vagrant` runs in the project's directory on the VM host, so a relative path would look for the key under a directory bombyx creates, writes and deletes |
+| `deploy_key` | a `.` or `..` segment, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
 The dash rule is the one row where what it buys differs by
@@ -791,10 +830,10 @@ flowchart TD
 
 Each stage is safe on its own rather than trusting the one
 before it. `render` escapes every `"`, `\` and `#` even though
-`BoxName`, `RepoUrl`, `GitRef` and `ScriptPath` already refused
-them. `write_file` lengthens its heredoc delimiter until no
-payload line equals it, rather than assuming the payload came
-from `render`.
+`BoxName`, `RepoUrl`, `GitRef`, `ScriptPath` and
+`DeployKeyPath` already refused them. `write_file` lengthens
+its heredoc delimiter until no payload line equals it, rather
+than assuming the payload came from `render`.
 
 The repetition is not redundant, and the newtypes narrowed it
 rather than removing it. A library caller can no longer hand

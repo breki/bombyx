@@ -410,6 +410,24 @@ file is checked as the file is read -- the file-wide one and
 every project's, not only the one this command wants -- so a bad
 value is reported wherever it sits and the error names the line.
 
+One field names a file bombyx deliberately does not open.
+`deploy_key` in `[source]` is a path on the **VM host**, and it
+is `vagrant` there that reads the key and uploads it into the
+guest. So the value is checked here and expanded on a machine
+you may not be sitting at: it must be anchored (`/` or `~/`),
+name a file below that anchor, carry no `.` or `..` segment and
+no trailing slash, and spell `~` only as its first character.
+
+Before `up`, `provision` or `scratch` creates anything, bombyx
+checks on the VM host that the file is there, and stops with a
+message naming the expanded path when it is not. The teardown
+verbs check nothing, so `destroy` still clears a directory
+whose key has since gone.
+
+`docs/trust-boundary.md` under **What this costs** says what
+having that key inside the guest costs, and it is not a small
+thing: code in the VM can reach it.
+
 bombyx opens no file inside the project's directory at all, and
 that is the property the design turns on. It is a rule about
 files rather than about everything a repository can reach: a

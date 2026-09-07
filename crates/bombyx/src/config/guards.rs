@@ -3,7 +3,7 @@
 //!
 //! A rule that several fields share lives here once, so widening
 //! it reaches all of them at the same time. Five fields use the
-//! leading-dash rule, four use the Ruby-literal rule, and both
+//! leading-dash rule, five use the Ruby-literal rule, and both
 //! the blank check and the character check have several callers.
 //!
 //! Everything here returns [`FieldError`], not `ConfigError`.
@@ -98,9 +98,9 @@ pub(super) fn check_charset(
 /// writes, or arrive somewhere with whitespace nobody meant.
 ///
 /// bombyx generates a Vagrantfile, which is a Ruby file, and
-/// four config values get written into it inside double quotes:
-/// `box`, `repo`, `ref` and `script`. Something like
-/// `box = "generic/ubuntu2204"` in the config becomes
+/// five config values get written into it inside double quotes:
+/// `box`, `repo`, `ref`, `script` and `deploy_key`. Something
+/// like `box = "generic/ubuntu2204"` in the config becomes
 /// `config.vm.box = "generic/ubuntu2204"` in the Ruby.
 ///
 /// Four kinds of character break that. All four are refused,
@@ -118,7 +118,7 @@ pub(super) fn check_charset(
 ///
 /// Two more refusals are about the value being wrong rather
 /// than the Ruby being wrong, and they come first. A blank
-/// value means nothing for any of these four fields. And
+/// value means nothing for any of these five fields. And
 /// leading or trailing whitespace is almost always a
 /// copy-paste artifact, which fails obscurely and far from
 /// here -- a trailing space on `repo` comes back from the guest
@@ -126,9 +126,9 @@ pub(super) fn check_charset(
 ///
 /// Escaping the four characters would work instead of refusing
 /// them. Refusing is better: a box name, a repository address,
-/// a branch name and a relative path have no reason to contain
-/// any of them, so allowing them would only give the renderer
-/// more to get right.
+/// a branch name and a path have no reason to contain any of
+/// them, so allowing them would only give the renderer more to
+/// get right.
 pub(super) fn check_renderable(
     field: &'static str,
     value: &str,
@@ -195,16 +195,20 @@ mod tests {
     /// field name, constructor, a value that constructor
     /// accepts, and whether the value reaches a command line.
     ///
-    /// **Two other newtypes use rules from this module and are
-    /// deliberately not rows.** `RemoteRoot` and `HostName` are
-    /// built on `check_not_empty`, `check_not_an_option` and
-    /// `check_charset`, never on `check_renderable`, and each
-    /// carries anchoring or charset rules of its own that no
-    /// column here could express. `super::root` and
-    /// `super::host` test them, the dash rule included. So this
-    /// table is not the answer to "which types use this
-    /// module"; it is the answer to "which types share one rule
-    /// set", and a new field sharing that set is one more row.
+    /// **Three other newtypes use rules from this module and
+    /// are deliberately not rows.** `RemoteRoot` and `HostName`
+    /// are built on `check_not_empty`, `check_not_an_option`
+    /// and `check_charset`, never on `check_renderable`, and
+    /// each carries anchoring or charset rules of its own that
+    /// no column here could express. `DeployKeyPath` does call
+    /// `check_renderable`, and is still not a row: its
+    /// anchoring rule refuses `-x`, which is the value the last
+    /// column's `false` branch below asserts is *accepted*.
+    /// `super::root`, `super::host` and `super::deploy_key`
+    /// test all three, the dash rule included. So this table is
+    /// not the answer to "which types use this module"; it is
+    /// the answer to "which types share one rule set", and a
+    /// new field sharing that set is one more row.
     ///
     /// The table lives here rather than beside any one type,
     /// because the rules live here. A fifth newtype sharing the

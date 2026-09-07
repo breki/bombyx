@@ -9,18 +9,26 @@
 //! All three values reach `git` and the guest's shell, so they
 //! carry the checks that cannot be expressed as "a non-empty
 //! string".
+//!
+//! The table has a fourth key, `deploy_key`, and its type lives
+//! in `super::deploy_key` rather than here. It is the one value
+//! in the table that is a path on the VM host instead of
+//! something the guest hands to `git`, and its rules are its
+//! own.
 
 use serde::Deserialize;
 
+use super::deploy_key::DeployKeyPath;
 use super::error::FieldError;
 use super::guards;
 use crate::newtype::checked_str_newtype;
 
 /// Where the guest fetches the project from, as `[source]`.
 ///
-/// The guest clones this itself, so none of it is a path on
-/// the workstation or the VM host -- see
-/// `docs/trust-boundary.md`.
+/// The guest clones this itself, so the first three keys are
+/// not paths on the workstation or the VM host -- see
+/// `docs/trust-boundary.md`. `deploy_key` is the exception,
+/// and its own module says why.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
@@ -33,6 +41,14 @@ pub struct Source {
     pub git_ref: GitRef,
     /// Provisioning script to run, relative to the clone root.
     pub script: ScriptPath,
+    /// Private key on the VM host that the guest clones a
+    /// private repository with.
+    ///
+    /// `None` when the config names none, which is what a
+    /// public repository wants: `vagrant` then uploads nothing
+    /// and the guest clones without a credential.
+    #[serde(default)]
+    pub deploy_key: Option<DeployKeyPath>,
 }
 
 /// A repository address that `git` will download from, and not

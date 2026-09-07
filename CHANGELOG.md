@@ -96,6 +96,13 @@ and this project adheres to
   holding `box` and `ref`, and `config::ProjectName` as a re-export of
   `name::ProjectName`. Building a `Vm` or a `Source` by hand means calling their
   constructors.
+- `deploy_key` in `[source]`: an optional path, on the VM host, naming the
+  private key the guest clones a private repository with. `vagrant` uploads it
+  into the guest before provisioning, `bootstrap.sh` moves it to a root-owned
+  0600 file in `/root/.ssh` and hands it to `git` through `GIT_SSH_COMMAND`, and
+  `up`, `provision` and `scratch` refuse to create anything when the VM host
+  does not have the file. Removing the key from a config deletes it from the
+  guest on the next provision. The workstation never holds it.
 
 ### Changed
 

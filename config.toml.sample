@@ -142,3 +142,30 @@ script = "vagrant/provision.sh"   # path inside the clone
 # `script` names a file that must exist in the repository at
 # `ref`. The guest refuses to provision without it. Part 3 of
 # bombyx's docs/tutorial.md writes a re-runnable one.
+
+# Optional, and the only key in this table that is a path on
+# the VM HOST rather than something the guest hands to git.
+#
+# Leave it out for a public repository. `git clone` then needs
+# no credential, and the generated Vagrantfile carries no
+# upload at all.
+#
+# For a private one, name a private key file on the VM host.
+# vagrant reads it there and uploads it into the guest before
+# provisioning, so the key never touches your workstation and
+# never sits in any repository. Make it a read-only deploy key
+# for this one repository: code inside the VM can read it, and
+# scoping it is what limits what stealing it is worth. See
+# docs/trust-boundary.md.
+#
+# vagrant runs on the VM host, so `~` is that machine's home
+# directory and not yours. bombyx checks the file is there
+# before `up`, `provision` or `scratch` creates anything, so a
+# path the VM host does not have stops the run with a message
+# naming it rather than booting a VM whose clone then fails.
+#
+# The value must be anchored -- it starts with `/` or `~/` --
+# and name a file below that anchor. No `.` or `..` segment, no
+# trailing slash, and `~` only as the first character.
+#
+# deploy_key = "~/.secrets/myproject-deploy-key"

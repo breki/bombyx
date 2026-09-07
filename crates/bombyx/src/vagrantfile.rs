@@ -21,7 +21,7 @@
 //! config values into a shell script is where quoting bugs and
 //! injection holes come from, so we simply never do it.
 
-use crate::config::Config;
+use crate::config::{Config, Source};
 
 /// The provisioning script, shipped to the host unchanged.
 ///
@@ -38,6 +38,26 @@ pub const VAGRANTFILE_NAME: &str = "Vagrantfile";
 /// Vagrantfile is in, so the two names have to agree and are
 /// stated once here.
 pub const BOOTSTRAP_NAME: &str = "bootstrap.sh";
+
+/// Where the Vagrantfile's file provisioner drops the deploy
+/// key inside the guest.
+///
+/// Two files have to agree on this path and neither can read
+/// the other: [`render`] writes it as the upload's
+/// `destination:`, and [`BOOTSTRAP`] has it as a literal. It is
+/// stated here so the Rust half has one spelling, and a test
+/// asserts the shell half still contains it.
+///
+/// It is a *constant* rather than another config value on
+/// purpose. [`BOOTSTRAP`] is shipped exactly as written and
+/// bombyx pastes nothing into it, so the guest-side path has to
+/// be something the script can spell for itself.
+///
+/// The file provisioner runs as the box's SSH user, which for
+/// every Vagrant box is `vagrant`, so the destination has to be
+/// somewhere that user can write. `bootstrap.sh` moves the key
+/// out of there before the clone.
+pub const DEPLOY_KEY_GUEST_PATH: &str = "/home/vagrant/.ssh/bombyx-deploy-key";
 
 /// Wraps `value` in double quotes, ready to drop into Ruby.
 ///
@@ -122,7 +142,7 @@ Vagrant.configure(\"2\") do |config|
     v.memory = {memory}
   end
 
-  config.vm.provision \"shell\",
+{deploy_key}  config.vm.provision \"shell\",
     path: {bootstrap},
     env: {{
       \"BOMBYX_REPO\" => {repo},
@@ -138,6 +158,7 @@ Vagrant.configure(\"2\") do |config|
 end
 ",
         version = env!("CARGO_PKG_VERSION"),
+        deploy_key = deploy_key_block(source),
         box_name = ruby_string(vm.box_name.as_str()),
         provider = vm.provider,
         cpus = vm.cpus,
@@ -148,6 +169,55 @@ end
         script = ruby_string(source.script.as_str()),
         host_env = crate::remote::VM_HOST_ENV,
         hostname_env = crate::remote::VM_HOSTNAME_ENV,
+    )
+}
+
+/// The Ruby that uploads the deploy key, or nothing at all.
+///
+/// An empty string when the config names no key, so a public
+/// repository's Vagrantfile carries no upload block.
+///
+/// [`render`] places this ahead of the shell provisioner.
+/// Vagrant runs provisioners in the order the file declares
+/// them, and [`BOOTSTRAP`] looks for the key as soon as it
+/// starts.
+///
+/// The upload is conditional, and that is not the same as
+/// tolerating a missing key. `crate::remote::require_file`
+/// refuses the run before this file is even written, so a boot
+/// never reaches an absent key.
+///
+/// What the condition protects is every *other* verb.
+/// `vagrant destroy` loads this file too, so a `raise` here
+/// would leave a directory that no bombyx command could tear
+/// down: teardown stops at the failing destroy and never
+/// reaches the removal that follows it.
+/// `crate::remote::destroy_vm_if_present` holds that argument.
+fn deploy_key_block(source: &Source) -> String {
+    let Some(key) = source.deploy_key.as_ref() else {
+        return String::new();
+    };
+    format!(
+        "  # The credential the guest clones a private repository
+  # with. bombyx never opens the file: vagrant reads it here on
+  # the VM host and uploads it, so the workstation never holds
+  # it. docs/trust-boundary.md says what keeping it inside the
+  # guest costs.
+  #
+  # The upload is conditional so that `vagrant destroy` can
+  # still load this file after the key has gone. bombyx refuses
+  # a boot with no key of its own accord, before writing this
+  # file at all.
+  bombyx_deploy_key = File.expand_path({key})
+  if File.exist?(bombyx_deploy_key)
+    config.vm.provision \"file\",
+      source: bombyx_deploy_key,
+      destination: {dest}
+  end
+
+",
+        key = ruby_string(key.as_str()),
+        dest = ruby_string(DEPLOY_KEY_GUEST_PATH),
     )
 }
 
@@ -177,8 +247,13 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::config::{
-        BoxName, GitRef, Provider, RepoUrl, ScriptPath, Source, Vm,
+        BoxName, DeployKeyPath, GitRef, Provider, RepoUrl, ScriptPath, Source,
+        Vm,
     };
+
+    /// A `deploy_key` value every rule accepts, written once so
+    /// the tests below and the expected Ruby agree.
+    const KEY: &str = "~/.secrets/myproject-deploy-key";
 
     fn cfg_with(provider: Provider) -> Config {
         let mut cfg = Config::for_tests();
@@ -195,7 +270,16 @@ mod tests {
             git_ref: GitRef::parse("main").expect("a valid fixture ref"),
             script: ScriptPath::parse("vagrant/provision.sh")
                 .expect("a valid fixture path"),
+            deploy_key: None,
         };
+        cfg
+    }
+
+    /// [`cfg_with`] on libvirt, carrying a `deploy_key`.
+    fn cfg_with_key() -> Config {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.source.deploy_key =
+            Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
         cfg
     }
 
@@ -293,6 +377,95 @@ mod tests {
         assert_eq!(ruby_string("a\\b"), "\"a\\\\b\"");
         assert_eq!(ruby_string("a#{x}"), "\"a\\#{x}\"");
         assert_eq!(ruby_string("plain"), "\"plain\"");
+    }
+
+    #[test]
+    fn a_configured_deploy_key_is_uploaded_before_the_bootstrap_runs() {
+        // Vagrant runs provisioners in the order the
+        // Vagrantfile declares them, so the upload has to come
+        // first or the bootstrap looks for a key that is not
+        // there yet.
+        let out = cfg_with_key();
+        let out = render(&out);
+        let upload = out
+            .find("config.vm.provision \"file\"")
+            .expect("the file provisioner must be rendered");
+        let shell = out
+            .find("config.vm.provision \"shell\"")
+            .expect("the shell provisioner must be rendered");
+        assert!(upload < shell, "the upload must come first:\n{out}");
+        assert!(
+            out.contains(&format!("File.expand_path(\"{KEY}\")")),
+            "{out}"
+        );
+        assert!(
+            out.contains(&format!("destination: \"{DEPLOY_KEY_GUEST_PATH}\"")),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn the_upload_is_conditional_and_never_raises() {
+        // `vagrant destroy` loads this file too. A `raise` here
+        // stops the teardown at its first step and leaves a
+        // directory no bombyx command can clear -- which is a
+        // failure this repo has had before, and
+        // `remote::destroy_vm_if_present` records.
+        //
+        // The loud failure lives in the plan instead:
+        // `plan::tests::a_deploy_key_is_checked_before_anything_is_created`.
+        let out = render(&cfg_with_key());
+        assert!(out.contains("if File.exist?"), "{out}");
+        assert!(!out.contains("raise"), "a raise breaks destroy:\n{out}");
+    }
+
+    #[test]
+    fn no_deploy_key_renders_no_upload_at_all() {
+        // A public repository needs no credential, and an
+        // upload block with an empty path would fail every
+        // `up`.
+        let out = render(&cfg_with(Provider::Libvirt));
+        for absent in [
+            "config.vm.provision \"file\"",
+            "File.expand_path",
+            DEPLOY_KEY_GUEST_PATH,
+        ] {
+            assert!(!out.contains(absent), "{absent} rendered:\n{out}");
+        }
+    }
+
+    #[test]
+    fn the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to() {
+        // Two files have to agree on one path and neither can
+        // see the other: the Vagrantfile uploads to it and
+        // `bootstrap.sh` has it as a literal. This is what
+        // catches a rename in one of them.
+        assert!(
+            BOOTSTRAP.contains(DEPLOY_KEY_GUEST_PATH),
+            "{DEPLOY_KEY_GUEST_PATH} is not in the bootstrap script"
+        );
+    }
+
+    #[test]
+    fn the_bootstrap_script_points_ssh_at_the_key_and_nothing_else() {
+        // `IdentitiesOnly=yes` alone is not enough: it does not
+        // exclude identities named in an `ssh_config`, so
+        // `-F /dev/null` is what makes "only this key" true.
+        for needle in ["GIT_SSH_COMMAND", "IdentitiesOnly=yes", "-F /dev/null"]
+        {
+            assert!(BOOTSTRAP.contains(needle), "{needle} missing");
+        }
+    }
+
+    #[test]
+    fn the_bootstrap_script_deletes_a_key_no_upload_replaced() {
+        // Removing `deploy_key` from the config has to remove
+        // the credential from the guest, not leave one behind
+        // that nothing points at.
+        assert!(
+            BOOTSTRAP.contains("rm -f \"$DEPLOY_KEY\""),
+            "the stale-key removal is gone"
+        );
     }
 
     #[test]

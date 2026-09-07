@@ -488,6 +488,40 @@ pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
     transport(cfg, &script, Tty::NoPty)
 }
 
+/// Builds the command that fails when `path` is not a file on
+/// the VM host.
+///
+/// `field` is the config key the path came from, and it is in
+/// the message because the answer to "which line do I edit?" is
+/// what the operator needs. A bare `test -f` would exit 1 and
+/// say nothing.
+///
+/// **This is a check on the VM host, run by bombyx, and that is
+/// the point.** The generated Vagrantfile could test the file
+/// itself and `raise`, which is fewer moving parts and one
+/// fewer round trip. It cannot be done there: `vagrant destroy`
+/// loads that file too, so the `raise` would leave a directory
+/// no bombyx command could tear down --
+/// [`destroy_vm_if_present`] holds why. bombyx knows which verb
+/// it is running and the Vagrantfile does not.
+///
+/// The path is assigned to a shell variable first so that a
+/// leading `~` is expanded once, and the message then quotes
+/// the directory the far side really looked in rather than the
+/// `~` the operator wrote. POSIX expands a tilde at the start
+/// of an assignment's value, which `sh` and `dash` were both
+/// checked for.
+#[must_use]
+pub fn require_file(cfg: &Config, path: &str, field: &str) -> RemoteCommand {
+    let script = format!(
+        "p={quoted}; if [ ! -f \"$p\" ]; then printf 'bombyx: \
+         {field} names %s, which is not on this machine\\n' \
+         \"$p\" >&2; exit 1; fi",
+        quoted = quote_remote_path(path)
+    );
+    transport(cfg, &script, Tty::NoPty)
+}
+
 /// Builds the command that destroys the VM defined in `dir`,
 /// doing nothing when there is no Vagrantfile there.
 ///
@@ -1088,6 +1122,31 @@ mod tests {
     fn ensure_dir_quotes_an_absolute_dir() {
         let c = ensure_dir(&cfg(), "/srv/vms/p");
         assert_eq!(remote_script(&c), "mkdir -p '/srv/vms/p'");
+    }
+
+    #[test]
+    fn require_file_names_the_path_in_its_own_message() {
+        // The whole script, because the message is the point:
+        // an operator who sees only "exit status 1" has to go
+        // and read the generated Vagrantfile to find out which
+        // file was missing.
+        let c = require_file(&cfg(), "~/.secrets/k", "deploy_key");
+        assert_eq!(
+            remote_script(&c),
+            "p=~/'.secrets/k'; if [ ! -f \"$p\" ]; then printf \
+             'bombyx: deploy_key names %s, which is not on this \
+             machine\\n' \"$p\" >&2; exit 1; fi"
+        );
+    }
+
+    #[test]
+    fn require_file_quotes_an_absolute_path() {
+        let c = require_file(&cfg(), "/etc/keys/k", "deploy_key");
+        assert!(
+            remote_script(&c).starts_with("p='/etc/keys/k';"),
+            "{}",
+            remote_script(&c)
+        );
     }
 
     #[test]

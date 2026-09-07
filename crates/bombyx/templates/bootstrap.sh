@@ -64,6 +64,72 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
+# THE DEPLOY KEY, when the operator's config named one.
+#
+# A private repository needs a credential inside the guest, and
+# this is how it arrives. The Vagrantfile runs a `file`
+# provisioner before this script and drops the key at the path
+# below. That path is fixed, so nothing about it is pasted into
+# this file -- see the header.
+#
+# Two things happen to the key here.
+#
+# It moves to root's own directory. The `file` provisioner
+# uploads as the `vagrant` user, which is the user the agent
+# works as, so a key left where it lands is one the agent's own
+# code can read with no effort at all. Moving it to a
+# root-owned 0600 file means reading it takes root. That is a
+# narrowing and not a fix: on most boxes the `vagrant` user has
+# passwordless sudo, so the credential is still reachable by
+# code running in this VM. docs/trust-boundary.md says why that
+# is accepted.
+#
+# And `git` is told to use it, through GIT_SSH_COMMAND, which
+# git passes to `ssh` for every connection it makes. Three
+# options go with the key:
+#
+#   -i <key>              use this identity
+#   IdentitiesOnly=yes    and no other one git or ssh found
+#   -F /dev/null          ignoring every ssh_config on the box
+#
+# The last one is what makes the second true. `IdentitiesOnly`
+# does not exclude an identity named by an `IdentityFile` line
+# in a config file, so without `-F /dev/null` a box shipping
+# its own /etc/ssh/ssh_config could authenticate with a key
+# nobody here chose.
+#
+# StrictHostKeyChecking=accept-new accepts the git host's key
+# the first time it is seen and refuses a change afterwards. It
+# trades a first-contact check for a clone that works
+# unattended: the alternative is a prompt no operator is there
+# to answer.
+#
+# The options are assembled a piece at a time rather than
+# written across continued lines. Inside double quotes a
+# backslash before a newline removes both, so a wrapped
+# assignment joins the key path straight onto the next option
+# with no space between them -- and reading the file back does
+# not show it.
+readonly UPLOADED_KEY=/home/vagrant/.ssh/bombyx-deploy-key
+readonly DEPLOY_KEY=/root/.ssh/bombyx-deploy-key
+
+if [ -f "$UPLOADED_KEY" ]; then
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    install -m 600 -o root -g root "$UPLOADED_KEY" "$DEPLOY_KEY"
+    rm -f "$UPLOADED_KEY"
+
+    ssh_opts="-o IdentitiesOnly=yes -F /dev/null"
+    ssh_opts="$ssh_opts -o StrictHostKeyChecking=accept-new"
+    export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY $ssh_opts"
+else
+    # Taking `deploy_key` out of the config takes the
+    # credential out of the guest on the next provision. Left
+    # here, it would be a key nothing points at and nobody
+    # remembers granting.
+    rm -f "$DEPLOY_KEY"
+fi
+
 # If the clone came from a different repository than the one
 # bombyx was asked for, throw it away rather than fetching over
 # it.

@@ -4,6 +4,51 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**The guest can clone a private repository, and the loud
+failure had to move out of the Vagrantfile to get there**
+
+Issue #50. jutro's old hand-written Vagrantfile uploaded a
+read-only deploy key from the VM host into the guest, and the
+generated one could not express it, so jutro could be driven by
+bombyx and not rebuilt from `config.toml`. `deploy_key` in
+`[source]` is now the field for it: a path on the VM host,
+uploaded by a `file` provisioner, moved by `bootstrap.sh` to a
+root-owned 0600 file in `/root/.ssh`, and handed to `git`
+through `GIT_SSH_COMMAND`.
+
+**The obvious place for the existence check is the one place it
+cannot go.** The operator chose a loud failure over jutro's
+silent skip, and the first cut put a `raise` in the generated
+Vagrantfile. It worked: a real `bombyx up` on frosti stopped
+with the path named, before any VM existed. Then `bombyx
+destroy` on that same directory failed too, because `vagrant
+destroy` loads the Vagrantfile as well -- so the raise stranded
+a directory no bombyx command could clear. `destroy_vm_if_present`
+already had that hazard written on it, for a Vagrantfile
+reading an environment variable with no default, and I read
+that comment while writing the raise without connecting the
+two. The check is now `remote::require_file`, a plan step ahead
+of the `mkdir`, and the upload in the Vagrantfile is
+conditional. bombyx knows which verb it is running; the
+Vagrantfile does not.
+
+**Two shell mistakes, both invisible in the file.** The
+`GIT_SSH_COMMAND` assignment was first written across continued
+lines, and inside double quotes a backslash before a newline
+removes both -- joining the key path onto the next option with
+no space, which reading the file back does not show. The
+options are now assembled a piece at a time. And a scripted
+`python` replace ate the line continuations in a Rust `format!`
+string the same way, leaving runs of spaces inside a shell
+script; the test comparing the whole script is what caught it.
+
+**Verified against the real private repository.** A VM booted
+on frosti cloned `git@github.com:breki/jutro.git` with the
+existing `~/.secrets/jutro-deploy-key`, which is the case the
+issue said was impossible. Removing `deploy_key` from a config
+now deletes the key from the guest on the next provision, so a
+credential nobody remembers granting does not survive.
+
 **Twenty findings on the disarm work, and the one that cost the
 most was a decision made on incomplete information**
 
