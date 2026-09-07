@@ -104,41 +104,39 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// the argument.
 ///
 /// **Every project vagrant call carries it except the
-/// teardown.** The reason it goes on more than the boot is the
-/// `unset` in `DISARM_VAGRANT_REDIRECTS`, which clears the
-/// operator's own exported value in front of every script. A
-/// verb that did not write the configured one back would leave
-/// vagrant choosing for itself, and on a host where the other
-/// provider cannot answer a probe -- a WSL2 distribution with
-/// no PowerShell for the Hyper-V provider to call -- vagrant
-/// refuses the command instead. `docs/vm-host-wsl2.md`
-/// describes that host. Not a doc link: the constant is
-/// private, and rustdoc rejects a public page pointing at a
-/// private item.
+/// teardown.** `DISARM_VAGRANT_REDIRECTS` clears the
+/// operator's own exported value in front of every script, so
+/// a verb that did not write the configured one back would
+/// leave vagrant choosing for itself. On a host where the
+/// other provider cannot even answer a usability probe -- a
+/// WSL2 distribution with no PowerShell for the Hyper-V
+/// provider to call -- vagrant then refuses the command.
+/// `docs/vm-host-wsl2.md` describes that host. Not a doc link:
+/// the constant is private, and rustdoc rejects a public page
+/// pointing at a private item.
 ///
-/// `doctor`'s probe is not a project call and carries none:
-/// `vagrant plugin list` ignores this variable, measured under
-/// `hyperv` on Linux and under a provider name that does not
-/// exist.
+/// **`is_teardown` holds the exception**, and three facts
+/// measured on a libvirt host are why. With a machine already
+/// created, vagrant reads the provider it recorded and ignores
+/// this variable. With no machine yet, an unusable provider
+/// makes it refuse `status`, `halt` and `destroy` as readily
+/// as `up`. And with nothing set at all, `destroy` in a
+/// directory holding a Vagrantfile and no machine reports
+/// "Domain is not created" and exits 0.
 ///
-/// **The teardown is the exception, and `tears_down` holds
-/// it.** Three measured facts about vagrant, all checked on a
-/// libvirt host. With a machine already created vagrant reads
-/// the provider it recorded and ignores this variable. With no
-/// machine yet an unusable provider makes it refuse `status`,
-/// `halt` and `destroy` as readily as `up`. And with no such
-/// variable set, `destroy` in a directory holding a
-/// Vagrantfile and no machine reports "Domain is not created"
-/// and exits 0.
+/// Put together: naming a provider on `destroy` can only ever
+/// refuse it, and `execute` stops at the first failing step,
+/// so the directory removal behind it never runs. Omitting it
+/// is safe because a refusal implies no machine exists, and a
+/// machine that exists carries its own recorded provider.
 ///
-/// So naming a provider on `destroy` can only ever refuse it,
-/// and `execute` stops at the first failing step, which leaves
-/// the directory removal behind it unrun and nothing else to
-/// clear the directory. Omitting it there is safe for the same
-/// reason: a refusal implies no machine exists, so there is no
-/// recorded provider to disagree with.
+/// **A WSL2 host inverts that, and the gap is carried rather
+/// than closed.** There vagrant needs a provider named before
+/// it will load a project at all, so the teardown that names
+/// none is the one refused. `docs/vm-host-wsl2.md` holds the
+/// gap, the recovery and the command that would settle it.
 ///
-/// The first of those facts is also a limit worth knowing:
+/// The first measured fact is also a limit worth knowing:
 /// editing `provider` and re-running `up` on a project that
 /// already has a VM keeps the old one, silently.
 /// `provider-change-on-existing-vm` in `docs/todo.md` holds
@@ -192,7 +190,7 @@ fn vm_host_env(cfg: &Config) -> String {
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
     use std::fmt::Write as _;
     let mut cmd = vm_host_env(cfg);
-    if !tears_down(args) {
+    if !is_teardown(args) {
         // `Provider` renders one of two fixed lowercase words,
         // so there is no operator input here for a quote to
         // protect. It is quoted anyway, so the assignment
@@ -220,7 +218,7 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
 /// run, while a separate flag could be set wrongly on a new
 /// call site. [`PROVIDER_ENV`] holds why the teardown is the
 /// one verb that names no provider.
-fn tears_down(args: &[&str]) -> bool {
+fn is_teardown(args: &[&str]) -> bool {
     args.first() == Some(&"destroy")
 }
 
@@ -348,9 +346,14 @@ impl Tty {
 /// behind it never runs. Measured on a libvirt host with
 /// `hyperv` exported.
 ///
-/// bombyx then writes its own [`PROVIDER_ENV`] in front of
-/// every vagrant call. That assignment comes after this `unset`
-/// and wins, so clearing the pair costs nothing.
+/// bombyx writes its own [`PROVIDER_ENV`] back in front of
+/// every project vagrant call but the teardown. That
+/// assignment comes after this `unset` and wins, so clearing
+/// the pair costs those calls nothing.
+///
+/// It is not free for the teardown, which writes nothing back.
+/// [`PROVIDER_ENV`] holds why that is the right trade on a
+/// libvirt host and a known gap on a WSL2 one.
 ///
 /// **Both routes need it, for different reasons.** `sh -c` is a
 /// child of bombyx and inherits everything the operator
@@ -367,8 +370,20 @@ impl Tty {
 /// documented startup order rather than measured
 /// *(unverified)*.
 ///
-/// Ends in `; ` so it prefixes any script, `cat` heredoc
-/// included.
+/// **Ends in `; ` rather than a newline or `&&`.** A `cat`
+/// heredoc is why. The shell reads the body of
+///
+/// ```text
+/// unset ...; cat > f <<'EOF'
+/// first line of the file
+/// EOF
+/// ```
+///
+/// starting on the line after the redirection, so a prefix
+/// ending in a newline would put the `cat` on its own line and
+/// hand the file's first line to the shell instead. `&&` would
+/// work but ties the script to the `unset` succeeding, and a
+/// separator that can fail is one the script does not need.
 const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
      VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH \
      VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; ";
@@ -896,8 +911,9 @@ mod tests {
     ///
     /// [`vm_env`] is the identity half alone, which is what the
     /// assertions about the guest's two names use.
-    /// `every_project_vagrant_call_names_the_provider` in `plan`
-    /// is what holds the provider half across the actions.
+    /// `every_other_project_vagrant_call_names_the_provider`
+    /// and `the_teardown_verb_names_no_provider`, both in
+    /// `plan`, hold the provider half across the actions.
     ///
     /// The provider is read back from the test config rather
     /// than spelled out, for the reason [`vm_env`] gives about

@@ -35,25 +35,29 @@ was not reachable from that session.
 
 ## Context
 
-- `crates/bombyx/src/remote.rs:347` holds
-  `DISARM_VAGRANT_REDIRECTS`, the `unset` prefix and its long
-  doc comment.
-- `crates/bombyx/src/remote.rs:364` holds `transport`, the one
-  wrapper every VM command goes through. Its `Local` arm adds
-  the prefix; its two `Ssh` arms do not.
-- `crates/bombyx/src/remote.rs:690`,
-  `the_ssh_route_disarms_nothing`, records the decision this
-  change reverses.
+**This section records the tree as it stood when the issue was
+filed.** The names below are how to find things; the line
+numbers they used to carry are gone, because every one of them
+moved while the work was done.
+
+- `remote::DISARM_VAGRANT_REDIRECTS` holds the `unset` prefix
+  and its long doc comment.
+- `remote::transport` is the one wrapper every VM command goes
+  through. Its `Local` arm added the prefix; its two `Ssh` arms
+  did not.
+- `the_ssh_route_disarms_nothing` recorded the decision this
+  change reverses. It is gone, replaced by
+  `every_route_disarms_the_vagrant_redirects`.
 - `the_local_route_runs_the_same_script_through_sh` strips the
   prefix from the local script and compares the rest to the
   `ssh` script character for character. With the prefix on both
   routes the strip has to move.
-- `crates/bombyx/src/remote/probe.rs:62` builds the doctor
-  probes. Its `Local` arm delegates to `transport`; its `Ssh`
-  arm builds its own command with five connection options.
-- `docs/architecture.md:75-87` describes the disarm as a local
+- `remote::probe::probe` builds the doctor probes. Its `Local`
+  arm delegates to `transport`; its `Ssh` arm builds its own
+  command with five connection options.
+- `docs/architecture.md` describes the disarm as a local
   branch only.
-- `docs/tutorial.md:667` and `docs/usage.md:304` print dry-run
+- `docs/tutorial.md` and `docs/usage.md` print dry-run
   transcripts that the new prefix changes.
 - Three unit tests assert against an `ssh` script's exact head:
   `vagrant_runs_in_the_project_dir` (`starts_with("cd ...")`),
@@ -151,7 +155,7 @@ recorded under **Outcome**.
   version leaves the `rm -rf` behind it unrun. Two facts make
   the exemption safe: a refusal can only happen when no machine
   exists, and a machine that exists carries its own recorded
-  provider. `remote::tears_down` holds the rule, and
+  provider. `remote::is_teardown` holds the rule, and
   `the_teardown_verb_names_no_provider` states it across the
   actions.
 
@@ -159,23 +163,46 @@ recorded under **Outcome**.
   guard to skip vagrant when no machine exists was offered and
   not taken: it is new logic beyond what this issue asked for.
 
-- **2026-09-06 -- `doctor` was never the WSL2 risk.** The
-  decision above was argued partly from a `bombyx doctor` run
-  on a WSL2 host. Measured here: `vagrant plugin list` prints
-  the same list under `VAGRANT_DEFAULT_PROVIDER=hyperv` on
-  Linux and under a provider name that does not exist, so it
-  never reaches the usability probe. Only `status` and `halt`
-  were at risk, and the four prose sites that claimed
-  otherwise are corrected.
+- **2026-09-07 -- the WSL2 teardown gap is carried, not
+  closed.** Round 2 of `red-team` showed the exemption above
+  moves the stranding rather than removing it: on a WSL2 host
+  the teardown now names no provider and the `unset` cleared
+  the one `/etc/environment` supplied, so `bombyx destroy` is
+  expected to be refused and leave the directory. Two other
+  routes were offered -- letting the host's own
+  `VAGRANT_DEFAULT_PROVIDER` through on the teardown alone, or
+  naming the provider everywhere and calling vagrant only when
+  a machine is recorded. The operator chose to keep the code
+  and write the gap down, on the grounds that the libvirt case
+  is measured while the WSL2 case is inferred, and that this
+  rule has already moved four times in two days on facts
+  measured after the previous move landed.
+  `docs/vm-host-wsl2.md` names the command that settles it.
+
+- **2026-09-06 -- `doctor` is probably not the WSL2 risk, and
+  the claim is marked as unproven.** The decision above was
+  argued partly from a `bombyx doctor` run on a WSL2 host.
+  `vagrant plugin list` prints the same list under
+  `VAGRANT_DEFAULT_PROVIDER=hyperv`, under a name no provider
+  has, and with the variable absent. That says vagrant does not
+  *use* the value; it does not prove vagrant never consults
+  providers to pick a default, because this host has a working
+  libvirt and a probe that ran would have succeeded. The four
+  prose sites now say so and name the experiment that would
+  settle it. Round 2 of `red-team` raised this; the first
+  version of the claim was broader than the measurement.
 
 ## Progress log
 
 - **2026-09-06** -- `every_route_disarms_the_vagrant_redirects`
   written and seen to fail on the `ssh` route, then the prefix
   moved out of the `Local` arm of `transport`.
-- **2026-09-06** -- `every_project_vagrant_call_names_the_provider`
-  written and seen to fail, then `creates_a_machine` removed
-  and the provider written on every call.
+- **2026-09-06** -- a test that every project vagrant call
+  names the provider, written and seen to fail, then
+  `creates_a_machine` removed and the provider written on every
+  call. Review later narrowed both the test and the rule to
+  exempt the teardown; the test is now
+  `every_other_project_vagrant_call_names_the_provider`.
 - **2026-09-06** -- about two dozen tests read a script's exact
   head, so `remote::tests` and `plan::tests` each grew a helper
   that strips the prefix. `remote::tests::raw_script` is what
@@ -228,8 +255,16 @@ exported it returns the same correct answer, while a bare
 machine is required". So the guard was seen to work, and the
 counterfactual was seen to fail.
 
-**Not verified.** The `ssh` route was not exercised against a
-remote VM host: the only host in the registry is this machine,
+**Not verified: the WSL2 host.** Two claims rest on inference
+rather than measurement, both about a host bombyx has never
+run against. `bombyx destroy` is expected to be refused there,
+because the teardown names no provider. And `bombyx doctor` is
+expected to be fine, because `vagrant plugin list` appears not
+to consult providers. `docs/vm-host-wsl2.md` names the command
+for each.
+
+**Not verified: the `ssh` route.** It was not exercised against
+a remote VM host: the only host in the registry is this machine,
 and `ssh frosti` fails host key verification here. Both routes
 emit one script, pinned by
 `the_local_route_runs_the_same_script_through_sh`, so what

@@ -263,8 +263,9 @@ pub fn dir_writable(cfg: &Config, dir: &str) -> RemoteCommand {
 /// variables and the provider selection on every other project
 /// call. This probe gets neither: `vagrant plugin list`
 /// evaluates no `Vagrantfile`, so nothing here could read the
-/// identity, and it reports the installed plugins whichever
-/// provider vagrant would pick. That holds wherever the
+/// identity, and it printed the same plugin list under every
+/// value of `VAGRANT_DEFAULT_PROVIDER` tried, the absent case
+/// included. Evaluating no `Vagrantfile` holds wherever the
 /// command starts, which matters because the two routes stand
 /// in different directories: over `ssh` the login directory,
 /// and running here whatever directory bombyx was started in.

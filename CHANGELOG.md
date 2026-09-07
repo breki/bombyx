@@ -69,31 +69,26 @@ and this project adheres to
   through PAM, from `~/.zshenv` which `zsh` sources on every invocation, and
   from an export placed above the non-interactive return guard in `~/.bashrc`.
   Either way a value on the far side would otherwise make `bombyx destroy`
-  check one project's
-  directory and destroy the machine defined in another.
+  check one project's directory and destroy the machine defined in another.
 - `bombyx snapshot` saves the project VM's `fresh-install` snapshot, replacing
   one that is already there. It is how you move the point `reset` returns to,
   and how a VM created before bombyx took snapshots gets a correct one.
 - Library API: `config::RemoteRoot` and `config::HostName`, the checked types
   behind `remote_root` and `host`. `RemoteRoot` also drops a trailing slash, so
   the value is always in the form a path join needs.
-- bombyx passes the project's provider to vagrant as `VAGRANT_DEFAULT_PROVIDER`
-  in front of every project vagrant call except the teardown. `bombyx doctor`'s
-  probe is not a project call and carries none, since `vagrant plugin list`
-  ignores the variable. `bombyx destroy` omits it because naming a provider the
-  host cannot supply makes vagrant refuse the destroy, and the directory
-  removal behind it would then never run -- while omitting it is safe, since a
-  machine that exists carries its own recorded provider. Rendering a provider block in the generated
-  Vagrantfile only configures that provider; vagrant chooses one itself, from
-  what the host offers. So a project asking for `hyperv` on a libvirt-only host
-  got a libvirt machine with its `cpus` and `memory` ignored, and nothing said
-  so. A host that cannot supply the named provider now fails the boot instead.
-  Every call carries it because the `unset` above cleared whatever the host
-  had, so a verb that omitted it would leave vagrant choosing for itself -- and
-  on a WSL2 host with no PowerShell for the Hyper-V provider to probe, that
-  refuses the command.
+- bombyx passes the project's provider to vagrant as `VAGRANT_DEFAULT_PROVIDER`,
+  in front of every project vagrant call except `bombyx destroy`. Rendering a
+  provider block in the generated Vagrantfile only configures that provider;
+  vagrant chooses one itself, from what the host offers, so a project asking for
+  `hyperv` on a libvirt-only host got a libvirt machine with its `cpus` and
+  `memory` ignored and nothing said so. A host that cannot supply the named
+  provider now fails instead. The teardown is exempt because vagrant refuses a
+  destroy naming a provider the host cannot supply, and bombyx removes the
+  directory only after the destroy succeeds. `bombyx doctor`'s probe carries
+  none either, since `vagrant plugin list` does not use the variable.
 - Library API: `remote::PROVIDER_ENV`, the name of the environment variable
-  bombyx sets on every vagrant call to select the provider;
+  bombyx sets on every project vagrant call but the teardown to select the
+  provider;
   `config::Provider::as_str`, which borrows the lowercase name instead of
   allocating one; and `impl Default for Provider`, which is `Libvirt` and is
   what makes an absent `provider` key mean libvirt.

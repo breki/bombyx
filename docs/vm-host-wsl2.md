@@ -1,9 +1,12 @@
 # Running the VM host in WSL2
 
 This describes how to use a WSL2 distribution on your Windows
-workstation as a bombyx VM host, and the four ways it behaves
+workstation as a bombyx VM host, and the five ways it behaves
 differently from the dedicated Linux host that
-[vm-host-setup.md](vm-host-setup.md) describes.
+[vm-host-setup.md](vm-host-setup.md) describes: nested
+virtualization, the guest bridge surviving a restart, Vagrant
+treating WSL as Windows, WSL stopping idle distributions, and
+reaching the host without opening a port.
 
 Read that page first. Everything in it applies here: the same
 packages, the same Vagrant repository, the same provider plugin,
@@ -202,23 +205,79 @@ trap in [vm-host-setup.md](vm-host-setup.md). bombyx runs
 interactive nor a login shell and reads neither file. sshd applies
 `/etc/environment` through PAM, which those commands do get.
 
-**bombyx does not rely on this setting, and deliberately
-discards it.** Every script bombyx sends begins by unsetting the
-five vagrant variables that redirect a command, this one among
-them, because a value on the VM host would otherwise point a
-`destroy` at the wrong machine. bombyx then writes the
+**This setting is for the commands you type by hand.** bombyx
+neither needs it nor uses it, and the rest of this section is
+about why -- but make the edit anyway, because without it every
+vagrant command you run yourself on this host fails with the
+`cmd.exe` error above.
+
+Every script bombyx sends begins by unsetting the five vagrant
+variables that redirect a command, this one among them, because
+a value on the VM host would otherwise point a `destroy` at the
+wrong machine. bombyx then writes the
 project's own `provider` back in front of each project
-`vagrant` call, so vagrant is named a provider either way.
+`vagrant` call except the teardown, so vagrant is named a
+provider on all of them but `bombyx destroy`.
 
-`bombyx doctor` is the exception, and it needs none: its only
-vagrant call is `vagrant plugin list`, which ignores
-`VAGRANT_DEFAULT_PROVIDER` -- it prints the same list under
-`hyperv` on Linux and under a provider name that does not
-exist, so it never reaches the usability probe described above.
+**`bombyx destroy` is not covered on this host, and that is a
+known gap.** The teardown is the one project call bombyx sends
+without a provider, because naming one that a host cannot
+supply makes vagrant refuse the destroy, and the directory
+removal runs only after it. On a libvirt host that exemption is
+what keeps a misconfigured project removable, and it was
+measured. Here it works the other way: the `unset` clears the
+`/etc/environment` value and the teardown writes none back, so
+vagrant reaches the Hyper-V usability probe with nothing named,
+and `bombyx destroy` is expected to fail with the `cmd.exe`
+error above -- leaving the project directory and the two files
+bombyx generated, with no bombyx command able to clear them.
 
-The setting is still worth making: it is what makes a vagrant
-command *you* type by hand behave the same as one bombyx
-sends.
+Clean up by hand in this order, and not the other way round.
+The project directory is `<remote_root>/<project>` from your
+`config.toml`, which is `~/vms/<project>` unless you changed
+it:
+
+```bash
+ssh <host> "cd ~/vms/<project> && vagrant destroy -f"
+rm -rf ~/vms/<project>          # only after the destroy
+```
+
+The destroy over `ssh` succeeds where bombyx's fails, and the
+reason is the mechanism this section opened with: sshd applies
+`/etc/environment` through PAM, so that command gets the
+provider bombyx had cleared. Removing the directory first would
+delete the Vagrantfile while the libvirt domain is still
+defined, which leaves a machine running with nothing left to
+point `vagrant` at.
+
+That whole expectation is *(unverified)*. No WSL2 host was
+available, and this is the command that settles it:
+
+```bash
+ssh <host> "cd ~/vms/<project> && unset VAGRANT_DEFAULT_PROVIDER \
+  && vagrant destroy -f"
+```
+
+Run it against a directory holding a Vagrantfile and no created
+machine, which is the state the libvirt measurement used. An
+exit status of 0 means the gap is not real and the exemption is
+safe here too.
+
+`bombyx doctor` is a separate question and carries no provider
+at all. Its only vagrant call is `vagrant plugin list`, which
+printed the same list under `hyperv` on Linux, under a name no
+provider has, and with the variable absent.
+
+Whether that command reaches the usability probe described
+above is *(unverified)*, and this is the gap to know about on a
+WSL2 host. The measurements were taken on a Linux machine with
+a working libvirt, where a probe that did run would have
+succeeded anyway. If `vagrant plugin list` does probe, then
+`bombyx doctor` fails on a WSL2 host that has no PowerShell,
+because bombyx clears the `/etc/environment` value and the
+probe writes none back. The experiment that settles it is
+`ssh <host> "unset VAGRANT_DEFAULT_PROVIDER; vagrant plugin
+list"` on such a host.
 
 Confirm it the way bombyx will see it, not from a login shell:
 

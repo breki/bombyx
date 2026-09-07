@@ -218,7 +218,8 @@ counts it.
 
 Setting `provider = "hyperv"` still does not get you a Hyper-V
 VM on a Linux host, but it now fails rather than substituting.
-bombyx passes the provider to vagrant on every project call, so
+bombyx passes the provider to vagrant on every project call
+but the teardown, so
 `bombyx up` stops with `The Hyper-V provider only works on
 Windows` instead of quietly building a libvirt VM at vagrant's
 default size. `bombyx status` and `bombyx halt` stop the same
@@ -322,9 +323,11 @@ Vagrantfile or a different provider, and a value for any of
 them on the VM host would otherwise decide where bombyx's own
 commands land. Clearing them first is what makes the `cd` on
 each line mean what it says. bombyx writes the project's own
-`VAGRANT_DEFAULT_PROVIDER` back in front of each `vagrant`
-call, which is the assignment you can see further along the
-line.
+`VAGRANT_DEFAULT_PROVIDER` back in front of each `vagrant` call
+but `bombyx destroy`, which is the assignment you can see
+further along the line. The teardown is the exception because
+naming a provider the host cannot supply would have vagrant
+refuse it, and the directory removal runs only afterwards.
 
 The fifth line is the snapshot guard, and it is one command
 rather than two: the host's shell runs the listing, tests it and

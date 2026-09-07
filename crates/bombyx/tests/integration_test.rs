@@ -29,11 +29,13 @@ fn vm_env() -> String {
     format!(r"{VM_HOST_ENV}='vmhost.invalid' {VM_HOSTNAME_ENV}=\$(hostname -s)")
 }
 
-/// The whole prefix on every vagrant call: the identity and
-/// the provider.
+/// The whole prefix on a vagrant call that names a provider:
+/// the identity and the provider.
 ///
-/// Every verb carries it; `remote::PROVIDER_ENV` in the
-/// library says why. `libvirt` is written out here because
+/// Every project verb but the teardown carries it, and
+/// `remote::PROVIDER_ENV` in the library says why. No
+/// assertion below uses this on a `destroy`, which is the one
+/// call that carries the identity alone. `libvirt` is written out here because
 /// [`REQUIRED_TABLES`] writes it into every fixture registry,
 /// and the two have to agree for the assertion to mean
 /// anything.

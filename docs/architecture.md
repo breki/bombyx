@@ -408,14 +408,28 @@ all -- it is the operator seeing a working machine.
 snapshots, so the script tests its output rather than its
 status.
 
-**Every project `vagrant` call carries the same three
-variables.** Two are the `BOMBYX_VM_*` names telling the guest
-which machine it runs on. The third is
-`VAGRANT_DEFAULT_PROVIDER`, which is how bombyx selects a
-provider rather than merely configuring one; it goes on every
-call because the `unset` described above cleared whatever the
-host had. **What config values are checked** below holds the
-argument for the choice.
+**Every project `vagrant` call carries the two `BOMBYX_VM_*`
+names telling the guest which machine it runs on.** Every one
+but the teardown also carries `VAGRANT_DEFAULT_PROVIDER`, which
+is how bombyx selects a provider rather than merely configuring
+one; it goes on more than the boot because the `unset` above
+cleared whatever the host had.
+
+`bombyx destroy` is the exemption, and `remote::is_teardown`
+holds it. Three facts measured on a libvirt host are the
+argument. Vagrant reads an existing machine's recorded provider
+and ignores this variable. With no machine yet, an unusable
+provider makes it refuse `status`, `halt` and `destroy` as
+readily as `up`. And with nothing set at all, a `destroy` in a
+directory holding a Vagrantfile and no machine reports "Domain
+is not created" and exits 0.
+
+So naming a provider on the teardown can only ever refuse it,
+and the directory removal runs after the destroy, which leaves
+a refused teardown with nothing able to clear the directory.
+Omitting it is safe because a refusal implies no machine
+exists. A WSL2 host inverts that, and
+[vm-host-wsl2.md](vm-host-wsl2.md) carries the gap.
 
 Pretty-printed, and with the environment prefix left off each
 `vagrant` call, that script is:
@@ -487,8 +501,10 @@ way, so it carries no guard. It reaches as far as any of them --
 into the generated Vagrantfile, and onto the command line
 bombyx hands to `ssh` or to `sh -c`, where
 `VAGRANT_DEFAULT_PROVIDER` tells vagrant which provider to use
-rather than letting it choose. Every vagrant call carries it,
-and `remote::PROVIDER_ENV` argues why. But `Provider` is a closed
+rather than letting it choose. Every project vagrant call but
+the teardown carries it; the paragraph above holds why, and
+`remote::is_teardown` is the exemption. But `Provider` is a
+closed
 enum, and serde admits only the two words `libvirt` and
 `hyperv` while the file is read, so nothing an operator typed
 reaches the shell or the guest and a guard would have nothing to

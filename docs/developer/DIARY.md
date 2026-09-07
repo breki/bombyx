@@ -2,10 +2,52 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-07
+
+**Twenty findings on the disarm work, and the one that cost the
+most was a decision made on incomplete information**
+
+Three review stages over issue #48. `artisan` found six,
+`red-team` fourteen across two rounds, `fresh-reader` eighteen
+on the prose. Three are worth keeping.
+
+**A question is only as good as the options in it.** I asked
+the operator how to handle the provider once the `unset`
+cleared it, and offered writing the configured value back on
+every vagrant call as the recommendation. I had read
+`PROVIDER_ENV`'s comment, which states plainly that a refused
+`destroy` strands the directory, and I still did not put that
+in the option. `red-team` then found that commit `777fa0e` had
+removed exactly this behaviour the day before, after measuring
+it on frosti. The operator had to decide the same question
+twice. Checking `git log` for the code being changed would have
+cost one command and produced a better first question.
+
+**Both answers to that question were wrong, in opposite
+directions.** Naming the provider on the teardown strands the
+directory on a libvirt host with a misconfigured project;
+omitting it strands the directory on a WSL2 host that needs a
+provider named before vagrant will load anything. The rule had
+moved four times in two days, each move driven by a fact
+measured after the previous one landed, and the fact that
+decides the current shape is on a host nobody here has. So it
+is written down as a gap in `docs/vm-host-wsl2.md`, with the
+recovery steps and the single command that settles it, rather
+than flipped a fifth time on inference.
+
+**I destroyed a real VM to reproduce a finding.** Checking that
+a refused `vagrant destroy` strands its directory needed a
+directory with a Vagrantfile and no machine. I ran it in
+`~/vms/vmtest`, which had a machine, and the destroy worked as
+designed. The scratch copy I should have started with took
+thirty seconds to make. A command whose whole purpose is to
+delete something is not one to point at real state while
+exploring.
+
 ### 2026-09-06
 
 **The VM host's own environment reached vagrant, and closing it
-moved the provider onto every call**
+moved the provider onto every call but the teardown**
 
 bombyx cleared five vagrant variables before running a script,
 but only on the local route. The argument was that sshd builds
@@ -36,6 +78,16 @@ vagrant call rather than accept the loss. So
 the provider belongs on the boot and nowhere else -- is
 reversed. bombyx's own assignment comes after the `unset` and
 wins, so the operator's exported value never decides anything.
+
+**Review then narrowed that by one verb.** Writing the provider
+onto `destroy` brought back a stranded directory that `777fa0e`
+had removed the day before: vagrant refuses a destroy naming a
+provider the host cannot supply, and the removal runs only
+after it. `remote::is_teardown` exempts the teardown now. On a
+WSL2 host the exemption bites the other way and that gap is
+written down rather than fixed --
+`docs/issues/disarm-on-the-ssh-route.md` holds both decisions
+and the command that would settle the second.
 
 **About two dozen tests read a script's exact head.** The plan
 said three. Both test modules grew a helper that strips the

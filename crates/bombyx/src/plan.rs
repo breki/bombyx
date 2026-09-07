@@ -588,8 +588,9 @@ mod tests {
         let writes = pr.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
         // One prefix on both, which
-        // `every_project_vagrant_call_names_the_provider`
-        // states as a rule across every action.
+        // `every_other_project_vagrant_call_names_the_provider`
+        // states as a rule across every action but the
+        // teardown.
         assert_eq!(
             script(&up[writes]),
             format!("cd ~/'vms/myproject' && {} vagrant 'up'", vagrant_env())
@@ -876,16 +877,27 @@ mod tests {
         // provider and ignores this variable. So omitting it
         // here cannot pick the wrong provider for a machine
         // that is really there.
+        //
+        // Counted, not just filtered. A loop that skips every
+        // script it does not recognise asserts nothing at all
+        // once the builder stops emitting the literal it
+        // matches on, and `project_vagrant_scripts` guards
+        // itself the same way for the same reason.
         let want = format!("{}='", remote::PROVIDER_ENV);
+        let mut teardowns = 0;
         for (action, script) in project_vagrant_scripts() {
             if !script.contains("vagrant 'destroy'") {
                 continue;
             }
+            teardowns += 1;
             assert!(
                 !script.contains(&want),
                 "{action:?} names a provider on the teardown: {script}"
             );
         }
+        // `destroy` and `discard`, the two actions that tear a
+        // machine down.
+        assert_eq!(teardowns, 2, "the teardown scripts went missing");
     }
 
     #[test]
@@ -896,16 +908,52 @@ mod tests {
         // the configured one back leaves vagrant choosing for
         // itself -- and on a host whose other provider cannot
         // even answer a probe, that refuses the command.
+        //
+        // Split on the vagrant invocation rather than on the
+        // whole script, because one script can hold two calls
+        // -- `save_snapshot_if_absent` already emits a listing
+        // and a save in one -- and a whole-script skip would
+        // then exempt the call beside a teardown.
         let want = format!("{}='{}'", remote::PROVIDER_ENV, cfg().vm.provider);
+        let mut calls = 0;
         for (action, script) in project_vagrant_scripts() {
-            if script.contains("vagrant 'destroy'") {
-                continue;
+            for call in vagrant_calls(&script) {
+                if call.contains("vagrant 'destroy'") {
+                    continue;
+                }
+                calls += 1;
+                assert!(
+                    call.contains(&want),
+                    "{action:?} runs vagrant without the provider: {call}"
+                );
             }
-            assert!(
-                script.contains(&want),
-                "{action:?} runs vagrant without the provider: {script}"
-            );
         }
+        // Ten calls today, and this is a floor rather than
+        // that number: a new action adding one should not have
+        // to edit this line, while a builder that stops
+        // emitting a call still fails here. The exact figure
+        // is not written into the assertion for the reason
+        // `config-tests-own-file` in `docs/todo.md` gives about
+        // counts in prose.
+        assert!(calls >= 7, "only {calls} vagrant calls seen");
+    }
+
+    /// Each `vagrant` invocation inside one script.
+    ///
+    /// A script can hold more than one: `save_snapshot_if_absent`
+    /// puts a listing and a save in a single `if`. Each slice
+    /// runs from the identity prefix that opens an invocation up
+    /// to the next one, so an assertion about a call reads only
+    /// that call.
+    fn vagrant_calls(script: &str) -> Vec<String> {
+        let opener = format!("{}=", remote::VM_HOST_ENV);
+        let mut starts: Vec<usize> =
+            script.match_indices(&opener).map(|(i, _)| i).collect();
+        starts.push(script.len());
+        starts
+            .windows(2)
+            .map(|w| script[w[0]..w[1]].to_owned())
+            .collect()
     }
 
     #[test]

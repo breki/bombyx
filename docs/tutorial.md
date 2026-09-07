@@ -689,7 +689,8 @@ can redirect a command to a different directory or a different
 provider, and one of them set on your VM host would otherwise
 decide where these commands land. bombyx clears all five, then
 writes the provider your `config.toml` asks for back in front
-of each `vagrant` call.
+of each `vagrant` call. `bombyx destroy` is the one exception,
+and `usage.md` says why.
 
 The two `BOMBYX_VM_*` variables are how the guest learns
 which machine it is running on. The generated Vagrantfile

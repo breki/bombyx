@@ -81,13 +81,23 @@ the `/review2` on the backlog sweep, 2026-09-06.
 how bombyx selects a provider: what rendering a provider block
 does, why the environment variable rather than
 `vagrant up --provider`, three facts measured on frosti, why
-only the boot carries it, what a refused `destroy` strands, and
-the known limit with its backlog ID. Four other places defer to
-it -- `docs/architecture.md`, `plan.rs`'s test, `probe.rs` and
+every project call but the teardown carries it, why the
+teardown is exempt, how a WSL2 host inverts that, and the known
+limit with its backlog ID. Four other places defer to it --
+`docs/architecture.md`, `plan.rs`'s test, `probe.rs` and
 `vagrantfile.rs` -- so the argument is owned by a comment and
 pointed at from a document, which is backwards. `CLAUDE.md`
 under **Code comments** says reasoning belongs in `docs/` and
 that a shared explanation is not owned by a comment.
+
+**Updated 2026-09-07**, during the review on issue #48. The
+inventory above is what the comment holds now; the entry was
+filed when it held "why only the boot carries it" instead. The
+comment grew by two paragraphs in that work, so the case for
+moving it is stronger rather than weaker. `docs/architecture.md`
+now carries the three measurements as well, which is the first
+half of the fix below -- what remains is cutting the constant
+back to the local fact.
 
 The fix is a subsection in `docs/architecture.md` holding the
 mechanism, the measurements and the consequence, with the
