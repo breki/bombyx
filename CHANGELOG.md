@@ -109,6 +109,11 @@ and this project adheres to
   `fresh-install` snapshot still holds it and `bombyx reset` restores it -- see
   `docs/trust-boundary.md` under **What this costs**. The workstation never
   holds it.
+- A project can hand its own variables to its provisioning script, as a
+  `[projects.<name>.env]` table. Names must be spellable as shell variables and
+  must not start with `BOMBYX_`; values carry the same rule as `box`, `repo`,
+  `ref`, `script` and `deploy_key`. Rendered sorted by name, so an unchanged
+  config writes a byte-identical Vagrantfile.
 
 ### Changed
 

@@ -241,6 +241,12 @@ classDiagram
   class HostName {
     +String value
   }
+  class EnvName {
+    +String value
+  }
+  class EnvValue {
+    +String value
+  }
   class Provider {
     <<enumeration>>
     Libvirt
@@ -278,6 +284,10 @@ classDiagram
   Source *-- DeployKeyPath : deploy_key
   Vm *-- BoxName : box
   Config *-- ProjectName : project
+  Config *-- EnvName : env keys
+  Config *-- EnvValue : env values
+  Project *-- EnvName : env keys
+  Project *-- EnvValue : env values
   Registry ..> HostOrigin : ranked to produce one
 ```
 
@@ -543,11 +553,12 @@ So the allowlist is a boundary rather than a typo check. Each
 of those rules is what stops a repo-supplied value reaching
 `ssh` or `rm -rf`, so none of them is there to catch a typo.
 Membership of the guarded set turns on one question: does the
-operator choose the value's text? Six of them reach the
-generated files and so the guest: `box`, `repo`, `ref`,
-`script`, `cpus` and `memory`. The last two are on that list
-although they are not strings, because the operator still
-chooses the number and a floor is what guards them.
+operator choose the value's text? Seven reach the generated
+files and so the guest: `box`, `repo`, `ref`, `script`, `cpus`,
+`memory` and every value in the `[env]` table. `cpus` and
+`memory` are on that list although they are not strings,
+because the operator still chooses the number and a floor is
+what guards them.
 
 `remote_root` reaches `rm -rf` on the VM host. A config out of
 a clone naming `remote_root = "/etc"` gets
@@ -577,8 +588,7 @@ rather than letting it choose. Every project vagrant call but
 the teardown carries it, and **`bombyx up`, end to end** above
 holds why: `remote::is_teardown` is the exemption, argued there
 from three facts measured on a libvirt host. But `Provider` is
-a closed enum, and serde admits only the two words `libvirt`
-and
+a closed enum, and serde admits only the two words `libvirt` and
 `hyperv` while the file is read, so nothing an operator typed
 reaches the shell or the guest and a guard would have nothing to
 check. `remote::vagrant_command` quotes it regardless, so the
@@ -590,15 +600,22 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Eight values are enforced by a newtype of bombyx's own:
+Eight fields are enforced by a newtype of bombyx's own:
 `remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
 `ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `deploy_key`
 a `DeployKeyPath`, `project` a `ProjectName` and `host` a
-`HostName`. Each constructor holds the rules, so an invalid one
-cannot be built -- by a config file or by a library caller. All
-eight but `host` run their constructor as serde deserializes,
-so a bad value is refused before a `Config` exists and the
-error identifies the line.
+`HostName`. An `[env]` entry adds two more, because both halves
+are checked: an `EnvName` keying an `EnvValue`. Each constructor
+holds the rules, so an invalid one cannot be built -- by a
+config file or by a library caller. All of them but `host` run
+their constructor as serde deserializes, so a bad value is
+refused before a `Config` exists and the error identifies the
+line.
+
+`EnvName` is the second newtype in bombyx that arrives as a map
+key rather than as a field, `ProjectName` being the first. That
+is the reason it is a type: nothing calls a checking function
+on a key while serde is building the map.
 
 `deploy_key` is the only optional one. It is an
 `Option<DeployKeyPath>`, so a project cloning a public
@@ -798,10 +815,13 @@ fail at the requirement rather than at compile time.
 
 ### Every field of a Config carries its own rule
 
-`Config` and its two tables hold nine values. Every one of them
-is a type that refuses a bad value as it is built, so a caller
-assigning to a public field of a loaded `Config` gets the same
-check the config file got.
+`Config`, its two tables and its `[env]` map hold every value
+the table below lists, and no number is given here because the
+table is the count. Each one is checked as it is built -- most
+by a newtype that refuses a bad value, `cpus` and `memory` by
+the deserializer named beside them -- so a caller assigning to
+a public field of a loaded `Config` gets the same check the
+config file got.
 
 That matters because `load_project` hands the caller an owned
 `Config` with public fields. `cfg.project = ProjectName::parse(
@@ -819,17 +839,19 @@ because no config can reach it.
 
 | Field | Refused | Because |
 |-------|---------|---------|
-| `box` `repo` `ref` `script` `deploy_key` | empty or blank | no meaning when blank |
-| `box` `repo` `ref` `script` `deploy_key` | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
-| `box` `repo` `ref` `script` `deploy_key` | control characters | end the line in a Ruby file |
-| `box` `repo` `ref` `script` `deploy_key` | `"` or `\` | end or escape the Ruby literal |
-| `box` `repo` `ref` `script` `deploy_key` | `#{` | Ruby interpolation is evaluated |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | empty or blank | no meaning when blank |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | leading or trailing whitespace | almost always a copy-paste artifact, and it fails far from here — a trailing space on `repo` comes back from the guest as `repository '...' does not exist` |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | control characters | end the line in a Ruby file |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | `"` or `\` | end or escape the Ruby literal |
+| `box` `repo` `ref` `script` `deploy_key` `[env]` values | `#{` | Ruby interpolation is evaluated |
 | `repo` `ref` `script` | leading `-` | `git` would treat it as an option |
 | `host` `project` `remote_root` | leading `-` | the program each one reaches would read it as an option |
 | `repo` | anything but an `https` `http` `ssh` `git` URL, or `user@host:path` | `ext::` and the other remote helpers run a command instead of cloning |
 | `script` | leading `/`, a `..` segment | root makes it executable, and it is then run inside the clone |
 | `deploy_key` | anything but a `/` or `~/` anchor | `vagrant` runs in the project's directory on the VM host, so a relative path would look for the key under a directory bombyx creates, writes and deletes |
 | `deploy_key` | a `.` or `..` segment, `//`, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
+| `[env]` names | anything but a leading letter or `_` followed by letters, digits and `_` | the guest exports each one as a shell variable, and `9LIVES=1` is a syntax error while `WITH-DASH=1` is read as a command to run |
+| `[env]` names | a leading `BOMBYX_` | the generated Vagrantfile writes bombyx's own variables and the project's into one Ruby hash literal, and a repeated key there takes its last value, so a project could otherwise choose which script bombyx runs |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
 
 The dash rule is the one row where what it buys differs by

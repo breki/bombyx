@@ -4,6 +4,87 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**A project can hand its own variables to its provisioning
+script**
+
+`[projects.<name>.env]`, one table holding both a project
+constant and a per-developer value. Splitting the two was
+considered and dropped: the registry is already one file per
+operator and is never committed, so a personal value has
+nowhere better to be, and nothing in bombyx acts on the
+distinction. Issue #54.
+
+Two newtypes, `EnvName` and `EnvValue` in `config/env.rs`.
+`EnvName` is the second one in bombyx that arrives as a map key
+rather than as a field, after `ProjectName`, and that is the
+reason it is a type at all -- nothing calls a checking function
+on a key while serde is building the map.
+
+The name rule is that the guest exports it as a shell variable,
+so `9LIVES=1` is a syntax error and `WITH-DASH=1` is read as a
+command to run. The interesting one is the other half: a name
+starting with `BOMBYX_` is refused. The generated Vagrantfile
+writes bombyx's own variables and the project's into one Ruby
+hash literal, and a repeated key in a Ruby hash takes its last
+value, so without that rule a project writing `BOMBYX_SCRIPT`
+would decide which script bombyx runs. The value rule is
+`check_renderable` unchanged, the one `box`, `repo`, `ref`,
+`script` and `deploy_key` already carry.
+
+The map is a `BTreeMap`, so the rendering is sorted by name and
+a re-run against an unchanged config writes a byte-identical
+Vagrantfile.
+
+The script's *behaviour* needed no change, and finding that out
+was the part worth doing before writing any code. `runuser -u
+NAME --` passes the environment through, which the file already
+said it does for the `BOMBYX_*` variables; the project's own
+reach its script by the same mechanism. What did change in
+`bootstrap.sh` is its closing comment, which now names the
+`[env]` table as arriving that way.
+
+`/review2` found 35 things across the three stages, and the
+two that mattered most were the same mistake twice. `artisan`
+saw that the `BOMBYX_` reservation protects a prefix while the
+six names bombyx actually sets are spelled in three other
+modules, with nothing asserting they carry it -- the
+**Guarding one field? Check its siblings** rule, applied to a
+guard written that same afternoon. `red-team` then found the
+sibling of *that*: the shell provisioner is privileged, so an
+`[env]` value is in root's environment for the whole of
+`bootstrap.sh`, where `PATH` decides which `git` root runs. One
+guard, two primitives, and the second one had to be found by
+somebody else.
+
+That second finding is not fixed here. It is issue #64, which
+deletes it by dropping root from `bootstrap.sh` altogether --
+and the discussion that got there is worth more than the fix
+would have been. Root is in that file for three `rm -f
+/root/.ssh/...` lines cleaning up after a bombyx nobody runs
+any more. Everything else is already `runuser`. And a project
+needing root already has it: jutro's own unprivileged script
+calls `sudo` 26 times, `apt-get install` among them. So bombyx
+never needs to learn a package manager, and the trap has
+nowhere to spring.
+
+Two smaller lessons. A test asserting one entry at a time
+cannot see the comma between them: delete the separator and
+every needle still matches while the Ruby stops parsing. The
+fix is one literal covering the whole tail, and real `vagrant
+validate` now runs against a populated hash rather than an
+empty one. And seven separate enumerations of the newtype set
+were stale -- "Seven are newtypes", "all nine", "the four
+newtypes" -- each written as complete. A list that is complete
+except for the newest member is worse than no list, because the
+omission reads as deliberate.
+
+Verified against a real VM rather than a dry run: the
+jutro-rebuild guest on frosti provisioned with `NODE_MAJOR`,
+`GIT_USER_NAME` and `GIT_USER_EMAIL`, and the warning it had
+been printing about a missing git identity became a configured
+one. The `ssh` route is still unexercised -- frosti is this
+machine, so bombyx took the local `sh -c` route.
+
 **Forty-three review findings on the clone-in-home work, and I
 made the same mistake three times**
 

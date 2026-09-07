@@ -3,8 +3,10 @@
 //!
 //! A rule that several fields share lives here once, so widening
 //! it reaches all of them at the same time. Five fields use the
-//! leading-dash rule, five use the Ruby-literal rule, and both
-//! the blank check and the character check have several callers.
+//! leading-dash rule. Six fields carry the Ruby-literal rule,
+//! and `[env]` is one of them -- every entry's value goes
+//! through it, so one field there is many values. Both the
+//! blank check and the character check have several callers.
 //!
 //! Everything here returns [`FieldError`], not `ConfigError`.
 //! These functions check a value and nothing else. The caller
@@ -98,9 +100,10 @@ pub(super) fn check_charset(
 /// writes, or arrive somewhere with whitespace nobody meant.
 ///
 /// bombyx generates a Vagrantfile, which is a Ruby file, and
-/// five config values get written into it inside double quotes:
-/// `box`, `repo`, `ref`, `script` and `deploy_key`. Something
-/// like `box = "generic/ubuntu2204"` in the config becomes
+/// config values get written into it inside double quotes:
+/// `box`, `repo`, `ref`, `script`, `deploy_key`, and every
+/// value in the `[env]` table. Something like
+/// `box = "generic/ubuntu2204"` in the config becomes
 /// `config.vm.box = "generic/ubuntu2204"` in the Ruby.
 ///
 /// Four kinds of character break that. All four are refused,
@@ -118,7 +121,7 @@ pub(super) fn check_charset(
 ///
 /// Two more refusals are about the value being wrong rather
 /// than the Ruby being wrong, and they come first. A blank
-/// value means nothing for any of these five fields. And
+/// value means nothing for any of these fields. And
 /// leading or trailing whitespace is almost always a
 /// copy-paste artifact, which fails obscurely and far from
 /// here -- a trailing space on `repo` comes back from the guest
@@ -183,14 +186,14 @@ pub(super) fn check_renderable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BoxName, GitRef, RepoUrl, ScriptPath};
+    use crate::config::{BoxName, EnvValue, GitRef, RepoUrl, ScriptPath};
 
     /// Builds one of the checked newtypes from a string and
     /// throws the value away, so a rule several of them share
     /// can be tested against every one of them.
     type Build = fn(&str) -> Result<(), FieldError>;
 
-    /// The four newtypes whose rules are [`check_renderable`]
+    /// The five newtypes whose rules are [`check_renderable`]
     /// and, for three of them, [`check_not_an_option`].
     ///
     /// Each row is a field name, its constructor, a value that
@@ -198,17 +201,18 @@ mod tests {
     /// command line. The accepted value is written in the row
     /// rather than worked out from the field name, so a test
     /// needing one reads it here. The last column decides which
-    /// rows [`check_not_an_option`] applies to: `box` is
-    /// resolved by vagrant and never becomes an argument bombyx
-    /// composes, so it is the one row that does not carry that
-    /// rule.
+    /// rows [`check_not_an_option`] applies to. Two rows do not
+    /// carry it: `box` is resolved by vagrant and never becomes
+    /// an argument bombyx composes, and an `[env]` value
+    /// becomes the right-hand side of a shell assignment, where
+    /// a leading `-` is an ordinary character.
     ///
     /// The table lives here rather than beside any one type,
     /// because the rules live here. So a new field sharing that
     /// rule set is one more row, wherever the type itself
     /// lives.
     ///
-    /// **Three other newtypes use rules from this module and
+    /// **Four other newtypes use rules from this module and
     /// are deliberately not rows.** `RemoteRoot` and `HostName`
     /// are built on `check_not_empty`, `check_not_an_option`
     /// and `check_charset`, never on `check_renderable`, and
@@ -229,7 +233,7 @@ mod tests {
     ///
     /// The closures capture nothing, so they become plain
     /// function pointers and the array has one type.
-    fn renderable_newtypes() -> [(&'static str, Build, &'static str, bool); 4] {
+    fn renderable_newtypes() -> [(&'static str, Build, &'static str, bool); 5] {
         [
             (
                 "repo",
@@ -250,6 +254,7 @@ mod tests {
                 "generic/ubuntu2204",
                 false,
             ),
+            ("env", |s| EnvValue::parse(s).map(|_| ()), "22", false),
         ]
     }
 

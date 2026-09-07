@@ -845,7 +845,26 @@ fn cli_help_flag() {
 #[ignore = "needs vagrant and a provider plugin installed"]
 fn the_generated_vagrantfile_is_one_vagrant_accepts() {
     let dir = TempDir::new().unwrap();
-    let cfg = load_cfg(dir.path());
+    // An `[env]` table, rather than `load_cfg`'s plain entry,
+    // because the project's variables are the tail of the
+    // provisioner's hash and the comma separating them is what
+    // keeps that hash parseable. Every unit test around the
+    // renderer asserts bombyx produced the text it meant to;
+    // this is the only one that asks Ruby whether the text
+    // parses, so it is the only one a missing comma reaches.
+    let path = dir.path().join(USER_CONFIG_FILE);
+    std::fs::write(
+        &path,
+        format!(
+            "{}\n[projects.myproject.env]\n\
+             NODE_MAJOR = \"22\"\n\
+             GIT_USER_NAME = \"A Name\"\n",
+            registry("host = \"vmhost.invalid\"\n", "")
+        ),
+    )
+    .unwrap();
+    let (cfg, _) =
+        bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
     std::fs::write(
         dir.path().join(bombyx::vagrantfile::VAGRANTFILE_NAME),
         bombyx::vagrantfile::render(&cfg),

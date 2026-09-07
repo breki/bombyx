@@ -21,9 +21,11 @@
 //! operator is editing.
 //!
 //! **Every field is checked by its *type*, so none can be built
-//! wrong at all.** Seven are newtypes of bombyx's own:
-//! `remote_root`, `host`, `repo`, `script`, `box`, `ref` and
-//! `project`. See [`RepoUrl`] for how the pattern works.
+//! wrong at all.** Eight fields are newtypes of bombyx's own --
+//! `remote_root`, `host`, `repo`, `script`, `box`, `ref`,
+//! `deploy_key` and `project` -- and an `[env]` entry is two
+//! more, an [`EnvName`] keying an [`EnvValue`]. See [`RepoUrl`]
+//! for how the pattern works.
 //!
 //! `cpus` and `memory` are `std::num::NonZeroU32`, which is the
 //! whole rule either has. That standard type follows none of
@@ -60,6 +62,10 @@
 //!   error is summarised.
 //! - `registry` -- the operator's own `config.toml`: the VM
 //!   host, and a table per project.
+//! - `deploy_key` -- every rule the path to a private key on
+//!   the VM host must pass.
+//! - `env` -- the `[env]` table: a project's own variables, and
+//!   the two types holding a name and a value.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
@@ -73,11 +79,13 @@
 //! A new field rule belongs in the module that owns the field.
 //! Put it in `guards` only once a second field needs it.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::name::{ScratchName, check_segment};
 
 mod deploy_key;
+mod env;
 mod error;
 mod guards;
 mod host;
@@ -195,6 +203,9 @@ fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
 
 pub use crate::name::ProjectName;
 pub use deploy_key::DeployKeyPath;
+#[cfg(test)]
+pub(crate) use env::RESERVED_PREFIX;
+pub use env::{EnvName, EnvValue};
 pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -281,6 +292,13 @@ pub struct Config {
 
     /// Where the guest clones the project from.
     pub source: Source,
+
+    /// Variables the project's own provisioning script reads,
+    /// keyed by name and ordered by it.
+    ///
+    /// Rendered into the Vagrantfile beside bombyx's own
+    /// variables. Empty when the project's table names none.
+    pub env: BTreeMap<EnvName, EnvValue>,
 
     /// Whether bombyx reaches `host` over `ssh` or runs the
     /// script here.
@@ -775,11 +793,11 @@ mod tests {
 
     #[test]
     fn a_directory_named_as_the_registry_is_not_a_file() {
-        // Was a `Read` error carrying whatever the OS said,
-        // which differs per platform ("Is a directory" on Unix,
-        // "Access is denied" on Windows) and explains nothing.
-        // The type check answers this case first and says what
-        // is actually wrong.
+        // The type check answers this case before the read is
+        // attempted, because the OS message differs per
+        // platform -- "Is a directory" on Unix, "Access is
+        // denied" on Windows -- and neither says what is
+        // actually wrong.
         let dir = tempfile::tempdir().unwrap();
         let err =
             Config::load_project("myproject", Some(dir.path())).unwrap_err();
@@ -938,6 +956,77 @@ mod tests {
         );
         assert_eq!(cfg.source.git_ref.as_str(), "main");
         assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
+    }
+
+    #[test]
+    fn reads_the_env_table() {
+        let source = format!(
+            "{}\n[projects.myproject.env]\n\
+             NODE_MAJOR = \"22\"\n\
+             GIT_USER_NAME = \"Igor Brejc (agent VM)\"\n",
+            full_registry()
+        );
+        let cfg = parse_whole(&source).unwrap();
+        let got: Vec<_> = cfg
+            .env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("GIT_USER_NAME", "Igor Brejc (agent VM)"),
+                ("NODE_MAJOR", "22"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_project_without_an_env_table_carries_no_variables() {
+        // The table is optional, so its absence must load
+        // rather than being reported as a missing key.
+        let cfg = parse_whole(&full_registry()).unwrap();
+        assert!(cfg.env.is_empty());
+    }
+
+    #[test]
+    fn refuses_a_bad_env_entry_while_reading_the_config() {
+        // Both halves of the table are checked, and both are
+        // checked here rather than on the way to the guest.
+        for (entry, reason) in [
+            ("WITH-DASH = \"1\"", "is not allowed"),
+            ("9LIVES = \"1\"", "must start with a letter"),
+            ("BOMBYX_SCRIPT = \"/bin/sh\"", "keeps for its own"),
+            (
+                "GOOD = \"has a \\\" quote\"",
+                "would end or escape the string",
+            ),
+            ("GOOD = \"a #{1 + 1} sum\"", "Ruby interpolation"),
+            ("GOOD = \"\"", "must not be empty"),
+        ] {
+            let source = format!(
+                "{}\n[projects.myproject.env]\n{entry}\n",
+                full_registry()
+            );
+            let err = parse_whole(&source)
+                .err()
+                .unwrap_or_else(|| panic!("should have refused {entry}"))
+                .to_string();
+            assert!(
+                err.contains(reason),
+                "{entry} should have been refused with {reason:?}, \
+                 got {err}"
+            );
+            // One `env` label covers both halves of the table,
+            // so the field name alone cannot say which entry is
+            // wrong. What names it is the position the TOML
+            // parser reports, and that is a claim about serde
+            // worth asserting rather than assuming -- for a bad
+            // value as much as for a bad name, since a value
+            // error quotes back neither the key nor the value.
+            assert!(err.contains("line "), "no line in {err}");
+            assert!(err.contains("column "), "no column in {err}");
+        }
     }
 
     #[test]
