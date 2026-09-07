@@ -262,7 +262,7 @@ plan, decisions, and outcome.
   that sshd builds the far side's environment and bombyx's own is not in it.
   True and incomplete: the threat is an exported variable, and the VM host has
   its own sources for one. pam_env applies /etc/environment to a non-interactive
-  `ssh host "cmd"`, a zsh login shell reads ~/.zshenv for `zsh -c`, and a bash
+  `ssh host "cmd"`, zsh sources ~/.zshenv on every invocation, and a bash
   export placed above the usual non-interactive return guard in ~/.bashrc
   survives. So VAGRANT_CWD or VAGRANT_VAGRANTFILE on the VM host makes `bombyx
   destroy` test one project's directory and destroy another machine, and
@@ -278,8 +278,9 @@ plan, decisions, and outcome.
 
 - **provider-change-on-existing-vm** -- a provider edit needs a destroy first
   Found by red-team in round 3 of the review on issue #45. bombyx sets
-  VAGRANT_DEFAULT_PROVIDER on `vagrant up`, which makes vagrant refuse rather
-  than substitute -- but only for a machine that does not exist yet. Measured on
+  VAGRANT_DEFAULT_PROVIDER on every project call but the teardown, which makes
+  vagrant refuse rather than substitute -- but only for a machine that does not
+  exist yet. Measured on
   frosti: with a machine already created, vagrant reads the provider it recorded
   and ignores the variable, so `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status`
   on a running libvirt machine exits 0 and reports libvirt. So an operator who

@@ -103,24 +103,40 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// because the two spell the same choice and only `up` accepts
 /// the argument.
 ///
-/// **It goes on the boot and nowhere else.** Two measured facts
-/// about vagrant, both checked on a libvirt host: with a
-/// machine already created vagrant reads the provider it
-/// recorded and ignores this variable, and with no machine yet
-/// an unusable provider makes it refuse `status`, `halt` and
-/// `destroy` as readily as `up`.
+/// **Every project vagrant call carries it except the
+/// teardown.** `DISARM_VAGRANT_REDIRECTS` clears the
+/// operator's own exported value in front of every script, so
+/// a verb that did not write the configured one back would
+/// leave vagrant choosing for itself. On a host where the
+/// other provider cannot even answer a usability probe -- a
+/// WSL2 distribution with no PowerShell for the Hyper-V
+/// provider to call -- vagrant then refuses the command.
+/// `docs/vm-host-wsl2.md` describes that host. Not a doc link:
+/// the constant is private, and rustdoc rejects a public page
+/// pointing at a private item.
 ///
-/// So on any verb but the boot the variable can never change
-/// which provider vagrant uses. The one thing it can do there
-/// is make the command fail, and on `destroy` that leaves the
-/// directory behind: `execute` stops at the first failing step,
-/// so the removal after it never runs.
+/// **`is_teardown` holds the exception**, and three facts
+/// measured on a libvirt host are why. With a machine already
+/// created, vagrant reads the provider it recorded and ignores
+/// this variable. With no machine yet, an unusable provider
+/// makes it refuse `status`, `halt` and `destroy` as readily
+/// as `up`. And with nothing set at all, `destroy` in a
+/// directory holding a Vagrantfile and no machine reports
+/// "Domain is not created" and exits 0.
 ///
-/// `creates_a_machine` holds the rule, and
-/// `DISARM_VAGRANT_REDIRECTS` is what keeps an operator's own
-/// exported value from arriving instead.
+/// Put together: naming a provider on `destroy` can only ever
+/// refuse it, and `execute` stops at the first failing step,
+/// so the directory removal behind it never runs. Omitting it
+/// is safe because a refusal implies no machine exists, and a
+/// machine that exists carries its own recorded provider.
 ///
-/// The first of those facts is also a limit worth knowing:
+/// **A WSL2 host inverts that, and the gap is carried rather
+/// than closed.** There vagrant needs a provider named before
+/// it will load a project at all, so the teardown that names
+/// none is the one refused. `docs/vm-host-wsl2.md` holds the
+/// gap, the recovery and the command that would settle it.
+///
+/// The first measured fact is also a limit worth knowing:
 /// editing `provider` and re-running `up` on a project that
 /// already has a VM keeps the old one, silently.
 /// `provider-change-on-existing-vm` in `docs/todo.md` holds
@@ -159,8 +175,8 @@ fn vm_host_env(cfg: &Config) -> String {
     )
 }
 
-/// Builds the `vagrant` command itself: the identity prefix, the
-/// program, and its quoted arguments.
+/// Builds the `vagrant` command itself: the identity and
+/// provider prefix, the program, and its quoted arguments.
 ///
 /// Split out from [`vagrant_script`] so every shape bombyx emits
 /// carries the same prefix. [`vagrant_script`] puts the command
@@ -170,11 +186,11 @@ fn vm_host_env(cfg: &Config) -> String {
 /// `if [ -f Vagrantfile ]` guard, and `save_snapshot_if_absent`
 /// puts `snapshot list` and `snapshot save` inside one `if`. A
 /// builder assembling its own string would run `vagrant` with
-/// neither variable set.
+/// none of the three variables set.
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
+    use std::fmt::Write as _;
     let mut cmd = vm_host_env(cfg);
-    if creates_a_machine(args) {
-        use std::fmt::Write as _;
+    if !is_teardown(args) {
         // `Provider` renders one of two fixed lowercase words,
         // so there is no operator input here for a quote to
         // protect. It is quoted anyway, so the assignment
@@ -193,16 +209,17 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
     cmd
 }
 
-/// Whether `args` names the one vagrant verb that can create a
+/// Whether `args` names the vagrant verb that removes a
 /// machine.
 ///
 /// Read from the verb rather than passed in by the caller. The
 /// callers hand `vagrant` its arguments, so a rule derived from
 /// those arguments cannot disagree with the command that gets
-/// run, while a separate flag could be set wrongly on a new call
-/// site. [`PROVIDER_ENV`] holds why only creation is asked.
-fn creates_a_machine(args: &[&str]) -> bool {
-    args.first() == Some(&"up")
+/// run, while a separate flag could be set wrongly on a new
+/// call site. [`PROVIDER_ENV`] holds why the teardown is the
+/// one verb that names no provider.
+fn is_teardown(args: &[&str]) -> bool {
+    args.first() == Some(&"destroy")
 }
 
 /// Builds the remote script that enters `dir` and runs
@@ -303,7 +320,8 @@ impl Tty {
     }
 }
 
-/// Cleared from the environment before a script runs here.
+/// Cleared from the environment before a script runs, on
+/// either route.
 ///
 /// The rule the list must satisfy: **every vagrant variable that
 /// decides which directory, which machine or which provider a
@@ -321,32 +339,91 @@ impl Tty {
 ///
 /// Two redirect the provider. [`PROVIDER_ENV`] names one
 /// outright, and `VAGRANT_PREFERRED_PROVIDERS` ranks the usable
-/// ones when [`PROVIDER_ENV`] is unset -- which is the state
-/// bombyx leaves on every verb but the boot. bombyx sets the
-/// provider on the boot and depends on its absence elsewhere:
-/// an operator with [`PROVIDER_ENV`] exported to a provider this
-/// host cannot supply gets a refused `vagrant destroy`, and
-/// since `execute` stops at the first failing step, the
-/// directory removal behind it never runs. Measured on a libvirt
-/// host with `hyperv` exported.
+/// ones when [`PROVIDER_ENV`] is unset. An operator with
+/// [`PROVIDER_ENV`] exported to a provider this host cannot
+/// supply gets a refused `vagrant destroy`, and since `execute`
+/// stops at the first failing step, the directory removal
+/// behind it never runs. Measured on a libvirt host with
+/// `hyperv` exported.
 ///
-/// The boot is unaffected, because the assignment bombyx writes
-/// comes after this `unset` and wins.
+/// bombyx writes its own [`PROVIDER_ENV`] back in front of
+/// every project vagrant call but the teardown. That
+/// assignment comes after this `unset` and wins, so clearing
+/// the pair costs those calls nothing.
 ///
-/// **This protects the local route only, and the `ssh` route has
-/// the same exposure by a different door.** bombyx's own
-/// environment does not cross `ssh`, but the VM host builds one
-/// of its own -- `pam_env` reads `/etc/environment` for a
-/// non-interactive command, and a `zsh` login shell reads
-/// `~/.zshenv`. Closing that is `disarm-on-the-ssh-route` in
-/// `docs/todo.md`; it reverses a decision recorded in
-/// `the_ssh_route_disarms_nothing`, so it is not made here.
+/// It is not free for the teardown, which writes nothing back.
+/// [`PROVIDER_ENV`] holds why that is the right trade on a
+/// libvirt host and a known gap on a WSL2 one.
 ///
-/// Ends in `; ` so it prefixes any script, `cat` heredoc
-/// included.
+/// **Both routes need it, for different reasons.** `sh -c` is a
+/// child of bombyx and inherits everything the operator
+/// exported. bombyx's own environment does not cross `ssh`, but
+/// the VM host builds one of its own. Three sources reach the
+/// command sshd runs: `pam_env` applies `/etc/environment`,
+/// `zsh` sources `~/.zshenv` on every invocation and so on
+/// `zsh -c` too, and a `bash` export placed above the
+/// non-interactive return guard in `~/.bashrc` survives.
+///
+/// The `ssh` command is neither interactive nor a login shell,
+/// which is why the list names those three and not `~/.profile`.
+/// The `zsh` and `bash` halves are read from those shells'
+/// documented startup order rather than measured
+/// *(unverified)*.
+///
+/// **Ends in `; ` rather than a newline or `&&`.** A `cat`
+/// heredoc is why. The shell reads the body of
+///
+/// ```text
+/// unset ...; cat > f <<'EOF'
+/// first line of the file
+/// EOF
+/// ```
+///
+/// starting on the line after the redirection, so a prefix
+/// ending in a newline would put the `cat` on its own line and
+/// hand the file's first line to the shell instead. `&&` would
+/// work but ties the script to the `unset` succeeding, and a
+/// separator that can fail is one the script does not need.
 const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
      VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH \
      VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; ";
+
+/// The script `c` carries, without the prefix every route puts
+/// in front of it.
+///
+/// One accessor rather than a strip in each test module, so the
+/// two cannot disagree on how strict the strip is. It panics on
+/// a command without the prefix, which is the assertion:
+/// `every_route_disarms_the_vagrant_redirects` and
+/// `every_probe_disarms_the_vagrant_redirects_on_both_routes`
+/// state the rule, and this is what every other test relies on
+/// having held.
+#[cfg(test)]
+pub(crate) fn script_without_disarm(c: &RemoteCommand) -> String {
+    c.args
+        .last()
+        .expect("a remote command")
+        .strip_prefix(DISARM_VAGRANT_REDIRECTS)
+        .expect("every script carries the disarming prefix")
+        .to_owned()
+}
+
+/// `c` as [`Display`](std::fmt::Display) renders it, with the
+/// same prefix removed.
+///
+/// The whole command rather than the script alone, for a test
+/// asserting on the line `--dry-run` prints. It panics on a
+/// command without the prefix, for the reason
+/// [`script_without_disarm`] gives.
+#[cfg(test)]
+pub(crate) fn rendered_without_disarm(c: &RemoteCommand) -> String {
+    let shown = c.to_string();
+    assert!(
+        shown.contains(DISARM_VAGRANT_REDIRECTS),
+        "every command carries the disarming prefix: {shown}"
+    );
+    shown.replacen(DISARM_VAGRANT_REDIRECTS, "", 1)
+}
 
 /// Wraps `script` in the command that runs it on the VM host.
 ///
@@ -361,12 +438,15 @@ const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
 /// `ssh` would have started on the host, so `script` is handed
 /// over untouched -- and `tty` has nothing to ask for, because
 /// the shell inherits whatever stdio bombyx itself was given.
+///
+/// [`DISARM_VAGRANT_REDIRECTS`] goes in front of the script on
+/// every route, because the shell running it can carry an
+/// exported vagrant variable on either one.
 fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
+    let disarmed = format!("{DISARM_VAGRANT_REDIRECTS}{script}");
+    let script = disarmed.as_str();
     match (cfg.transport(), tty) {
-        (Transport::Local, _) => RemoteCommand::new(
-            "sh",
-            &["-c", &format!("{DISARM_VAGRANT_REDIRECTS}{script}")],
-        ),
+        (Transport::Local, _) => RemoteCommand::new("sh", &["-c", script]),
         (Transport::Ssh, Tty::Allocate) => RemoteCommand::new(
             "ssh",
             &["-t", "-o", "LogLevel=ERROR", cfg.host.as_str(), script],
@@ -601,9 +681,21 @@ mod tests {
             .collect()
     }
 
-    /// The remote script, whatever precedes it.
-    fn remote_script(c: &RemoteCommand) -> String {
+    /// The remote script as built, whatever precedes it.
+    fn raw_script(c: &RemoteCommand) -> String {
         c.args.last().expect("a remote command").clone()
+    }
+
+    /// The remote script without the `unset` every route
+    /// carries.
+    ///
+    /// Every test below asks about the part of the script the
+    /// builder wrote, so stripping here keeps the prefix out of
+    /// two dozen expected strings.
+    /// `every_route_disarms_the_vagrant_redirects` is the one
+    /// test that reads the prefix, and it uses `raw_script`.
+    fn remote_script(c: &RemoteCommand) -> String {
+        script_without_disarm(c)
     }
 
     fn local_cfg() -> Config {
@@ -616,10 +708,8 @@ mod tests {
         // the heredoc delimiter and the `$(hostname -s)` the far
         // side must evaluate. `sh -c` is the same POSIX shell
         // `ssh` starts on the host, so every builder keeps one
-        // script. Only two things differ on this route: the two
-        // words in front of it, and the `unset` prefix that
-        // `the_local_route_disarms_the_vagrant_redirects`
-        // covers. Strip that prefix and the rest must be equal
+        // script. The only difference on this route is the two
+        // words in front of it, so the scripts must be equal
         // character for character.
         /// One builder, named for the error message.
         type Builder = (&'static str, fn(&Config) -> RemoteCommand);
@@ -645,55 +735,63 @@ mod tests {
             assert_eq!(here.program, "sh", "{name}");
             assert_eq!(here.args.len(), 2, "{name}: {:?}", here.args);
             assert_eq!(here.args[0], "-c", "{name}");
-            let bare = remote_script(&here)
-                .strip_prefix(DISARM_VAGRANT_REDIRECTS)
-                .expect("the local script carries the prefix")
-                .to_owned();
-            assert_eq!(bare, remote_script(&over_ssh), "{name}");
+            assert_eq!(
+                remote_script(&here),
+                remote_script(&over_ssh),
+                "{name}"
+            );
         }
     }
 
     #[test]
-    fn the_local_route_disarms_the_vagrant_redirects() {
-        // Over `ssh`, sshd builds the far side's environment
-        // and bombyx's own is not in it. `sh -c` is a child of
-        // bombyx, so it inherits everything the operator
-        // exported -- and three vagrant variables override the
-        // directory the script just `cd`'d into. `destroy`
-        // would then test `[ -f Vagrantfile ]` in one project
-        // and destroy the machine defined in another.
-        for c in [
-            vagrant(&local_cfg(), &["status"], Tty::NoPty),
-            destroy_vm_if_present(&local_cfg(), "~/vms/p", Tty::NoPty),
-            save_snapshot(&local_cfg(), "~/vms/p", Tty::NoPty),
-            save_snapshot_if_absent(&local_cfg(), "~/vms/p", Tty::NoPty),
-            ensure_dir(&local_cfg(), "~/vms"),
-            write_file(&local_cfg(), "~/vms", "Vagrantfile", "x\n"),
-        ] {
-            let script = remote_script(&c);
-            for var in [
-                "VAGRANT_CWD",
-                "VAGRANT_VAGRANTFILE",
-                "VAGRANT_DOTFILE_PATH",
-                PROVIDER_ENV,
-                "VAGRANT_PREFERRED_PROVIDERS",
+    fn every_route_disarms_the_vagrant_redirects() {
+        // Both routes hand the script a shell that may already
+        // carry the operator's exported variables. `sh -c` is a
+        // child of bombyx and inherits its whole environment.
+        // Over `ssh` bombyx's own environment stays behind, but
+        // the VM host builds one of its own: `pam_env` applies
+        // `/etc/environment` to a non-interactive command, and
+        // `zsh` sources `~/.zshenv` on every invocation, and
+        // a `bash` export above the non-interactive return
+        // guard in `~/.bashrc` survives. Either way
+        // three vagrant variables override the directory the
+        // script just `cd`'d into, so `destroy` would test
+        // `[ -f Vagrantfile ]` in one project and destroy the
+        // machine defined in another.
+        for route in [cfg(), local_cfg()] {
+            for c in [
+                vagrant(&route, &["status"], Tty::NoPty),
+                destroy_vm_if_present(&route, "~/vms/p", Tty::NoPty),
+                save_snapshot(&route, "~/vms/p", Tty::NoPty),
+                save_snapshot_if_absent(&route, "~/vms/p", Tty::NoPty),
+                ensure_dir(&route, "~/vms"),
+                write_file(&route, "~/vms", "Vagrantfile", "x\n"),
             ] {
-                assert!(
-                    script.starts_with("unset ") && script.contains(var),
-                    "{var} not disarmed: {script}"
-                );
+                // The prefix alone, not the whole script.
+                // `vagrant_command` writes `PROVIDER_ENV` into
+                // the same string, so a search over everything
+                // would find that assignment and report the
+                // variable disarmed with the `unset` gone.
+                let raw = raw_script(&c);
+                let prefix = raw
+                    .split_once("; ")
+                    .expect("the script carries the unset prefix")
+                    .0;
+                assert!(prefix.starts_with("unset "), "{raw}");
+                for var in [
+                    "VAGRANT_CWD",
+                    "VAGRANT_VAGRANTFILE",
+                    "VAGRANT_DOTFILE_PATH",
+                    PROVIDER_ENV,
+                    "VAGRANT_PREFERRED_PROVIDERS",
+                ] {
+                    assert!(
+                        prefix.contains(var),
+                        "{var} not disarmed: {prefix}"
+                    );
+                }
             }
         }
-    }
-
-    #[test]
-    fn the_ssh_route_disarms_nothing() {
-        // sshd already gives the far side a fresh environment,
-        // and an `unset` there would be noise in every dry run.
-        assert!(
-            !remote_script(&vagrant(&cfg(), &["status"], Tty::NoPty))
-                .contains("unset")
-        );
     }
 
     #[test]
@@ -793,7 +891,7 @@ mod tests {
     /// The identity prefix every vagrant script carries.
     ///
     /// `vagrant_carries_the_vm_host_identity` spells it out in
-    /// full. Everything else references this or [`boot_env`],
+    /// full. Everything else references this or [`vagrant_env`],
     /// because their subject is the directory and the arguments;
     /// repeating the prefix in each of them would push every
     /// assertion past the line limit and give it several places
@@ -808,18 +906,21 @@ mod tests {
         format!("{VM_HOST_ENV}='vmhost' {VM_HOSTNAME_ENV}=$(hostname -s)")
     }
 
-    /// The prefix on the one verb that creates a machine.
+    /// The whole prefix on every vagrant call: the identity and
+    /// the provider.
     ///
-    /// Every other verb carries [`vm_env`] alone, and
-    /// `only_the_calls_that_create_a_machine_name_the_provider`
-    /// in `plan` is what holds that apart across the actions.
+    /// [`vm_env`] is the identity half alone, which is what the
+    /// assertions about the guest's two names use.
+    /// `every_other_project_vagrant_call_names_the_provider`
+    /// and `the_teardown_verb_names_no_provider`, both in
+    /// `plan`, hold the provider half across the actions.
     ///
     /// The provider is read back from the test config rather
     /// than spelled out, for the reason [`vm_env`] gives about
     /// the variable names: what these assertions are about is
     /// that the configured provider reaches the script, not
     /// that the word `libvirt` appears in it.
-    fn boot_env() -> String {
+    fn vagrant_env() -> String {
         format!("{} {PROVIDER_ENV}='{}'", vm_env(), cfg().vm.provider)
     }
 
@@ -834,7 +935,7 @@ mod tests {
         // substitution.
         let mut cfg = cfg();
         cfg.vm.provider = crate::config::Provider::Hyperv;
-        let script = vagrant(&cfg, &["up"], Tty::NoPty).args[1].clone();
+        let script = remote_script(&vagrant(&cfg, &["up"], Tty::NoPty));
         assert!(
             script.contains(&format!("{PROVIDER_ENV}='hyperv'")),
             "{script}"
@@ -852,7 +953,7 @@ mod tests {
         // writes them down.
         let c = vagrant(&cfg(), &["up"], Tty::NoPty);
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' \
              BOMBYX_VM_HOSTNAME=$(hostname -s) \
              VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
@@ -870,7 +971,11 @@ mod tests {
         // show it escaped, or a pasted line would answer with
         // the wrong machine.
         let c = vagrant(&cfg(), &["up"], Tty::NoPty);
-        assert!(c.args[1].contains("$(hostname -s)"), "{}", c.args[1]);
+        assert!(
+            remote_script(&c).contains("$(hostname -s)"),
+            "{}",
+            remote_script(&c)
+        );
         assert!(c.to_string().contains(r"\$(hostname -s)"), "{c}");
     }
 
@@ -905,18 +1010,18 @@ mod tests {
         // in `vm_host_env` and the quotes go missing here.
         // `remote::quote` tests what quoting does to a value
         // that needs it.
-        let script = vagrant(&cfg(), &["up"], Tty::NoPty).args[1].clone();
+        let script = remote_script(&vagrant(&cfg(), &["up"], Tty::NoPty));
         assert!(script.contains("BOMBYX_VM_HOST='vmhost'"), "{script}");
     }
 
     #[test]
     fn builds_a_vagrant_command() {
         let c = vagrant(&cfg(), &["up"], Tty::NoPty);
-        let env = boot_env();
+        let env = vagrant_env();
         assert_eq!(c.program, "ssh");
         assert_eq!(c.args[0], "vmhost");
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!("cd ~/'vms/myproject' && {env} vagrant 'up'")
         );
     }
@@ -928,9 +1033,9 @@ mod tests {
             &["snapshot", "restore", "fresh-install"],
             Tty::NoPty,
         );
-        let env = vm_env();
+        let env = vagrant_env();
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && {env} vagrant 'snapshot' \
                  'restore' 'fresh-install'"
@@ -948,9 +1053,12 @@ mod tests {
             &["destroy", "-f"],
             Tty::NoPty,
         );
+        // The teardown names no provider; the sibling test
+        // `the_teardown_verb_names_no_provider` in `plan` holds
+        // that rule across the actions.
         let env = vm_env();
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && {env} \
                  vagrant 'destroy' '-f'"
@@ -965,7 +1073,7 @@ mod tests {
         let cfg = cfg();
         let quoted = quote_remote_path(&cfg.remote_project_dir());
         assert!(
-            vagrant(&cfg, &["up"], Tty::NoPty).args[1]
+            remote_script(&vagrant(&cfg, &["up"], Tty::NoPty))
                 .starts_with(&format!("cd {quoted} &&"))
         );
     }
@@ -973,13 +1081,13 @@ mod tests {
     #[test]
     fn ensure_dir_keeps_the_tilde_expandable() {
         let c = ensure_dir(&cfg(), "~/vms/scratch/pr-1");
-        assert_eq!(c.args[1], "mkdir -p ~/'vms/scratch/pr-1'");
+        assert_eq!(remote_script(&c), "mkdir -p ~/'vms/scratch/pr-1'");
     }
 
     #[test]
     fn ensure_dir_quotes_an_absolute_dir() {
         let c = ensure_dir(&cfg(), "/srv/vms/p");
-        assert_eq!(c.args[1], "mkdir -p '/srv/vms/p'");
+        assert_eq!(remote_script(&c), "mkdir -p '/srv/vms/p'");
     }
 
     #[test]
@@ -987,13 +1095,13 @@ mod tests {
         let c = remove_dir(&cfg(), "~/vms/myproject");
         assert_eq!(c.program, "ssh");
         assert_eq!(c.args[0], "vmhost");
-        assert_eq!(c.args[1], "rm -rf ~/'vms/myproject'");
+        assert_eq!(remote_script(&c), "rm -rf ~/'vms/myproject'");
     }
 
     #[test]
     fn remove_dir_removes_an_absolute_path() {
         let c = remove_dir(&cfg(), "/srv/vms/myproject");
-        assert_eq!(c.args[1], "rm -rf '/srv/vms/myproject'");
+        assert_eq!(remote_script(&c), "rm -rf '/srv/vms/myproject'");
     }
 
     #[test]
@@ -1001,7 +1109,7 @@ mod tests {
         // Config rejects these characters, so this is the
         // second line of defence rather than the first.
         let c = remove_dir(&cfg(), "~/vms/a b; rm /");
-        assert_eq!(c.args[1], "rm -rf ~/'vms/a b; rm /'");
+        assert_eq!(remote_script(&c), "rm -rf ~/'vms/a b; rm /'");
     }
 
     #[test]
@@ -1012,7 +1120,7 @@ mod tests {
         // and would stop the removal that follows.
         let c = destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty);
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
@@ -1029,11 +1137,11 @@ mod tests {
         // existing snapshot.` -- measured on a libvirt host.
         let c = save_snapshot(&cfg(), "~/vms/myproject", Tty::NoPty);
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
                  '-f' 'fresh-install'",
-                vm_env()
+                vagrant_env()
             )
         );
     }
@@ -1045,11 +1153,11 @@ mod tests {
         // that `reset` is handed this builder and not another.
         let c = restore_snapshot(&cfg(), "~/vms/myproject", Tty::NoPty);
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' \
                  'restore' 'fresh-install'",
-                vm_env()
+                vagrant_env()
             )
         );
     }
@@ -1066,9 +1174,9 @@ mod tests {
         // step: an unguarded save would make the second `up`
         // report failure.
         let c = save_snapshot_if_absent(&cfg(), "~/vms/myproject", Tty::NoPty);
-        let env = vm_env();
+        let env = vagrant_env();
         assert_eq!(
-            c.args[1],
+            remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && {{ names=$({env} vagrant \
                  'snapshot' 'list') && if ! printf '%s\\n' \"$names\" \
@@ -1088,9 +1196,11 @@ mod tests {
         // make a machine vagrant cannot read look exactly like
         // one holding no snapshots. Capturing it and joining with
         // `&&` is what fails the step instead.
-        let script = save_snapshot_if_absent(&cfg(), "~/vms/p", Tty::NoPty)
-            .args[1]
-            .clone();
+        let script = remote_script(&save_snapshot_if_absent(
+            &cfg(),
+            "~/vms/p",
+            Tty::NoPty,
+        ));
         assert!(script.contains("names=$("), "{script}");
         let after_listing = script
             .split_once("'list')")
@@ -1114,9 +1224,11 @@ mod tests {
         // it has no snapshot support, and one whose listing
         // decorates the name so the guard reads "absent" and the
         // unforced save is then refused.
-        let script = save_snapshot_if_absent(&cfg(), "~/vms/p", Tty::NoPty)
-            .args[1]
-            .clone();
+        let script = remote_script(&save_snapshot_if_absent(
+            &cfg(),
+            "~/vms/p",
+            Tty::NoPty,
+        ));
         assert!(script.contains("|| printf 'bombyx: "), "{script}");
         // The braces keep the `cd` out of the advisory. Every
         // other builder here fails its step on a missing
@@ -1133,15 +1245,22 @@ mod tests {
         // wrong about what is there, which is the failure the
         // guard exists to prevent.
         assert!(
-            !save_snapshot_if_absent(&cfg(), "~/vms/p", Tty::NoPty).args[1]
-                .contains("'-f'")
+            !remote_script(&save_snapshot_if_absent(
+                &cfg(),
+                "~/vms/p",
+                Tty::NoPty
+            ))
+            .contains("'-f'")
         );
     }
 
     #[test]
     fn vagrant_in_runs_in_the_given_dir() {
         let c = vagrant_in(&cfg(), "/srv/x", &["halt"], Tty::NoPty);
-        let env = vm_env();
-        assert_eq!(c.args[1], format!("cd '/srv/x' && {env} vagrant 'halt'"));
+        let env = vagrant_env();
+        assert_eq!(
+            remote_script(&c),
+            format!("cd '/srv/x' && {env} vagrant 'halt'")
+        );
     }
 }

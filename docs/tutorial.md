@@ -352,7 +352,9 @@ supply it fails the boot rather than quietly building a libvirt
 machine, as long as the VM does not exist yet -- vagrant
 records the provider it built a machine with and reads that
 back afterwards, so changing the key later needs a
-`bombyx destroy` first. That refusal was run on a Linux host
+`bombyx destroy` first. `bombyx destroy` itself names no
+provider, which is what keeps it able to clear the directory a
+refused boot left behind. That refusal was run on a Linux host
 and it works. Whether a Windows VM host then boots the machine
 is *(unverified)*: nobody has run bombyx against one.
 
@@ -663,11 +665,11 @@ one a VM command runs.
 
 ```console
 $ bombyx --project myproject --dry-run up
-ssh vmhost "mkdir -p ~/'vms/myproject'"
-ssh vmhost "cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
-ssh vmhost "cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
-ssh vmhost "cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
-ssh vmhost "cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (33 lines elided)
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (266 lines elided)
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
 Five commands, and every one of them is an `ssh`: make the
@@ -682,7 +684,15 @@ The full contents are written to the host either way -- this is
 the one place `--dry-run` summarises rather than showing you
 everything.
 
-The two variables on the last line are how the guest learns
+Every line begins with the same `unset`. Five vagrant variables
+can redirect a command to a different directory or a different
+provider, and one of them set on your VM host would otherwise
+decide where these commands land. bombyx clears all five, then
+writes the provider your `config.toml` asks for back in front
+of each `vagrant` call. `bombyx destroy` is the one exception,
+and `usage.md` says why.
+
+The two `BOMBYX_VM_*` variables are how the guest learns
 which machine it is running on. The generated Vagrantfile
 forwards them into the VM, where `provision.sh` can read them.
 The `\$` is deliberate: that name has to be filled in by the

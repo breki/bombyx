@@ -377,8 +377,26 @@ mod tests {
         plan(action, &cfg(), Tty::NoPty)
     }
 
+    /// Each command of `action`'s plan as `--dry-run` prints
+    /// it, without the `unset` prefix.
     fn scripts(action: &Action) -> Vec<String> {
-        run(action).iter().map(ToString::to_string).collect()
+        run(action)
+            .iter()
+            .map(remote::rendered_without_disarm)
+            .collect()
+    }
+
+    /// The script of one command, without the `unset` prefix.
+    ///
+    /// `remote` does the stripping, so this module and
+    /// `remote::tests` cannot disagree about how strict it is.
+    /// `remote` owns the prefix and asserts it on every builder
+    /// and every probe; repeating it in the pins here would put
+    /// a hundred characters of `unset` in front of every
+    /// expected string and hide the command order these tests
+    /// are about.
+    fn script(c: &RemoteCommand) -> String {
+        remote::script_without_disarm(c)
     }
 
     /// Like [`scripts`], with each entry cut at its first line.
@@ -528,8 +546,8 @@ mod tests {
         // Four, and every one of them is `ssh`: a VM action
         // runs no program on the workstation.
         assert_eq!(programs, vec!["ssh", "ssh", "ssh", "ssh"]);
-        assert!(cmds[0].args[1].contains("mkdir -p"));
-        assert!(cmds.last().unwrap().args[1].ends_with("vagrant 'up'"));
+        assert!(script(&cmds[0]).contains("mkdir -p"));
+        assert!(script(cmds.last().unwrap()).ends_with("vagrant 'up'"));
     }
 
     #[test]
@@ -546,7 +564,9 @@ mod tests {
                  <<'BOMBYX_EOF'",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
-                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) vagrant 'provision'\"",
+                 BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
+                 VAGRANT_DEFAULT_PROVIDER='libvirt' \
+                 vagrant 'provision'\"",
             ]
         );
     }
@@ -567,17 +587,20 @@ mod tests {
         assert_eq!(up.len(), pr.len() + 1);
         let writes = pr.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
-        // Two prefixes, not one: the boot names the provider
-        // and `provision` does not, which
-        // `only_the_calls_that_create_a_machine_name_the_provider`
-        // states as a rule across every action.
+        // One prefix on both, which
+        // `every_other_project_vagrant_call_names_the_provider`
+        // states as a rule across every action but the
+        // teardown.
         assert_eq!(
-            up[writes].args[1],
-            format!("cd ~/'vms/myproject' && {} vagrant 'up'", boot_env())
+            script(&up[writes]),
+            format!("cd ~/'vms/myproject' && {} vagrant 'up'", vagrant_env())
         );
         assert_eq!(
-            pr.last().unwrap().args[1],
-            format!("cd ~/'vms/myproject' && {} vagrant 'provision'", vm_env())
+            script(pr.last().unwrap()),
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'provision'",
+                vagrant_env()
+            )
         );
     }
 
@@ -596,7 +619,7 @@ mod tests {
         assert_eq!(up.len(), sc.len() + 1);
         assert_eq!(names(&up[..sc.len()]), names(&sc));
         assert!(
-            up.last().unwrap().args[1].contains("vagrant 'snapshot' 'save'"),
+            script(up.last().unwrap()).contains("vagrant 'snapshot' 'save'"),
             "{:?}",
             up.last().unwrap().args
         );
@@ -606,7 +629,7 @@ mod tests {
     fn scratch_targets_a_project_scoped_dir() {
         let cmds = run(&Action::Scratch(scratch("pr-1234")));
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             "mkdir -p ~/'vms/scratch/myproject/pr-1234'"
         );
     }
@@ -614,10 +637,10 @@ mod tests {
     #[test]
     fn down_only_halts() {
         let cmds = run(&Action::Down);
-        let env = vm_env();
+        let env = vagrant_env();
         assert_eq!(cmds.len(), 1);
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             format!("cd ~/'vms/myproject' && {env} vagrant 'halt'")
         );
     }
@@ -625,9 +648,9 @@ mod tests {
     #[test]
     fn status_queries_the_project_dir() {
         let cmds = run(&Action::Status);
-        let env = vm_env();
+        let env = vagrant_env();
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             format!("cd ~/'vms/myproject' && {env} vagrant 'status'")
         );
     }
@@ -650,7 +673,7 @@ mod tests {
             )
         );
         assert!(
-            cmds[cmds.len() - 2].args[1].ends_with("vagrant 'up'"),
+            script(&cmds[cmds.len() - 2]).ends_with("vagrant 'up'"),
             "the boot should come directly before the save: {:?}",
             cmds[cmds.len() - 2].args
         );
@@ -664,11 +687,11 @@ mod tests {
         let cmds = run(&Action::Snapshot);
         assert_eq!(cmds.len(), 1);
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
                  '-f' 'fresh-install'",
-                vm_env()
+                vagrant_env()
             )
         );
     }
@@ -679,7 +702,7 @@ mod tests {
         // the plans rather than inside `remote`, because `plan`
         // chooses which builder each action gets and could hand
         // `reset` a different one.
-        let restored = run(&Action::Reset)[0].args[1].clone();
+        let restored = script(&run(&Action::Reset)[0]);
         assert!(restored.contains("'fresh-install'"), "{restored}");
         for action in [Action::Up, Action::Snapshot] {
             let saved = scripts(&action);
@@ -695,9 +718,9 @@ mod tests {
     #[test]
     fn reset_restores_the_fresh_install_snapshot() {
         let cmds = run(&Action::Reset);
-        let env = vm_env();
+        let env = vagrant_env();
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             format!(
                 "cd ~/'vms/myproject' && {env} vagrant 'snapshot' \
                  'restore' 'fresh-install'"
@@ -719,14 +742,17 @@ mod tests {
         let cmds = run(&Action::Discard(scratch("pr-1234")));
         assert_eq!(cmds.len(), 2);
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f \
                  Vagrantfile ]; then {} vagrant 'destroy' '-f'; fi",
                 vm_env()
             )
         );
-        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/scratch/myproject/pr-1234'");
+        assert_eq!(
+            script(&cmds[1]),
+            "rm -rf ~/'vms/scratch/myproject/pr-1234'"
+        );
     }
 
     #[test]
@@ -734,14 +760,14 @@ mod tests {
         let cmds = run(&Action::Destroy);
         assert_eq!(cmds.len(), 2);
         assert_eq!(
-            cmds[0].args[1],
+            script(&cmds[0]),
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
                  {} vagrant 'destroy' '-f'; fi",
                 vm_env()
             )
         );
-        assert_eq!(cmds[1].args[1], "rm -rf ~/'vms/myproject'");
+        assert_eq!(script(&cmds[1]), "rm -rf ~/'vms/myproject'");
     }
 
     #[test]
@@ -752,9 +778,9 @@ mod tests {
         let kinds = |cmds: &[RemoteCommand]| -> Vec<&'static str> {
             cmds.iter()
                 .map(|c| {
-                    if c.args[1].contains("vagrant 'destroy'") {
+                    if script(c).contains("vagrant 'destroy'") {
                         "destroy"
-                    } else if c.args[1].starts_with("rm -rf") {
+                    } else if script(c).starts_with("rm -rf") {
                         "remove"
                     } else {
                         "other"
@@ -784,13 +810,13 @@ mod tests {
         assert!(!run(&Action::Doctor).is_empty());
     }
 
-    /// The prefix on the boot, which is the one verb that names
-    /// a provider.
+    /// The whole prefix on every vagrant call: the identity and
+    /// the provider.
     ///
-    /// Every other verb carries [`vm_env`] alone;
-    /// `only_the_calls_that_create_a_machine_name_the_provider`
-    /// is what holds the two apart across the actions.
-    fn boot_env() -> String {
+    /// [`vm_env`] is the identity half alone, which is what
+    /// `every_project_vagrant_call_carries_the_vm_host_identity`
+    /// asserts on its own.
+    fn vagrant_env() -> String {
         format!(
             "{} {}='{}'",
             vm_env(),
@@ -822,9 +848,12 @@ mod tests {
                 continue;
             }
             for cmd in run(&action) {
-                let script = cmd.args[cmd.args.len() - 1].clone();
-                if script.contains(" vagrant '") {
-                    found.push((action.clone(), script));
+                // Stripped, so an assertion about a variable
+                // being set cannot pass on the `unset` that
+                // clears the same name two words earlier.
+                let s = script(&cmd);
+                if s.contains(" vagrant '") {
+                    found.push((action.clone(), s));
                 }
             }
         }
@@ -833,23 +862,98 @@ mod tests {
     }
 
     #[test]
-    fn only_the_calls_that_create_a_machine_name_the_provider() {
-        // `remote::PROVIDER_ENV` holds the argument and the
-        // measurements. The short version: on any verb but the
-        // boot the variable never changes which provider
-        // vagrant uses, and on `destroy` it can refuse the
-        // command that clears the directory a refused boot left
-        // behind.
-        let want = format!("{}='{}'", remote::PROVIDER_ENV, cfg().vm.provider);
+    fn the_teardown_verb_names_no_provider() {
+        // Measured on a libvirt host, in a directory with a
+        // Vagrantfile and no machine: `vagrant destroy -f`
+        // under `VAGRANT_DEFAULT_PROVIDER=hyperv` is refused
+        // and exits 1, and with no such variable it reports
+        // "Domain is not created" and exits 0. `execute` stops
+        // at the first failing step, so the refused version
+        // leaves the `rm -rf` behind it unrun and nothing else
+        // clears the directory.
+        //
+        // A refusal can only happen when no machine exists,
+        // because vagrant reads an existing one's recorded
+        // provider and ignores this variable. So omitting it
+        // here cannot pick the wrong provider for a machine
+        // that is really there.
+        //
+        // Counted, not just filtered. A loop that skips every
+        // script it does not recognise asserts nothing at all
+        // once the builder stops emitting the literal it
+        // matches on, and `project_vagrant_scripts` guards
+        // itself the same way for the same reason.
+        let want = format!("{}='", remote::PROVIDER_ENV);
+        let mut teardowns = 0;
         for (action, script) in project_vagrant_scripts() {
-            let creates = script.contains(" vagrant 'up'");
-            assert_eq!(
-                script.contains(&want),
-                creates,
-                "{action:?}: a provider belongs on the boot and \
-                 nowhere else: {script}"
+            if !script.contains("vagrant 'destroy'") {
+                continue;
+            }
+            teardowns += 1;
+            assert!(
+                !script.contains(&want),
+                "{action:?} names a provider on the teardown: {script}"
             );
         }
+        // `destroy` and `discard`, the two actions that tear a
+        // machine down.
+        assert_eq!(teardowns, 2, "the teardown scripts went missing");
+    }
+
+    #[test]
+    fn every_other_project_vagrant_call_names_the_provider() {
+        // `remote::PROVIDER_ENV` holds the argument. The short
+        // version: bombyx clears the operator's exported value
+        // before every script, so a verb that does not write
+        // the configured one back leaves vagrant choosing for
+        // itself -- and on a host whose other provider cannot
+        // even answer a probe, that refuses the command.
+        //
+        // Split on the vagrant invocation rather than on the
+        // whole script, because one script can hold two calls
+        // -- `save_snapshot_if_absent` already emits a listing
+        // and a save in one -- and a whole-script skip would
+        // then exempt the call beside a teardown.
+        let want = format!("{}='{}'", remote::PROVIDER_ENV, cfg().vm.provider);
+        let mut calls = 0;
+        for (action, script) in project_vagrant_scripts() {
+            for call in vagrant_calls(&script) {
+                if call.contains("vagrant 'destroy'") {
+                    continue;
+                }
+                calls += 1;
+                assert!(
+                    call.contains(&want),
+                    "{action:?} runs vagrant without the provider: {call}"
+                );
+            }
+        }
+        // Ten calls today, and this is a floor rather than
+        // that number: a new action adding one should not have
+        // to edit this line, while a builder that stops
+        // emitting a call still fails here. The exact figure
+        // is not written into the assertion for the reason
+        // `config-tests-own-file` in `docs/todo.md` gives about
+        // counts in prose.
+        assert!(calls >= 7, "only {calls} vagrant calls seen");
+    }
+
+    /// Each `vagrant` invocation inside one script.
+    ///
+    /// A script can hold more than one: `save_snapshot_if_absent`
+    /// puts a listing and a save in a single `if`. Each slice
+    /// runs from the identity prefix that opens an invocation up
+    /// to the next one, so an assertion about a call reads only
+    /// that call.
+    fn vagrant_calls(script: &str) -> Vec<String> {
+        let opener = format!("{}=", remote::VM_HOST_ENV);
+        let mut starts: Vec<usize> =
+            script.match_indices(&opener).map(|(i, _)| i).collect();
+        starts.push(script.len());
+        starts
+            .windows(2)
+            .map(|w| script[w[0]..w[1]].to_owned())
+            .collect()
     }
 
     #[test]

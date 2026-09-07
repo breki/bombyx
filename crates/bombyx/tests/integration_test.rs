@@ -29,14 +29,17 @@ fn vm_env() -> String {
     format!(r"{VM_HOST_ENV}='vmhost.invalid' {VM_HOSTNAME_ENV}=\$(hostname -s)")
 }
 
-/// The prefix on `vagrant up`, which also names the provider.
+/// The whole prefix on a vagrant call that names a provider:
+/// the identity and the provider.
 ///
-/// Only the boot carries it; `remote::PROVIDER_ENV` in the
-/// library says why. `libvirt` is written out here because
+/// Every project verb but the teardown carries it, and
+/// `remote::PROVIDER_ENV` in the library says why. No
+/// assertion below uses this on a `destroy`, which is the one
+/// call that carries the identity alone. `libvirt` is written out here because
 /// [`REQUIRED_TABLES`] writes it into every fixture registry,
 /// and the two have to agree for the assertion to mean
 /// anything.
-fn boot_env() -> String {
+fn vagrant_env() -> String {
     format!("{vm} {PROVIDER_ENV}='libvirt'", vm = vm_env())
 }
 
@@ -195,7 +198,7 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     assert!(
         lines[3].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'up'\"",
-            boot_env()
+            vagrant_env()
         )),
         "{}",
         lines[3]
@@ -225,7 +228,7 @@ fn snapshot_replaces_the_snapshot_it_finds() {
         lines[0].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'snapshot' 'save' \
              '-f' 'fresh-install'\"",
-            vm_env()
+            vagrant_env()
         )),
         "{}",
         lines[0]
@@ -329,7 +332,7 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
     assert!(
         lines[3].ends_with(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'provision'\"",
-            vm_env()
+            vagrant_env()
         )),
         "{}",
         lines[3]
@@ -345,7 +348,7 @@ fn scratch_writes_into_a_project_scoped_dir() {
     assert!(
         lines[3].ends_with(&format!(
             "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up'\"",
-            boot_env()
+            vagrant_env()
         )),
         "{}",
         lines[3]
