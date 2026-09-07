@@ -557,9 +557,9 @@ mistake this arrangement exists to avoid.
 `sudo` is available for the steps that do need root, which is
 why every privileged line in the example below has it.
 
-Its working directory is the clone, at `/opt/project`. That is
-also where `bombyx shell` leaves you, and it is the only copy
-of your code in the VM.
+Its working directory is the clone, at `~/project` in that
+user's home. That is also where `bombyx shell` leaves you, and
+it is the only copy of your code in the VM.
 
 Write the script to be **re-runnable**. `bombyx provision` runs
 it again on an existing VM, so every step should either be

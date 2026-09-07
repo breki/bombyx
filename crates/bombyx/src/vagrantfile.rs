@@ -771,23 +771,45 @@ mod tests {
     }
 
     #[test]
-    fn root_prepares_the_clone_directory_and_nothing_else() {
-        // `/opt` belongs to root, so only root can create the
-        // directory or remove it. Everything inside it is the
-        // agent's, which is why the recursive chown comes
-        // first rather than last: it normalises a tree an
-        // earlier bombyx left with root-owned files in it.
-        let mkdir = BOOTSTRAP
-            .find("mkdir -p \"$CLONE_DIR\"")
-            .expect("root must create the clone directory");
-        let chown = BOOTSTRAP
-            .find("chown -R \"$OWNER:$OWNER\" \"$CLONE_DIR\"")
-            .expect("root must hand the directory over");
-        let clone = BOOTSTRAP
-            .find("git clone --depth 1")
-            .expect("the clone must be in the script");
-        assert!(mkdir < chown, "create before handing over");
-        assert!(chown < clone, "hand over before cloning");
+    fn the_clone_lives_in_the_agents_home_and_root_never_touches_it() {
+        // `/opt` belongs to root, so a clone under it forced
+        // root to create, remove and chown the directory -- the
+        // last root operations on a tree the agent owns. In the
+        // agent's own home the agent does all three itself, and
+        // root's work on that tree becomes none.
+        //
+        // The home directory is read from the owner's passwd
+        // entry rather than written out, so it is right
+        // whatever the box calls that user. `$HOME` would be
+        // wrong here: this script runs as root, so `$HOME` is
+        // `/root`.
+        let flat = flat_bootstrap();
+        assert!(
+            flat.contains("getent passwd \"$OWNER\""),
+            "the clone's home must come from the passwd entry"
+        );
+        assert!(
+            !flat.contains("CLONE_DIR=/opt"),
+            "the clone must not live under root-owned /opt"
+        );
+
+        // Nothing root does may reach that tree. The needles
+        // are the three commands the old placement needed.
+        for line in flat_bootstrap_lines() {
+            if line.starts_with('#') || !line.contains("$CLONE_DIR") {
+                continue;
+            }
+            let touches = ["mkdir ", "chown ", "rm -rf "]
+                .iter()
+                .any(|c| line.contains(*c));
+            if !touches {
+                continue;
+            }
+            assert!(
+                line.contains("$runuser_bin"),
+                "root touches the clone tree here: {line}"
+            );
+        }
     }
 
     #[test]
@@ -856,17 +878,16 @@ mod tests {
             flat.contains("config --unset-all core.sshCommand"),
             "the clone keeps pointing at a key that is gone"
         );
-        // And it has to run after the chown that normalises a
-        // tree an earlier bombyx left root-owned files in,
-        // because git as $OWNER refuses a repository it does
-        // not own.
-        let chown = flat
-            .find("chown -R \"$OWNER:$OWNER\" \"$CLONE_DIR\"")
-            .expect("the normalising chown must be there");
+        // And it has to run after the clone exists, since
+        // there is no config file to unset anything from
+        // before that.
+        let clone = flat
+            .find("git clone --depth 1")
+            .expect("the clone must be there");
         let unset = flat
             .find("config --unset-all core.sshCommand")
             .expect("the unset must be there");
-        assert!(chown < unset, "normalise ownership before unsetting");
+        assert!(clone < unset, "the clone must exist before the unset");
     }
 
     #[test]

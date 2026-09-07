@@ -227,6 +227,13 @@ and this project adheres to
   installs lands in the home directory of the account the agent logs in as
   instead of in `/root`. Root stays available to that script through `sudo`. A
   box without `runuser` is refused with a message naming it.
+- **BREAKING:** The guest clones the project into `~/project` in the home
+  directory of the account the agent works as, read from that account's passwd
+  entry, rather than into `/opt/project`. `/opt` belongs to root, so the old
+  placement forced root to create, remove and chown a directory the agent then
+  owned; now the agent does all three and root touches the project tree not at
+  all. A project script referring to `/opt/project` must change, and an existing
+  guest keeps a stale clone at the old path that bombyx does not remove.
 
 ### Fixed
 

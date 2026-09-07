@@ -4,6 +4,50 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**The clone moved into the agent's home, and root's work on the
+project tree became none**
+
+Issue #60, and the operator spotted it by asking a question I
+had no good answer to: why does the clone run as root? Because
+`bootstrap.sh` was root from top to bottom and nobody moved it.
+Then the better question: why `/opt/project` at all, rather than
+the user's home? No reason was ever recorded --
+`git log -S"CLONE_DIR=/opt/project"` finds one commit whose
+message argues about the Vagrantfile, the two-file split and the
+dry-run output, and says nothing about the path.
+
+`/opt` belongs to root, which was the *only* thing forcing root
+to create, remove and chown a directory the agent then owned.
+That is gone: `CLONE_DIR` is now read from the account's passwd
+entry, the agent makes its own directory, and
+`find ~/project ! -user vagrant` in a real guest returns
+nothing. Root's remaining work in the whole script is three
+`rm -f` calls, two of them on its own `/root/.ssh`.
+
+**`$HOME` is the obvious way to find that home and is wrong.**
+This script runs as root, so `$HOME` is `/root` -- the exact
+mistake that put a toolchain in root's home and started this
+whole line of work a few hours ago. `getent passwd "$OWNER" |
+cut -d: -f6` is what makes the fix not repeat the bug, and it
+is also right on a box whose SSH user is not called `vagrant`,
+which a literal never was.
+
+**The ordering guard written yesterday caught me within a
+minute.** The new "no passwd entry for that user" refusal sat
+above the deploy-key block, and nothing may exit above that
+because Vagrant has already uploaded the key -- which is
+precisely the defect a reviewer found in my own fix the day
+before. The test failed on the first run. Worth writing down
+because it is the first time one of these guards has paid for
+itself on me rather than on a hypothetical editor.
+
+**And I overclaimed on the issue.** I wrote that the move
+retires the hardcoded `/home/vagrant`; it retires it for the
+clone only. The deploy key's path is a `file` provisioner
+`destination:` that Vagrant evaluates before the guest exists,
+so it cannot come from the guest's passwd file. Corrected on
+the issue rather than left to be discovered.
+
 **Thirty-nine review findings on the run-as-the-agent work, and
 the reviewers kept finding my fixes rather than my code**
 

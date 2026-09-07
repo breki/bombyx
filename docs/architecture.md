@@ -20,7 +20,7 @@ flowchart LR
   end
 
   subgraph guest["agent VM (guest)"]
-    clone["/opt/project"]
+    clone["~/project<br/>in the agent's home"]
     agent["agent"]
   end
 
@@ -487,12 +487,20 @@ own script as the unprivileged user the box logs in as --
 it cannot find it, and its last line is
 `exec -- "$runuser_bin" -u "$OWNER" -- "$script_real"`.
 
-The split follows what each half actually needs. Three things
-in that script need root: creating, removing and chowning the
-clone directory, which lives under root-owned `/opt`; clearing
-a key an earlier bombyx left in `/root/.ssh`; and being able to
-drop privilege at all. The project's script is not one of them,
-and running it as root has a consequence that is easy to miss: whatever it
+The split follows what each half actually needs. Two things in
+that script need root: clearing a key an earlier bombyx left in
+`/root/.ssh`, and being able to drop privilege at all.
+
+The clone is not one of them. It lives in the agent's own home,
+read from that account's passwd entry, so the agent creates it,
+removes it and owns everything in it -- which is what took the
+last root operation off a tree the agent controls. It used to
+sit in `/opt/project`, and because `/opt` belongs to root, every
+provision had root create, remove and chown a directory the
+agent then owned.
+
+The project's script is not one either, and running it as root
+has a consequence that is easy to miss: whatever it
 installs -- a language toolchain, an agent's own configuration,
 a shell profile -- lands in `/root` instead of in the home
 directory of the account the agent logs in as. The agent then

@@ -15,13 +15,15 @@
 # wrong. See docs/trust-boundary.md.
 #
 # It starts as root, and by the end almost nothing here needs
-# to be. Three things do: creating, removing and chowning the
-# clone directory, because it lives under root-owned /opt;
-# clearing a key an earlier bombyx left in /root/.ssh; and
-# being able to drop privilege in the first place. Everything
-# else -- every git command, the project's own script -- runs
-# as the unprivileged OWNER declared below, which is the
-# account the agent works as.
+# to be. Two things do: clearing a key an earlier bombyx left
+# in /root/.ssh, and being able to drop privilege in the first
+# place. Everything else -- the clone, every git command, the
+# project's own script -- runs as the unprivileged OWNER
+# declared below, which is the account the agent works as.
+#
+# Root touches a path in that account's home exactly once, on
+# the refusal path below, and the comment there says why `rm`
+# is safe where `chmod` would not be.
 #
 # Past the hand-over at the end of this file, everything in
 # this VM is assumed untrustworthy.
@@ -54,7 +56,6 @@ set -euo pipefail
 : "${BOMBYX_REF:?bombyx: BOMBYX_REF is not set}"
 : "${BOMBYX_SCRIPT:?bombyx: BOMBYX_SCRIPT is not set}"
 
-readonly CLONE_DIR=/opt/project
 
 # The agent works as this user, and two things here depend on
 # that.
@@ -266,6 +267,40 @@ else
     # exactly the case this matters for.
 fi
 
+# WHERE THE PROJECT IS CLONED, read from $OWNER's passwd entry
+# rather than written out.
+#
+# `getent passwd NAME` prints that account's line from whatever
+# the system uses for accounts, and field six of it is the home
+# directory. So this is right whatever the box calls its SSH
+# user, where a literal `/home/vagrant` would only be right on
+# the boxes that happen to use that name.
+#
+# `$HOME` would be the obvious thing and is wrong: this script
+# runs as root, so `$HOME` is `/root` -- which is precisely the
+# mistake that put a toolchain in root's home and started this
+# whole line of work.
+#
+# The clone belongs in that home for one blunt reason. It used
+# to live in `/opt/project`, and `/opt` belongs to root, so
+# every provision had root create, remove and chown a directory
+# the agent then owned -- the last root operations on an
+# agent-owned tree, and the shape a symlink turns into an
+# escalation. In the agent's own home the agent does all three
+# itself and root does nothing to the tree at all.
+#
+# The name is fixed rather than the project's, so nothing about
+# the operator's config is pasted into this file -- see the
+# header.
+owner_home=$(getent passwd "$OWNER" | cut -d: -f6)
+if [ -z "$owner_home" ]; then
+    echo "bombyx: no passwd entry for $OWNER in this box, so" \
+        "there is no home directory to clone into. Choose a" \
+        "box whose SSH user is $OWNER." >&2
+    exit 1
+fi
+readonly CLONE_DIR="$owner_home/project"
+
 # Base images do not all come with git installed. Without this
 # check you would get a bare "command not found" from a script
 # running as root inside a VM, which tells you nothing about
@@ -315,15 +350,12 @@ same_repo() {
     [ "$a" = "$b" ]
 }
 
-# THE ONLY THINGS ROOT DOES TO THIS TREE: create the directory,
-# remove it, and hand it over. The mismatch branch further down
-# does all three again for the same reason.
+# ROOT DOES NOTHING TO THIS TREE. It sits in $OWNER's own home,
+# so the agent creates it, removes it and owns everything in
+# it, and every `git` command below runs as $OWNER.
 #
-# `/opt` belongs to root, so only root can create the clone
-# directory or remove it. Everything *inside* it is the agent's,
-# and every `git` command below runs as $OWNER for a reason
-# worth stating plainly: root running `git` in a tree the agent
-# owns is a root escalation, not a tidiness question.
+# That is not a tidiness question. Root running `git` in a tree
+# the agent owns is a root escalation:
 #
 # git normally refuses to parse a repository owned by another
 # user. That guard does not apply here. From `safe.directory` in
@@ -334,16 +366,6 @@ same_repo() {
 # `post-checkout` hook planted by the agent was measured
 # executing as `uid=0` on the next provision.
 #
-# The recursive chown comes *before* the git work rather than
-# after it, and it is what normalises a tree an earlier bombyx
-# left root-owned files in. It is the one root operation left on
-# an agent-owned path: `chown -R` does not follow symlinks it
-# finds, and the hardlink route is blocked by
-# `fs.protected_hardlinks`, on by default on the boxes bombyx
-# assumes.
-mkdir -p "$CLONE_DIR"
-chown -R "$OWNER:$OWNER" "$CLONE_DIR"
-
 if [ -d "$CLONE_DIR/.git" ]; then
     if current_url=$("$runuser_bin" -u "$OWNER" -- \
         git -C "$CLONE_DIR" remote get-url origin 2>/dev/null)
@@ -356,13 +378,7 @@ if [ -d "$CLONE_DIR/.git" ]; then
                 "but the config asks for $BOMBYX_REPO." >&2
             echo "bombyx: discarding the clone and starting" \
                 "again. Uncommitted work in $CLONE_DIR is lost." >&2
-            # Root's, because the directory itself sits in
-            # root-owned /opt and the agent cannot put a
-            # symlink there. Recreated and handed back
-            # straight away.
-            rm -rf "$CLONE_DIR"
-            mkdir -p "$CLONE_DIR"
-            chown "$OWNER:$OWNER" "$CLONE_DIR"
+            "$runuser_bin" -u "$OWNER" -- rm -rf "$CLONE_DIR"
         fi
     fi
 fi
@@ -465,9 +481,9 @@ else
         || { rc=$?; [ "$rc" = 5 ]; }
 fi
 
-# No chown here. The directory was handed to $OWNER before any
-# git ran, and every git command since has run as $OWNER, so
-# everything under it already belongs to that user.
+# No chown anywhere. The tree is in $OWNER's home and every
+# command that made it ran as $OWNER, so it belongs to that
+# user by construction rather than by correction.
 
 cd "$CLONE_DIR"
 
