@@ -577,6 +577,43 @@ mod tests {
     }
 
     #[test]
+    fn the_deploy_key_ends_up_readable_by_the_agent() {
+        // The agent has to push with this key: `bootstrap.sh`
+        // says committing in the guest does not survive a
+        // provision and pushing is what does. A root-owned key
+        // the agent cannot read makes that impossible, so the
+        // key is chowned to $OWNER at 0600 rather than moved
+        // out of reach. `docs/trust-boundary.md` under **What
+        // this costs** states what that does and does not buy.
+        assert!(
+            BOOTSTRAP.contains("chown \"$OWNER:$OWNER\" \"$DEPLOY_KEY\""),
+            "the key must end up owned by the agent"
+        );
+        assert!(
+            BOOTSTRAP.contains("chmod 600 \"$DEPLOY_KEY\""),
+            "the key must end up at 0600"
+        );
+        // And not in root's home, which the agent cannot read
+        // into whatever `sudo` policy the box happens to have.
+        assert!(
+            !BOOTSTRAP.contains("/root/.ssh"),
+            "the key must not live in root's home"
+        );
+    }
+
+    #[test]
+    fn the_clone_is_told_which_key_to_push_with() {
+        // Otherwise the agent has a key it may read and no
+        // reason to know where it is. Recording it on the
+        // clone means a plain `git push` in the guest works
+        // without the project's script arranging anything.
+        assert!(
+            BOOTSTRAP.contains("config core.sshCommand"),
+            "the clone must record the ssh command"
+        );
+    }
+
+    #[test]
     fn the_bootstrap_script_deletes_a_key_no_upload_replaced() {
         // Removing `deploy_key` from the config has to remove
         // the credential from the guest, not leave one behind
@@ -584,6 +621,27 @@ mod tests {
         assert!(
             BOOTSTRAP.contains("rm -f \"$DEPLOY_KEY\""),
             "the stale-key removal is gone"
+        );
+    }
+
+    #[test]
+    fn the_project_script_runs_as_the_agent_not_as_root() {
+        // Everything above the hand-over needs root: the
+        // clone, the chown, the deploy key. The project's own
+        // script does not, and running it as root puts its
+        // toolchain in root's home rather than in the account
+        // the agent logs in as. `docs/architecture.md` under
+        // **Who runs the project's script** holds the
+        // argument.
+        //
+        // The needle is the whole `exec` line, because the
+        // point is what the process becomes -- an `exec` that
+        // dropped the `runuser` would still contain both words
+        // somewhere in the file.
+        assert!(
+            BOOTSTRAP
+                .contains("exec -- runuser -u \"$OWNER\" -- \"$script_real\""),
+            "the hand-over must drop to $OWNER"
         );
     }
 

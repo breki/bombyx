@@ -145,8 +145,10 @@ header above it:
   creating anything (`remote::require_file`), the generated
   Vagrantfile uploads it to
   `/home/vagrant/.ssh/bombyx-deploy-key` before `bootstrap.sh`
-  runs, and `bootstrap.sh` moves it to a root-owned 0600 file
-  in `/root/.ssh` and exports `GIT_SSH_COMMAND`. The upload is
+  runs, and `bootstrap.sh` chowns it to the agent's own user at
+  0600, exports `GIT_SSH_COMMAND`, and records the same command
+  on the clone as `core.sshCommand` so the agent can push with
+  it. The upload is
   conditional and carries no `raise` of its own, because
   `vagrant destroy` loads the Vagrantfile too. Whether a key
   was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,

@@ -293,7 +293,7 @@ fn check_repo(value: &str) -> Result<(), FieldError> {
 /// The first two rules are shared with other fields. The rest
 /// are `script`'s own, and they matter because the guest
 /// changes into the cloned project, runs `chmod +x` on this
-/// path, and executes it as root -- so whatever this names is
+/// path, and executes it -- so whatever this names is
 /// about to be given the run of the machine.
 ///
 /// A value escapes the clone in two ways, and both are refused:
@@ -396,8 +396,8 @@ mod tests {
 
     #[test]
     fn a_script_path_refuses_one_that_leaves_the_clone() {
-        // Whatever this names is about to be made executable and
-        // run as root in the guest.
+        // Whatever this names is about to be made executable
+        // by root and then run in the guest.
         for (bad, reason) in [
             ("/usr/bin/env", "relative to the clone root"),
             ("../../usr/bin/env", "`..` segment"),

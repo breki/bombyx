@@ -4,6 +4,49 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-07
 
+**bombyx ran the project's script as root, and the first real
+project showed what that costs**
+
+Going to rebuild jutro from `config.toml` now that #50 unblocked
+it, and the first thing found was not a jutro problem. bombyx
+`exec`s the project's script as root. jutro's script is written
+for the agent's unprivileged user and calls `sudo` where it
+needs more -- its old Vagrantfile said `privileged: false` with
+the reason written next to it, that rustup and the node
+toolchain must land in the account the agent works as.
+
+So the first bombyx run put `/root/.rustup` and a second clone
+at `/root/jutro` into a VM whose agent logs in as `vagrant`, and
+nothing failed while it happened. That is the worst shape a bug
+can have: a successful provision that installed everything where
+nobody will look for it. The hand-over is now
+`exec -- runuser -u "$OWNER" -- "$script_real"`.
+
+**And that exposed a second thing, which was my own doing.** The
+deploy key was being moved to a root-owned 0600 file in
+`/root/.ssh` -- my idea in the first implementation, refined by
+three review rounds. With the project script no longer running
+as root, the agent could not read the key. Which is fatal,
+because `bootstrap.sh`'s own comment says a commit made in the
+guest does not survive a provision and pushing is what does: an
+agent that cannot read the key cannot push, so the key had been
+hardened into uselessness. It is now chowned to the agent at
+0600 where it lands, and the clone records `core.sshCommand` so
+`git push` works without the project arranging it.
+
+Worth keeping the shape of that mistake. Three review rounds
+went over the `/root` move and none of them asked what the
+*agent* needed, because every reviewer was looking at the threat
+model and not at the job. The question that would have caught it
+is "who has to use this, and can they?" -- and it only came up
+because a real project's script was finally pointed at it.
+
+**Verified as the agent, not inferred.** In the guest as
+`vagrant`: the key is `0600 vagrant:vagrant`, `core.sshCommand`
+is on the clone, the tree and `.git/config` are owned by
+`vagrant`, and `git ls-remote origin` against the private
+repository answers.
+
 **The guest can clone a private repository, and the loud
 failure had to move out of the Vagrantfile to get there**
 

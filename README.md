@@ -179,7 +179,7 @@ the guest's clone is not what Vagrant boots from.
 Neither `[vm]` nor `[source]` has defaults, and both are
 required. There is no defensible default for a base image, and
 a repository bombyx guessed at would be cloned into the guest
-and run as root.
+and have its script run there.
 
 **`[source]` is fetched by the guest, not by you.** The
 generated Vagrantfile runs a bootstrap script inside the VM

@@ -14,8 +14,12 @@
 # command. Keeping this file fixed means there is nothing to get
 # wrong. See docs/trust-boundary.md.
 #
-# It runs as root. After it hands over to the project's own
-# script, everything in this VM is assumed untrustworthy.
+# It runs as root, because installing a credential and cloning
+# into /opt/project need root. It hands over to the project's
+# own script as the unprivileged OWNER below, which is the
+# account the agent works as -- see the `exec` at the end of
+# this file for why. Past that hand-over, everything in this VM
+# is assumed untrustworthy.
 
 # Three separate settings, and each one turns a silent failure
 # into a loud one:
@@ -47,10 +51,17 @@ set -euo pipefail
 
 readonly CLONE_DIR=/opt/project
 
-# The agent works as this user. Everything here runs as root, so
-# without the chown further down, the cloned project would be
-# owned by root and the agent could read it but not change it --
-# a VM built for editing code, in which the code is read-only.
+# The agent works as this user, and two things here depend on
+# that.
+#
+# The chown further down hands it the clone. Without that, the
+# tree would stay owned by root and the agent could read it but
+# not change it -- a VM built for editing code, in which the
+# code is read-only.
+#
+# And the `exec` at the end of this file drops to it before
+# running the project's script, so whatever that script installs
+# lands in this user's home rather than in root's.
 readonly OWNER=vagrant
 
 # THE DEPLOY KEY, when the operator's config named one.
@@ -58,8 +69,8 @@ readonly OWNER=vagrant
 # A private repository needs a credential inside the guest, and
 # this is how it arrives. Before this script runs, the
 # Vagrantfile has already had Vagrant upload the key to
-# UPLOADED_KEY below. Both paths here are fixed, so nothing
-# about them is pasted into this file -- see the header.
+# DEPLOY_KEY below. That path is fixed, so nothing about it is
+# pasted into this file -- see the header.
 #
 # WHETHER a key was configured arrives as BOMBYX_DEPLOY_KEY,
 # which the Vagrantfile sets to `1` or `0` on every render, and
@@ -85,8 +96,7 @@ readonly OWNER=vagrant
 # sitting in the agent's own directory for the life of the VM,
 # and a box without git is an ordinary way to reach such an
 # exit. Nothing here needs git.
-readonly UPLOADED_KEY=/home/vagrant/.ssh/bombyx-deploy-key
-readonly DEPLOY_KEY=/root/.ssh/bombyx-deploy-key
+readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 
 if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # The config named a key, so the upload must have happened.
@@ -95,25 +105,29 @@ if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # checked for it, and the alternative is a clone that
     # authenticates with nothing and a guest that reports
     # success.
-    if [ ! -f "$UPLOADED_KEY" ]; then
+    if [ ! -f "$DEPLOY_KEY" ]; then
         echo "bombyx: the configured deploy key did not arrive" \
-            "at $UPLOADED_KEY. Check it is still on the VM" \
+            "at $DEPLOY_KEY. Check it is still on the VM" \
             "host and re-run." >&2
         exit 1
     fi
 
-    # The key moves to root's own directory. The `file`
-    # provisioner uploaded it as the box's SSH user, `vagrant`
-    # on the boxes bombyx assumes, so a key
-    # left where it landed is one the agent's own code reads
-    # with no effort. A root-owned 0600 file means reading it
-    # takes root -- a narrowing and not a fix, because on most
-    # boxes that user has passwordless sudo.
-    # docs/trust-boundary.md says why that is accepted.
-    mkdir -p /root/.ssh
-    chmod 700 /root/.ssh
-    install -m 600 -o root -g root "$UPLOADED_KEY" "$DEPLOY_KEY"
-    rm -f "$UPLOADED_KEY"
+    # The key is tightened where it landed, not moved out of
+    # the agent's reach.
+    #
+    # The agent has to be able to use it. Committing inside the
+    # guest does not survive a provision -- the note on the
+    # checkout below explains why -- so pushing is how work
+    # leaves this VM, and pushing needs this key. A root-owned
+    # key would mean the agent could not push at all.
+    #
+    # What tightening buys, then, is only that no *other* user
+    # in the guest can read it: `scp` uploads at the box's
+    # umask, which is world-readable on some boxes. The agent's
+    # own code can read it, and that is deliberate and is the
+    # exposure docs/trust-boundary.md accounts for.
+    chown "$OWNER:$OWNER" "$DEPLOY_KEY"
+    chmod 600 "$DEPLOY_KEY"
 
     # Then `git` is told to use it. GIT_SSH_COMMAND is what git
     # passes to `ssh` for every connection it makes, and four
@@ -145,11 +159,11 @@ else
     # here, it would be a key nothing points at and nobody
     # remembers granting.
     #
-    # The uploaded copy goes too. Nothing writes it in this
-    # branch, so anything at that path is either a leftover
-    # from an interrupted provision or something the guest put
-    # there itself.
-    rm -f "$DEPLOY_KEY" "$UPLOADED_KEY"
+    # Anything at that path in this branch is either a
+    # leftover from an interrupted provision or something the
+    # guest put there itself, and neither is a key the operator
+    # asked for.
+    rm -f "$DEPLOY_KEY"
 fi
 
 # Base images do not all come with git installed. Without this
@@ -278,6 +292,21 @@ else
         -- "$BOMBYX_REPO" "$CLONE_DIR"
 fi
 
+# The agent pushes with the same key this script fetched with,
+# so the clone records how to reach it. Without this the agent
+# has a key it is allowed to read and no way to know where it
+# is, and `git push` falls back to whatever identity `ssh`
+# finds -- which in a fresh guest is none.
+#
+# Set only when a key is configured. On a public repository
+# GIT_SSH_COMMAND is unset, and writing an empty value here
+# would break every `git` command the agent runs.
+if [ -n "${GIT_SSH_COMMAND:-}" ]; then
+    git -C "$CLONE_DIR" config core.sshCommand "$GIT_SSH_COMMAND"
+fi
+
+# Last, so it covers the config written just above as well as
+# the tree.
 chown -R "$OWNER:$OWNER" "$CLONE_DIR"
 
 cd "$CLONE_DIR"
@@ -362,4 +391,32 @@ fi
 # project's script inherits this process, and its exit status is
 # what Vagrant sees -- nothing here runs afterwards to swallow a
 # failure.
-exec -- "$script_real"
+#
+# `runuser -u NAME --` drops from root to that user first, and
+# it is the whole point of this line. Everything above needed
+# root: installing the deploy key, cloning into /opt/project,
+# chowning it. The project's own script does not, and running it
+# as root would put whatever it installs -- a rust toolchain, a
+# node toolchain, an agent's own configuration -- into /root
+# rather than into the home directory of the account the agent
+# logs in as. The agent would then find none of it.
+#
+# `runuser` rather than `sudo`: it is a root-only tool that
+# needs no sudoers entry, so a box with sudo locked down still
+# works. It sets HOME, USER, LOGNAME and SHELL for the target
+# user and passes the rest of the environment through, which is
+# what the BOMBYX_* variables above need.
+#
+# Root is still reachable from the project's script through
+# `sudo`, which every Vagrant box configures for this user. That
+# is the right shape: the script asks for root where it needs
+# it, rather than having it throughout.
+if ! command -v runuser >/dev/null 2>&1; then
+    echo "bombyx: runuser is not installed in this box." >&2
+    echo "bombyx: it comes with util-linux. Install it, or" \
+        "choose a box that has it, so the project's script can" \
+        "run as $OWNER rather than as root." >&2
+    exit 1
+fi
+
+exec -- runuser -u "$OWNER" -- "$script_real"

@@ -508,10 +508,11 @@ mod tests {
         // fail on a directory holding no Vagrantfile at all.
         //
         // The directory has to exist first as well, which is what
-        // pins `mkdir` at index 0. The needle carries the quote
-        // the remote path is wrapped in, because `bootstrap.sh`
-        // has a `mkdir -p /root/.ssh` of its own and that file
-        // is written by one of these very commands.
+        // pins `mkdir` at index 0. The needle carries the
+        // quote the remote path is wrapped in, so it matches
+        // the command bombyx builds and not a `mkdir` that
+        // happens to appear inside a file being written by one
+        // of these very commands.
         //
         // The boot is found by its own vagrant verb rather than
         // taken as the last step, because `up` has one step after

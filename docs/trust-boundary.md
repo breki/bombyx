@@ -225,9 +225,10 @@ bombyx checks on the VM host that the file is there and stops
 with a message naming the expanded path when it is not. The
 generated Vagrantfile then uploads the key with a `file`
 provisioner that Vagrant runs before the bootstrap script, and
-`bootstrap.sh` moves it to a root-owned `0600` file in
-`/root/.ssh`, deletes the uploaded copy, and exports
-`GIT_SSH_COMMAND` so `git` uses that key and no other.
+`bootstrap.sh` chowns it to the agent's own user at `0600`,
+exports `GIT_SSH_COMMAND` so `git` uses that key and no other,
+and records the same command on the clone so the agent can push
+with it.
 
 Where that check runs is worth a sentence, because the obvious
 place is wrong. The Vagrantfile could test the file itself and
@@ -250,15 +251,26 @@ nowhere else. A design that took the path on the workstation
 instead was rejected for exactly this reason -- it would have
 put the secret in a third place.
 
-**Moving the key to `/root/.ssh` narrows the exposure and does
-not close it.** Vagrant's `file` provisioner uploads as the box's
-SSH user, `vagrant` on the boxes bombyx assumes -- the user the
-agent works as -- so a key left where it lands is one the
-agent's own code reads with no effort. Root-owned and `0600`
-means reading it takes root. On most Vagrant boxes the
-`vagrant` user has passwordless `sudo`, so code running in the
-VM can still get there. What it buys is that the theft is an
-escalation rather than a `cat`.
+**The agent's own user can read the key, and that is
+deliberate.** Vagrant's `file` provisioner uploads as the box's
+SSH user, `vagrant` on the boxes bombyx assumes, which is the
+user the agent works as. `bootstrap.sh` chowns the key to that
+user at `0600` and leaves it there.
+
+Putting it out of the agent's reach was tried and does not
+survive contact with the job. Work leaves this VM by being
+pushed -- a commit made in the guest sits on no branch after the
+next provision -- and pushing needs this key. A root-owned key
+means an agent that cannot push at all. So `bootstrap.sh` also
+records the key on the clone as `core.sshCommand`, which is the
+opposite of hiding it.
+
+What the chown and the `0600` buy is narrower than it looks: no
+*other* account in the guest can read the key, which matters
+because `scp` uploads at the box's umask and that is
+world-readable on some boxes. Against the agent itself they buy
+nothing, and nothing can -- an agent that can push is an agent
+that holds the credential.
 
 **`StrictHostKeyChecking=accept-new` trades a first-contact
 check for an unattended clone.** The guest has no `known_hosts`
@@ -276,10 +288,11 @@ git host and the handshake discloses only the public half.
 
 What they get is the ability to impersonate the git host and
 serve a repository of their own. `bootstrap.sh` clones what it
-is served and `exec`s the script named by `script` from that
-clone, **as root inside the guest**. Root in the guest can read
-`/root/.ssh/bombyx-deploy-key`, so the key does go -- by way of
-code execution rather than by way of the handshake.
+is served and runs the script named by `script` from that
+clone. That script runs as the agent's own user rather than as
+root, which narrows what the first step reaches and not the
+outcome: the key belongs to that very user. So the key does go,
+by way of code execution rather than by way of the handshake.
 
 The egress rules under `host-network-isolation` are what would
 narrow that, and they are not loaded. Pre-seeding the guest's
@@ -287,10 +300,10 @@ narrow that, and they are not loaded. Pre-seeding the guest's
 nothing does that today.
 
 **Removing `deploy_key` from the config removes the key from
-the guest's live disk, and not from its snapshot.** `bootstrap.sh`
-deletes `/root/.ssh/bombyx-deploy-key` whenever the config
-names none, so the credential goes on the next `bombyx
-provision`. But `bombyx up` takes the `fresh-install` snapshot
+the guest's live disk, and not from its snapshot.**
+`bootstrap.sh` deletes the key whenever the config names none,
+so the credential goes on the next `bombyx provision`. But
+`bombyx up` takes the `fresh-install` snapshot
 *after* provisioning, so that snapshot's disk holds the key,
 and `bombyx reset` restores it -- measured on a real VM rather
 than reasoned about. A later `up` does not refresh the

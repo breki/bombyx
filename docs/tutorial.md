@@ -490,7 +490,7 @@ except `provider` and `deploy_key` is required too. bombyx
 builds the VM from the first and the guest clones the second,
 so there is nothing sensible for bombyx to guess: a base image
 is a choice, and a repository bombyx invented would be cloned
-into the guest and run as root.
+into the guest and have its script run there.
 
 `remote_root` is optional, shown with its default.
 
