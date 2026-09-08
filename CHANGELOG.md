@@ -225,16 +225,16 @@ and this project adheres to
   destructure the pair. The key is a `ProjectName` the lookup has already proved
   legal, so code building a `Config` from an entry no longer re-parses the
   string it asked with.
-- The project's provisioning script runs as the guest's unprivileged user rather
-  than as root. `bootstrap.sh` still starts as root -- an earlier bombyx left a
-  key in `/root/.ssh` to clear, and dropping privilege needs root -- and hands
-  over with `runuser`, so whatever the script
-  installs lands in the home directory of the account the agent logs in as
-  instead of in `/root`. Root stays available to that script through `sudo`. A
-  box without `runuser` is refused with a message naming it.
+- Nothing bombyx runs inside the guest runs as root. The generated Vagrantfile
+  marks the shell provisioner `privileged: false`, so `bootstrap.sh` and the
+  project's own script both run as the account the box logs in as -- and
+  whatever that script installs lands in that account's home instead of in
+  `/root`. Root stays available to the project's script through `sudo`, which
+  every Vagrant box configures for this user, so a project installs its own
+  packages without bombyx knowing a package manager.
 - **BREAKING:** The guest clones the project into `~/project` in the home
-  directory of the account the agent works as, read from that account's passwd
-  entry, rather than into `/opt/project`. `/opt` belongs to root, so the old
+  directory of the account the agent works as, read from that account's `HOME`,
+  rather than into `/opt/project`. `/opt` belongs to root, so the old
   placement forced root to create, remove and chown a directory the agent then
   owned; now the agent creates and removes it, nothing chowns anything, and root
   modifies nothing under it. A project script referring to `/opt/project` must

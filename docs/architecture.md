@@ -490,22 +490,38 @@ first creates a machine.
 
 ### Who runs the project's script
 
-`bootstrap.sh` runs as root, and hands over to the project's
-own script as the unprivileged user the box logs in as --
-`vagrant` on every box bombyx assumes. The script resolves
-`runuser`'s path once into `$runuser_bin`, refusing the run if
-it cannot find it, and its last line is
-`exec -- "$runuser_bin" -u "$OWNER" -- "$script_real"`.
+The whole of `bootstrap.sh` runs as the unprivileged user the
+box logs in as -- `vagrant` on every box bombyx assumes. The
+generated Vagrantfile marks the shell provisioner
+`privileged: false`, which is the one line that arranges it;
+without that flag Vagrant runs a shell provisioner as root. The
+script's last line is `exec -- "$script_real"`, and it changes
+no privilege because there is none to change.
 
-The split follows what each half actually needs. Two things in
-that script need root: clearing a key an earlier bombyx left in
-`/root/.ssh`, and being able to drop privilege at all.
+Nothing in that script needs root. The clone lives in `$HOME`,
+which is the account's own home because the provisioner is
+unprivileged, so the account creates the directory, owns
+everything in it and removes it again. Every `git` command is
+that same account acting on its own files.
 
-The clone is not one of them. It lives in the agent's own home,
-read from that account's passwd entry, so the agent creates and
-removes it and every command bombyx runs that modifies it runs
-as that user -- which is what took the last root operation off a
-tree the agent controls.
+A project that has to install packages already has root: every
+Vagrant box grants the SSH user passwordless `sudo`, and a
+project's own script calls it. So bombyx never learns a package
+manager, and `git` stays the box's own requirement, which is
+what `bootstrap.sh` tells the operator when it refuses.
+
+Two consequences follow from there being no root phase at all.
+An `[env]` value such as `PATH` reaches only the project's own
+script, rather than deciding which `git` root runs on the way
+there. And nothing overwrites `HOME`, `USER`, `LOGNAME` or
+`SHELL` after the operator's values arrive, where `runuser`
+used to set all four for the account it dropped to. `HOME`
+written in `[env]` therefore moves the clone with it, which is
+why `bootstrap.sh` checks that the value is absolute, present
+and writable before using it. *(Unverified: no run has put any
+of those four names in an `[env]` table. `GIT_USER_NAME` and
+`GIT_USER_EMAIL` did reach a project's script on a real
+provision.)*
 
 The project's own script has `sudo` and runs with that tree as
 its working directory, so it can leave content bombyx's own
@@ -515,29 +531,17 @@ removes the clone therefore checks whether it succeeded and
 says what to clear when it did not, rather than letting a bare
 `git` or `rm` message be the whole diagnosis.
 
-The project's script is not one either, and running it as root
-has a consequence that is easy to miss: whatever it
-installs -- a language toolchain, an agent's own configuration,
-a shell profile -- lands in `/root` instead of in the home
-directory of the account the agent logs in as. The agent then
-finds none of it, and nothing fails while that happens.
+Running the project's script as root has a consequence that is
+easy to miss: whatever it installs -- a language toolchain, an
+agent's own configuration, a shell profile -- lands in `/root`
+instead of in the home directory of the account the agent logs
+in as. The agent then finds none of it, and nothing fails while
+that happens.
 
 That is not hypothetical. It is how the first real run against
 a project went, and the symptom was a `/root/.rustup` and a
 second clone at `/root/jutro` in a VM whose agent works as
 `vagrant`.
-
-Root is still reachable from the project's script through
-`sudo`, which every Vagrant box configures for that user. That
-is the right shape: a script asks for root at the steps that
-need it rather than holding it throughout.
-
-The hand-over uses `runuser` and not `sudo`, because `runuser`
-is a root-only tool that needs no sudoers entry, so it works on
-a box with `sudo` locked down. It sets `HOME`, `USER`,
-`LOGNAME` and `SHELL` for the target user and passes the rest
-of the environment through, which is what the `BOMBYX_*`
-variables depend on.
 
 ## What config values are checked
 

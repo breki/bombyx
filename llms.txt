@@ -36,13 +36,13 @@ Cargo workspace, CLI only:
   - `bin/bombyx/main.rs` — clap parsing, host-provenance
     reporting, process spawning, the self-update ordering
   - `crates/bombyx/templates/bootstrap.sh` — the script the
-    guest runs, identical for every project. Starts as root
-    and `exec`s the project's own script as the box's SSH user
-    through `runuser`, so a toolchain it installs lands in
-    that account's home rather than in `/root`. Every `git`
-    command runs as that user too, because root running `git`
-    in a tree the agent owns is an escalation. A box without
-    `runuser` is refused by name
+    guest runs, identical for every project. The generated
+    Vagrantfile marks the provisioner `privileged: false`, so
+    the whole script runs as the box's SSH user and nothing in
+    it asks for root. The clone goes in `$HOME`, which that
+    account owns, and a toolchain the project's script
+    installs lands there too rather than in `/root`. A project
+    needing root calls `sudo` from its own script
 - `xtask` — build automation (not published)
 
 No web crate, no frontend, no E2E suite, no deploy

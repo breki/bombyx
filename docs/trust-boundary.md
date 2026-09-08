@@ -286,11 +286,12 @@ Against the agent itself the mode buys nothing, and nothing
 can: an agent that can push is an agent that holds the
 credential.
 
-Nor does running as the agent rather than as root put root out
-of reach. On the boxes bombyx assumes, that user has
-passwordless `sudo`. What the hand-over changes is which step
-has to ask for root, not what is reachable from inside the
-guest.
+Nor does the provisioner running as the agent rather than as
+root put root out of reach. On the boxes bombyx assumes, that
+user has passwordless `sudo`, and a project's own script calls
+it where it needs to. What `privileged: false` on the shell
+provisioner changes is which step has to ask for root, not what
+is reachable from inside the guest.
 
 **`StrictHostKeyChecking=accept-new` trades a first-contact
 check for an unattended clone.** The guest has no `known_hosts`

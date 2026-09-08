@@ -2,6 +2,56 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-08
+
+**bootstrap.sh stops asking for root**
+
+One line in the generated Vagrantfile did it: `privileged: false`
+on the shell provisioner. Vagrant runs a shell provisioner as
+root without it, and that default was the only reason the script
+had a privilege arrangement to get wrong.
+
+The count is the argument. 753 lines to 601, six guard tests
+deleted, and with them `runuser` resolution, the `getent passwd`
+block that derived the owner's home, `readonly OWNER=vagrant`,
+and three `rm -f /root/.ssh/bombyx-deploy-key` lines cleaning up
+after a bombyx nobody runs. The two guards that replace all of
+it are one assertion each: the rendered Vagrantfile carries the
+flag, and no non-comment line in the script names `runuser`,
+`sudo`, `su`, `pkexec`, `doas` or a path under `/root`.
+
+Two escalated review findings go with them. A project's `[env]`
+values sat in root's environment for the whole script, where
+`PATH` decided which `git` root ran -- with no root, the trap
+has nowhere to spring. And `runuser` had been quietly setting
+`HOME`, `USER`, `LOGNAME` and `SHELL` over whatever the operator
+wrote; nothing overwrites them now.
+
+The one decision worth recording is where the clone goes. The
+script *is* the account, so `$HOME` answers, and the four checks
+the old passwd block had grown over three review rounds moved
+across to it: set, absolute, present, writable and searchable.
+Reading the home out of `getent passwd "$(id -un)"` instead was
+rejected. It would keep the clone where passwd says even when a
+project writes `HOME` in `[env]`, and that is not a trap worth
+guarding -- the operator wrote the line, and the whole point of
+the second finding above is that those four names start working
+as written.
+
+Verified on frosti, which is also the VM host here, so bombyx
+took the `sh -c` route. `vmtest` booted from nothing and
+provisioned again; `jutro-rebuild` provisioned with a deploy key
+and an `[env]` table. All three exited 0, the clone came out
+`vagrant:vagrant`, the toolchain landed in `/home/vagrant`, and
+`find -user root` inside both clones returned nothing. Neither
+guest had a key in `/root/.ssh`, so the cleanup that went away
+had nothing left to clean.
+
+Also found: the elided-line counts in the dry-run transcripts in
+`docs/tutorial.md` and `docs/usage.md` were already wrong before
+this work -- 33 and 266 against 34 and 753. Measured rather than
+adjusted, and they now read 39 and 601.
+
 ### 2026-09-07
 
 **A project can hand its own variables to its provisioning
