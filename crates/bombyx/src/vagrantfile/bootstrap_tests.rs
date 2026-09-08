@@ -198,15 +198,10 @@ fn every_command_on_the_key_reports_its_own_failure() {
         // anywhere in the line exempts the whole line, so
         // `mv "$DEPLOY_KEY" /tmp/k; GIT_SSH_COMMAND=x` walked
         // through the unanchored version -- measured.
-        let only_reads = [
-            "echo ",
-            "refuse ",
-            "readonly ",
-            "key_note=",
-            "export GIT_SSH_COMMAND=",
-        ]
-        .iter()
-        .any(|allowed| line.starts_with(*allowed));
+        let only_reads =
+            ["echo ", "refuse ", "readonly ", "key_note=", "ssh_opts="]
+                .iter()
+                .any(|allowed| line.starts_with(*allowed));
         if only_reads {
             continue;
         }
@@ -234,30 +229,134 @@ fn the_bootstrap_script_points_ssh_at_the_key_and_nothing_else() {
     // exclude identities named in an `ssh_config`, so
     // `-F /dev/null` is what makes "only this key" true.
     //
-    // Whole clauses over a comment-stripped view. All three
-    // of those words appear in the comment above the code that
-    // builds them, so a bare needle over the raw text is
-    // satisfied by the prose and says nothing about the
-    // code -- and the subject here is a credential scoped to a
-    // single identity.
+    // `-F /dev/null` is asserted on its own line, because it
+    // goes on whether or not a key was configured -- an
+    // ssh_config the box shipped can name a host alias as well
+    // as an identity.
+    //
+    // Whole clauses over a comment-stripped view. All of those
+    // words appear in the comment above the code that builds
+    // them, so a bare needle over the raw text is satisfied by
+    // the prose and says nothing about the code -- and the
+    // subject here is a credential scoped to a single identity.
     let code = bootstrap_code();
     for clause in [
-        "ssh_opts=\"-o IdentitiesOnly=yes -F /dev/null\"",
-        "export GIT_SSH_COMMAND=\"ssh -i $DEPLOY_KEY $ssh_opts\"",
+        "ssh_opts=\"-F /dev/null\"",
+        "ssh_opts=\"$ssh_opts -i $DEPLOY_KEY -o IdentitiesOnly=yes\"",
+        "export GIT_SSH_COMMAND=\"ssh $ssh_opts\"",
     ] {
         assert!(code.contains(clause), "not in the script: {clause}");
     }
 }
 
 #[test]
-fn only_one_user_ever_verifies_the_git_host() {
-    // One account clones and pushes, so `ssh` reads that
-    // account's own `~/.ssh/known_hosts`. Naming a file
-    // here would point the clone at a path the agent can
-    // rewrite.
+fn the_fetched_keys_are_the_only_ones_the_clone_accepts() {
+    // `UserKnownHostsFile` names a path the agent's own
+    // account can rewrite, and that is worth stating plainly
+    // rather than leaving as an objection. Two things answer
+    // it. The file is written from the fetch on every
+    // provision, immediately above the clone, and no code of
+    // the project's has run at that point -- the clone is what
+    // brings it into the guest. And the default
+    // `~/.ssh/known_hosts` sits in the same account's home, so
+    // the alternative is no less writable.
+    //
+    // What naming the file buys is the opposite: the default
+    // file may already hold an `accept-new` entry from an
+    // earlier provision, and pointing `ssh` away from it stops
+    // that entry standing in for a fetched key.
+    let code = bootstrap_code();
+    for clause in [
+        "ssh_opts=\"$ssh_opts -o StrictHostKeyChecking=yes\"",
+        "ssh_opts=\"$ssh_opts -o UserKnownHostsFile=$KNOWN_HOSTS\"",
+    ] {
+        assert!(code.contains(clause), "not in the script: {clause}");
+    }
+    // The fallback is reached only when bombyx published no
+    // URL, and it is the weaker of the two.
+    assert_eq!(
+        code.matches("StrictHostKeyChecking=accept-new").count(),
+        1,
+        "accept-new must appear once, in the fallback branch"
+    );
+}
+
+#[test]
+fn every_key_fetch_is_pinned_to_https() {
+    // The whole mechanism rests on a certificate authority
+    // vouching for the answer. A request that reaches the
+    // server over plain text, or reaches it over HTTPS and
+    // then follows a redirect to plain text, has no such
+    // authority behind it -- and a fetch that came back wrong
+    // is what the guest is about to trust the git host on.
+    //
+    // `--proto-redir` is the half that is easy to leave out,
+    // and `-L` above it is what makes leaving it out matter.
+    //
+    // Per line and inverted: every line running `curl` is
+    // examined, rather than the two that exist today being
+    // listed. A third fetch added without these flags is the
+    // failure this catches.
+    let mut fetches = 0;
+    for line in flat_bootstrap_lines() {
+        // `curl -`, so the `command -v curl` guard above the
+        // fetches is not mistaken for one of them.
+        if line.starts_with('#') || !line.contains("curl -") {
+            continue;
+        }
+        fetches += 1;
+        for flag in ["--proto '=https'", "--proto-redir '=https'", "-fsSL"] {
+            assert!(
+                line.contains(flag),
+                "this fetch is not pinned to https ({flag} missing):\n  \
+                 {line}"
+            );
+        }
+    }
+    assert_eq!(fetches, 2, "expected one fetch per key format");
+}
+
+#[test]
+fn a_fetch_that_came_back_wrong_is_refused_before_the_clone() {
+    // A fetch can succeed and still leave nothing usable: an
+    // empty body, a truncated one, a document whose shape has
+    // changed, or a response naming another host. Every one
+    // ends in a file with no line for the host about to be
+    // contacted, and `ssh` would then report a host-key
+    // failure -- which reads as an attack rather than as a
+    // fetch that came back wrong.
+    let code = bootstrap_code();
     assert!(
-        !BOOTSTRAP.contains("UserKnownHostsFile"),
-        "the clone must use the agent's own known_hosts"
+        code.contains("if ! grep -q \"^$BOMBYX_GIT_HOST \" \"$KNOWN_HOSTS\""),
+        "the fetched keys must be checked for the host's own line"
+    );
+    // Anchored at the start of a line, so a key for another
+    // host cannot answer for this one.
+    assert!(
+        code.contains("\"^$BOMBYX_GIT_HOST \""),
+        "the check must anchor the host name"
+    );
+}
+
+#[test]
+fn a_box_missing_the_fetch_tools_is_refused_by_name() {
+    // A bare "command not found" from inside a VM says
+    // nothing about which box to go and fix. `jq` is asked
+    // for only by the JSON format, so a box carrying neither
+    // can still clone from a host that publishes finished
+    // lines.
+    let flat = flat_bootstrap();
+    for needle in [
+        "command -v curl",
+        "refuse \"curl is not installed in this box",
+        "command -v jq",
+        "refuse \"jq is not installed in this box",
+    ] {
+        assert!(flat.contains(needle), "missing: {needle}");
+    }
+    assert!(
+        bootstrap_code().contains("= json ] && ! command -v jq"),
+        "jq must be required only by the json format"
     );
 }
 

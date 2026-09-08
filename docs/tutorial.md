@@ -457,6 +457,27 @@ it.
 in `config.toml.sample`. Both boots are recorded under
 `tutorial-box-lacks-git` in `docs/todo.md`.
 
+**A GitHub or Bitbucket URL over ssh needs two more programs in
+the box.** Before it clones, bombyx has the guest fetch that
+host's published ssh keys, so it can tell the real server from
+an impostor rather than trusting whatever answers on port 22.
+`docs/trust-boundary.md` explains why. The fetch runs `curl`,
+and reading GitHub's answer also needs `jq`, because GitHub
+publishes its keys as JSON while Bitbucket publishes finished
+`known_hosts` lines. A box missing either is refused by name,
+the same way a missing `git` is:
+
+```
+bombyx: jq is not installed in this box, and bombyx needs it to read github.com's published ssh host keys. Install jq in the box, or choose one that has it.
+```
+
+*(unverified)* We have not booted a guest to find out which of
+these boxes carries `jq`. Ubuntu and Debian cloud images
+generally do not, so expect to install it -- and note that your
+own `provision.sh` cannot do it, for the reason the `git`
+passage above gives. An `https://` URL needs neither program,
+because it opens no ssh connection at all.
+
 Two later passages were written for the Debian box and will
 not match what you have, which is why they still mention it.
 The `provision.sh` below runs `chsh` because the Debian box

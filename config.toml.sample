@@ -123,6 +123,15 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 # The name will not tell you which boxes carry it. Two that do
 # not are `cloud-image/debian-13` and `debian/bookworm64`; the
 # value below does. Booting the box is the only way to be sure.
+#
+# An ssh URL under `repo` below asks for two more programs.
+# Before cloning, the guest fetches the git host's published
+# ssh keys, so it can tell the real server from an impostor --
+# see docs/trust-boundary.md. That fetch runs `curl`, and
+# reading GitHub's answer also needs `jq`, because GitHub
+# publishes its keys as JSON where Bitbucket publishes finished
+# `known_hosts` lines. An `https` URL needs neither, because it
+# opens no ssh connection at all.
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192                 # MiB

@@ -144,7 +144,7 @@ What a project's table holds:
 
 | Key | |
 |-----|---|
-| `[vm]` | required; `box` (must have `git`), `cpus`, `memory`. `provider` is optional, `libvirt` |
+| `[vm]` | required; `box` (must have `git`; also `curl`, and `jq` too, when `repo` clones from GitHub over ssh), `cpus`, `memory`. `provider` is optional, `libvirt` |
 | `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host |
 | `remote_root` | optional, `~/vms`; must sit above the two tables |
 | `host` | optional; only for a project that runs elsewhere |

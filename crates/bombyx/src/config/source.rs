@@ -74,13 +74,14 @@ pub struct Source {
 /// guest VM as the agent's own user, before any of the
 /// project's own code exists. [`RepoUrl::parse`] refuses it.
 ///
-/// You might reach for the `url` crate here. Do not, for two
-/// reasons. First, `RepoUrl` accepts `git@github.com:you/repo.git`,
-/// the usual way to write an SSH address for `git`, and it is
-/// not a valid URL -- a URL parser rejects it. Second, bombyx
-/// never looks at the pieces of the address. It passes the
-/// whole thing to `git` and writes it into the Vagrantfile, so
-/// splitting it into scheme, host and path would buy nothing.
+/// You might reach for the `url` crate here. Do not: `RepoUrl`
+/// accepts `git@github.com:you/repo.git`, the usual way to
+/// write an SSH address for `git`, and a URL parser rejects it
+/// because it is not a valid URL.
+///
+/// The value stays whole. It goes to `git` as written and into
+/// the Vagrantfile as written, and the one piece bombyx reads
+/// out of it is the host, which [`RepoUrl::ssh_host`] returns.
 ///
 /// `#[serde(try_from = "String")]` is what connects the type to
 /// the config file. It tells serde to read a plain string and
@@ -113,6 +114,38 @@ impl RepoUrl {
     pub fn parse(raw: &str) -> Result<Self, FieldError> {
         check_repo(raw)?;
         Ok(Self(raw.to_owned()))
+    }
+
+    /// The host `git` opens an ssh connection to, when it opens
+    /// one at all.
+    ///
+    /// `None` for an `https`, `http` or `git` URL. Those reach
+    /// the server by another transport, so no ssh host key is
+    /// involved and there is nothing for `crate::hostkeys` to
+    /// look up.
+    ///
+    /// Two spellings carry a host over ssh, and they end the
+    /// authority differently. `ssh://git@host:2222/path` ends
+    /// it at the first `/`, and the scp-like
+    /// `git@host:path` ends it at the first `:`. Both may carry
+    /// a `user@` in front, which is not part of the host.
+    ///
+    /// An IPv6 literal such as `ssh://[::1]/p.git` cannot reach
+    /// this, because `check_repo` refuses any `::`.
+    ///
+    /// The host comes back exactly as the operator wrote it.
+    /// `crate::hostkeys::for_host` is what compares it without
+    /// regard to case.
+    #[must_use]
+    pub fn ssh_host(&self) -> Option<&str> {
+        let authority = match self.0.strip_prefix("ssh://") {
+            Some(rest) => rest.split_once('/').map_or(rest, |(a, _)| a),
+            None if self.0.contains("://") => return None,
+            None => self.0.split_once(':').map_or(self.0.as_str(), |(a, _)| a),
+        };
+        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        let host = host.split_once(':').map_or(host, |(h, _)| h);
+        (!host.is_empty()).then_some(host)
     }
 }
 
@@ -391,6 +424,36 @@ mod tests {
             let parsed = RepoUrl::parse(good)
                 .unwrap_or_else(|e| panic!("{good:?}: {e}"));
             assert_eq!(parsed.as_str(), good);
+        }
+    }
+
+    #[test]
+    fn only_an_ssh_url_names_a_host_whose_key_matters() {
+        // The whole family, so the answer is not read off the
+        // one spelling that prompted the work. A host key
+        // matters when `git` opens an ssh connection and not
+        // otherwise: `https` and `http` are verified by TLS,
+        // and `git://` carries no verification bombyx could
+        // improve here.
+        for (url, want) in [
+            ("ssh://git@github.com/you/repo.git", Some("github.com")),
+            ("ssh://github.com/you/repo.git", Some("github.com")),
+            ("ssh://git@github.com:2222/you/r.git", Some("github.com")),
+            ("git@github.com:you/repo.git", Some("github.com")),
+            ("github.com:you/repo.git", Some("github.com")),
+            // Returned as written. `hostkeys::for_host` is what
+            // folds case, because DNS does.
+            ("ssh://git@GitHub.com/you/r.git", Some("GitHub.com")),
+            ("https://github.com/you/repo.git", None),
+            ("http://example.invalid/p.git", None),
+            ("git://example.invalid/p.git", None),
+            // No authority to read. `check_repo` accepts it,
+            // because it only looks at the prefix.
+            ("ssh:///p.git", None),
+        ] {
+            let repo =
+                RepoUrl::parse(url).unwrap_or_else(|e| panic!("{url:?}: {e}"));
+            assert_eq!(repo.ssh_host(), want, "{url:?}");
         }
     }
 

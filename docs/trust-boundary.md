@@ -293,12 +293,39 @@ it where it needs to. What `privileged: false` on the shell
 provisioner changes is which step has to ask for root, not what
 is reachable from inside the guest.
 
-**`StrictHostKeyChecking=accept-new` trades a first-contact
-check for an unattended clone.** The guest has no `known_hosts`
-entry for the git host the first time it runs, and the strict
-default would stop at a prompt nobody is there to answer. So
-the guest accepts the git host's key on first sight and refuses
-a change afterwards.
+**The guest verifies the git host when bombyx knows where that
+host publishes its keys, and trusts it on first sight
+otherwise.** Two hosts are in the table
+`crates/bombyx/src/hostkeys.rs` holds: `github.com`, whose keys
+come from `https://api.github.com/meta`, and `bitbucket.org`,
+whose keys come from `https://bitbucket.org/site/ssh`. For
+those, `bootstrap.sh` fetches the published keys before it
+clones and passes `StrictHostKeyChecking=yes` with a
+`UserKnownHostsFile` naming what it fetched. Every other git
+host still gets `StrictHostKeyChecking=accept-new`.
+
+The trust moves rather than disappearing, and it is worth
+saying where it moves to. It now rests on the certificate
+authority that vouches for `api.github.com` or
+`bitbucket.org` over HTTPS -- a chain bombyx already depends
+on, because that is how Vagrant downloads the box. It no
+longer rests on whatever answers on port 22.
+
+**Why a failed fetch refuses the run rather than falling
+back.** Somebody positioned to impersonate the git host on
+port 22 is usually positioned to block an HTTPS request as
+well. A fallback to `accept-new` would therefore be a check
+they could switch off whenever they wanted it off, which is no
+check at all. So a fetch that fails, or one that returns
+nothing naming the host, stops the provisioning with a message
+naming the URL.
+
+**What the remaining `accept-new` case costs.** This is the
+self-hosted git server and anything else absent from the table.
+The guest has no `known_hosts` entry for that host the first
+time it runs, and the strict default would stop at a prompt
+nobody is there to answer, so the guest accepts the key it is
+offered and refuses a change afterwards.
 
 What an attacker on that first connection gets is worth being
 precise about, because the obvious answer is wrong. They do
@@ -317,9 +344,31 @@ because the key belongs to that very user. So the key does go,
 by way of code execution rather than by way of the handshake.
 
 The egress rules under `host-network-isolation` are what would
-narrow that, and they are not loaded. Pre-seeding the guest's
-`known_hosts` would close the first-contact window itself, and
-nothing does that today.
+narrow that, and they are not loaded.
+
+**Two smaller gaps in the verified case, both deliberate.**
+
+The fetched `known_hosts` file sits in the agent's own home, at
+`$HOME/.ssh/bombyx-known-hosts`, so code running as the agent
+can rewrite it. That does not reach the clone: `bootstrap.sh`
+writes the file from the fetch immediately above the clone, and
+the clone is what brings the project's code into the guest, so
+none of it has run yet. Putting the file somewhere the agent
+cannot write would need `sudo`, and the provisioner runs
+unprivileged on purpose.
+
+The clone's own `core.sshCommand` carries the verification
+forward only when the config named a `deploy_key`, because that
+is the only case where `bootstrap.sh` writes that setting at
+all. A repository reached over ssh with no deploy key cannot
+authenticate in a fresh guest anyway, so the case is
+unreachable rather than covered.
+
+**Verifying the git host needs `curl` in the box, and `jq` as
+well for GitHub.** GitHub publishes its keys as JSON and
+Bitbucket publishes finished `known_hosts` lines, so `jq` is
+asked for only by the first. A box missing either is refused by
+name rather than failing inside a pipeline.
 
 **Removing `deploy_key` from the config removes the key from
 the guest's live disk, and not from its snapshot.**

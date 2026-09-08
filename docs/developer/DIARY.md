@@ -4,6 +4,57 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-08
 
+**The guest checks who it is cloning from**
+
+The first ssh connection a fresh guest makes is the one that
+fetches the code bombyx is about to run, and it was made under
+`StrictHostKeyChecking=accept-new` -- which trusts whatever key
+the server offers. jutro solves this for its own git operations
+by taking GitHub's keys from `api.github.com/meta` over HTTPS,
+and bombyx could not benefit from that, because bombyx clones
+before it hands over to the project's script. Issue #61.
+
+We took the route the issue called awkward: a table inside
+bombyx, `github.com` and `bitbucket.org`, mapping a host to
+where it publishes its keys. The alternative was a config field
+naming a file the operator writes, which is general but puts
+the work on every operator and tells them nothing about whether
+what they wrote is genuine.
+
+The fetch happens in the guest rather than in bombyx, and that
+was not a preference. bombyx has no HTTP client and no JSON
+parser on purpose -- `update.rs` reaches for `git ls-remote`
+instead of the GitHub releases API for exactly that reason, and
+a test pins the choice. So `bootstrap.sh` runs `curl`, and `jq`
+too for GitHub, whose keys arrive as JSON where Bitbucket's
+arrive as finished `known_hosts` lines. A box without them is
+refused by name, the way a box without `git` already was.
+
+Two decisions in that block are worth keeping. A failed fetch
+refuses the run rather than falling back to `accept-new`:
+somebody able to impersonate the git host on port 22 can
+usually block an HTTPS request too, so a fallback is a check
+they could switch off whenever they wanted it off. And one
+`grep` for the host's own line covers four ways a fetch
+succeeds and still leaves nothing usable -- an empty body, a
+truncated one, a changed document shape, and an answer for
+another host.
+
+`RepoUrl` now has one piece read out of it. Its doc comment
+said bombyx never looks at the pieces of the address, which
+`ssh_host` makes false, so that paragraph went. The two lint
+tests that pinned the old ssh options went with it, and one of
+them was a flat ban on `UserKnownHostsFile` whose stated reason
+-- the agent can rewrite a file we name -- is true and does not
+reach the clone: the file is written from the fetch immediately
+above the clone, and the clone is what brings the project's
+code into the guest.
+
+Not verified against a real VM host. This workstation holds no
+accepted host key for frosti, so nothing here has been run
+against a guest, and which of the usual boxes carry `jq` is
+still unknown.
+
 **bootstrap.sh stops asking for root**
 
 One line in the generated Vagrantfile did it: `privileged: false`

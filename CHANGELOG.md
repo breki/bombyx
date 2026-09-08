@@ -114,6 +114,18 @@ and this project adheres to
   must not start with `BOMBYX_`; values carry the same rule as `box`, `repo`,
   `ref`, `script` and `deploy_key`. Rendered sorted by name, so an unchanged
   config writes a byte-identical Vagrantfile.
+- Before it clones over ssh, the guest verifies the git host against the keys
+  that host publishes over HTTPS, rather than trusting the key it is offered on
+  first sight. Two hosts are known: `github.com` (keys from
+  `https://api.github.com/meta`) and `bitbucket.org` (keys from
+  `https://bitbucket.org/site/ssh`). A fetch that fails, or one returning
+  nothing for that host, refuses the run instead of falling back -- whoever can
+  impersonate the git host can usually block the fetch too. Any other git host,
+  and every `https` repository, is unchanged.
+- The box needs `curl`, and `jq` as well when `source.repo` clones from GitHub
+  over ssh, so the guest can read the published host keys. A box missing either
+  is refused by name, the way a box missing `git` already was. An `https`
+  repository needs neither.
 
 ### Changed
 

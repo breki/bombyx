@@ -25,6 +25,8 @@ Cargo workspace, CLI only:
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `vagrantfile.rs` — renders the Vagrantfile, embeds the
     bootstrap script
+  - `hostkeys.rs` — the two git hosts whose published ssh keys
+    the guest fetches, and the URL and response shape of each
   - `plan.rs` — `Action` → ordered command list
   - `doctor.rs` — the check model; submodules own the rest
     - `doctor/probes.rs` — which probes run, reading a result
@@ -160,6 +162,26 @@ header above it:
   was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,
   always set, so the guest's own environment cannot answer it.
   Left out, no upload is rendered and no check is planned
+  A repository reached over ssh also carries the git host's own
+  identity into the guest. `RepoUrl::ssh_host` reads the host
+  out of `repo` -- the one piece bombyx takes out of that value
+  rather than passing whole -- and `hostkeys::for_host` looks it
+  up in a table of two. `github.com` publishes its keys as JSON
+  at `https://api.github.com/meta` and `bitbucket.org`
+  publishes finished `known_hosts` lines at
+  `https://bitbucket.org/site/ssh`. A hit sends three variables
+  to the guest: `BOMBYX_GIT_HOST` (the table's lower-cased
+  spelling, never the operator's), `BOMBYX_HOST_KEYS_URL` and
+  `BOMBYX_HOST_KEYS_FORMAT` (`json` or `lines`). All three are
+  empty for an `https` repository, which opens no ssh
+  connection, and for a host the table does not hold.
+  `bootstrap.sh` fetches the keys with `curl`, needs `jq` for
+  the JSON shape, refuses when the response holds no line for
+  that host, and then clones under
+  `StrictHostKeyChecking=yes` with a `UserKnownHostsFile`
+  naming what it fetched. With all three empty it falls back to
+  `StrictHostKeyChecking=accept-new`, which trusts the host on
+  first sight; `docs/trust-boundary.md` says what that costs
 - `[projects.<name>.env]` — optional. Variables the project's
   own provisioning script reads, rendered into the generated
   Vagrantfile's provisioner beside bombyx's own set and sorted
