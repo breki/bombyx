@@ -225,13 +225,13 @@ and this project adheres to
   destructure the pair. The key is a `ProjectName` the lookup has already proved
   legal, so code building a `Config` from an entry no longer re-parses the
   string it asked with.
-- Nothing bombyx runs inside the guest runs as root. The generated Vagrantfile
-  marks the shell provisioner `privileged: false`, so `bootstrap.sh` and the
-  project's own script both run as the account the box logs in as -- and
-  whatever that script installs lands in that account's home instead of in
-  `/root`. Root stays available to the project's script through `sudo`, which
-  every Vagrant box configures for this user, so a project installs its own
-  packages without bombyx knowing a package manager.
+- Neither `bootstrap.sh` nor the project's own script runs as root. The
+  generated Vagrantfile marks the shell provisioner `privileged: false`, so both
+  run as the account the box logs in as, and whatever the project's script
+  installs lands in that account's home instead of in `/root`. Root stays
+  available to that script through `sudo`, which every Vagrant box configures
+  for this user, so a project installs its own packages without bombyx knowing
+  a package manager.
 - **BREAKING:** The guest clones the project into `~/project` in the home
   directory of the account the agent works as, read from that account's `HOME`,
   rather than into `/opt/project`. `/opt` belongs to root, so the old
@@ -242,11 +242,20 @@ and this project adheres to
   does not remove.
 - Every refusal in the guest's bootstrap script removes the uploaded deploy key
   before exiting. A refusal that exited without it left a credential in a guest
-  that never finished provisioning. bombyx also refuses, by name rather than
-  with a bare `git` error: a box with no account for the guest's SSH user, a
-  home directory that does not exist or that the agent cannot create a directory
-  in, a clone the agent cannot update because something in it belongs to another
-  user, and a leftover directory at the clone path.
+  that never finished provisioning, and it says so even when the removal itself
+  fails. bombyx also refuses, by name rather than with a bare `git` error: a
+  `HOME` that is unset, relative, absent, not writable and searchable, or not
+  owned by the guest's own account; a clone the agent cannot update because
+  something in it belongs to another user; and a leftover directory at the
+  clone path.
+- An `[env]` name that changes what bombyx's own bootstrap script does is
+  refused while the config parses, with a message saying so. Vagrant puts the
+  whole `[env]` table in the provisioner's environment, so such a name changed
+  what bombyx did rather than what the project's script did --
+  `SHELLOPTS=noexec` made a provision report success having cloned nothing, and
+  `GIT_CONFIG_COUNT` outranks the `core.sshCommand` bombyx writes on the clone.
+  `config.toml.sample` lists the refused names. `HOME` stays accepted, and
+  setting it moves the clone.
 
 ### Fixed
 
@@ -281,7 +290,7 @@ and this project adheres to
 
 - **BREAKING:** bombyx no longer pushes the project directory to the VM host.
   The generated Vagrantfile disables the `/vagrant` share, so no program on the
-  host or in the guest read the pushed files. `bombyx up` is now four `ssh`
+  host or in the guest read the pushed files. `bombyx up` is now five `ssh`
   commands instead of seven, and bombyx runs nothing on the workstation.
 - **BREAKING:** the `vagrant_dir` config key. It existed only to tell the push
   what to archive, and there is nowhere left to write it: the config refuses

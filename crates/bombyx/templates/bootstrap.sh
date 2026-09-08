@@ -19,12 +19,13 @@
 # `privileged: false`, and without that flag Vagrant would run
 # it as root.
 #
-# Nothing here needs root. The clone sits in this account's own
-# home, so it creates the directory, owns everything in it and
-# removes it again, and every git command below is that same
-# account acting on its own files. A project that has to
-# install packages calls `sudo` from its own script, which
-# every Vagrant box configures for this user.
+# bombyx needs no root inside the guest. The clone sits in this
+# account's own home, so this script creates the directory, owns
+# everything in it and removes it again, and it runs every git
+# command below as that same account on that account's own
+# files. A project that has to install packages calls `sudo`
+# from its own script, which every Vagrant box configures for
+# this user.
 #
 # Past the hand-over at the end of this file, everything in
 # this VM is assumed untrustworthy.
@@ -80,10 +81,19 @@ set -euo pipefail
 # provisioner's `env:` becomes a prefix on the command line and
 # is applied after any /etc/profile.d has been sourced. It is
 # read as `${VAR:-}` all the same: `set -u` above makes an
-# unset variable fatal, and the one thing that could leave it
-# unset is a Vagrantfile older than this script. Defaulting to
-# empty takes the deleting branch, which is the safe answer to
-# "these two files disagree".
+# unset variable fatal, and one route leaves it unset -- a
+# `vagrant provision` run on the VM host by hand, in a
+# directory an older bombyx wrote, where the Vagrantfile does
+# not set this variable and this script expects it. bombyx
+# rewrites both files together on every `up`, `provision` and
+# `scratch`, so its own runs cannot produce the mismatch.
+# Defaulting to empty takes the deleting branch, which is the
+# safe answer to "these two files disagree".
+#
+# This path stays a literal and cannot come from `$HOME` the way
+# `CLONE_DIR` below does. It is the `destination:` of a `file`
+# provisioner in the generated Vagrantfile, and Vagrant
+# evaluates that before this guest exists.
 #
 # Declared before anything expands it. Every refusal below
 # removes the uploaded key, and `set -u` makes expanding an
@@ -99,24 +109,43 @@ readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 # the guest -- at whatever mode `scp` gave it -- for the life of
 # a VM that never finished provisioning.
 #
-# That was a rule stated in prose, and four of this file's own
-# refusals broke it. One function removes the doubt: it clears
-# the key, prints what it was given, and exits.
-# `vagrantfile.rs` refuses a bare `exit 1` anywhere else.
+# One function removes the doubt: it clears the key, prints what
+# it was given, and exits. `vagrantfile.rs` refuses a bare
+# `exit 1` anywhere else, so a refusal cannot be written that
+# skips the removal.
+#
+# THE REMOVAL'S STATUS IS TESTED RATHER THAN ASSUMED. `rm` gives
+# up on a file in a directory it cannot write, and the project's
+# own script can arrange one: it has `sudo` and it runs with
+# this guest to itself. Under `set -e` an unguarded `rm` would
+# abort this function before either `echo` below, so the
+# operator would get a bare `rm: Permission denied` naming no
+# part of bombyx -- and the message they actually need would
+# never print.
+#
+# A command inside an `if` condition is exempt from `set -e`,
+# which is what makes testing the status possible here at all.
 refuse() {
-    rm -f "$DEPLOY_KEY"
+    if rm -f "$DEPLOY_KEY"; then
+        key_note="any uploaded deploy key has been removed from"
+        key_note="$key_note this guest."
+    else
+        key_note="THE UPLOADED DEPLOY KEY IS STILL IN THIS"
+        key_note="$key_note GUEST at $DEPLOY_KEY, because it"
+        key_note="$key_note could not be removed. The error"
+        key_note="$key_note above says why. Remove it in the"
+        key_note="$key_note guest."
+    fi
     # `$*` joins the arguments with spaces, so a message
-    # written across continued lines prints as one sentence.
-    # Looping over them instead gave each fragment its own
-    # `bombyx:` prefix.
+    # written across continued lines prints as one sentence
+    # with a single `bombyx:` prefix.
     echo "bombyx: $*" >&2
-    echo "bombyx: any uploaded deploy key has been removed" \
-        "from this guest." >&2
+    echo "bombyx: $key_note" >&2
     exit 1
 }
 
-# WHERE THE CLONE GOES, and the four things that have to be
-# true of the directory it goes in.
+# WHERE THE CLONE GOES, and what has to be true of the
+# directory it goes in.
 #
 # `$HOME` answers, because this script *is* the account the
 # agent works as. The provisioner is unprivileged, so the shell
@@ -127,15 +156,18 @@ refuse() {
 # moves with it. That is a line the operator wrote in their own
 # config rather than something the guest arranged, so it is
 # allowed -- but it does mean the value is not guaranteed
-# sound. The four checks below are what stand between an
-# unusable value and a bare `git` error naming no part of
-# bombyx.
+# sound. The checks below are what stand between an unusable
+# value and a bare `git` error naming no part of bombyx. Each
+# one names the property it establishes rather than a position
+# in a list, so adding another needs no count corrected
+# anywhere.
 #
-# They sit above the deploy-key block, and every one of them
-# refuses through `refuse`, which removes the uploaded key. So
-# a guest that stops here keeps no credential.
+# They sit above the deploy-key block and every one refuses
+# through `refuse`, which removes the uploaded key -- so a guest
+# that stops here keeps no credential. The banner below the
+# block says why that matters and what the dangerous case is.
 
-# One: set and not empty. `${HOME:-}` rather than `$HOME`
+# Set and not empty. `${HOME:-}` rather than `$HOME`
 # because `set -u` would otherwise abort with "unbound
 # variable" before `refuse` could run.
 if [ -z "${HOME:-}" ]; then
@@ -143,7 +175,7 @@ if [ -z "${HOME:-}" ]; then
         "tell where to clone the project."
 fi
 
-# Two: usable as a path, and not merely non-empty. A relative
+# Usable as a path, and not merely non-empty. A relative
 # home would put the clone wherever the provisioner happened to
 # start, and `cd` and `readlink -f` further down would resolve
 # against that same directory -- so the containment check would
@@ -162,7 +194,7 @@ case "$HOME" in
         ;;
 esac
 
-# Three: it is there. A home named in passwd need not exist --
+# Present. A home named in passwd need not exist --
 # `/nonexistent` is what `useradd -M` writes -- and nothing in
 # this flow proves it does. Left unchecked, `git clone` either
 # creates the directory itself when the parent is writable, so
@@ -173,7 +205,7 @@ if [ ! -d "$HOME" ]; then
         "box, so there is nowhere to clone into."
 fi
 
-# Four: writable *and* searchable. Creating a directory needs
+# Writable *and* searchable. Creating a directory needs
 # both bits on the parent, and a home at mode 0600 passes
 # `test -w` while `mkdir` in it fails -- measured. Checking
 # only `-w` would let exactly the bare `git` error these guards
@@ -183,15 +215,54 @@ if [ ! -w "$HOME" ] || [ ! -x "$HOME" ]; then
         "home $HOME, so the clone would fail there."
 fi
 
+# Owned by this account. The checks above establish that the
+# directory is usable and say nothing about whose it is: `/tmp`
+# is absolute, present, and mode 1777 gives both bits, so it
+# passes every one of them. The clone would then sit in a
+# world-writable directory -- and so would `.git/config`, which
+# this script writes `core.sshCommand` into, naming the deploy
+# key.
+#
+# `-O` asks whether the effective user owns the file. That is
+# the right question rather than a name comparison, because the
+# account this script runs as is the one that will do the
+# cloning. It follows symlinks, so a HOME linked into another
+# account's directory is refused too.
+#
+# What it establishes is ownership and nothing about the mode. A
+# home this account owns at mode 0777 passes, and the message
+# below says only what was checked.
+if [ ! -O "$HOME" ]; then
+    refuse "HOME is $HOME, which this account does not own." \
+        "bombyx clones into a directory belonging to the" \
+        "account the agent works as."
+fi
+
+# The last component is fixed rather than the project's name, so
+# nothing about the operator's config is pasted into this file --
+# see the header.
 readonly CLONE_DIR="$HOME/project"
 
-# NOTHING BELOW THIS LINE MAY EXIT BEFORE THE KEY IS DEALT
-# WITH. Vagrant has already uploaded it by the time this script
-# runs, so an exit above the line that tightens or removes it
-# leaves a credential in the agent's own directory for the life
-# of a VM that never finished provisioning. The git check below
-# is an ordinary way to reach such an exit, and it sits after
-# this. Nothing here needs git.
+# A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
+# distinction, and the two are easy to run together.
+#
+# Vagrant uploads the deploy key before this script starts, and
+# the deploy-key block below is what tightens or removes it. A
+# refusal before that block is harmless, because `refuse`
+# removes the key itself. An *abort* before it is not: the
+# script dies without running `refuse`, and the credential
+# stays in the agent's own directory for the life of a VM that
+# never finished provisioning.
+#
+# `set -u` on an undeclared variable is the way to get such an
+# abort, which is why the checks above read `${HOME:-}` before
+# anything expands `$HOME` bare. `set -e` on an untested
+# command is the other way, which is why every command acting
+# on the key below tests its own status.
+#
+# The `git` check sits after this block rather than before it,
+# because a box without `git` has to reach a refusal rather
+# than an abort, and no command above needs `git` anyway.
 
 
 if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
@@ -239,7 +310,17 @@ if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # file provisioner uploads as that same user, so the file
     # already arrives owned by it and there is nothing for a
     # chown to do.
-    chmod 600 "$DEPLOY_KEY"
+    # The message says what failed and stops there. `refuse`
+    # below prints what became of the key, and claiming an
+    # exposure here would contradict it: `chmod` follows
+    # symlinks and needs the target's ownership, while `rm`
+    # unlinks the name and needs only the directory -- so the
+    # ordinary shape of this failure is a `chmod` that fails and
+    # a removal that succeeds.
+    if ! chmod 600 "$DEPLOY_KEY"; then
+        refuse "could not tighten the mode on $DEPLOY_KEY." \
+            "The error above says why."
+    fi
 
     # Then `git` is told to use it. GIT_SSH_COMMAND is what git
     # passes to `ssh` for every connection it makes, and four
@@ -275,7 +356,12 @@ else
     # leftover from an interrupted provision or something the
     # guest put there itself, and neither is a key the operator
     # asked for.
-    rm -f "$DEPLOY_KEY"
+    if ! rm -f "$DEPLOY_KEY"; then
+        refuse "the config names no deploy key, but the one at" \
+            "$DEPLOY_KEY could not be removed. The error above" \
+            "says why. Remove it in the guest: a credential" \
+            "nobody granted is still in this VM."
+    fi
 
     # And the clone stops pointing at it. Leaving
     # `core.sshCommand` behind is the mirror of the key nothing
@@ -289,15 +375,6 @@ else
     # clone exists -- there is no config file to unset anything
     # from before that.
 fi
-
-# The deploy key's path at the top of this file stays a literal
-# and cannot come from `$HOME` the way `CLONE_DIR` does: it is
-# the `destination:` of a `file` provisioner in the generated
-# Vagrantfile, which Vagrant evaluates before this guest exists.
-#
-# `CLONE_DIR`'s last component is fixed rather than the
-# project's name, so nothing about the operator's config is
-# pasted into this file -- see the header.
 
 # Base images do not all come with git installed. Without this
 # check you would get a bare "command not found" from a script
@@ -508,11 +585,11 @@ else
         || { rc=$?; [ "$rc" = 5 ]; }
 fi
 
-# No chown anywhere. The tree is in this account's own home and
-# every command bombyx runs is that same account, so bombyx has
-# nothing to correct. The project's own script may leave
-# root-owned content in there through `sudo`, which is why the
-# discard above checks whether it succeeded.
+# bombyx runs no `chown`. The tree sits in this account's own
+# home, and bombyx runs every command above as that account, so
+# there is nothing to correct. The project's own script may
+# leave root-owned content in there through `sudo`, which is why
+# the discard above checks whether it succeeded.
 
 cd "$CLONE_DIR"
 
@@ -582,11 +659,11 @@ chmod +x "$script_real"
 # what Vagrant sees -- nothing here runs afterwards to swallow a
 # failure.
 #
-# There is no privilege change here, and that is the point. The
-# whole provisioner already runs as the account the agent logs
-# in as, so whatever the project's script installs -- a rust
-# toolchain, a node toolchain, an agent's own configuration --
-# lands in that account's home, where the agent will find it.
+# This `exec` changes no privilege, because the whole
+# provisioner already runs as the account the agent logs in as.
+# So whatever the project's script installs -- a rust toolchain,
+# a node toolchain, an agent's own configuration -- lands in
+# that account's home, where the agent will find it.
 #
 # The script also inherits this environment as it stands, which
 # is how a project's own variables reach it: the generated

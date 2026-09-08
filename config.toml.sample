@@ -197,6 +197,36 @@ script = "vagrant/provision.sh"   # path inside the clone
 # its last value -- so `BOMBYX_SCRIPT` here would decide which
 # script bombyx runs.
 #
+# These variables reach more than your own script, which is the
+# one surprise in this table. Vagrant puts the whole of it in
+# the environment of the provisioner, and bombyx's own
+# bootstrap script is that provisioner -- so a name that
+# changes what that script does changes what bombyx does,
+# rather than what your script does. bombyx refuses those names
+# while it reads this file, with a message saying so, and this
+# is the list:
+#
+#   PATH  IFS  BASH_ENV  ENV  SHELLOPTS  BASHOPTS
+#   LD_PRELOAD  LD_LIBRARY_PATH
+#   GIT_SSH_COMMAND  GIT_CONFIG_COUNT  GIT_CONFIG_GLOBAL
+#   GIT_CONFIG_SYSTEM  GIT_DIR  GIT_WORK_TREE
+#
+# Set any of those inside your own script, where they do what
+# you meant. Two of them are the ones worth knowing about:
+# `SHELLOPTS` can make a provision report success having done
+# nothing at all, and `GIT_CONFIG_COUNT` outranks the git
+# config bombyx writes on your checkout.
+#
+# `HOME` is accepted and is the one to think about before
+# writing. bombyx clones into `$HOME/project`, so setting
+# `HOME` here moves the clone, and your script's working
+# directory with it. That is measured rather than assumed: a
+# provision with `HOME` pointing at a second directory cloned
+# into that directory instead. The value has to be absolute,
+# exist, be writable and searchable, and be owned by the
+# guest's own account, or bombyx refuses the provision and says
+# which of those failed.
+#
 # Values carry the same rule as `box`, `repo`, `ref`, `script`
 # and `deploy_key`: no quote, no backslash, no control
 # character, no `#{`, and no leading or trailing space. An

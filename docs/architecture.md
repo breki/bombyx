@@ -498,7 +498,7 @@ without that flag Vagrant runs a shell provisioner as root. The
 script's last line is `exec -- "$script_real"`, and it changes
 no privilege because there is none to change.
 
-Nothing in that script needs root. The clone lives in `$HOME`,
+That script needs no root of its own. The clone lives in `$HOME`,
 which is the account's own home because the provisioner is
 unprivileged, so the account creates the directory, owns
 everything in it and removes it again. Every `git` command is
@@ -510,18 +510,68 @@ project's own script calls it. So bombyx never learns a package
 manager, and `git` stays the box's own requirement, which is
 what `bootstrap.sh` tells the operator when it refuses.
 
-Two consequences follow from there being no root phase at all.
-An `[env]` value such as `PATH` reaches only the project's own
-script, rather than deciding which `git` root runs on the way
-there. And nothing overwrites `HOME`, `USER`, `LOGNAME` or
-`SHELL` after the operator's values arrive, where `runuser`
-used to set all four for the account it dropped to. `HOME`
-written in `[env]` therefore moves the clone with it, which is
-why `bootstrap.sh` checks that the value is absolute, present
-and writable before using it. *(Unverified: no run has put any
-of those four names in an `[env]` table. `GIT_USER_NAME` and
-`GIT_USER_EMAIL` did reach a project's script on a real
-provision.)*
+Where the `[env]` table lands is worth being exact about,
+because it is not where the name suggests. Vagrant renders the
+provisioner's `env:` as an assignment prefix on the command it
+runs, so every name in that table is in `bootstrap.sh`'s own
+environment and not only the project script's. This was
+measured against a real VM host: an `[env]` entry setting
+`PATH` to a directory holding no `bash` fails the provision at
+the `#!/usr/bin/env bash` line, so `/etc/profile` does not
+overwrite it either. The `privileged: false` flag decides *whose*
+environment those values sit in; it does not decide which
+script they reach.
+
+That is why `config::env` refuses a name that changes what
+`bootstrap.sh` does, alongside the `BOMBYX_` prefix it already
+refused. `NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES` in
+`crates/bombyx/src/config/env.rs` is the list, and
+`config.toml.sample` spells it out for the operator; no count
+is given here, because the array is the count.
+
+Each name on it disarms one of bombyx's own guarantees rather
+than inconveniencing the project. `PATH` decides which
+`readlink` runs, and `readlink -f` is the whole of the check
+that the project's script resolves inside the clone.
+`SHELLOPTS=noexec` makes `bash` parse the script and exit 0, so
+Vagrant reports a provision in which nothing was cloned and the
+uploaded key was never tightened or removed. `GIT_CONFIG_COUNT`
+is treated as `git -c`, which outranks every config file, so it
+beats the `core.sshCommand` the script writes on the clone --
+and `GIT_DIR` outranks `git -C`, so every `git -C "$CLONE_DIR"`
+would act on a repository the `[env]` table names while the
+clone itself was left alone.
+
+Setting bombyx's own `PATH` at the top of the script was
+considered instead, and rejected: `bootstrap.sh` ends by
+`exec`ing the project's script, which would then inherit
+bombyx's `PATH` rather than the operator's, silently discarding
+a line they wrote deliberately. A refusal while the config
+parses tells them at the moment they wrote it.
+
+`HOME` changes what the script does too, and is accepted
+anyway. That is the one exception to the rule above, and it is
+deliberate: honouring `HOME` moves the clone, because
+`bootstrap.sh` derives the clone directory from `$HOME`. So the script checks
+the value before using it: set at all, absolute, present, both
+writable and searchable, and owned by this account. Ownership
+is what refuses `HOME = "/tmp"`, which passes everything
+else -- `/tmp` is absolute, present and mode 1777 -- and would
+put the checkout and its `core.sshCommand` in a world-writable
+directory.
+
+That `HOME` moves the clone is measured rather than reasoned
+from the `PATH` result, because `HOME` is the one variable a
+login shell also sets and the two could have disagreed. A
+provision against the real VM host with
+`HOME = "/home/vagrant/homedirtest"` cloned into
+`/home/vagrant/homedirtest/project`, and the project's own
+script then cloned its own checkout beside it in the same
+directory.
+
+`USER`, `LOGNAME` and `SHELL` are accepted and take effect as
+written. *(Unverified: no run has put `USER`, `LOGNAME` or
+`SHELL` in an `[env]` table.)*
 
 The project's own script has `sudo` and runs with that tree as
 its working directory, so it can leave content bombyx's own
@@ -531,17 +581,16 @@ removes the clone therefore checks whether it succeeded and
 says what to clear when it did not, rather than letting a bare
 `git` or `rm` message be the whole diagnosis.
 
-Running the project's script as root has a consequence that is
-easy to miss: whatever it installs -- a language toolchain, an
-agent's own configuration, a shell profile -- lands in `/root`
-instead of in the home directory of the account the agent logs
-in as. The agent then finds none of it, and nothing fails while
-that happens.
+The flag is set because a root provisioner puts the project's
+toolchain where the agent never looks. Whatever the script
+installs -- a language toolchain, an agent's own configuration,
+a shell profile -- lands in `/root` rather than in the home
+directory of the account the agent logs in as, and nothing
+fails while that happens.
 
-That is not hypothetical. It is how the first real run against
-a project went, and the symptom was a `/root/.rustup` and a
-second clone at `/root/jutro` in a VM whose agent works as
-`vagrant`.
+That is what the first real run against a project did. The
+symptom was a `/root/.rustup` and a second clone at
+`/root/jutro`, in a VM whose agent works as `vagrant`.
 
 ## What config values are checked
 

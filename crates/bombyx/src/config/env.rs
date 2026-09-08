@@ -1,6 +1,14 @@
 //! The `[env]` table: variables a project hands to its own
 //! provisioning script.
 //!
+//! They reach bombyx's own `bootstrap.sh` as well, because
+//! Vagrant puts the whole table in the provisioner's
+//! environment. So two sets of names are refused: the ones
+//! bombyx sets itself, and the ones that change what its script
+//! does. `HOME` changes what the script does and is accepted
+//! anyway, because honouring it moves the clone, which is a
+//! decision rather than an accident.
+//!
 //! Two newtypes, one for a name and one for a value, because
 //! the two carry different rules. A name becomes a shell
 //! variable in the guest, so it has to be spellable as one. A
@@ -32,6 +40,79 @@ const FIELD: &str = "env";
 /// in such a literal takes its last value. So a project writing
 /// `BOMBYX_SCRIPT` would decide which script bombyx runs.
 pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
+
+/// Names that change what `bootstrap.sh` does, so a project may
+/// not set them.
+///
+/// Not "names the script reads": most of these appear nowhere in
+/// it. `LD_PRELOAD` and `LD_LIBRARY_PATH` are read by the
+/// dynamic loader, and the `GIT_*` names by `git`. What they
+/// share is that the script behaves differently when they are
+/// set.
+///
+/// Vagrant renders the provisioner's `env:` as an assignment
+/// prefix on the command it runs, so an `[env]` name is in
+/// `bootstrap.sh`'s own environment and not only the project
+/// script's. Measured against a real VM host: an `[env]` entry
+/// setting `PATH` to a directory with no `bash` in it fails the
+/// provision at the `#!/usr/bin/env bash` line.
+///
+/// Six of these were measured to disarm one of bombyx's own
+/// guarantees, on bash 5.2.21 and git 2.43.0:
+///
+/// - `PATH` decides which `git`, `readlink`, `rm` and `chmod`
+///   the script finds, and `readlink -f` is the whole of the
+///   check that the project's script resolves inside the clone.
+/// - `SHELLOPTS=noexec` makes `bash` parse the script and exit
+///   0, so Vagrant reports a provision in which nothing was
+///   cloned and the uploaded key was never tightened or
+///   removed.
+/// - `BASH_ENV` names a file the shell sources before the
+///   script.
+/// - `GIT_CONFIG_COUNT` is treated as `git -c`, which outranks
+///   every config file -- so it beats the `core.sshCommand` the
+///   script writes on the clone, which `GIT_CONFIG_GLOBAL`
+///   cannot do.
+/// - `GIT_DIR` and `GIT_WORK_TREE` outrank `git -C`, so every
+///   `git -C "$CLONE_DIR"` here would act on a repository the
+///   `[env]` table names while the clone itself was left alone.
+///
+/// The rest are refused in advance rather than on a
+/// measurement. `IFS` and `ENV` were measured to be inert:
+/// bash resets `IFS` to its default at startup, and `ENV` is
+/// read only by an interactive shell or by `sh`, neither of
+/// which this script is. They stay on the list because
+/// refusing them costs nothing and one `sh` line here would
+/// make both live. `BASHOPTS`, `LD_PRELOAD`,
+/// `LD_LIBRARY_PATH`, `GIT_SSH_COMMAND`, `GIT_CONFIG_GLOBAL`
+/// and `GIT_CONFIG_SYSTEM` are the same case: each is a name
+/// this script's behaviour could turn on, and none is a name a
+/// project needs bombyx to hand onward.
+///
+/// `HOME` is deliberately absent: `bootstrap.sh` derives the
+/// clone directory from it, so writing it here moves the clone,
+/// and that is a recorded decision rather than an accident.
+/// `docs/architecture.md` under **Who runs the project's
+/// script** holds the argument.
+///
+/// Keeping a list is a maintenance cost, and `docs/todo.md`
+/// holds the alternative to it as `bootstrap-sets-own-path`.
+const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 14] = [
+    "PATH",
+    "IFS",
+    "BASH_ENV",
+    "ENV",
+    "SHELLOPTS",
+    "BASHOPTS",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "GIT_SSH_COMMAND",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+];
 
 /// The name of a variable the guest's shell will carry.
 ///
@@ -119,8 +200,23 @@ fn is_name_char(c: char) -> bool {
 /// digits and underscores. Anything else cannot be assigned:
 /// `9LIVES=1` is a syntax error rather than an odd variable,
 /// and `WITH-DASH=1` is read as a command to run.
+///
+/// Two sets of names are then refused rather than spelled
+/// wrongly: [`RESERVED_PREFIX`] for the ones bombyx sets, and
+/// [`NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES`] for the ones its script reads.
 fn check_name(value: &str) -> Result<(), FieldError> {
     guards::check_not_empty(FIELD, value)?;
+    if NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES.contains(&value) {
+        return Err(FieldError::invalid(
+            FIELD,
+            format!(
+                "`{value}` changes what bombyx's own \
+                 provisioning script does in the guest, rather \
+                 than what your script does. Set it inside your \
+                 own provisioning script instead."
+            ),
+        ));
+    }
     if value.starts_with(RESERVED_PREFIX) {
         return Err(FieldError::invalid(
             FIELD,
@@ -218,6 +314,79 @@ mod tests {
                 "should have refused {name:?}"
             );
         }
+    }
+
+    #[test]
+    fn refuses_a_name_the_bootstrap_script_itself_reads() {
+        // Vagrant renders `env:` as an assignment prefix on the
+        // command it runs, so an `[env]` name is in
+        // `bootstrap.sh`'s own environment and not only the
+        // project script's. Measured against a real VM host:
+        // `PATH = "/nonexistent-bombyx-pathtest"` fails the
+        // provision at `#!/usr/bin/env bash`.
+        //
+        // The family is "a name that changes what bombyx's own
+        // fixed script does", and each one below disarms a
+        // guarantee rather than merely inconveniencing the
+        // project: `SHELLOPTS=noexec` makes bash parse the
+        // script and exit 0, so Vagrant reports a provision in
+        // which nothing was cloned and the uploaded key was
+        // never tightened or removed.
+        for name in [
+            "PATH",
+            "IFS",
+            "BASH_ENV",
+            "ENV",
+            "SHELLOPTS",
+            "BASHOPTS",
+            "LD_PRELOAD",
+            "LD_LIBRARY_PATH",
+            "GIT_SSH_COMMAND",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_SYSTEM",
+            // The three that actually beat what the script
+            // writes, measured on git 2.43.0.
+            // `GIT_CONFIG_GLOBAL` above cannot override the
+            // `core.sshCommand` the clone carries, because a
+            // repository's own config wins over a global one.
+            // These do:
+            //
+            //   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=... \
+            //     GIT_CONFIG_VALUE_0=...
+            //
+            // is treated as `git -c`, which outranks every
+            // config file, and `GIT_DIR` outranks `git -C`, so
+            // every `git -C "$CLONE_DIR"` in the script would
+            // act on a repository the `[env]` table names while
+            // the clone itself was left alone.
+            //
+            // Refusing `GIT_CONFIG_COUNT` disarms the whole
+            // mechanism, because git ignores `GIT_CONFIG_KEY_n`
+            // and `GIT_CONFIG_VALUE_n` without the count. So
+            // this stays a list of names and needs no prefix
+            // rule.
+            "GIT_CONFIG_COUNT",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+        ] {
+            assert!(
+                EnvName::parse(name).is_err(),
+                "should have refused {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_home_because_moving_the_clone_is_a_decision() {
+        // `HOME` changes what the script does and is accepted
+        // anyway, which is the one exception to the list above.
+        // `bootstrap.sh` derives the clone directory from
+        // `$HOME`, so writing it here moves the clone -- the
+        // operator's own line in their own config, and the
+        // script checks the value before using it.
+        // `docs/architecture.md` under **Who runs the project's
+        // script** holds the argument.
+        assert!(EnvName::parse("HOME").is_ok());
     }
 
     #[test]

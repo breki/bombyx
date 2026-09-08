@@ -38,9 +38,9 @@ Cargo workspace, CLI only:
   - `crates/bombyx/templates/bootstrap.sh` — the script the
     guest runs, identical for every project. The generated
     Vagrantfile marks the provisioner `privileged: false`, so
-    the whole script runs as the box's SSH user and nothing in
-    it asks for root. The clone goes in `$HOME`, which that
-    account owns, and a toolchain the project's script
+    the whole script runs as the box's SSH user, and no command
+    in it raises privilege. The clone goes in `$HOME`, which
+    that account owns, and a toolchain the project's script
     installs lands there too rather than in `/root`. A project
     needing root calls `sudo` from its own script
 - `xtask` — build automation (not published)
@@ -164,13 +164,23 @@ header above it:
   own provisioning script reads, rendered into the generated
   Vagrantfile's provisioner beside bombyx's own set and sorted
   by name, so a re-run with an unchanged config writes a
-  byte-identical file. A name has to be spellable as a shell
-  variable and must not start with `BOMBYX_`, because a
-  repeated key in a Ruby hash literal takes its last value and
-  a project could otherwise choose which script bombyx runs. A
-  value carries the same `check_renderable` rule as `box`,
-  `repo`, `ref`, `script` and `deploy_key`, so an empty one is
-  refused and a variable is made absent by leaving the key out
+  byte-identical file. Three rules on a name. It has to be
+  spellable as a shell variable. It must not start with
+  `BOMBYX_`, because a repeated key in a Ruby hash literal
+  takes its last value and a project could otherwise choose
+  which script bombyx runs. And it must not be one of the names
+  in `NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES` in
+  `crates/bombyx/src/config/env.rs` -- `PATH`, `SHELLOPTS`,
+  `GIT_CONFIG_COUNT` and the rest -- because Vagrant puts the
+  whole table in the provisioner's environment, which is
+  `bootstrap.sh`'s own. `HOME` is on neither list and is the
+  one to know about: bombyx clones into `$HOME/project`, so
+  setting it moves the clone, and `bootstrap.sh` checks the
+  value is absolute, present, writable, searchable and owned by
+  that account before using it. A value carries the same
+  `check_renderable` rule as `box`, `repo`, `ref`, `script` and
+  `deploy_key`, so an empty one is refused and a variable is
+  made absent by leaving the key out
 
 The VM host belongs to the developer, not the project: each
 person has their own hardware on their own network, so a
