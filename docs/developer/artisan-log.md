@@ -4,6 +4,31 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-08-vagrantfile-tests-hold-two-subjects
+
+**Category:** Module Size
+
+`crates/bombyx/src/vagrantfile.rs` holds two unrelated test
+groups in one `mod tests`. About fifteen tests assert
+properties of the rendered Ruby -- `carries_every_configured_value`,
+`the_env_hash_closes_with_the_projects_variables_in_it`,
+`disables_the_default_synced_folder`. About fifteen more assert
+properties of the shell text of `bootstrap.sh` through
+`flat_bootstrap` and `flat_bootstrap_lines`, which is a lint
+over a shell script that this module happens to `include_str!`.
+The two groups share no fixture, no helper and no subject.
+
+The wanted shape is a second `#[cfg(test)] mod bootstrap_tests`
+in its own file, holding the shell-text group and the two
+flattening helpers, and leaving the four cross-file agreement
+tests where they are -- those are the ones whose subject really
+is the pair.
+
+Deferred rather than fixed: it is a move of roughly 400 lines
+with no behaviour change, it is outside what issue #64 asked
+for, and `/review` forbids applying a consolidation in the
+round that found it.
+
 ### aq-2026-09-05-check-segment-runs-three-times-per-load
 
 **Category:** Type Safety

@@ -391,6 +391,12 @@ plan, decisions, and outcome.
   six sharpened comments in the sweep this came from turned out false, which is
   what comment-claims-have-no-gate records.
 
+- **bootstrap-sets-own-path** -- guard without a name list to keep current
+  Refusing an `[env]` name is a list that can go stale. `bootstrap.sh` could set
+  its own `PATH` and `IFS` instead, but only if it restores the operator's
+  values before it execs the project's script. Raised as RT-4(b) on PR #65 and
+  rejected there for that reason.
+
 ## Done
 
 - [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)

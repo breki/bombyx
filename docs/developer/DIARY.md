@@ -2,6 +2,78 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-08
+
+**bootstrap.sh stops asking for root**
+
+One line in the generated Vagrantfile did it: `privileged: false`
+on the shell provisioner. Vagrant runs a shell provisioner as
+root without it, and that default was the only reason the script
+had a privilege arrangement to get wrong.
+
+The count is the argument. `bootstrap.sh` goes from 753 lines to
+661, and seven guard tests go with it, along with `runuser`
+resolution, the `getent passwd` block that derived the owner's
+home, `readonly OWNER=vagrant`, and three
+`rm -f /root/.ssh/bombyx-deploy-key` lines cleaning up after a
+bombyx nobody runs.
+
+Five guards replace those seven. Two cover the privilege
+arrangement itself: the rendered Vagrantfile carries the flag on
+every shell provisioner, and no non-comment line in the script
+names a command that changes the effective user or a path under
+root's home. Two cover the clone directory, which is the one job
+the deleted machinery was doing that still has to be done. The
+fifth came out of the review and is the one worth having: every
+command acting on the deploy key must test its own status.
+`config/env.rs` gained two more, on which `[env]` names are
+refused.
+
+No line count for the script appears under `docs/` any more, and
+that is deliberate. The `--dry-run` transcripts there used to
+quote the figure bombyx prints, and it was wrong on `main`
+before this work and wrong twice again during the review, each
+time because a fix added lines to the file. Both transcripts now
+write it as `N` and say why.
+
+Two escalated review findings go with them. A project's `[env]`
+values sat in root's environment for the whole script, where
+`PATH` decided which `git` root ran -- with no root, the trap
+has nowhere to spring. And `runuser` had been quietly setting
+`HOME`, `USER`, `LOGNAME` and `SHELL` over whatever the operator
+wrote; nothing overwrites them now.
+
+The one decision worth recording is where the clone goes. The
+script *is* the account, so `$HOME` answers, and the checks the
+old passwd block had grown over three review rounds moved across
+to it: set, absolute, present, writable and searchable. The
+review added ownership to that list, because `HOME = "/tmp"`
+passed every one of the others.
+Reading the home out of `getent passwd "$(id -un)"` instead was
+rejected. It would keep the clone where passwd says even when a
+project writes `HOME` in `[env]`, and that is not a trap worth
+guarding -- the operator wrote the line, and the whole point of
+the second finding above is that those four names start working
+as written.
+
+Verified on frosti, which is also the VM host here, so bombyx
+took the `sh -c` route. `vmtest` booted from nothing and
+provisioned again; `jutro-rebuild` provisioned with a deploy key
+and an `[env]` table. All three exited 0, the clone came out
+`vagrant:vagrant`, the toolchain landed in `/home/vagrant`, and
+`find -user root` inside both clones returned nothing. Neither
+guest had a key in `/root/.ssh`, so the cleanup that went away
+had nothing left to clean.
+
+Also found: the elided-line counts in the dry-run transcripts in
+`docs/tutorial.md` and `docs/usage.md` were already wrong before
+this work -- 33 and 266 against 34 and 753. Measuring them was
+the wrong fix, and the review proved it twice over: each round
+of fixes added lines to `bootstrap.sh` and made the freshly
+measured figure stale again. Both transcripts now write the
+count as `N` and say why, which is the answer to a number in
+prose that is really a property of a file.
+
 ### 2026-09-07
 
 **A project can hand its own variables to its provisioning
