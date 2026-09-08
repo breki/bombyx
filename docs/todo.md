@@ -420,6 +420,32 @@ plan, decisions, and outcome.
   FR-1, FR-2, FR-5, FR-7, FR-12, FR-13 and FR-15 in that PR's review record.
   FR-12 is the argument itself.
 
+- **guest-branch-state-differs** -- first up leaves a branch, later ones detach
+  The first `up` clones with `git clone --depth 1 --branch <ref>` and leaves the
+  guest on a real branch. Every provision after that runs `git checkout --force
+  FETCH_HEAD`, which detaches HEAD. So a guest that has never been
+  re-provisioned is on a branch and an identical one that has is not, and an
+  operator cannot say which state to expect. The detaching itself is deliberate
+  and `bootstrap.sh` says so where it happens: a commit made in the guest sits
+  on no branch, the next provision moves HEAD away from it, and pushing rather
+  than committing is how work survives. That reasoning stands. It is the
+  inconsistency between the two paths that is not covered. Found by running
+  `bombyx --project jutro-rebuild provision` a second time on 2026-09-07 and
+  then looking at the guest's checkout. Still true as of 2026-09-08:
+  bootstrap.sh lines 509 and 556.
+
+- **chmod-dirties-the-checkout** -- bombyx modifies a tracked file every run
+  `bootstrap.sh` runs `chmod +x "$script_real"` before `exec`ing the project's
+  script, so a `vagrant/provision.sh` tracked at mode 100644 becomes 100755 and
+  git reports the tree as modified from the moment provisioning finishes. Worked
+  around on jutro's side in commit `c71e2d0`, which records 100755 so bombyx's
+  chmod changes nothing. The bombyx-side question survives: should bombyx modify
+  a tracked file at all, rather than invoking the script through `sh`? Invoking
+  through `sh` would drop the shebang, which is a real cost and the reason the
+  chmod is there -- so this is a trade rather than an obvious fix. Found by
+  running `bombyx --project jutro-rebuild provision` a second time on
+  2026-09-07. Still true as of 2026-09-08: bootstrap.sh line 657.
+
 ## Done
 
 - [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)
