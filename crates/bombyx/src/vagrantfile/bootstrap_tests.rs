@@ -1,4 +1,4 @@
-//! Tests reading the shell text of [`super::BOOTSTRAP`].
+//! Tests reading the shell text of `super::BOOTSTRAP`.
 //!
 //! These are separate from `super::tests` because the subject
 //! is different. That module renders a Vagrantfile and asserts
@@ -8,19 +8,32 @@
 //! `include_str!` happens to pull into this crate. The two
 //! groups share no fixture and no helper.
 //!
-//! The split has a practical point: an edit to
-//! `bootstrap.sh` is reviewed here rather than in the middle
-//! of the renderer's own tests, and the renderer's tests sit
-//! next to the code they exercise.
+//! The split has a practical point: an edit to `bootstrap.sh`
+//! is reviewed here rather than in the middle of the
+//! renderer's own tests, and the renderer's tests sit next to
+//! the code they exercise.
 //!
-//! **Four tests deliberately stay in `super::tests`**, because
-//! their subject is the *pair* of files rather than either one:
-//! `points_the_provisioner_at_the_bootstrap_script`,
-//! `the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to`,
-//! `the_bootstrap_script_branches_on_the_announcement` and
-//! `the_shell_provisioner_runs_unprivileged`. Each asserts that
-//! the Rust half and the shell half still agree about a name or
-//! a path neither can see in the other.
+//! **Two tests in `super::tests` span both files**, and stay
+//! there because neither half is the subject on its own:
+//! `the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to`
+//! and `the_bootstrap_script_branches_on_the_announcement`.
+//! Each compares `BOOTSTRAP` against a Rust constant, so each
+//! catches a rename in *either* file. That is a property of
+//! how they assert rather than of where they sit: a needle
+//! taken over the raw text can be satisfied by the script's
+//! own comments, which is why the announcement test goes
+//! through `super::bootstrap_code` and the path test does not
+//! need to -- `DEPLOY_KEY_GUEST_PATH` appears in the script's
+//! code and nowhere in its prose.
+//!
+//! Two more stay there for different reasons, and it is worth
+//! knowing which is which. In `super::tests`,
+//! `the_shell_provisioner_runs_unprivileged` is a rendering
+//! test whose companion here is
+//! `nothing_in_the_bootstrap_script_asks_for_root`: one asserts
+//! the flag is set, the other that no line in the script
+//! defeats it. And `points_the_provisioner_at_the_bootstrap_script`
+//! is a plain rendering test with no shell half at all.
 //!
 //! **A test here cannot run the script**, so every assertion is
 //! over text. `CLAUDE.md` under **Test-Driven Development**
@@ -29,15 +42,19 @@
 //! ships, byte for byte, so its text is a contract. A rendered
 //! terminal report is not.
 
-use super::BOOTSTRAP;
+use super::{BOOTSTRAP, bootstrap_code};
 
-/// [`BOOTSTRAP`] with line continuations joined and every
-/// whitespace run collapsed to one space.
-///
-/// Needed because a command in that file may be wrapped
-/// across lines, so the text a reader sees as one command
-/// is not a contiguous substring -- the same wrap trap
-/// `CLAUDE.md` warns about for grepping canon prose.
+// `BOOTSTRAP` with line continuations joined and every
+// whitespace run collapsed to one space.
+//
+// Needed because a command in that file may be wrapped across
+// lines, so the text a reader sees as one command is not a
+// contiguous substring -- the same wrap trap `CLAUDE.md` warns
+// about for grepping canon prose.
+//
+// A plain comment, not `///`: this whole file is `cfg(test)`,
+// which neither rustdoc pass compiles, so a doc link here
+// would never be resolved or checked.
 fn flat_bootstrap() -> String {
     BOOTSTRAP
         .replace("\\\n", " ")
@@ -46,12 +63,14 @@ fn flat_bootstrap() -> String {
         .join(" ")
 }
 
-/// [`BOOTSTRAP`] as lines, each with its continuations
-/// joined and its whitespace collapsed.
-///
-/// [`flat_bootstrap`] answers "does this text appear
-/// anywhere"; this one answers "what does each command look
-/// like", which is what a per-line invariant needs.
+// `BOOTSTRAP` as lines, each with its continuations joined and
+// its whitespace collapsed.
+//
+// `flat_bootstrap` answers "does this text appear anywhere";
+// this one answers "what does each command look like", which is
+// what a per-line invariant needs. `super::bootstrap_code`
+// answers "does the script actually do this", by dropping the
+// comment lines first.
 fn flat_bootstrap_lines() -> Vec<String> {
     BOOTSTRAP
         .replace("\\\n", " ")
@@ -83,11 +102,16 @@ fn every_variable_is_declared_before_it_is_expanded() {
             !l.starts_with('#') && l.contains(&format!("${name}"))
         });
         if let Some(u) = first_use {
+            // The two lines quoted, not their indices.
+            // `flat_bootstrap_lines` joins each `\`-continuation
+            // into the line above, so an index into it is not a
+            // file line number.
             assert!(
                 decl <= u,
-                "${name} is expanded at line {} and declared at {}",
-                u + 1,
-                decl + 1
+                "${name} is used before it is declared.\n  \
+                 use:  {}\n  decl: {}",
+                flat[u],
+                flat[decl]
             );
         }
     }
@@ -100,10 +124,9 @@ fn every_refusal_clears_the_uploaded_key() {
     // credential at whatever mode `scp` gave it, in a guest
     // that never provisioned.
     //
-    // The rule was written as prose and broken four times
-    // by the file's own refusals. So it is structural now:
-    // `refuse` removes the key and exits, and no bare
-    // `exit 1` is allowed outside it. The checks on
+    // The rule is structural rather than stated:
+    // `refuse` removes the key and exits, and no `exit` or
+    // `return` is allowed outside it. The checks on
     // `$HOME` sit above the key block and refuse through
     // it, which `an_unusable_home_is_refused_by_name`
     // pins.
@@ -117,7 +140,15 @@ fn every_refusal_clears_the_uploaded_key() {
             inside = false;
             continue;
         }
-        if line.starts_with('#') || !line.contains("exit 1") {
+        // Any `exit`, not `exit 1`, and `return` with it. A
+        // refusal spelled `exit 2`, a bare `exit` or a
+        // `return 1` out of a helper skips the removal exactly
+        // as `exit 1` would, and the narrower needle could not
+        // see any of them.
+        let leaves = line
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|w| w == "exit" || w == "return");
+        if line.starts_with('#') || !leaves {
             continue;
         }
         assert!(
@@ -147,15 +178,36 @@ fn every_command_on_the_key_reports_its_own_failure() {
     // this file is arranged around.
     //
     // Per line, because all three commands act on the same
-    // path and a rule naming one of them misses the next.
+    // path, one line at a time.
     for line in flat_bootstrap_lines() {
         if line.starts_with('#') || !line.contains("$DEPLOY_KEY") {
             continue;
         }
-        if !["rm ", "chmod ", "install "]
-            .iter()
-            .any(|c| line.contains(*c))
-        {
+        // INVERTED ON PURPOSE: every line naming the key is
+        // examined, and the shapes that only read it are
+        // allowed. Listing the verbs instead -- `rm`, `chmod`,
+        // `install` -- leaves the next one unexamined, and
+        // `mv`, `cp`, `ln -sf`, `truncate` and `shred` all
+        // reach the same file.
+        //
+        // The criterion for an allowance is that the line does
+        // not touch the file at that path: it prints the path,
+        // declares it, or reads it into a variable.
+        //
+        // EVERY ENTRY IS ANCHORED. An allowance matched
+        // anywhere in the line exempts the whole line, so
+        // `mv "$DEPLOY_KEY" /tmp/k; GIT_SSH_COMMAND=x` walked
+        // through the unanchored version -- measured.
+        let only_reads = [
+            "echo ",
+            "refuse ",
+            "readonly ",
+            "key_note=",
+            "export GIT_SSH_COMMAND=",
+        ]
+        .iter()
+        .any(|allowed| line.starts_with(*allowed));
+        if only_reads {
             continue;
         }
         // `if `, and no `|| true` alternative. Silencing
@@ -181,8 +233,19 @@ fn the_bootstrap_script_points_ssh_at_the_key_and_nothing_else() {
     // `IdentitiesOnly=yes` alone is not enough: it does not
     // exclude identities named in an `ssh_config`, so
     // `-F /dev/null` is what makes "only this key" true.
-    for needle in ["GIT_SSH_COMMAND", "IdentitiesOnly=yes", "-F /dev/null"] {
-        assert!(BOOTSTRAP.contains(needle), "{needle} missing");
+    //
+    // Whole clauses over a comment-stripped view. All three
+    // of those words appear in the comment above the code that
+    // builds them, so a bare needle over the raw text is
+    // satisfied by the prose and says nothing about the
+    // code -- and the subject here is a credential scoped to a
+    // single identity.
+    let code = bootstrap_code();
+    for clause in [
+        "ssh_opts=\"-o IdentitiesOnly=yes -F /dev/null\"",
+        "export GIT_SSH_COMMAND=\"ssh -i $DEPLOY_KEY $ssh_opts\"",
+    ] {
+        assert!(code.contains(clause), "not in the script: {clause}");
     }
 }
 
@@ -278,15 +341,25 @@ fn an_unusable_home_is_refused_by_name() {
         .iter()
         .position(|l| l.contains("[ -z \"${HOME:-}\" ]"))
         .expect("the unset check must be there");
+    // Any spelling of a bare expansion. `$HOME` unquoted,
+    // `"$HOME"` quoted and `${HOME}` braced all abort under
+    // `set -u`, and this script writes more than one of them.
+    // `${HOME:-` is the guarded form, so it is what the first
+    // bare use is looked for *after*.
     let first_bare = lines
         .iter()
-        .position(|l| !l.starts_with('#') && l.contains("\"$HOME\""))
+        .position(|l| {
+            !l.starts_with('#')
+                && l.contains("$HOME")
+                && !l.contains("${HOME:-")
+        })
         .expect("HOME must be used");
     assert!(
         guard < first_bare,
-        "an unset HOME is expanded at line {} and checked at {}",
-        first_bare + 1,
-        guard + 1
+        "$HOME is expanded before it is checked for being \
+         unset.\n  expanded: {}\n  checked:  {}",
+        lines[first_bare],
+        lines[guard]
     );
 }
 
@@ -360,13 +433,14 @@ fn a_discard_that_cannot_finish_says_so() {
 
 #[test]
 fn the_clone_is_pinned_from_the_config_not_the_environment() {
-    // `GIT_SSH_COMMAND` is inherited, and this file's own
-    // header says whether a key was configured must never
-    // be re-derived from the guest -- a `/etc/profile.d`
-    // export reaches a login shell provisioner. Deciding
-    // the `core.sshCommand` write from it would let the
-    // guest re-pin the clone to a key the operator had just
-    // removed.
+    // `GIT_SSH_COMMAND` is inherited from the environment. The
+    // deploy-key banner near the top of `bootstrap.sh` states
+    // the rule: whether a key was configured must never be
+    // re-derived from inside the guest, because an export in
+    // `/etc/profile.d` reaches a login shell provisioner.
+    // Deciding the `core.sshCommand` write from that variable
+    // would let the guest re-pin the clone to a key the
+    // operator had just removed.
     //
     // `--replace-all`, because a plain set refuses with
     // "cannot overwrite multiple values" and exits 5 when
@@ -390,9 +464,11 @@ fn the_clone_is_pinned_from_the_config_not_the_environment() {
 
 #[test]
 fn removing_the_key_unpins_the_clone_from_it() {
-    // The mirror of the comment about a key nothing points
-    // at: a pointer to no key. `core.sshCommand` names the
-    // deleted identity, and `IdentitiesOnly=yes` with
+    // The `else` branch of `bootstrap.sh`'s deploy-key block
+    // handles a key nothing points at. This is the other
+    // direction: a pointer to a key that is gone.
+    // `core.sshCommand` names the deleted identity, and
+    // `IdentitiesOnly=yes` with
     // `-F /dev/null` stops git falling back to one the
     // agent does hold -- so every fetch and push fails with
     // an ssh error naming nothing about bombyx.
@@ -447,11 +523,11 @@ fn the_deploy_key_ends_up_readable_by_the_agent() {
 
 #[test]
 fn nothing_in_the_bootstrap_script_asks_for_root() {
-    // `the_shell_provisioner_runs_unprivileged` is one half
-    // of the arrangement and this is the other. A line here
-    // that raises privilege puts root back inside a tree the
-    // agent owns, and the rendered flag would go on saying
-    // the script is unprivileged.
+    // `super::tests` holds one half of this arrangement, as
+    // `the_shell_provisioner_runs_unprivileged`, and this is
+    // the other. A line here that raises privilege puts root
+    // back inside a tree the agent owns, and the rendered flag
+    // would go on saying the script is unprivileged.
     //
     // Root in that tree is a measured escalation rather than
     // a theoretical one. git trusts the uid in `SUDO_UID` as

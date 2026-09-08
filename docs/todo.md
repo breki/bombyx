@@ -397,6 +397,29 @@ plan, decisions, and outcome.
   values before it execs the project's script. Raised as RT-4(b) on PR #65 and
   rejected there for that reason.
 
+- **bootstrap-harness-runs-the-script** -- run the script, do not match its text
+  The eighteen tests in `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
+  assert over the text of `bootstrap.sh`, and keeping them working has taken
+  three flattening helpers, a comment stripper, a word splitter and two
+  allowance lists -- which is the parser `CLAUDE.md` under **Test-Driven
+  Development** says such a test ends up being. Four assertions turned out to be
+  satisfied by the script's own comments rather than its code, each found one at
+  a time: AQ-1, RT-1 and RT-2 on PR #66, over two review runs. The replacement
+  is a harness that runs the script: a fake `git` on `PATH`, a temporary `HOME`,
+  a fake deploy key, and assertions on what it refuses, what it removes, where
+  it clones and what it exits with. That is a contract, and it would have caught
+  all four comment-satisfied assertions by construction rather than singly. It
+  also covers shapes text matching cannot see at all -- an `mv` on the key, a
+  refusal spelled `exit 2`, an unquoted $HOME above the guard -- each of which
+  had to be added to a list by hand after a reviewer found it. Unix-only, so it
+  needs `#[cfg(unix)]` or an `#[ignore]` on Windows, where CI runs the suite.
+  The two cross-file agreement tests stay as they are: their subject is that the
+  Rust half and the shell half agree about a name, which is not a behavioural
+  question. Seven comment findings on PR #66 were escalated and left unfixed
+  because they turn on this decision rather than on seven separate defects:
+  FR-1, FR-2, FR-5, FR-7, FR-12, FR-13 and FR-15 in that PR's review record.
+  FR-12 is the argument itself.
+
 ## Done
 
 - [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)

@@ -104,11 +104,11 @@ const DEPLOY_KEY_GUEST_PATH: &str = "/home/vagrant/.ssh/bombyx-deploy-key";
 /// the only thing that overrides what those files set. So a
 /// name bombyx does not render is left to them, and an export
 /// placed there reaches `bootstrap.sh` unopposed. Rendering the
-/// entry only for a configured key
-/// would leave the *no-key* case forgeable in exactly the
-/// direction that matters: the guest could claim a key was
-/// configured and keep a stale credential alive. Naming it
-/// always means the config answers either way.
+/// entry only for a configured key would leave the *no-key*
+/// case forgeable in exactly the direction that matters: the
+/// guest could claim a key was configured and keep a stale
+/// credential alive. Naming it always means the config
+/// answers either way.
 const DEPLOY_KEY_ENV: &str = "BOMBYX_DEPLOY_KEY";
 
 /// Repository the guest clones, as the guest's shell sees it.
@@ -144,6 +144,40 @@ const BOMBYX_ENV_NAMES: [&str; 6] = [
     crate::remote::VM_HOST_ENV,
     crate::remote::VM_HOSTNAME_ENV,
 ];
+
+/// [`BOOTSTRAP`] as code, with every comment line dropped and
+/// the remaining text flattened to single spaces.
+///
+/// **A positive needle asserted over the whole file can be
+/// satisfied by the script's own prose**, which is how a lint
+/// comes to guard nothing: that script explains each thing it
+/// does in a comment above the doing of it, so the words are
+/// there either way. `GIT_SSH_COMMAND`, `IdentitiesOnly=yes`,
+/// `-F /dev/null` and `BOMBYX_DEPLOY_KEY` are all in that
+/// position.
+///
+/// So an assertion that the script *does* something goes
+/// through here. An assertion that it does *not* contain
+/// something is better off over the raw text, where a mention
+/// in a comment is also worth refusing.
+///
+/// Line continuations are joined first, so a command wrapped
+/// across lines is one string here. It lives beside the
+/// production code rather than in either test module because
+/// both of them need it, the same reason [`BOMBYX_ENV_NAMES`]
+/// sits here.
+#[cfg(test)]
+fn bootstrap_code() -> String {
+    BOOTSTRAP
+        .replace("\\\n", " ")
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 /// Wraps `value` in double quotes, ready to drop into Ruby.
 ///
@@ -391,11 +425,11 @@ pub fn files(cfg: &Config) -> [(&'static str, String); 2] {
     ]
 }
 
-/// Tests reading the shell text of [`BOOTSTRAP`].
-///
-/// A separate module because the subject is separate. Those
-/// tests lint `templates/bootstrap.sh` as text; [`tests`] below
-/// asserts things about the Ruby [`render`] produces.
+// The shell text of `bootstrap.sh` is linted in
+// `bootstrap_tests.rs`, whose header holds the argument for the
+// split. A plain comment rather than `///`: neither rustdoc
+// pass renders a `cfg(test)` item, so a doc link here would
+// never be checked.
 #[cfg(test)]
 mod bootstrap_tests;
 
@@ -607,11 +641,20 @@ mod tests {
 
     #[test]
     fn points_the_provisioner_at_the_bootstrap_script() {
-        // The two names must agree or vagrant reports a missing
-        // path after bombyx has already created a directory
-        // on the host.
+        // The name is a literal here, not `BOOTSTRAP_NAME`.
+        // Asserting the constant against a rendering that
+        // interpolates the same constant compares it with
+        // itself: measured, renaming it to
+        // `not-the-script-at-all.sh` left this test green.
+        //
+        // What the literal pins is that the provisioner is
+        // still handed a `path:`, and what that path spells.
+        // `files` writes the script under the same constant, so
+        // the two sides cannot disagree -- there is no
+        // cross-file agreement to check here, which is why this
+        // is a plain rendering test.
         let out = render(&cfg_with(Provider::Libvirt));
-        assert!(out.contains(BOOTSTRAP_NAME), "{out}");
+        assert!(out.contains("path: \"bootstrap.sh\""), "{out}");
         assert!(out.contains("config.vm.provision"), "{out}");
     }
 
@@ -716,9 +759,16 @@ mod tests {
     fn the_bootstrap_script_branches_on_the_announcement() {
         // Two files have to agree on the variable's name and
         // neither can see the other.
+        // The clause, over a comment-stripped view. The bare
+        // name appears in this script's own comments twice, so
+        // asserting it over the raw text would stay green after
+        // a rename in the shell half -- and the guest would
+        // then take the key-deleting branch on every provision
+        // while the Vagrantfile announced `1`.
+        let code = bootstrap_code();
         assert!(
-            BOOTSTRAP.contains(DEPLOY_KEY_ENV),
-            "{DEPLOY_KEY_ENV} is not in the bootstrap script"
+            code.contains(&format!("if [ \"${{{DEPLOY_KEY_ENV}:-}}\" = 1 ]")),
+            "{DEPLOY_KEY_ENV} is not branched on in the bootstrap script"
         );
         // A configured key that did not arrive is a failure,
         // not a silent skip. Without this the guest would
@@ -748,6 +798,12 @@ mod tests {
         // no root: every command in it acts on the agent's own
         // home, and a project that has to install something
         // calls `sudo` from its own script.
+        //
+        // The other half of this arrangement lives in
+        // `bootstrap_tests`, as
+        // `nothing_in_the_bootstrap_script_asks_for_root`. This
+        // test asserts the flag is set; that one asserts no
+        // line in the script defeats it.
         //
         // Root here would also put the operator's `[env]`
         // values into root's environment for the whole of
