@@ -153,6 +153,7 @@ flowchart TD
 
   vagrantfile --> remote
   vagrantfile --> config
+  vagrantfile --> hostkeys
 
   update --> remote
   update --> config
@@ -182,6 +183,7 @@ probe commands, `doctor` decides what their output means.
 | `config::transport` | whether `host` names this very machine |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
 | `vagrantfile` | rendering the Vagrantfile and the bootstrap |
+| `hostkeys` | which git hosts publish ssh keys, and where |
 | `remote` | building the argv for either route, quoting |
 | `remote::write` | the heredoc that writes a generated file |
 | `doctor` | preconditions, and what a result means |
@@ -612,6 +614,17 @@ files and so the guest: `box`, `repo`, `ref`, `script`, `cpus`,
 `memory` are on that list although they are not strings,
 because the operator still chooses the number and a floor is
 what guards them.
+
+`repo` is the one value bombyx reads a piece out of rather
+than passing whole. `RepoUrl::ssh_host` returns the host, and
+`hostkeys::for_host` looks that host up in a table of two --
+`github.com` and `bitbucket.org` -- to find where it publishes
+its ssh host keys. What reaches the guest is the table's own
+URL and the table's own spelling of the host name, never the
+operator's text, so `repo` gains no new route into the
+generated files. A host the table does not hold gets no
+verification, and `docs/trust-boundary.md` says what that
+costs.
 
 `remote_root` reaches `rm -rf` on the VM host. A config out of
 a clone naming `remote_root = "/etc"` gets

@@ -114,6 +114,26 @@ and this project adheres to
   must not start with `BOMBYX_`; values carry the same rule as `box`, `repo`,
   `ref`, `script` and `deploy_key`. Rendered sorted by name, so an unchanged
   config writes a byte-identical Vagrantfile.
+- Before it clones over ssh, the guest verifies the git host against the keys
+  that host publishes over HTTPS, rather than trusting the key it is offered on
+  first sight. Two hosts are known: `github.com` (keys from
+  `https://api.github.com/meta`) and `bitbucket.org` (keys from
+  `https://bitbucket.org/site/ssh`). A fetch that fails, or one returning
+  nothing for that host, refuses the run instead of falling back -- whoever can
+  impersonate the git host can usually block the fetch too. Any other git host,
+  and every `https` repository, is unchanged.
+- The verification reaches the clone and stops there. bombyx names the ssh
+  options on its own `git clone` and `git fetch`, and writes them into the
+  clone as `core.sshCommand`; it exports nothing, so the project's own script
+  and the agent keep their own `~/.ssh/config` and `known_hosts` for every
+  other host they talk to.
+- The box needs `curl` when `source.repo` clones from GitHub or Bitbucket over
+  ssh, and `jq` as well for GitHub, so the guest can read the published host
+  keys. A box missing a program it needs is refused by name, the way a box
+  missing `git` already was. An `https` repository needs neither.
+- A repository whose ssh URL names a port other than 22 keeps the first-sight
+  behaviour rather than being verified, because `known_hosts` spells such a host
+  `[example.com]:2222` while the published keys carry bare names.
 
 ### Changed
 

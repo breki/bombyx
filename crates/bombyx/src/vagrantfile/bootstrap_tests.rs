@@ -89,11 +89,11 @@ fn every_variable_is_declared_before_it_is_expanded() {
     // offsets of things that are present rather than asking
     // whether the shell can run them.
     //
-    // Checked for the two the script declares itself.
+    // Checked for the names the script declares itself.
     // `readonly` lines are the declarations; anything of
     // the form `$NAME` or `"$NAME"` before one is a use.
     let flat = flat_bootstrap_lines();
-    for name in ["DEPLOY_KEY", "CLONE_DIR"] {
+    for name in ["DEPLOY_KEY", "CLONE_DIR", "KNOWN_HOSTS"] {
         let decl = flat
             .iter()
             .position(|l| l.starts_with(&format!("readonly {name}=")))
@@ -198,15 +198,10 @@ fn every_command_on_the_key_reports_its_own_failure() {
         // anywhere in the line exempts the whole line, so
         // `mv "$DEPLOY_KEY" /tmp/k; GIT_SSH_COMMAND=x` walked
         // through the unanchored version -- measured.
-        let only_reads = [
-            "echo ",
-            "refuse ",
-            "readonly ",
-            "key_note=",
-            "export GIT_SSH_COMMAND=",
-        ]
-        .iter()
-        .any(|allowed| line.starts_with(*allowed));
+        let only_reads =
+            ["echo ", "refuse ", "readonly ", "key_note=", "git_ssh="]
+                .iter()
+                .any(|allowed| line.starts_with(*allowed));
         if only_reads {
             continue;
         }
@@ -234,30 +229,287 @@ fn the_bootstrap_script_points_ssh_at_the_key_and_nothing_else() {
     // exclude identities named in an `ssh_config`, so
     // `-F /dev/null` is what makes "only this key" true.
     //
-    // Whole clauses over a comment-stripped view. All three
-    // of those words appear in the comment above the code that
-    // builds them, so a bare needle over the raw text is
-    // satisfied by the prose and says nothing about the
-    // code -- and the subject here is a credential scoped to a
-    // single identity.
+    // `-F /dev/null` is asserted on its own line, because it
+    // goes on whether or not a key was configured -- an
+    // ssh_config the box shipped can name a host alias as well
+    // as an identity.
+    //
+    // Whole clauses over a comment-stripped view. All of those
+    // words appear in the comment above the code that builds
+    // them, so a bare needle over the raw text is satisfied by
+    // the prose and says nothing about the code -- and the
+    // subject here is a credential scoped to a single identity.
     let code = bootstrap_code();
     for clause in [
-        "ssh_opts=\"-o IdentitiesOnly=yes -F /dev/null\"",
-        "export GIT_SSH_COMMAND=\"ssh -i $DEPLOY_KEY $ssh_opts\"",
+        "git_ssh=\"ssh\"",
+        "git_ssh=\"$git_ssh -F /dev/null -i $DEPLOY_KEY\"",
+        "git_ssh=\"$git_ssh -o IdentitiesOnly=yes\"",
     ] {
         assert!(code.contains(clause), "not in the script: {clause}");
+    }
+    // `-F /dev/null` belongs to the identity half and goes
+    // nowhere else. This string is persisted as
+    // `core.sshCommand`, so putting it on unconditionally would
+    // make every later `git` run in the clone ignore the
+    // agent's own `~/.ssh/config` -- its `Host` blocks, its
+    // `User` lines, any `ProxyCommand` -- in a clone where
+    // bombyx configured no identity to protect.
+    for line in flat_bootstrap_lines() {
+        if line.starts_with('#') || !line.contains("-F /dev/null") {
+            continue;
+        }
+        assert!(
+            line.contains("$DEPLOY_KEY"),
+            "`-F /dev/null` must travel with the deploy key:\n  {line}"
+        );
     }
 }
 
 #[test]
-fn only_one_user_ever_verifies_the_git_host() {
-    // One account clones and pushes, so `ssh` reads that
-    // account's own `~/.ssh/known_hosts`. Naming a file
-    // here would point the clone at a path the agent can
-    // rewrite.
+fn the_fetched_keys_are_the_only_ones_the_clone_accepts() {
+    // The attacker this defends against sits on the network
+    // between the guest and the git host. It is not the guest:
+    // past the hand-over the guest runs the project's code with
+    // `sudo`, so `/etc/hosts`, the resolver and the CA store
+    // are all its own, and no arrangement inside it would
+    // survive that. `docs/trust-boundary.md` holds the whole
+    // argument.
+    //
+    // What naming the file buys against a network attacker is
+    // that the account's own `~/.ssh/known_hosts` may already
+    // hold an `accept-new` entry from an earlier provision.
+    // Pointing `ssh` away from it stops that entry standing in
+    // for a fetched key.
+    //
+    // The path itself is asserted by
+    // `the_known_hosts_path_has_nothing_in_it_to_expand`.
+    let code = bootstrap_code();
+    for clause in [
+        "git_ssh=\"$git_ssh -o StrictHostKeyChecking=yes\"",
+        "git_ssh=\"$git_ssh -o UserKnownHostsFile=$KNOWN_HOSTS\"",
+    ] {
+        assert!(code.contains(clause), "not in the script: {clause}");
+    }
+    // The fallback is reached only when bombyx published no
+    // URL, and it is the weaker of the two.
+    assert_eq!(
+        code.matches("StrictHostKeyChecking=accept-new").count(),
+        1,
+        "accept-new must appear once, in the fallback branch"
+    );
+}
+
+#[test]
+fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
+    // `set -u` makes expanding an unset variable fatal, and an
+    // abort is not a refusal: the script dies before `refuse`
+    // can run, so the operator gets "unbound variable" naming
+    // no part of bombyx and any uploaded deploy key stays in
+    // the guest.
+    //
+    // The four names below are the ones a Vagrantfile can
+    // lack. An older bombyx wrote a directory whose Vagrantfile
+    // sets none of them, and `vagrant provision` run by hand
+    // there reaches this script.
+    //
+    // `BOMBYX_REPO`, `BOMBYX_REF` and `BOMBYX_SCRIPT` are
+    // exempt because an unset one aborts at its `${VAR:?}` line
+    // near the top, before anything else expands it. That abort
+    // does not go through `refuse` either, so it leaves an
+    // uploaded key behind -- `abort-before-refuse-keeps-the-key`
+    // in `docs/todo.md` holds that, and it is older than the
+    // three names here.
+    //
+    // ASSERTED AS A NEGATIVE, because counting the guarded
+    // spelling against the bare one does not work: `${NAME:-}`
+    // has a brace where `$NAME` has a letter, so it does not
+    // contain the bare form. A line carrying one of each would
+    // count 1 against 1, and `${NAME}` would match neither.
+    for name in [
+        "BOMBYX_DEPLOY_KEY",
+        "BOMBYX_GIT_HOST",
+        "BOMBYX_HOST_KEYS_URL",
+        "BOMBYX_HOST_KEYS_FORMAT",
+    ] {
+        let guarded = format!("${{{name}:-}}");
+        for line in flat_bootstrap_lines() {
+            if line.starts_with('#') || !line.contains(name) {
+                continue;
+            }
+            // Take the legal spelling out first, then nothing
+            // naming the variable may be left.
+            let rest = line.replace(&guarded, "");
+            for bad in [format!("${name}"), format!("${{{name}")] {
+                assert!(
+                    !rest.contains(&bad),
+                    "{name} is expanded as `{bad}` rather than \
+                     `{guarded}`, so an unset one aborts before \
+                     `refuse` can run:\n  {line}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_known_hosts_path_has_nothing_in_it_to_expand() {
+    // The path lands inside `core.sshCommand`, and `git` hands
+    // that to a shell, which expands `$` and a backtick inside
+    // double quotes as readily as outside them. Measured: a
+    // path holding `$WORKDIR` arrived at `ssh` as
+    // `/home/vagrant/EXPANDED/kh`.
+    //
+    // `$HOME` could carry either character, because a project's
+    // `[env]` table may set it and
+    // `config::guards::check_renderable` refuses a quote, a
+    // backslash and `#{` while allowing `$`. A literal has
+    // nothing to expand, which is why the declaration is one --
+    // the same answer `DEPLOY_KEY` reaches for its own reason.
+    let code = bootstrap_code();
     assert!(
-        !BOOTSTRAP.contains("UserKnownHostsFile"),
-        "the clone must use the agent's own known_hosts"
+        code.contains(
+            "readonly KNOWN_HOSTS=/home/vagrant/.ssh/bombyx-known-hosts"
+        ),
+        "the known_hosts path must be a literal"
+    );
+    for line in flat_bootstrap_lines() {
+        if line.starts_with('#') || !line.contains("KNOWN_HOSTS=") {
+            continue;
+        }
+        assert!(
+            !line.contains("$HOME"),
+            "the known_hosts path must not be built from a \
+             variable:\n  {line}"
+        );
+    }
+}
+
+#[test]
+fn the_ssh_command_never_reaches_the_projects_own_script() {
+    // `exec` at the end of the script hands the environment to
+    // the project's script. An exported GIT_SSH_COMMAND would
+    // govern every `git` command that script runs and every one
+    // the agent runs afterwards -- each checked against a file
+    // naming one host, with `~/.ssh/known_hosts` and
+    // `~/.ssh/config` switched off, so a second ssh git host
+    // becomes unreachable with no local remedy.
+    //
+    // So it is built as `git_ssh` and named on one command at a
+    // time. What carries forward instead is `core.sshCommand`
+    // on the clone, which reaches that repository and stops.
+    let code = bootstrap_code();
+    assert!(
+        !code.contains("export GIT_SSH_COMMAND"),
+        "GIT_SSH_COMMAND must never be exported"
+    );
+    // Every mention has to be a one-command prefix, so a line
+    // naming it without a `git` behind it is either an export
+    // or a leak into something else.
+    let mut prefixes = 0;
+    for line in flat_bootstrap_lines() {
+        if line.starts_with('#') || !line.contains("GIT_SSH_COMMAND") {
+            continue;
+        }
+        prefixes += 1;
+        assert!(
+            line.contains("GIT_SSH_COMMAND=\"$git_ssh\" git"),
+            "this names GIT_SSH_COMMAND outside a one-command \
+             prefix:\n  {line}"
+        );
+    }
+    assert_eq!(prefixes, 2, "the clone and the fetch each need one");
+}
+
+#[test]
+fn the_fetched_file_is_the_only_key_source_the_clone_reads() {
+    // `-F /dev/null` does not cover the host-key database --
+    // it rules out `ssh_config`, which is a different
+    // setting -- so a key in /etc/ssh/ssh_known_hosts would
+    // otherwise satisfy the strict check.
+    // `docs/trust-boundary.md` says why that matters here.
+    let code = bootstrap_code();
+    assert!(
+        code.contains("git_ssh=\"$git_ssh -o GlobalKnownHostsFile=/dev/null\""),
+        "the system-wide known_hosts files must be ruled out too"
+    );
+}
+
+#[test]
+fn every_key_fetch_is_pinned_to_https() {
+    // The whole mechanism rests on a certificate authority
+    // vouching for the answer. A request that reaches the
+    // server over plain text, or reaches it over HTTPS and
+    // then follows a redirect to plain text, has no such
+    // authority behind it -- and a fetch that came back wrong
+    // is what the guest is about to trust the git host on.
+    //
+    // `--proto-redir` is the half that is easy to leave out,
+    // and `-L` above it is what makes leaving it out matter.
+    //
+    // Per line and inverted: every line running `curl` is
+    // examined, rather than the two that exist today being
+    // listed. A third fetch added without these flags is the
+    // failure this catches.
+    let mut fetches = 0;
+    for line in flat_bootstrap_lines() {
+        // `curl -`, so the `command -v curl` guard above the
+        // fetches is not mistaken for one of them.
+        if line.starts_with('#') || !line.contains("curl -") {
+            continue;
+        }
+        fetches += 1;
+        for flag in ["--proto '=https'", "--proto-redir '=https'", "-fsSL"] {
+            assert!(
+                line.contains(flag),
+                "this fetch is not pinned to https ({flag} missing):\n  \
+                 {line}"
+            );
+        }
+    }
+    assert_eq!(fetches, 2, "expected one fetch per key format");
+}
+
+#[test]
+fn a_fetch_that_came_back_wrong_is_refused_before_the_clone() {
+    // A fetch can succeed and still leave nothing usable: an
+    // empty body, a truncated one, a document whose shape has
+    // changed, or a response naming another host. Every one
+    // ends in a file with no line for the host about to be
+    // contacted, and `ssh` would then report a host-key
+    // failure -- which reads as an attack rather than as a
+    // fetch that came back wrong.
+    let code = bootstrap_code();
+    assert!(
+        code.contains("if ! grep -q \"^$git_host \" \"$KNOWN_HOSTS\""),
+        "the fetched keys must be checked for the host's own line"
+    );
+    // Anchored at the start of a line, so a key for another
+    // host cannot answer for this one.
+    assert!(
+        code.contains("\"^$git_host \""),
+        "the check must anchor the host name"
+    );
+}
+
+#[test]
+fn a_box_missing_the_fetch_tools_is_refused_by_name() {
+    // A bare "command not found" from inside a VM says
+    // nothing about which box to go and fix. `jq` is asked
+    // for only by the JSON format, so a box carrying neither
+    // can still clone from a host that publishes finished
+    // lines.
+    let flat = flat_bootstrap();
+    for needle in [
+        "command -v curl",
+        "refuse \"curl is not installed in this box",
+        "command -v jq",
+        "refuse \"jq is not installed in this box",
+    ] {
+        assert!(flat.contains(needle), "missing: {needle}");
+    }
+    assert!(
+        bootstrap_code().contains("= json ] && ! command -v jq"),
+        "jq must be required only by the json format"
     );
 }
 
@@ -379,7 +631,7 @@ fn a_fetch_or_checkout_that_cannot_finish_says_so() {
     // directory, and a symlink at the clone skips it.
     let flat = flat_bootstrap();
     for needle in [
-        "if ! git -C \"$CLONE_DIR\" fetch",
+        "if ! GIT_SSH_COMMAND=\"$git_ssh\" git -C \"$CLONE_DIR\" fetch",
         "if ! git -C \"$CLONE_DIR\" checkout",
     ] {
         assert!(flat.contains(needle), "unchecked: {needle}");

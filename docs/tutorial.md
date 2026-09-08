@@ -434,14 +434,23 @@ obvious Debian choice and the box two later passages of this
 tutorial are written around. It has no `git`, so a first `up`
 on it cannot finish. Booting it on frosti on 2026-09-05
 confirmed that: the VM comes up, and then the provisioning
-prints these two lines and exits 1. Vagrant prefixes each with
-`default:`, and the second reaches the terminal as one long
-line.
+refuses and exits 1.
+
+**Every refusal prints two `bombyx:` lines**, and it is worth
+seeing the shape once. The first says what went wrong; the
+second says what became of any deploy key that had already been
+uploaded, because a guest that stops part-way must not keep a
+credential quietly. Vagrant prefixes each line with `default:`,
+and each reaches the terminal as one long line.
 
 ```
-bombyx: git is not installed in this box.
-bombyx: install it in the box, or choose one with git, so the guest can clone the project.
+bombyx: git is not installed in this box. Install it in the box, or choose one with git, so the guest can clone the project.
+bombyx: any uploaded deploy key has been removed from this guest.
 ```
+
+*(The wording above is taken from the script rather than copied
+out of that run, so treat the exact text as the script's and
+the behaviour as measured.)*
 
 **Your own `provision.sh` cannot save you here**, and this is
 the part that surprises people. bombyx runs one provisioner in
@@ -456,6 +465,31 @@ it.
 2026-09-05 and provisioned to completion, and it is the value
 in `config.toml.sample`. Both boots are recorded under
 `tutorial-box-lacks-git` in `docs/todo.md`.
+
+**A GitHub or Bitbucket URL over ssh needs `curl` in the box,
+and `jq` as well for GitHub.** Before it clones, bombyx has the
+guest fetch that host's published ssh keys, so it can tell the
+real server from an impostor rather than trusting whatever
+answers on port 22. `docs/trust-boundary.md` explains why. The
+fetch runs `curl` for either host. Reading GitHub's answer needs
+`jq` on top of that, because GitHub publishes its keys as JSON
+while Bitbucket publishes finished `known_hosts` lines, so a
+Bitbucket clone asks for no `jq` at all. A box missing a program
+it needs is refused by name, the same way a missing `git` is:
+
+```
+bombyx: jq is not installed in this box, and bombyx needs it to read github.com's published ssh host keys. Install jq in the box, or choose one that has it.
+```
+
+A second `bombyx:` line follows it, the same one the `git`
+passage above shows.
+
+*(unverified)* We have not booted a guest to find out which of
+these boxes carries `jq`. Ubuntu and Debian cloud images
+generally do not, so expect to install it -- and note that your
+own `provision.sh` cannot do it, for the reason the `git`
+passage above gives. An `https://` URL needs neither program,
+because it opens no ssh connection at all.
 
 Two later passages were written for the Debian box and will
 not match what you have, which is why they still mention it.

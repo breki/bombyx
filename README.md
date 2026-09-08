@@ -144,7 +144,7 @@ What a project's table holds:
 
 | Key | |
 |-----|---|
-| `[vm]` | required; `box` (must have `git`), `cpus`, `memory`. `provider` is optional, `libvirt` |
+| `[vm]` | required; `box` (needs `git`, and two more programs for an ssh clone -- see below), `cpus`, `memory`. `provider` is optional, `libvirt` |
 | `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host |
 | `remote_root` | optional, `~/vms`; must sit above the two tables |
 | `host` | optional; only for a project that runs elsewhere |
@@ -199,9 +199,18 @@ message rather than booting a VM whose clone then fails.
 
 That exposure is accepted rather than solved, and
 [trust-boundary.md](docs/trust-boundary.md) under
-**What this costs** says exactly what it covers -- including
-the first-contact host-key check the guest gives up in order
-to clone unattended.
+**What this costs** says exactly what it covers.
+
+**The guest checks who it is cloning from, where bombyx knows
+where to ask.** A fresh VM has met no git server before, so
+`ssh` has nothing to compare the offered key against. For
+`github.com` and `bitbucket.org`, the guest first fetches that
+host's published keys over HTTPS and then insists on them --
+which is why the base image needs `curl`, and `jq` as well for
+GitHub, whose keys arrive as JSON. Any other git host still
+gets the first-contact check the guest gives up in order to
+clone unattended, and an `https` repository needs neither
+program because it opens no ssh connection at all.
 
 The `host` line at the top is an SSH alias, resolved through
 your `~/.ssh/config` -- bombyx never handles addresses,

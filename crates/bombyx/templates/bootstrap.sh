@@ -313,6 +313,7 @@ if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # file provisioner uploads as that same user, so the file
     # already arrives owned by it and there is nothing for a
     # chown to do.
+    #
     # The message says what failed and stops there. `refuse`
     # below prints what became of the key, and claiming an
     # exposure here would contradict it: `chmod` follows
@@ -325,30 +326,11 @@ if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
             "The error above says why."
     fi
 
-    # Then `git` is told to use it. GIT_SSH_COMMAND is what git
-    # passes to `ssh` for every connection it makes, and four
-    # options go with the key:
-    #
-    #   -i <key>                          use this identity
-    #   IdentitiesOnly=yes                and no other one found
-    #   -F /dev/null                      ignore every ssh_config
-    #   StrictHostKeyChecking=accept-new  trust the git host on
-    #                                     first sight
-    #
-    # The third is what makes the second true: `IdentitiesOnly`
-    # does not exclude an identity named by an `IdentityFile`
-    # line in a config file, so without it a box shipping its
-    # own /etc/ssh/ssh_config could authenticate with a key
-    # nobody here chose.
-    #
-    # The fourth trades a first-contact check for a clone that
-    # runs unattended. `accept-new` records the git host's key
-    # the first time it is seen and refuses a change afterwards;
-    # the strict default would stop at a prompt no operator is
-    # there to answer.
-    ssh_opts="-o IdentitiesOnly=yes -F /dev/null"
-    ssh_opts="$ssh_opts -o StrictHostKeyChecking=accept-new"
-    export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY $ssh_opts"
+    # The options that point `git` at this key are assembled
+    # below, under HOW `git` REACHES THE GIT HOST, together with
+    # the ones that decide whether the host gets verified. Both
+    # halves end up in one `git_ssh` string, so building them in
+    # one place is what stops the two disagreeing.
 else
     # Taking `deploy_key` out of the config takes the
     # credential out of the guest on the next provision. Left
@@ -368,11 +350,11 @@ else
 
     # And the clone stops pointing at it. Leaving
     # `core.sshCommand` behind is the mirror of the key nothing
-    # points at: it names a deleted identity, and
-    # `IdentitiesOnly=yes` with `-F /dev/null` stops git
-    # falling back to one the agent does hold, so every fetch
-    # and push would fail with an ssh error naming nothing
-    # about bombyx.
+    # points at: it names a deleted identity, and the
+    # `IdentitiesOnly=yes` and `-F /dev/null` this script adds
+    # for a configured key stop git falling back to one the
+    # agent does hold, so every fetch and push would fail with
+    # an ssh error naming nothing about bombyx.
     #
     # The unsetting itself happens further down, after the
     # clone exists -- there is no config file to unset anything
@@ -387,6 +369,296 @@ if ! command -v git >/dev/null 2>&1; then
     refuse "git is not installed in this box. Install it in" \
         "the box, or choose one with git, so the guest can" \
         "clone the project."
+fi
+
+# THE GIT HOST'S OWN SSH KEYS, when bombyx knows where that host
+# publishes them.
+#
+# `ssh` decides whether it is talking to the right server by
+# comparing the key the server offers against a `known_hosts`
+# file. A guest that has just booted has no such file, so there
+# is nothing to compare against, and the first connection is the
+# one that fetches the code this script is about to run.
+#
+# What closes that is fetching the host's published keys over
+# HTTPS, whose trust comes from a certificate authority rather
+# than from whatever answers on port 22. bombyx does not make
+# that request itself -- it has no HTTP client, deliberately --
+# so the URL arrives here and the guest fetches it.
+#
+# Three variables carry it, and all three are empty when bombyx
+# has no key source for this repository. That covers an `https`
+# clone, which opens no ssh connection at all, and a git host
+# absent from bombyx's table, such as a self-hosted one.
+#
+#   BOMBYX_GIT_HOST           the host name, lower-cased
+#   BOMBYX_HOST_KEYS_URL      where its keys are published
+#   BOMBYX_HOST_KEYS_FORMAT   `json` or `lines`
+#
+# All three are copied into lower-case variables below and read
+# from there. Each is read once with a `:-` default, so an unset
+# one becomes an empty string rather than an abort. That matters
+# because `set -u` aborts the script where it stands, and an
+# abort inside `refuse` prints no message and leaves the
+# uploaded deploy key in the guest.
+#
+# The two formats differ because the two hosts differ. GitHub
+# serves a JSON document whose `ssh_keys` array holds bare
+# `<type> <base64>` pairs, so the host name has to be put in
+# front of each one and reading the array needs `jq`. Bitbucket
+# serves finished `known_hosts` lines and needs nothing.
+#
+# Read as `${VAR:-}` for the reason the deploy-key banner gives:
+# `set -u` makes an unset variable fatal, and a `vagrant
+# provision` run by hand in a directory an older bombyx wrote
+# leaves these unset. Such a guest falls back to `accept-new`,
+# which is what the bombyx that wrote its directory did.
+#
+# `KNOWN_HOSTS` IS A LITERAL, and not built from `$HOME`, for
+# two reasons.
+#
+# The first is DEPLOY_KEY's: this is bombyx's own bookkeeping
+# rather than the project's, so it belongs beside the key in the
+# account's real home and not wherever the clone went.
+#
+# The second is about quoting, and it is the one that bites. The
+# path ends up inside `core.sshCommand`, which `git` hands to a
+# shell -- and a shell expands `$` and a backtick inside double
+# quotes as readily as outside them. A project's `[env]` table
+# can set `HOME`, and `config::guards::check_renderable` refuses
+# a quote, a backslash and `#{` but allows `$`. So a `HOME` of
+# `/home/vagrant/$WORKDIR` would reach that shell and be
+# rewritten -- measured: the argument arrived at `ssh` as
+# `/home/vagrant/EXPANDED/kh`. A literal has nothing to expand.
+readonly KNOWN_HOSTS=/home/vagrant/.ssh/bombyx-known-hosts
+
+git_host="${BOMBYX_GIT_HOST:-}"
+keys_url="${BOMBYX_HOST_KEYS_URL:-}"
+keys_format="${BOMBYX_HOST_KEYS_FORMAT:-}"
+
+if [ -n "$keys_url" ]; then
+    if [ -z "$git_host" ]; then
+        refuse "bombyx published a URL for the git host's ssh" \
+            "keys and no host name to check them against. The" \
+            "generated Vagrantfile and this script came from" \
+            "different versions of bombyx."
+    fi
+
+    # `curl` is needed either way. `jq` only for the JSON
+    # format, so a box carrying neither can still clone from
+    # Bitbucket.
+    #
+    # Checking here rather than letting the pipeline fail: a
+    # bare "command not found" from inside a VM says nothing
+    # about which box to fix.
+    if ! command -v curl >/dev/null 2>&1; then
+        refuse "curl is not installed in this box, and bombyx" \
+            "needs it to fetch $git_host's ssh host keys" \
+            "before cloning. Install curl in the box, or choose" \
+            "one that has it."
+    fi
+    if [ "$keys_format" = json ] &&
+        ! command -v jq >/dev/null 2>&1; then
+        refuse "jq is not installed in this box, and bombyx" \
+            "needs it to read $git_host's published ssh" \
+            "host keys. Install jq in the box, or choose one" \
+            "that has it."
+    fi
+
+    # `/home/vagrant` is `vagrant`'s home, and that is an
+    # assumption rather than a fact about the box: the ssh user
+    # is `debian` or `ubuntu` on some images. bombyx already
+    # rests on it for `DEPLOY_KEY`, whose path is a `file`
+    # provisioner destination, so the assumption is not new --
+    # but it now applies to a verified clone with no deploy key
+    # as well.
+    #
+    # Both failures are reported here rather than left to the
+    # fetch. `mkdir` fails when /home has no `vagrant` and is
+    # root-owned; it *succeeds* when the directory exists and
+    # belongs to another account, and then only the redirect
+    # fails -- so without the second check the refusal would
+    # blame the published-keys URL for a permission problem.
+    if ! mkdir -p /home/vagrant/.ssh; then
+        refuse "bombyx could not create /home/vagrant/.ssh in" \
+            "this guest, so there is nowhere to put" \
+            "$git_host's ssh host keys. The error above says" \
+            "why. bombyx keeps them in vagrant's home, so a" \
+            "box whose ssh user is somebody else needs that" \
+            "directory to exist and be writable."
+    fi
+    if [ ! -w /home/vagrant/.ssh ]; then
+        refuse "/home/vagrant/.ssh is not writable by this" \
+            "account, so bombyx cannot put $git_host's ssh" \
+            "host keys there. bombyx keeps them in vagrant's" \
+            "home; this guest runs the provisioner as somebody" \
+            "else."
+    fi
+
+    # `--proto` and `--proto-redir` pin the request to HTTPS,
+    # including across a redirect. Without the second, a
+    # redirect to `http` would be followed, and the whole
+    # mechanism rests on the certificate authority that the
+    # plain-text answer would not have.
+    #
+    # `-f` makes an HTTP error status a curl failure rather
+    # than a page written into the file. `-sS` prints curl's
+    # own error and nothing else.
+    #
+    # `set -o pipefail` at the top of this file is what makes a
+    # curl failure fail the pipeline the JSON branch builds. A
+    # partly written file survives the refusal, and the next
+    # provision overwrites it -- nothing reads it in between,
+    # because a refusal ends this guest's provisioning.
+    case "$keys_format" in
+        json)
+            if ! curl -fsSL --proto '=https' \
+                --proto-redir '=https' --max-time 30 \
+                -- "$keys_url" |
+                jq -r --arg host "$git_host" \
+                    '.ssh_keys[] | $host + " " + .' \
+                    >"$KNOWN_HOSTS"; then
+                refuse "bombyx could not read $git_host's" \
+                    "ssh host keys from $keys_url." \
+                    "The error above says why. Without them the" \
+                    "guest cannot tell that host from an" \
+                    "impostor, so it will not clone."
+            fi
+            ;;
+        lines)
+            if ! curl -fsSL --proto '=https' \
+                --proto-redir '=https' --max-time 30 \
+                -- "$keys_url" >"$KNOWN_HOSTS"; then
+                refuse "bombyx could not fetch" \
+                    "$git_host's ssh host keys from" \
+                    "$keys_url. The error above says" \
+                    "why. Without them the guest cannot tell" \
+                    "that host from an impostor, so it will not" \
+                    "clone."
+            fi
+            ;;
+        *)
+            refuse "bombyx asked for $git_host's ssh" \
+                "host keys in a format this script does not" \
+                "know: \"$keys_format\". The" \
+                "generated Vagrantfile and this script came" \
+                "from different versions of bombyx."
+            ;;
+    esac
+
+    # One check for four ways the fetch can succeed and still
+    # leave nothing usable: an empty body, a truncated one, a
+    # document whose shape has changed, and a response for some
+    # other host. Every one of them ends in a `known_hosts` file
+    # with no line for the host about to be contacted.
+    #
+    # Left unchecked, each would surface at clone time as an
+    # `ssh` host-key failure, which reads as an attack rather
+    # than as a fetch that came back wrong.
+    #
+    # The dots in a host name are wildcards to `grep`, so this
+    # pattern is looser than the name it came from. That costs
+    # nothing: the file holds what an HTTPS-authenticated host
+    # served, `ssh` still compares the offered key against the
+    # whole file, and this is a check on the response's shape
+    # rather than on its contents.
+    if ! grep -q "^$git_host " "$KNOWN_HOSTS"; then
+        refuse "the keys bombyx fetched from" \
+            "$keys_url hold no line for" \
+            "$git_host, so there is nothing to verify" \
+            "that host against. Check whether that URL still" \
+            "publishes host keys."
+    fi
+fi
+
+# HOW `git` REACHES THE GIT HOST. Two questions are answered
+# here, and they are independent of each other.
+#
+# GIT_SSH_COMMAND is what git passes to `ssh` for every
+# connection it makes.
+#
+# `-F /dev/null` goes on either way: it tells `ssh` to ignore
+# every ssh_config, so a box shipping its own
+# /etc/ssh/ssh_config cannot add an identity or a host alias
+# that nothing here chose.
+#
+# WHICH IDENTITY. `-i` names the deploy key, and
+# `IdentitiesOnly=yes` stops `ssh` offering any other one it
+# finds. `IdentitiesOnly` does not exclude an identity named by
+# an `IdentityFile` line in a config file, which is the other
+# half of what `-F /dev/null` above is for.
+#
+# WHETHER THE HOST IS VERIFIED. With keys fetched above,
+# `StrictHostKeyChecking=yes` refuses any key that is not in a
+# known-hosts file, and the two `KnownHostsFile` options say
+# which files those are. Naming both is necessary: `-F` above
+# only makes `ssh` ignore /etc/ssh/ssh_config, and the host key
+# database is a different setting -- `GlobalKnownHostsFile`
+# defaults to /etc/ssh/ssh_known_hosts and
+# /etc/ssh/ssh_known_hosts2. Left at that default, a key
+# planted in either of those satisfies the check as readily as
+# one bombyx fetched, and the project's script has the `sudo` to
+# plant one before the next provision.
+#
+# `UserKnownHostsFile` likewise replaces the account's own
+# `~/.ssh/known_hosts`, so an `accept-new` entry an earlier
+# provision left there cannot stand in for a fetched key.
+#
+# Without fetched keys, `accept-new` records the host's key on
+# first sight and refuses a change afterwards. That is the
+# weaker answer, and it is what a host bombyx has no key source
+# for gets; docs/trust-boundary.md says what it costs.
+#
+# IT IS NEVER EXPORTED. `git_ssh` is built here and named on
+# each of the two `git` commands below that talk to the network,
+# one command at a time.
+#
+# The reason is `exec` at the end of this script, which hands
+# the environment to the project's own script. An exported
+# GIT_SSH_COMMAND would govern every `git` command that script
+# runs, and every one the agent runs afterwards. With keys
+# fetched, that means each of them checked against a file naming
+# one host, with the account's own `~/.ssh/known_hosts` and
+# `~/.ssh/config` switched off -- so a second ssh git host
+# becomes unreachable, and unreachable with no local remedy,
+# because `UserKnownHostsFile` replaced the file somebody would
+# add it to. bombyx has nothing to say about those connections.
+#
+# What does carry forward is `core.sshCommand` on the clone, set
+# further down. That reaches the repository bombyx cloned and
+# stops there.
+#
+# `-F /dev/null` TRAVELS WITH THE KEY and not on its own. It is
+# there to make `IdentitiesOnly` true, so it belongs to the
+# identity half; with no key there is no identity to protect,
+# and switching off the account's `~/.ssh/config` would cost the
+# agent its own `Host` blocks, `User` lines and any
+# `ProxyCommand` for nothing. This string is persisted as
+# `core.sshCommand` further down, so an option added here
+# outlives the provision.
+#
+# The host-key options do not need it. An `-o` on the command
+# line outranks any config file, so a box setting
+# `StrictHostKeyChecking no` in /etc/ssh/ssh_config cannot
+# loosen what is asked for here.
+git_ssh="ssh"
+if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
+    git_ssh="$git_ssh -F /dev/null -i $DEPLOY_KEY"
+    git_ssh="$git_ssh -o IdentitiesOnly=yes"
+fi
+if [ -n "$keys_url" ]; then
+    git_ssh="$git_ssh -o StrictHostKeyChecking=yes"
+    git_ssh="$git_ssh -o UserKnownHostsFile=$KNOWN_HOSTS"
+    git_ssh="$git_ssh -o GlobalKnownHostsFile=/dev/null"
+elif [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
+    # A key and no published key source. `accept-new` records
+    # the host on first sight and refuses a change afterwards.
+    #
+    # With neither, `git_ssh` stays plain `ssh` and bombyx adds
+    # nothing at all -- which is `ssh`'s own default of `ask`.
+    # Such a clone has no credential either, so it could not
+    # have authenticated whatever this said.
+    git_ssh="$git_ssh -o StrictHostKeyChecking=accept-new"
 fi
 
 # If the clone came from a different repository than the one
@@ -498,8 +770,11 @@ if [ -d "$CLONE_DIR/.git" ]; then
     # the nastier one: it exits 1 after printing "Switched to
     # branch", so the worktree is half-changed, and without this
     # check `set -e` would abort with nothing naming bombyx.
-    if ! git -C "$CLONE_DIR" fetch --depth 1 origin \
-        -- "$BOMBYX_REF"
+    # Named on the command rather than exported, and it wins
+    # over any `core.sshCommand` an earlier provision left in
+    # this clone: `git` prefers GIT_SSH_COMMAND to that setting.
+    if ! GIT_SSH_COMMAND="$git_ssh" git -C "$CLONE_DIR" \
+        fetch --depth 1 origin -- "$BOMBYX_REF"
     then
         refuse "could not update the clone. The message above" \
             "says why. If something in it belongs to another" \
@@ -553,37 +828,47 @@ else
             "guest, then provision again."
     fi
 
-    git clone --depth 1 --branch "$BOMBYX_REF" \
+    GIT_SSH_COMMAND="$git_ssh" git clone \
+        --depth 1 --branch "$BOMBYX_REF" \
         -- "$BOMBYX_REPO" "$CLONE_DIR"
 fi
 
-# The agent pushes with the same key this script fetched with,
-# so the clone records how to reach it. Without this the agent
-# has a key it is allowed to read and no way to know where it
-# is, and `git push` falls back to whatever identity `ssh`
-# finds -- which in a fresh guest is none.
+# The clone records the command this script cloned with, so
+# every later `git` run in that directory reaches the host the
+# same way. Two things need carrying: the deploy key, without
+# which the agent has a credential it may read and no idea where
+# it is, and the fetched host keys, without which a later
+# `git fetch` falls back to `~/.ssh/known_hosts` -- a file
+# bombyx never writes -- under the stock
+# `StrictHostKeyChecking=ask`.
 #
-# Decided by BOMBYX_DEPLOY_KEY and never by GIT_SSH_COMMAND.
-# The second is inherited, so a guest that exports it from
-# /etc/profile.d could re-pin the clone to a key the operator
-# had just removed from the config -- the header above says why
-# the flag is the only trustworthy answer to "was a key
-# configured".
+# Written only when there is one of those to carry. With
+# neither -- a public repository and no recognised git host --
+# the clone gets no setting, so `git` in it keeps the account's
+# own `~/.ssh/config` and `known_hosts`.
+#
+# The condition reads the two flags rather than testing
+# `$git_ssh`, which is never empty. Both flags come from the
+# generated Vagrantfile, and the deploy-key header above says
+# why that is the only trustworthy answer to "was a key
+# configured": a guest can set its own environment, and it
+# cannot set a provisioner's `env:` block.
 #
 # `--replace-all` because a plain set refuses with "cannot
 # overwrite multiple values" and exits 5 once the key has two,
 # which `set -e` would turn into a provision aborted after the
 # clone and the fetch had already run. A project script doing
 # `git config --add core.sshCommand` reaches that by accident.
-if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
+if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ] || [ -n "$keys_url" ]; then
     git -C "$CLONE_DIR" config --replace-all \
-        core.sshCommand "$GIT_SSH_COMMAND"
+        core.sshCommand "$git_ssh"
 else
-    # The mirror: no key, so the clone must not keep pointing
-    # at one. `--unset-all`, because `--unset` against two
-    # values warns, exits 5 and removes nothing -- which is
-    # indistinguishable from the exit 5 that means there was
-    # nothing there. Only that code is tolerated.
+    # The mirror: bombyx set nothing, so the clone must not
+    # keep pointing at something. `--unset-all`, because
+    # `--unset` against two values warns, exits 5 and removes
+    # nothing -- which is indistinguishable from the exit 5
+    # that means there was nothing there. Only that code is
+    # tolerated.
     git -C "$CLONE_DIR" config --unset-all core.sshCommand \
         || { rc=$?; [ "$rc" = 5 ]; }
 fi

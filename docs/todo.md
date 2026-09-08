@@ -398,7 +398,7 @@ plan, decisions, and outcome.
   rejected there for that reason.
 
 - **bootstrap-harness-runs-the-script** -- run the script, do not match its text
-  The eighteen tests in `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
+  The tests in `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
   assert over the text of `bootstrap.sh`, and keeping them working has taken
   three flattening helpers, a comment stripper, a word splitter and two
   allowance lists -- which is the parser `CLAUDE.md` under **Test-Driven
@@ -431,8 +431,10 @@ plan, decisions, and outcome.
   than committing is how work survives. That reasoning stands. It is the
   inconsistency between the two paths that is not covered. Found by running
   `bombyx --project jutro-rebuild provision` a second time on 2026-09-07 and
-  then looking at the guest's checkout. Still true as of 2026-09-08:
-  bootstrap.sh lines 509 and 556.
+  then looking at the guest's checkout. Still true as of 2026-09-08: the
+  `git clone --depth 1 --branch` in bootstrap.sh and the
+  `git checkout --force FETCH_HEAD` above it. Cited by command rather than by
+  line, because the host-key work moved both.
 
 - **chmod-dirties-the-checkout** -- bombyx modifies a tracked file every run
   `bootstrap.sh` runs `chmod +x "$script_real"` before `exec`ing the project's
@@ -444,7 +446,21 @@ plan, decisions, and outcome.
   through `sh` would drop the shebang, which is a real cost and the reason the
   chmod is there -- so this is a trade rather than an obvious fix. Found by
   running `bombyx --project jutro-rebuild provision` a second time on
-  2026-09-07. Still true as of 2026-09-08: bootstrap.sh line 657.
+  2026-09-07. Still true as of 2026-09-08: the `chmod +x "$script_real"` in
+  bootstrap.sh.
+
+- **abort-before-refuse-keeps-the-key** -- an abort leaves the key in the guest
+  The three ${VAR:?} checks at the top of bootstrap.sh exit through the shell's
+  own expansion rather than through refuse(), so an unset BOMBYX_REPO,
+  BOMBYX_REF or BOMBYX_SCRIPT aborts with a message naming bombyx but leaves the
+  uploaded deploy key in the guest. Vagrant's file provisioner uploads the key
+  before the shell provisioner runs, so the key is already there when those
+  lines execute -- which is the one invariant refuse() exists to hold. Found by
+  a reviewer while checking a comment that claimed those three names were
+  already 'refused'; that comment now states the real mechanism instead.
+  Predates the host-key work. Fixing it means either routing the three through
+  refuse, which needs refuse() and DEPLOY_KEY declared above them and both
+  currently sit below, or accepting the gap and saying so where the checks are.
 
 ## Done
 

@@ -21,6 +21,7 @@
 
 pub mod config;
 pub mod doctor;
+pub mod hostkeys;
 pub mod name;
 mod newtype;
 pub mod plan;
