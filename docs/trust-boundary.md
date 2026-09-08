@@ -226,8 +226,8 @@ with a message naming the expanded path when it is not. The
 generated Vagrantfile then uploads the key with a `file`
 provisioner that Vagrant runs before the bootstrap script, and
 `bootstrap.sh` tightens it to `0600` where the provisioner
-uploaded it, exports `GIT_SSH_COMMAND` so `git` uses that key
-and no other, and records the same command on the clone so the
+uploaded it, names that key on each `git` command it runs
+itself so `git` uses it and no other, and records the same command on the clone so the
 agent can push with it.
 
 Where that check runs is worth a sentence, because the obvious
@@ -300,9 +300,23 @@ otherwise.** Two hosts are in the table
 come from `https://api.github.com/meta`, and `bitbucket.org`,
 whose keys come from `https://bitbucket.org/site/ssh`. For
 those, `bootstrap.sh` fetches the published keys before it
-clones and passes `StrictHostKeyChecking=yes` with a
-`UserKnownHostsFile` naming what it fetched. Every other git
-host still gets `StrictHostKeyChecking=accept-new`.
+clones and passes `StrictHostKeyChecking=yes` with both
+known-hosts files named: `UserKnownHostsFile` pointing at what
+it fetched, and `GlobalKnownHostsFile=/dev/null`. Naming the
+second is necessary rather than tidy. `-F /dev/null` makes
+`ssh` ignore `/etc/ssh/ssh_config` and nothing more, and the
+host key database is a separate setting whose default is
+`/etc/ssh/ssh_known_hosts` and `/etc/ssh/ssh_known_hosts2` --
+so without it a key sitting in either of those satisfies the
+strict check as readily as one bombyx fetched.
+
+Every other git host still gets
+`StrictHostKeyChecking=accept-new`, and so does a table host
+named on a port other than 22. `known_hosts` spells that host
+`[github.com]:2222`, the guest writes bare names, and a
+verification that could only fail is worse than the weaker
+check -- `RepoUrl::ssh_host` returns nothing for such a URL for
+that reason.
 
 The trust moves rather than disappearing, and it is worth
 saying where it moves to. It now rests on the certificate
@@ -346,23 +360,53 @@ by way of code execution rather than by way of the handshake.
 The egress rules under `host-network-isolation` are what would
 narrow that, and they are not loaded.
 
-**Two smaller gaps in the verified case, both deliberate.**
+**Who this defends against, and who it does not.** The
+attacker it defends against sits on the network between the
+guest and the git host, on the first connection, before any of
+the project's code exists in the guest.
 
-The fetched `known_hosts` file sits in the agent's own home, at
-`$HOME/.ssh/bombyx-known-hosts`, so code running as the agent
-can rewrite it. That does not reach the clone: `bootstrap.sh`
-writes the file from the fetch immediately above the clone, and
-the clone is what brings the project's code into the guest, so
-none of it has run yet. Putting the file somewhere the agent
-cannot write would need `sudo`, and the provisioner runs
-unprivileged on purpose.
+It does not defend against the guest. Past the hand-over the
+guest runs the project's own script with `sudo`, and this
+script runs again on every `bombyx provision` rather than only
+on the first. So on a second provision the project's code has
+already run, and `/etc/hosts`, the resolver and the certificate
+store the fetch depends on are all the guest's to change --
+along with the fetched `known_hosts` file itself, which sits at
+`/home/vagrant/.ssh/bombyx-known-hosts`. That path is a literal
+and does not follow `HOME`, for the reason `bootstrap.sh` gives
+where it declares it: `git` hands `core.sshCommand` to a shell,
+a shell expands `$` inside double quotes, and a project's
+`[env]` table may set `HOME` to a value containing one. It does
+mean bombyx assumes the box's ssh user is `vagrant`, which it
+already assumed for the deploy key.
 
-The clone's own `core.sshCommand` carries the verification
-forward only when the config named a `deploy_key`, because that
-is the only case where `bootstrap.sh` writes that setting at
-all. A repository reached over ssh with no deploy key cannot
-authenticate in a fresh guest anyway, so the case is
-unreachable rather than covered.
+None of that is a gap to be closed, and it is worth saying why
+rather than leaving it as an objection. A guest that has run
+untrusted code with `sudo` cannot be defended from inside
+itself; that is the whole reason this document exists and the
+reason the VM is disposable. What narrows it is `bombyx
+destroy` and the egress rules under `host-network-isolation`,
+not an arrangement inside the guest.
+
+**The verification reaches the clone and every later fetch in
+it, and stops there.** That boundary is deliberate. `bootstrap.sh` never exports
+`GIT_SSH_COMMAND`. It builds the options once and names them on
+its own `git clone` and `git fetch`, one command at a time, and
+writes them into the clone as `core.sshCommand` so a later
+`git fetch` or `git push` in that repository insists on the same
+keys. That setting is written whenever bombyx set anything worth
+carrying -- a deploy key, a fetched key file, or both -- and
+unset otherwise.
+
+Exporting it instead would govern every `git` command the
+project's own script runs, and every one the agent runs after
+that, because `exec` hands the environment over. Each would
+then be checked against a file naming one host, with the
+account's own `~/.ssh/known_hosts` and `~/.ssh/config` switched
+off -- so a second ssh git host would become unreachable, and
+unreachable with no remedy available inside the guest, since
+`UserKnownHostsFile` replaces the very file somebody would add
+it to. bombyx has nothing to say about those connections.
 
 **Verifying the git host needs `curl` in the box, and `jq` as
 well for GitHub.** GitHub publishes its keys as JSON and

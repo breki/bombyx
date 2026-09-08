@@ -40,15 +40,74 @@ succeeds and still leaves nothing usable -- an empty body, a
 truncated one, a changed document shape, and an answer for
 another host.
 
+The review turned the ssh options inside out, and that is the
+part worth keeping. They began as an exported
+`GIT_SSH_COMMAND`, which is how the block already worked for
+the deploy key. `exec` at the end of the script hands the
+environment to the project's own script, so exporting them
+meant every `git` command that script ran -- and every one the
+agent ran afterwards -- was checked against a file naming one
+host, with the account's own `~/.ssh/known_hosts` and
+`~/.ssh/config` switched off. A second ssh git host became
+unreachable, and unreachable with no remedy from inside the
+guest, because `UserKnownHostsFile` replaces the file somebody
+would add it to.
+
+So nothing is exported now. The options are built once as
+`git_ssh` and named on the two `git` commands bombyx itself
+runs, and the clone keeps them as `core.sshCommand`. Scoping
+them that way also made the fallback honest: an unexported
+variable left `ssh` on its own default of `ask`, which in a
+provisioner with no terminal is a failed clone rather than a
+weaker check, and four passages had promised `accept-new`.
+
+Two smaller things came out of the same round. `-F /dev/null`
+does not rule out the system-wide known-hosts files; it rules
+out `ssh_config`, and `GlobalKnownHostsFile` is a separate
+setting, so a key planted in `/etc/ssh/ssh_known_hosts`
+satisfied the strict check. And the file's path is a literal
+rather than `$HOME`-derived, because `git` hands
+`core.sshCommand` to a shell, a shell expands `$` inside double
+quotes, and a project's `[env]` table may set `HOME` to a value
+containing one -- measured: a path holding `$WORKDIR` reached
+`ssh` as `/home/vagrant/EXPANDED/kh`.
+
 `RepoUrl` now has one piece read out of it. Its doc comment
 said bombyx never looks at the pieces of the address, which
-`ssh_host` makes false, so that paragraph went. The two lint
-tests that pinned the old ssh options went with it, and one of
-them was a flat ban on `UserKnownHostsFile` whose stated reason
--- the agent can rewrite a file we name -- is true and does not
-reach the clone: the file is written from the fetch immediately
-above the clone, and the clone is what brings the project's
-code into the guest.
+`ssh_host` makes false, so that paragraph went. It also returns
+nothing for a port other than 22, because `known_hosts` spells
+such a host `[github.com]:2222` while the published keys carry
+bare names, so verifying one could only fail.
+
+Both lint tests that pinned the old ssh options survive in
+edited form. One was rewritten to the new clauses, and the flat
+ban on `UserKnownHostsFile` became
+`the_fetched_keys_are_the_only_ones_the_clone_accepts`. That
+ban's stated reason -- the agent can rewrite a file we name --
+is true, and the answer is not that the agent has not run yet,
+because this script runs again on every provision. The answer
+is that the guest is not who this defends against: a network
+attacker on the first connection is.
+
+The review ran its full three rounds and hit the ceiling rather
+than settling. Each round found a defect in the previous
+round's own fix, twice in the same small block, and the third
+round found one more -- which under the rule earns a fourth
+round the cap forbids. So this landed reviewed but not
+converged, and `bootstrap-harness-runs-the-script` is why: the
+block has no executable test, so text lints are the only check
+on it and every fix has to be argued rather than run.
+
+The worst item was not a reviewer's. An edit replacing one lint
+test by its boundaries deleted the neighbour as well -- the test
+guarding the `GlobalKnownHostsFile` gap, the most serious
+finding of the whole review -- and the suite stayed green. It
+surfaced only because a `grep` for that option in the test file
+came back empty. Two habits come out of it: revert a probe with
+the inverse edit rather than `git checkout`, which had already
+cost a file's worth of uncommitted work earlier the same day,
+and after replacing a block by boundary, diff the list of test
+names.
 
 Not verified against a real VM host. This workstation holds no
 accepted host key for frosti, so nothing here has been run

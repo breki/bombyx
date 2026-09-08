@@ -147,28 +147,30 @@ header above it:
 - `[projects.<name>.source]` — required: `repo`, `ref`,
   `script`, what the guest clones and runs. `deploy_key` is
   optional: a path on the VM host naming the private key the
-  guest clones a private repository with. `up`, `provision`
-  and `scratch` check the file is on the VM host before
-  creating anything (`remote::require_file`), the generated
-  Vagrantfile uploads it to
-  `/home/vagrant/.ssh/bombyx-deploy-key` before `bootstrap.sh`
-  runs, and `bootstrap.sh` tightens it to 0600 where the
-  provisioner uploaded it -- owned by that user already --
-  exports `GIT_SSH_COMMAND`, and records the same command
-  on the clone as `core.sshCommand` so the agent can push with
-  it. The upload is conditional and carries no `raise` of its
-  own, because
-  `vagrant destroy` loads the Vagrantfile too. Whether a key
-  was configured reaches the guest as `BOMBYX_DEPLOY_KEY`,
-  always set, so the guest's own environment cannot answer it.
-  Left out, no upload is rendered and no check is planned
-  A repository reached over ssh also carries the git host's own
-  identity into the guest. `RepoUrl::ssh_host` reads the host
-  out of `repo` -- the one piece bombyx takes out of that value
-  rather than passing whole -- and `hostkeys::for_host` looks it
-  up in a table of two. `github.com` publishes its keys as JSON
-  at `https://api.github.com/meta` and `bitbucket.org`
-  publishes finished `known_hosts` lines at
+  guest clones a private repository with. `up`, `provision` and
+  `scratch` check the file is on the VM host before creating
+  anything (`remote::require_file`), the generated Vagrantfile
+  uploads it to `/home/vagrant/.ssh/bombyx-deploy-key` before
+  `bootstrap.sh` runs, and `bootstrap.sh` tightens it to 0600
+  where the provisioner uploaded it -- owned by that user
+  already -- names it on each `git` command it runs itself, and
+  records the same command on the clone as `core.sshCommand` so
+  the agent can push with it. The upload is conditional and
+  carries no `raise` of its own, because `vagrant destroy` loads
+  the Vagrantfile too. Whether a key was configured reaches the
+  guest as `BOMBYX_DEPLOY_KEY`, always set, so the guest's own
+  environment cannot answer it. Left out, no upload is rendered
+  and no check is planned.
+- Host-key verification, which is **independent of
+  `deploy_key`** -- it applies to a public repository cloned
+  over ssh just as much. A repository reached over ssh carries
+  the git host's own identity into the guest.
+  `RepoUrl::ssh_host` reads the host out of `repo` -- the one
+  piece bombyx takes out of that value rather than passing whole
+  -- and `hostkeys::for_host` looks it up in a table of two.
+  `github.com` publishes its keys as JSON at
+  `https://api.github.com/meta` and `bitbucket.org` publishes
+  finished `known_hosts` lines at
   `https://bitbucket.org/site/ssh`. A hit sends three variables
   to the guest: `BOMBYX_GIT_HOST` (the table's lower-cased
   spelling, never the operator's), `BOMBYX_HOST_KEYS_URL` and
@@ -177,11 +179,23 @@ header above it:
   connection, and for a host the table does not hold.
   `bootstrap.sh` fetches the keys with `curl`, needs `jq` for
   the JSON shape, refuses when the response holds no line for
-  that host, and then clones under
-  `StrictHostKeyChecking=yes` with a `UserKnownHostsFile`
-  naming what it fetched. With all three empty it falls back to
-  `StrictHostKeyChecking=accept-new`, which trusts the host on
-  first sight; `docs/trust-boundary.md` says what that costs
+  that host, and then runs its own `clone` and `fetch` under
+  `StrictHostKeyChecking=yes` with both known-hosts files named
+  -- `UserKnownHostsFile` for what it fetched and
+  `GlobalKnownHostsFile=/dev/null` for the system-wide pair;
+  `docs/trust-boundary.md` says why naming the second is
+  necessary rather than tidy. With all three empty it falls back
+  to `StrictHostKeyChecking=accept-new`, which trusts the host
+  on first sight; `docs/trust-boundary.md` says what that costs.
+  `ssh_host` also returns nothing for a port other than 22,
+  because `known_hosts` spells such a host `[github.com]:2222`
+  while the guest writes bare names. `GIT_SSH_COMMAND` is never
+  exported: `bootstrap.sh` builds the options as `git_ssh` and
+  names them on its own `clone` and `fetch`, one command at a
+  time, because `exec` would otherwise hand them to the
+  project's own script and pin every host it talks to. The clone
+  keeps them as `core.sshCommand`, written when there is a
+  deploy key or a fetched key file to carry
 - `[projects.<name>.env]` — optional. Variables the project's
   own provisioning script reads, rendered into the generated
   Vagrantfile's provisioner beside bombyx's own set and sorted

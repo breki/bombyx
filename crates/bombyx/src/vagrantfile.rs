@@ -142,13 +142,15 @@ const GIT_HOST_ENV: &str = "BOMBYX_GIT_HOST";
 /// keys when it is set, and falls back to
 /// `StrictHostKeyChecking=accept-new` when it is empty.
 ///
-/// A guest cannot gain verification by forging it, because a
-/// forged URL is one bombyx did not publish and the keys served
-/// from it would still have to match the real host. Losing
-/// verification by clearing it is not reachable either:
-/// [`DEPLOY_KEY_ENV`] explains that a provisioner's `env:`
-/// block overrides what `/etc/profile.d` sets, and this name is
-/// rendered on every render for that reason.
+/// A guest cannot forge it or clear it, and one fact covers
+/// both: [`DEPLOY_KEY_ENV`] explains that a provisioner's
+/// `env:` block overrides what `/etc/profile.d` sets, and this
+/// name is rendered on every render for that reason.
+///
+/// That is about the operator's config reaching the guest
+/// intact, and not about defending the guest from itself --
+/// `docs/trust-boundary.md` explains why the second is not on
+/// offer.
 ///
 /// Left *unset* -- rather than empty -- the guest falls back to
 /// `accept-new`. The one route there is a `vagrant provision`
@@ -385,12 +387,12 @@ end
         deploy_key_env_name = DEPLOY_KEY_ENV,
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
         git_host_env = GIT_HOST_ENV,
-        git_host = ruby_string(host_keys.map_or("", |k| k.host)),
+        git_host = ruby_string(host_keys.map_or("", |k| k.host())),
         host_keys_url_env = HOST_KEYS_URL_ENV,
-        host_keys_url = ruby_string(host_keys.map_or("", |k| k.url)),
+        host_keys_url = ruby_string(host_keys.map_or("", |k| k.url())),
         host_keys_format_env = HOST_KEYS_FORMAT_ENV,
         host_keys_format =
-            ruby_string(host_keys.map_or("", |k| k.format.as_str())),
+            ruby_string(host_keys.map_or("", |k| k.format().as_str())),
         box_name = ruby_string(vm.box_name.as_str()),
         provider = vm.provider,
         cpus = vm.cpus,
@@ -560,58 +562,76 @@ mod tests {
         cfg
     }
 
-    /// What the three host-key names render as in `out`.
+    /// [`cfg_with`] on libvirt, carrying a `deploy_key`.
+    fn cfg_with_key() -> Config {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.source.deploy_key =
+            Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
+        cfg
+    }
+
+    /// What one provisioner variable renders as in `out`,
+    /// quotes included.
     ///
-    /// Each has to appear exactly once, because a second
-    /// rendering of the same name would make the value this
-    /// reads back depend on which one came first.
-    fn host_key_env(out: &str) -> Vec<String> {
-        const NAMES: [&str; 3] =
-            [GIT_HOST_ENV, HOST_KEYS_URL_ENV, HOST_KEYS_FORMAT_ENV];
-        NAMES
-            .iter()
-            .map(|name| {
-                let head = format!("\"{name}\" => ");
-                assert_eq!(
-                    out.matches(&head).count(),
-                    1,
-                    "{name} is not rendered exactly once"
-                );
-                let rest = out
-                    .split_once(&head)
-                    .unwrap_or_else(|| panic!("{name} is not rendered"))
-                    .1;
-                rest.split_once(",\n")
-                    .unwrap_or_else(|| panic!("{name} has no value"))
-                    .0
-                    .to_owned()
-            })
-            .collect()
+    /// It has to appear exactly once: a second rendering of the
+    /// same name would make the value read back here depend on
+    /// which one came first.
+    ///
+    /// One name at a time, so a failed assertion names the
+    /// variable that was wrong. Reading all three into a
+    /// positional list made every failure read as three quoted
+    /// strings against three others.
+    fn rendered(out: &str, name: &str) -> String {
+        let head = format!("\"{name}\" => ");
+        assert_eq!(
+            out.matches(&head).count(),
+            1,
+            "{name} is not rendered exactly once"
+        );
+        let rest = out
+            .split_once(&head)
+            .unwrap_or_else(|| panic!("{name} is not rendered"))
+            .1;
+        rest.split_once(",\n")
+            .unwrap_or_else(|| panic!("{name} has no value"))
+            .0
+            .to_owned()
+    }
+
+    /// Asserts all three host-key variables of `out` at once.
+    fn assert_host_keys(out: &str, host: &str, url: &str, format: &str) {
+        assert_eq!(rendered(out, GIT_HOST_ENV), host, "{GIT_HOST_ENV}");
+        assert_eq!(
+            rendered(out, HOST_KEYS_URL_ENV),
+            url,
+            "{HOST_KEYS_URL_ENV}"
+        );
+        assert_eq!(
+            rendered(out, HOST_KEYS_FORMAT_ENV),
+            format,
+            "{HOST_KEYS_FORMAT_ENV}"
+        );
     }
 
     #[test]
     fn a_github_clone_over_ssh_is_told_where_the_keys_are() {
         let out = render(&cfg_cloning("git@github.com:you/private.git"));
-        assert_eq!(
-            host_key_env(&out),
-            vec![
-                "\"github.com\"".to_owned(),
-                "\"https://api.github.com/meta\"".to_owned(),
-                "\"json\"".to_owned(),
-            ]
+        assert_host_keys(
+            &out,
+            "\"github.com\"",
+            "\"https://api.github.com/meta\"",
+            "\"json\"",
         );
     }
 
     #[test]
     fn a_bitbucket_clone_needs_no_json_parsing() {
         let out = render(&cfg_cloning("ssh://git@bitbucket.org/you/p.git"));
-        assert_eq!(
-            host_key_env(&out),
-            vec![
-                "\"bitbucket.org\"".to_owned(),
-                "\"https://bitbucket.org/site/ssh\"".to_owned(),
-                "\"lines\"".to_owned(),
-            ]
+        assert_host_keys(
+            &out,
+            "\"bitbucket.org\"",
+            "\"https://bitbucket.org/site/ssh\"",
+            "\"lines\"",
         );
     }
 
@@ -623,7 +643,7 @@ mod tests {
         // would put a spelling in `known_hosts` that came from
         // the config rather than from bombyx.
         let out = render(&cfg_cloning("git@GitHub.COM:you/p.git"));
-        assert_eq!(host_key_env(&out)[0], "\"github.com\"");
+        assert_eq!(rendered(&out, GIT_HOST_ENV), "\"github.com\"");
     }
 
     #[test]
@@ -644,20 +664,8 @@ mod tests {
             "git@github.com.example.invalid:you/p.git",
         ] {
             let out = render(&cfg_cloning(repo));
-            assert_eq!(
-                host_key_env(&out),
-                vec!["\"\"".to_owned(), "\"\"".to_owned(), "\"\"".to_owned()],
-                "{repo}"
-            );
+            assert_host_keys(&out, "\"\"", "\"\"", "\"\"");
         }
-    }
-
-    /// [`cfg_with`] on libvirt, carrying a `deploy_key`.
-    fn cfg_with_key() -> Config {
-        let mut cfg = cfg_with(Provider::Libvirt);
-        cfg.source.deploy_key =
-            Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
-        cfg
     }
 
     #[test]

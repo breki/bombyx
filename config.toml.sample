@@ -124,14 +124,14 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 # not are `cloud-image/debian-13` and `debian/bookworm64`; the
 # value below does. Booting the box is the only way to be sure.
 #
-# An ssh URL under `repo` below asks for two more programs.
-# Before cloning, the guest fetches the git host's published
-# ssh keys, so it can tell the real server from an impostor --
-# see docs/trust-boundary.md. That fetch runs `curl`, and
-# reading GitHub's answer also needs `jq`, because GitHub
-# publishes its keys as JSON where Bitbucket publishes finished
-# `known_hosts` lines. An `https` URL needs neither, because it
-# opens no ssh connection at all.
+# An ssh URL under `repo` below asks for more. Before cloning,
+# the guest fetches the git host's published ssh keys, so it can
+# tell the real server from an impostor -- see
+# docs/trust-boundary.md. That fetch runs `curl` for GitHub and
+# for Bitbucket alike, and reading GitHub's answer needs `jq` on
+# top, because GitHub publishes its keys as JSON where Bitbucket
+# publishes finished `known_hosts` lines. An `https` URL needs
+# neither, because it opens no ssh connection at all.
 box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192                 # MiB
@@ -186,9 +186,11 @@ script = "vagrant/provision.sh"   # path inside the clone
 # Optional. Variables the project's own provisioning script
 # reads.
 #
-# bombyx already hands the guest its own set -- BOMBYX_REPO,
-# BOMBYX_REF, BOMBYX_SCRIPT, BOMBYX_DEPLOY_KEY, BOMBYX_VM_HOST
-# and BOMBYX_VM_HOSTNAME. This table is where a project adds
+# bombyx already hands the guest a set of its own, and the
+# whole `BOMBYX_` prefix is reserved for them rather than the
+# names in use today -- `BOMBYX_ENV_NAMES` in
+# crates/bombyx/src/vagrantfile.rs is the list, and it grows.
+# This table is where a project adds
 # its own, and both kinds of value belong in it: a constant the
 # project always wants, and a value that differs per developer.
 # There is no separate place for the second kind because this

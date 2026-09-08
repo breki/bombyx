@@ -7,16 +7,23 @@
 //! HTTPS, whose trust comes from a certificate authority rather
 //! than from whatever answers on port 22.
 //!
-//! This module holds the table and nothing else. bombyx makes
-//! no HTTPS request of its own -- it has no HTTP client and no
-//! JSON parser, and `crate::update` explains why that is
-//! deliberate. The fetch happens in the guest, and
-//! `templates/bootstrap.sh` is what runs it. So the two values
-//! here reach the guest as environment variables in the
-//! generated Vagrantfile.
+//! This module holds the table and nothing else. The request
+//! itself happens in the guest, because the guest is the
+//! machine that has to trust the answer: keys fetched on the
+//! workstation would have to survive two more hand-overs to
+//! get there. So the three values here reach the guest as
+//! environment variables in the generated Vagrantfile, and
+//! `templates/bootstrap.sh` runs the fetch.
 //!
-//! A host missing from the table gets no verification, and
-//! `crate::vagrantfile` says what the guest falls back to.
+//! It also means bombyx needs no HTTP client and no JSON
+//! parser, which suits it: `crate::update` reaches for
+//! `git ls-remote` over the GitHub releases API for the same
+//! kind of reason.
+//!
+//! A host missing from the table gets no verification. The
+//! guest falls back to `StrictHostKeyChecking=accept-new`,
+//! which trusts the key it is offered on first sight;
+//! `docs/trust-boundary.md` says what that costs.
 
 /// The shape a host serves its keys in.
 ///
@@ -51,22 +58,51 @@ impl KeyFormat {
 }
 
 /// One git host bombyx knows how to verify.
+///
+/// **The three fields are private, and `KNOWN` is the only
+/// thing that builds one.** So holding a `HostKeys` is the
+/// proof that its values came from that table, and the
+/// accessors below can promise what the table's own tests
+/// check. Public fields would let any caller -- this module is
+/// `pub`, so that includes one outside bombyx -- assemble a
+/// `HostKeys` naming an `http` URL, and the promise would then
+/// be a comment rather than a fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HostKeys {
+    host: &'static str,
+    url: &'static str,
+    format: KeyFormat,
+}
+
+impl HostKeys {
     /// The host name, lower-cased.
     ///
     /// This is what goes in front of each key in the guest's
     /// `known_hosts` file, rather than the spelling the
     /// operator used. OpenSSH compares a host name without
-    /// regard to case -- measured with `ssh-keygen -F
-    /// BitBucket.org` against a lower-cased file -- so the
-    /// canonical form matches either way.
-    pub host: &'static str,
-    /// Where the host publishes its keys. Always `https`, and
-    /// a test in this module refuses anything else.
-    pub url: &'static str,
+    /// regard to case -- measured with
+    /// `ssh-keygen -F BitBucket.org` against a lower-cased
+    /// file -- so the canonical form matches either way.
+    #[must_use]
+    pub fn host(self) -> &'static str {
+        self.host
+    }
+
+    /// Where the host publishes its keys.
+    ///
+    /// Always `https`. `every_entry_is_fetched_over_https` in
+    /// this module checks every entry of `KNOWN`, and nothing
+    /// else can build a `HostKeys`.
+    #[must_use]
+    pub fn url(self) -> &'static str {
+        self.url
+    }
+
     /// What the response looks like.
-    pub format: KeyFormat,
+    #[must_use]
+    pub fn format(self) -> KeyFormat {
+        self.format
+    }
 }
 
 /// Every host in the table.
@@ -95,6 +131,17 @@ const KNOWN: [HostKeys; 2] = [
 /// includes a self-hosted git server. There is no published
 /// key source to reach for in that case.
 ///
+/// **`host` is a `&str` rather than a type of its own**, and
+/// the reason is the second of the three `CLAUDE.md` allows: a
+/// value built and unwrapped in the same breath with nothing in
+/// between. `crate::config::RepoUrl::ssh_host` produces it and
+/// this function consumes it, in one expression in
+/// `crate::vagrantfile::render`. A second consumer would change
+/// that, because a bare `&str` cannot tell a host name from a
+/// whole repository URL and the wrong argument here returns
+/// `None` -- which is the answer that silently switches
+/// verification off.
+///
 /// The comparison ignores case, because DNS does. ASCII is
 /// enough: a host name reaches the wire as ASCII, and an
 /// internationalised one arrives already punycoded.
@@ -118,13 +165,13 @@ mod tests {
     #[test]
     fn the_two_hosts_in_the_table_are_found() {
         let gh = for_host("github.com").expect("github.com is in the table");
-        assert_eq!(gh.url, "https://api.github.com/meta");
-        assert_eq!(gh.format, KeyFormat::Json);
+        assert_eq!(gh.url(), "https://api.github.com/meta");
+        assert_eq!(gh.format(), KeyFormat::Json);
 
         let bb =
             for_host("bitbucket.org").expect("bitbucket.org is in the table");
-        assert_eq!(bb.url, "https://bitbucket.org/site/ssh");
-        assert_eq!(bb.format, KeyFormat::Lines);
+        assert_eq!(bb.url(), "https://bitbucket.org/site/ssh");
+        assert_eq!(bb.format(), KeyFormat::Lines);
     }
 
     #[test]
@@ -136,7 +183,7 @@ mod tests {
         for spelling in ["GitHub.com", "GITHUB.COM", "gitHub.Com"] {
             let found = for_host(spelling)
                 .unwrap_or_else(|| panic!("{spelling:?} must be found"));
-            assert_eq!(found.host, "github.com", "{spelling:?}");
+            assert_eq!(found.host(), "github.com", "{spelling:?}");
         }
     }
 
@@ -164,10 +211,10 @@ mod tests {
         // against another.
         for entry in KNOWN {
             assert!(
-                entry.url.starts_with("https://"),
+                entry.url().starts_with("https://"),
                 "{}: {}",
-                entry.host,
-                entry.url
+                entry.host(),
+                entry.url()
             );
         }
     }
@@ -180,10 +227,10 @@ mod tests {
         // canonical form no longer matches.
         for entry in KNOWN {
             assert_eq!(
-                entry.host,
-                entry.host.to_lowercase(),
+                entry.host(),
+                entry.host().to_lowercase(),
                 "{} is not lower-cased",
-                entry.host
+                entry.host()
             );
         }
     }

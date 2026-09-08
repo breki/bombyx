@@ -130,8 +130,24 @@ impl RepoUrl {
     /// `git@host:path` ends it at the first `:`. Both may carry
     /// a `user@` in front, which is not part of the host.
     ///
-    /// An IPv6 literal such as `ssh://[::1]/p.git` cannot reach
-    /// this, because `check_repo` refuses any `::`.
+    /// `None` for a bracketed IP literal such as
+    /// `ssh://[::1]/p.git`. `check_repo` accepts one -- it tests
+    /// for `::` only on the scp-like branch, so anything after
+    /// `ssh://` gets through -- and there is nothing useful to
+    /// return: `crate::hostkeys` looks a *named* host up in a
+    /// table, an address can never be in it, and `ssh` spells a
+    /// bracketed literal in `known_hosts` in a form bombyx does
+    /// not produce. Returning a piece of the address would hand
+    /// a later caller a value that looks like a host and is not.
+    ///
+    /// `None` when the URL names a port other than 22.
+    /// `known_hosts` spells such a host `[github.com]:2222`,
+    /// and the guest writes bare names, so a fetched key could
+    /// never match -- measured with `ssh-keygen -F` against a
+    /// bare-name file, which reports the bracketed form
+    /// missing. Returning `None` leaves that URL on
+    /// `accept-new` rather than turning it into a clone that
+    /// cannot succeed.
     ///
     /// The host comes back exactly as the operator wrote it.
     /// `crate::hostkeys::for_host` is what compares it without
@@ -144,7 +160,17 @@ impl RepoUrl {
             None => self.0.split_once(':').map_or(self.0.as_str(), |(a, _)| a),
         };
         let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        let host = host.split_once(':').map_or(host, |(h, _)| h);
+        // A bracketed literal is refused before the port is
+        // trimmed, because splitting `[::1]:22` on the first
+        // colon yields `[`.
+        if host.starts_with('[') {
+            return None;
+        }
+        let (host, port) =
+            host.split_once(':').map_or((host, "22"), |(h, p)| (h, p));
+        if port != "22" {
+            return None;
+        }
         (!host.is_empty()).then_some(host)
     }
 }
@@ -438,7 +464,18 @@ mod tests {
         for (url, want) in [
             ("ssh://git@github.com/you/repo.git", Some("github.com")),
             ("ssh://github.com/you/repo.git", Some("github.com")),
-            ("ssh://git@github.com:2222/you/r.git", Some("github.com")),
+            // An explicit default port is still the default
+            // port, and `known_hosts` spells that host with a
+            // bare name.
+            ("ssh://git@github.com:22/you/r.git", Some("github.com")),
+            // Any other port is refused. `known_hosts` spells
+            // such a host `[github.com]:2222` -- measured with
+            // `ssh-keygen -F` against a bare-name file, which
+            // reports it missing -- and the guest writes bare
+            // names, so verification could only fail. Returning
+            // `None` keeps `accept-new` instead.
+            ("ssh://git@github.com:2222/you/r.git", None),
+            ("ssh://github.com:443/you/r.git", None),
             ("git@github.com:you/repo.git", Some("github.com")),
             ("github.com:you/repo.git", Some("github.com")),
             // Returned as written. `hostkeys::for_host` is what
@@ -450,6 +487,16 @@ mod tests {
             // No authority to read. `check_repo` accepts it,
             // because it only looks at the prefix.
             ("ssh:///p.git", None),
+            // A bracketed IP literal reaches this. `check_repo`
+            // tests for `::` only on the scp-like branch, so a
+            // value starting `ssh://` is accepted whatever
+            // follows.
+            ("ssh://[::1]/p.git", None),
+            ("ssh://[::1]:22/p.git", None),
+            ("ssh://git@[2001:db8::1]/p.git", None),
+            // A password in the authority is not part of the
+            // host.
+            ("ssh://user:secret@github.com/p.git", Some("github.com")),
         ] {
             let repo =
                 RepoUrl::parse(url).unwrap_or_else(|e| panic!("{url:?}: {e}"));
