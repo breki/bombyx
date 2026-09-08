@@ -4,30 +4,40 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
-### aq-2026-09-08-vagrantfile-tests-hold-two-subjects
+### aq-2026-09-08-two-bootstrap-tests-carry-no-assertion-of-their-own
 
 **Category:** Module Size
 
-`crates/bombyx/src/vagrantfile.rs` holds two unrelated test
-groups in one `mod tests`. About fifteen tests assert
-properties of the rendered Ruby -- `carries_every_configured_value`,
-`the_env_hash_closes_with_the_projects_variables_in_it`,
-`disables_the_default_synced_folder`. About fifteen more assert
-properties of the shell text of `bootstrap.sh` through
-`flat_bootstrap` and `flat_bootstrap_lines`, which is a lint
-over a shell script that this module happens to `include_str!`.
-The two groups share no fixture, no helper and no subject.
+Two of the eighteen tests in
+`crates/bombyx/src/vagrantfile/bootstrap_tests.rs` consist of a
+single assertion another test in the same file already makes.
 
-The wanted shape is a second `#[cfg(test)] mod bootstrap_tests`
-in its own file, holding the shell-text group and the two
-flattening helpers, and leaving the four cross-file agreement
-tests where they are -- those are the ones whose subject really
-is the pair.
+`the_clone_is_told_which_key_to_push_with` asserts
+`flat_bootstrap().contains("config --replace-all
+core.sshCommand")`, which
+`the_clone_is_pinned_from_the_config_not_the_environment`
+already asserts over the same helper.
+`the_bootstrap_script_deletes_a_key_no_upload_replaced` asserts
+`BOOTSTRAP.contains("rm -f \"$DEPLOY_KEY\"")`, which the tail of
+`every_refusal_clears_the_uploaded_key` already asserts.
 
-Deferred rather than fixed: it is a move of roughly 400 lines
-with no behaviour change, it is outside what issue #64 asked
-for, and `/review` forbids applying a consolidation in the
-round that found it.
+Deleting either needle from `bootstrap.sh` therefore fails four
+tests naming four different rules, which makes the failure
+harder to read rather than easier.
+
+The wanted shape is to delete the two one-assertion tests and
+move the reason each comment carries into the richer test that
+already owns the needle: the "a plain `git push` in the guest
+works" reason into
+`the_clone_is_pinned_from_the_config_not_the_environment`, and
+the stale-key reason beside the removal assertion in
+`every_refusal_clears_the_uploaded_key`.
+
+Deferred rather than fixed: `/review` forbids applying a
+consolidation in the round that found it. The redundancy is not
+new -- it was invisible while these sat 400 lines apart in a
+962-line module, and the split is what made it a reader's first
+question.
 
 ### aq-2026-09-05-check-segment-runs-three-times-per-load
 

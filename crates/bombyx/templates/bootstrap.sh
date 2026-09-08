@@ -110,9 +110,12 @@ readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 # a VM that never finished provisioning.
 #
 # One function removes the doubt: it clears the key, prints what
-# it was given, and exits. `vagrantfile.rs` refuses a bare
-# `exit 1` anywhere else, so a refusal cannot be written that
-# skips the removal.
+# it was given, and exits. A test refuses any `exit` or `return`
+# outside this function, so a refusal that skips the removal
+# fails bombyx's build rather than this guest. That test is in
+# bombyx's own source, at
+# crates/bombyx/src/vagrantfile/bootstrap_tests.rs, and nothing
+# in this VM holds a copy of it.
 #
 # THE REMOVAL'S STATUS IS TESTED RATHER THAN ASSUMED. `rm` gives
 # up on a file in a directory it cannot write, and the project's

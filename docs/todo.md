@@ -397,6 +397,55 @@ plan, decisions, and outcome.
   values before it execs the project's script. Raised as RT-4(b) on PR #65 and
   rejected there for that reason.
 
+- **bootstrap-harness-runs-the-script** -- run the script, do not match its text
+  The eighteen tests in `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
+  assert over the text of `bootstrap.sh`, and keeping them working has taken
+  three flattening helpers, a comment stripper, a word splitter and two
+  allowance lists -- which is the parser `CLAUDE.md` under **Test-Driven
+  Development** says such a test ends up being. Four assertions turned out to be
+  satisfied by the script's own comments rather than its code, each found one at
+  a time: AQ-1, RT-1 and RT-2 on PR #66, over two review runs. The replacement
+  is a harness that runs the script: a fake `git` on `PATH`, a temporary `HOME`,
+  a fake deploy key, and assertions on what it refuses, what it removes, where
+  it clones and what it exits with. That is a contract, and it would have caught
+  all four comment-satisfied assertions by construction rather than singly. It
+  also covers shapes text matching cannot see at all -- an `mv` on the key, a
+  refusal spelled `exit 2`, an unquoted $HOME above the guard -- each of which
+  had to be added to a list by hand after a reviewer found it. Unix-only, so it
+  needs `#[cfg(unix)]` or an `#[ignore]` on Windows, where CI runs the suite.
+  The two cross-file agreement tests stay as they are: their subject is that the
+  Rust half and the shell half agree about a name, which is not a behavioural
+  question. Seven comment findings on PR #66 were escalated and left unfixed
+  because they turn on this decision rather than on seven separate defects:
+  FR-1, FR-2, FR-5, FR-7, FR-12, FR-13 and FR-15 in that PR's review record.
+  FR-12 is the argument itself.
+
+- **guest-branch-state-differs** -- first up leaves a branch, later ones detach
+  The first `up` clones with `git clone --depth 1 --branch <ref>` and leaves the
+  guest on a real branch. Every provision after that runs `git checkout --force
+  FETCH_HEAD`, which detaches HEAD. So a guest that has never been
+  re-provisioned is on a branch and an identical one that has is not, and an
+  operator cannot say which state to expect. The detaching itself is deliberate
+  and `bootstrap.sh` says so where it happens: a commit made in the guest sits
+  on no branch, the next provision moves HEAD away from it, and pushing rather
+  than committing is how work survives. That reasoning stands. It is the
+  inconsistency between the two paths that is not covered. Found by running
+  `bombyx --project jutro-rebuild provision` a second time on 2026-09-07 and
+  then looking at the guest's checkout. Still true as of 2026-09-08:
+  bootstrap.sh lines 509 and 556.
+
+- **chmod-dirties-the-checkout** -- bombyx modifies a tracked file every run
+  `bootstrap.sh` runs `chmod +x "$script_real"` before `exec`ing the project's
+  script, so a `vagrant/provision.sh` tracked at mode 100644 becomes 100755 and
+  git reports the tree as modified from the moment provisioning finishes. Worked
+  around on jutro's side in commit `c71e2d0`, which records 100755 so bombyx's
+  chmod changes nothing. The bombyx-side question survives: should bombyx modify
+  a tracked file at all, rather than invoking the script through `sh`? Invoking
+  through `sh` would drop the shebang, which is a real cost and the reason the
+  chmod is there -- so this is a trade rather than an obvious fix. Found by
+  running `bombyx --project jutro-rebuild provision` a second time on
+  2026-09-07. Still true as of 2026-09-08: bootstrap.sh line 657.
+
 ## Done
 
 - [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)
