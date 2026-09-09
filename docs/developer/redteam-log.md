@@ -36,7 +36,7 @@ re-provisioning after the restore, or `up` re-taking the
 snapshot when the key set changed. Both change what bombyx does
 for every project, not only one with a `deploy_key`. That is a
 decision about the reset lifecycle rather than about
-credentials, so it wants its own issue.
+credentials, so it went to its own issue, #57.
 
 What landed instead: `docs/trust-boundary.md` under **What this
 costs** states the limit, and names `bombyx snapshot` and

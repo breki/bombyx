@@ -441,7 +441,8 @@ above. bombyx warns you about neither order.
 Whichever route, revoke the key at the git host as well. That
 is the only step that does not depend on a guest doing what it
 was told. `docs/developer/redteam-log.md` holds why this is
-recorded rather than closed.
+recorded rather than closed, and GitHub issue #57 carries the
+decision it waits on.
 
 Two alternatives would change the picture rather than describe
 it, and neither exists. A forwarded agent keeps the key off the
