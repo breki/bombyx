@@ -243,21 +243,12 @@ Vagrant's embedded Ruby, and a pin that resolves badly breaks
 the provider completely -- a much worse outcome than one line
 of noise. The warning will stop appearing when `vagrant-libvirt`
 releases a version that no longer passes the option, but do not
-wait for that: 0.12.2 came out in June 2023 and is still the
-newest release on rubygems.
+wait for that: 0.12.2 came out in June 2023 and rubygems still
+listed it as the newest release in September 2026.
 
-bombyx does not silence the line either, and that is a decision
-rather than an omission. fog-core writes each warning to a
-channel a Vagrantfile can replace, so about twenty lines of Ruby
-in every generated Vagrantfile would drop this one message and
-forward the rest. We chose to keep the generated file free of a
-workaround for another project's bug, on the grounds that a
-reader who has read this section is no longer misled by the
-line. Filtering it inside bombyx is not an option at all: bombyx
-asks `ssh` for a PTY on every vagrant call, so the warning
-arrives merged into the command's normal output, and
-intercepting that output would break `bombyx shell` and every
-progress display.
+bombyx does not silence the line either. That is a decision
+rather than an omission, and issue #55 records the routes we
+considered and why we declined them.
 
 ## Checking that it worked
 

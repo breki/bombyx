@@ -9,6 +9,97 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-11-doctor-transcript-omits-project
+
+**Category:** False claim about the tool
+
+`docs/vm-host-setup.md` under **Checking that it worked** tells
+the reader to run `bombyx --project <name> doctor`, and the
+transcript four lines below it opens with `$ bombyx doctor`.
+That command cannot produce that output: `main.rs` rejects every
+subcommand but `self-update` when `--project` is absent, with
+"--project is required". A reader who copies the prompt line
+gets an error and then has reason to distrust the sample output
+around it.
+
+Found while reviewing the fog-warning change, which touches a
+different section of the same page. Deferred as out of scope for
+that change; the fix is to spell the transcript's prompt line
+the way the sentence above it already does.
+
+---
+
+### fr-2026-09-11-page-has-no-date-keeping-rule
+
+**Category:** Staleness cannot be judged
+
+`docs/vm-host-setup.md` states its age in three different ways.
+The header stamps Steps 1 and 2 as verified on Ubuntu 24.04.4
+with Vagrant 2.4.9 in August 2026. The fog section says the gem
+pair was "Seen with ... in August 2026, which is what a fresh
+host set up from this page gets today", where "today" carries no
+date of its own. A reader cannot tell which facts the August
+stamp covers, and an undated "today" ages without showing it.
+
+The repair is one rule applied once: the header carries the
+check date, and a section that was checked separately says so
+explicitly rather than saying "today".
+
+---
+
+### fr-2026-09-11-step-3-verification-status-unstated
+
+**Category:** Unmarked verification status
+
+`docs/vm-host-setup.md` promises in its header that unverified
+steps carry an inline marker, and stamps Steps 1 and 2 as
+verified. Step 3, the libvirt provider plugin, carries no marker
+either way, while its body reports a real run ("it built and
+linked without any help, installing `vagrant-libvirt 0.12.2` in
+about a minute"). Its `CONFIGURE_ARGS` fallback looks like the
+half that was not exercised.
+
+The reviewer reached this while judging how much to trust the
+gem versions quoted in the fog section, which are Step 3's
+output. Either extend the header to Steps 1 to 3, or mark the
+fallback unverified.
+
+---
+
+### fr-2026-09-11-vm-host-setup-what-worked
+
+**Category:** What worked -- do not trim
+
+Two comprehension reviews of `docs/vm-host-setup.md` named these
+passages as carrying a reason rather than padding. They are
+pre-existing prose, so a later trim could take them without
+anyone noticing what was lost.
+
+The `usermod -a` warning: it states the mechanism (`-G` without
+`-a` replaces the supplementary group list), then the
+consequence (losing `sudo` on a machine reached only over SSH),
+then the follow-on fact, that bombyx opens a new connection per
+command and so picks the groups up on its own.
+
+**Why the non-interactive PATH causes trouble**: it prints the
+actual default `PATH`, names the startup files that kind of
+shell skips, and gives the two `ssh` commands that show the
+difference on the reader's own host. The reviewer reported being
+able to diagnose a variant without returning to the page.
+
+**Always name the libvirt URI** and the pair under "Two of those
+commands need care": both explain why the obvious check passes
+while the real thing is broken -- a bare `virsh list` reaching
+the per-user daemon, and `sudo vagrant plugin install` landing
+in `/root/.vagrant.d`.
+
+The storage-pool autostart note: it states that the consequence
+is delayed and shows the `pool-list` row with the `no` in it,
+which is what connects a later failure to the reboot that caused
+it.
+
+---
+
 ### fr-2026-09-07-clone-in-home-what-worked
 
 **Category:** What worked -- do not trim
