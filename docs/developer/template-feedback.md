@@ -30,6 +30,34 @@ section they belong to.
 
 ## Open divergences
 
+### tf-2026-09-11-todo-md-unclassified-for-never-sync -- todo.md unclassified for never-sync
+
+`cargo xtask sync-candidates` drops a never-sync set before
+showing which upstream files changed, because some files are
+per-project records that every project writes for itself and an
+upstream change to one is never worth pulling. Listing them is
+noise for whoever reads the candidates.
+
+`NEVER_SYNC` in `xtask/src/sync.rs` lists `CHANGELOG.md`, the
+feedback file, the backfeed ledger, `docs/developer/DIARY.md`,
+`docs/developer/*-log.md` and `docs/issues/`. `docs/todo.md` is
+not in it, and `cargo xtask todo` writes that file per project,
+so it is the same kind of record as the rest. A sync would
+offer us the template's own backlog as a candidate to merge
+into ours.
+
+The red team found this on 2026-09-03 and it is deferred here
+as `rt-2026-09-03-todo-md-unclassified-for-never-sync`. It was
+deferred because adding an entry changes what every future sync
+offers, which is a decision about the workflow rather than a
+defect to patch.
+
+One thing is still unchecked, and it decides how much this
+matters: whether upstream rustbase accumulates its own
+`docs/todo.md`. There is no `template` remote configured here,
+so `git ls-tree <upstream>:docs` has never run. If upstream
+keeps the file empty the noise is theoretical.
+
 ### tf-2026-08-18-skills-json-registers-a-missing-skill -- skills.json registers a missing skill
 
 `.claude/skills.json` still registers a `web-dev` skill that does not
@@ -68,6 +96,277 @@ _None yet._
 _None yet._
 
 ## Suggestions to flow back to the template
+
+### tf-2026-09-11-issue-rundown-and-short-are-worth-shipping -- issue, rundown and short are worth shipping
+
+bombyx wrote three commands the template does not ship, and all
+three have turned out to be general rather than project
+-specific.
+
+`/issue` works a GitHub issue end to end: read it, verify it is
+still real, settle the approach, implement with TDD, review
+after the push, and open a PR that says what was not verified.
+The most transferable part is its first step, which is a
+refusal to trust the issue body. Somebody wrote it at one point
+and the tree has moved since, so every factual claim gets
+checked before any planning: does the code still look like
+that, has the work already landed, are the counts and versions
+still current. Re-measure rather than repeat a figure.
+
+`/rundown` prints a grouped one-line rundown of the session's
+work and ends with the decisions and actions left for the
+operator. It reports only and changes nothing. It is what makes
+a long session handoverable without reading the transcript.
+
+`/short` restates the reply above in under forty words. Forty
+is roughly ten seconds of silent reading, and the point of a
+number is that a reader can check it, where "be brief" is a
+criterion nobody can fail. Over budget, it cuts the evidence
+first, then the reasoning, then a qualification the reader has
+already accepted, and never the answer.
+
+Suggested for the template: ship all three. `/issue` needs `gh`
+and so belongs with a note saying so; the other two need
+nothing.
+
+### tf-2026-09-11-code-comments-have-a-floor-but-no-rules -- code comments have a floor but no rules
+
+The template's coding standards say all public items must have
+doc comments, and stop. That produces comments, not good ones.
+bombyx accumulated comments that narrated history, listed their
+own callers, argued hypothetical cases and restated reasoning
+that already existed in `docs/` -- all of it passing the
+template's rule.
+
+The rules bombyx settled on came out of an exercise rather than
+from taste: ten existing comments were each offered three
+shorter forms plus the option to keep them as they were. None
+was kept. Eight of the ten landed at two or three lines. So the
+budget is two or three lines unless the comment earns more, and
+two things earn more -- a list, when the thing described really
+is a list, and an absence, which has to be stated and then
+located.
+
+The five rules under that budget, in `CLAUDE.md` under **Code
+comments**:
+
+- One reason, not the chain. Give the reason the code sits
+  where it does and stop; the reader reaches the consequence.
+- State the invariant, not the disaster. "The host and the
+  settings always come from the same entry" beats "otherwise
+  this VM boots on that project's machine", which reads as a
+  warning to check rather than a fact to rely on.
+- Never inventory your callers. That is what `grep` answers,
+  and the list is stale the next time one is added.
+- No hypotheticals and no case for future work. A comment
+  describes the code as it is.
+- Say what looks wrong and is not. The comments that survived
+  nearest their original length were the two marking a
+  deliberate oddity.
+
+The rule the five follow from: reasoning belongs in `docs/`,
+not in a comment. Every paragraph cut in that exercise was
+reasoning, and every one already existed somewhere else. This
+has a second payoff -- a review here found one explanation
+stated in five places and escalated the consolidation, and
+under this rule that question does not arise, because no
+comment holds the reasoning and there is no copy to reconcile.
+
+It costs something, and the template should carry the cost with
+the rule: a warning aimed at a future editor rather than a
+reader is not visible from the code and a comment may no longer
+carry it, so it goes in an architecture document.
+
+Suggested for the template: ship the budget and the five rules
+alongside the existing "all public items must have doc
+comments". The existing rule sets a floor on quantity and says
+nothing about what is in them.
+
+### tf-2026-09-11-canon-prose-claims-have-no-gate -- canon prose claims have no gate
+
+Canon -- `CLAUDE.md`, `.claude/commands/` and `.claude/agents/`
+-- makes claims about the tree, and some of those claims are
+decidable by a command. Does this cross-reference resolve. Does
+this backticked path exist. Is this `git` subcommand in the
+command file's own `allowed-tools`. The template checks none of
+them, so the claims rot and a reviewer catches most instances
+and never all of them.
+
+The template's own `.claude/skills.json` is an instance: it
+registers a `web-dev` skill whose `path` resolves to nothing,
+already logged here as
+`tf-2026-08-18-skills-json-registers-a-missing-skill`.
+
+bombyx added `cargo xtask canon-check`, run as gate 3 of
+`validate`. It reads markdown only, so it needs no compilation
+and runs before every gate that does. It fails on five classes:
+
+- a bold cross-reference introduced by the word "under" that
+  names no heading anywhere in canon
+- a backticked repo path that does not exist
+- a command file telling the agent to run a `git` subcommand
+  its own `allowed-tools` does not grant
+- prose past 80 columns
+- a cited backlog ID that is in no backlog
+
+Two design points are worth copying with it. Paths that are
+correctly absent go in an `ABSENT_ON_PURPOSE` table where each
+entry carries its reason, because an unexplained exemption is
+indistinguishable from a defect somebody silenced. And the
+check decides nothing about phrasing: everything it does is
+reading files and comparing strings. A check with no stable
+answer is the thing to delete rather than parse harder.
+
+One thing the gate does not cover, and the template should say
+so rather than repeat the mistake: it reads those inputs and
+only those, so `.claude/skills/` and everything under `docs/`
+are unchecked, and a green gate says nothing about them.
+
+Suggested for the template: ship the command. Every class above
+kept producing new instances here, and they stopped reaching a
+reviewer at all once the gate ran on every validate.
+
+### tf-2026-09-11-three-reviewers-in-sequence-one-lane-each -- three reviewers in sequence, one lane each
+
+The template ships two reviewer agents and runs them in
+parallel: `red-team` for safety and correctness, `artisan` for
+code quality. bombyx now runs three, one at a time, and each is
+narrowed to a single lane.
+
+The third is `fresh-reader`, in `.claude/agents/fresh-reader.md`
+-- an engineer joining the project, who reads the changed files
+whole and cold and reports where the code failed to explain
+itself. It is read-only by construction (`Read`, `Grep`,
+`Glob`, no shell), and its findings are about prose a person
+reads rather than behaviour. It has been the cheapest of the
+three to act on, because a comprehension failure has no
+argument behind it: either the file explained itself or it did
+not.
+
+Running them one at a time rather than together is the other
+half. Three reviewers launched in parallel report against the
+same tree, and then the first stage's fixes land and the other
+two reports are describing code that no longer exists. bombyx
+runs artisan, then red-team, then fresh-reader, re-snapshotting
+before each, and the order is deliberate: each stage's fixes
+are less dangerous than the last, so the prose stage runs
+against code nobody is going to change again.
+
+Suggested for the template: ship the third agent, and sequence
+the stages instead of fanning them out. The parallel version
+looks faster and is not, once the cost of reconciling three
+reports against a moved tree is counted.
+
+### tf-2026-09-11-review-rounds-have-no-stopping-rule -- review rounds have no stopping rule
+
+The template says to run the reviewers, presents their
+findings, and says nothing about when to run them again. In
+practice a review is not one pass: fixing what a round found
+produces new text, and the next round finds things in that.
+
+Without a stopping rule this does not converge. One bombyx
+branch ran five rounds at 60, 42, 36, 37 and 33 findings. That
+tail is flat, not converging, and each round cost a full agent
+run to learn nothing.
+
+bombyx's rule, in `.claude/commands/review.md` under **What
+earns another round**: another round is earned only when the
+round found a **behaviour defect** and we fixed it. A behaviour
+defect is a finding whose fix changes what the program does --
+what it prints, what commands it emits, what input it accepts
+or refuses, what it writes or deletes, or what a caller can
+compile against. A finding about a comment, a document, a test
+or a name is not one, however right it is. A round returning
+only those ends the stage, and so does a round whose behaviour
+defects were all deferred or declined, because the tree did not
+move and the next round reads the same code.
+
+Three rounds is the ceiling, and reaching it means the rule
+above failed, so the run says so rather than reporting itself
+as finished.
+
+One run has exercised the rule and is worth shipping with it.
+The 2026-09-06 backlog sweep: stage 1 raised ten findings and
+fixed all ten; stage 2's first round raised thirteen with no
+behaviour defect among them, and six of the thirteen were
+defects in stage 1's own fixes. Both stopping conditions fired
+on the same round, which is not a coincidence -- a stage whose
+findings are all prose is also a stage whose fixes are all
+prose, and rewriting a comment is how the next round's findings
+get made.
+
+Suggested for the template: state the rule and the ceiling
+wherever the reviewers are described. "Reviewers always find
+something" is true, so the stopping condition has to be
+agreement on what matters, not an empty sheet.
+
+### tf-2026-09-11-reviewers-need-an-immutable-snapshot -- reviewers need an immutable snapshot
+
+The template's reviewers read the working tree while it is
+being changed. `commit.md` has `red-team` run `git diff
+--cached` itself and hands `artisan` a captured diff, and both
+run before any fix has landed.
+
+That breaks down as soon as the first fix does land. A reviewer
+here once reported findings against a tree that no longer
+compiled, because fixes for its own earlier findings had gone
+in underneath it while it was reading.
+
+bombyx's `/review` takes a snapshot before every stage and
+every round, and every reviewer reads the snapshot rather than
+the tree. Four details in it were each learned the hard way and
+are worth copying verbatim:
+
+- `git add -N <named paths>` records an untracked file in the
+  index without its contents, which is what makes `git diff`
+  report it at all. Name the paths: `git add -N .` sweeps in
+  the developer's scratch notes, which then reach the reviewers
+  and land in the next `git commit -a`.
+- `:(exclude)docs/developer/*-log.md` subtracts the reviewer
+  backlogs, because the stages write to them and a round would
+  otherwise be handed the previous round's own report to find
+  defects in.
+- `--diff-filter=d` drops deleted paths, which a reviewer with
+  no shell can only fail to open.
+- The intent-to-add entries stay in the index afterwards, so
+  the run has to report the undo (`git reset -- <paths>`) with
+  the snapshot. Until then any `git commit -a` commits the
+  paths, including ones the run concluded should not ship.
+
+Suggested for the template: whatever command ends up owning the
+reviewers, have it write the snapshot to `target/` first and
+pass that. The recipe is six lines of shell and it is the
+difference between a review of the change and a review of
+whatever the tree happened to hold.
+
+### tf-2026-09-11-reviewing-does-not-belong-inside-commit -- reviewing does not belong inside commit
+
+The template's `.claude/commands/commit.md` spawns the two
+reviewer agents in the middle of a commit: step 3 launches
+`red-team` and `artisan` in parallel, before the commit is
+written, and step 4 presents their findings. So every commit is
+also a review.
+
+bombyx ran that arrangement and abandoned it in `6055f93`.
+What it cost: a save-point became a multi-round session. The
+reviewers find things, the fixes need their own commits, the
+reviewers fire again on each of those, and there is no way to
+record a work-in-progress without inviting all of it. A commit
+should be cheap, and this one was not.
+
+The split bombyx settled on is `/review` reviews, `/commit`
+commits, and neither calls the other. Nothing requires a
+review: you reach for `/review` when you want work hardened
+before it becomes a commit, and skip it when you do not. The
+reasoning is written down in `CLAUDE.md` under **Reviewing is
+its own process**, so nobody re-opens it.
+
+Suggested for the template: ship the reviewers as a separate
+command and take the review steps out of `commit.md`. The
+review content itself is good and worth keeping -- it is the
+coupling that is wrong. A project that wants a review on every
+commit can still run the two commands in sequence, and a
+project that does not is no longer paying for one.
 
 ### tf-2026-09-04-todo-done-should-take-its-link-target -- todo done should take its link target
 
