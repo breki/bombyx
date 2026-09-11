@@ -241,8 +241,14 @@ Do not try to fix it by pinning `fog-libvirt` to an older
 release. That means overriding dependency resolution inside
 Vagrant's embedded Ruby, and a pin that resolves badly breaks
 the provider completely -- a much worse outcome than one line
-of noise. It will stop appearing when `vagrant-libvirt`
-releases a version that no longer passes the option.
+of noise. The warning will stop appearing when `vagrant-libvirt`
+releases a version that no longer passes the option, but do not
+wait for that: 0.12.2 came out in June 2023 and rubygems still
+listed it as the newest release in September 2026.
+
+bombyx does not silence the line either. That is a decision
+rather than an omission, and issue #55 records the routes we
+considered and why we declined them.
 
 ## Checking that it worked
 
