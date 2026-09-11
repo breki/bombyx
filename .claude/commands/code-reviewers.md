@@ -53,19 +53,17 @@ This file defines *which* reviewers run, *when*, and *how* to
 spawn them. The review criteria themselves live in the agent
 files above.
 
-Three commands read this file. `/review` spawns the three
-reviewers together and reviews the tree in rounds; `/review2`
-runs them one at a time, each reading the previous one's fixes;
-`/issue` offers a review at its step 8 and points here for the
-rest. All three take the reviewers, the handoff and the
-reading-back checks from here, and each owns its own loop.
+Two commands read this file. `/review` runs the reviewers one
+at a time, each reading the previous one's fixes; `/issue`
+offers a review at its step 8 and points here for the rest.
+Both take the reviewers, the handoff and the reading-back
+checks from here, and each owns its own loop.
 
-`/review` asks each reviewer for every category its agent file
-lists. `/review2` asks each for one of them and carries the
-rest to the stage that owns it -- that narrowing is written in
-`/review2`, because it is a property of that sequence rather
-than of the reviewers. The criteria stay in the agent files
-either way.
+`/review` asks each reviewer for one of the categories its
+agent file lists and carries the rest to the stage that owns
+it. That narrowing is written in `/review`, because it is a
+property of that sequence rather than of the reviewers. The
+criteria stay in the agent files.
 
 **An edit to an agent file takes effect on the next session,
 not this one.** Claude Code reads `.claude/agents/` at startup,
@@ -92,40 +90,39 @@ have no shell, so the harness settles it for them.
 
 ## When to run
 
-Three cases, and every change under review is one of them.
-Judge the change as a whole, not file by file.
+Judge the change as a whole, not file by file, and sort it into
+one of two kinds. `/review` under **Which stages run** turns
+that answer into the stages it runs.
 
 **Code.** `.rs`, `.toml`, `.sh`, `.ps1`, a template under
 `crates/bombyx/templates/`, or a workflow under `.github/`.
 That is the whole list; bombyx is CLI-only, so there is no
-frontend here and no `playwright.config.ts`. Run **all three**
-reviewers, and never skip them for a "straightforward" change.
+frontend here and no `playwright.config.ts`. Never skip a
+review for a "straightforward" change.
 
-**Canon and workflow.** `CLAUDE.md` or anything under
-`.claude/**`. Run **all three** as well. This project keeps
-its rules in prose, so a stale step number or a rule nobody
-can follow is a real defect -- `artisan.md` has a category for
+**Everything else** -- documentation, `CLAUDE.md` and anything
+under `.claude/**`. Review it only when the changed files
+include something a person lands on: `README.md`, `docs/*.md`,
+a module doc, a command or agent file. This project keeps its
+rules in prose, so a stale step number or a rule nobody can
+follow is a real defect -- `artisan.md` has a category for
 exactly this, and the reviewers have found false claims in
 these files that no gate could catch.
 
-**Everything else** -- documentation and prose. Run
-`fresh-reader` alone, and only when the changed files include
-something a newcomer lands on: `README.md`, `docs/*.md`, a
-module doc. Two kinds of file are exempt even then, because
-their content is not prose anybody reads to learn the project:
-the reviewers' own backlogs (`docs/developer/*-log.md`) and the
-diary (`docs/developer/DIARY.md`). `/review` under **Snapshot**
+Two kinds of file are exempt even then, because their content
+is not prose anybody reads to learn the project: the reviewers'
+own backlogs (`docs/developer/*-log.md`) and the diary
+(`docs/developer/DIARY.md`). `/review` under **Snapshot**
 already subtracts the backlogs. It does not subtract the diary,
-because `/commit` writes that after `/review` has finished, so a
-diary edit reaches a snapshot only when one is already sitting
-in the tree.
+because `/commit` writes that after `/review` has finished, so
+a diary edit reaches a snapshot only when one is already
+sitting in the tree.
 
 ## How to spawn
 
-**When to run** above specifies which reviewers a change
-needs. Spawn those in a **single parallel message** -- one
-`Agent` call per reviewer -- so they run concurrently. The
-three names are:
+`/review` under **Which stages run** specifies which reviewers
+a change needs and in what order. Spawn one at a time, never
+two together. The three names are:
 
 - `subagent_type: red-team`
 - `subagent_type: artisan`

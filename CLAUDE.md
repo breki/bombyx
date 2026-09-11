@@ -899,9 +899,9 @@ sheet: reviewers always find something, and the stopping rule is
 agreement on what matters. Do not read a falling finding count
 as progress either: a round's fixes make the next round's
 findings, so the count flattens out well above zero. `/review`
-under **Stop, or go again** lists the conditions themselves,
-the three-round cap among them, and holds the run that showed
-it.
+under **What earns another round** lists the conditions
+themselves, the three-round cap among them, and holds the run
+that showed it.
 
 ## Definition of Done
 
@@ -1042,8 +1042,7 @@ a fresh empty `[Unreleased]` above it.
 | `/check` | Type-check all targets, incl. tests; runs none |
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline with stepwise progress |
-| `/review` | Review and fix uncommitted work, committing nothing; independent of `/commit` |
-| `/review2` | The same three reviewers in sequence, red-team looping until behaviour settles |
+| `/review` | The three reviewers in sequence, red-team looping until behaviour settles; commits nothing, independent of `/commit` |
 | `/commit` | Save-point commit with diary and CHANGELOG (no reviewing, no version bump) |
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |
