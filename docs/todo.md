@@ -462,6 +462,21 @@ plan, decisions, and outcome.
   refuse, which needs refuse() and DEPLOY_KEY declared above them and both
   currently sit below, or accepting the gap and saying so where the checks are.
 
+- **list-registered-vms** -- list the registered projects and their VM state
+  Nothing prints the projects in the operator's config.toml, so they have to
+  open the file to learn what --project accepts, and nothing says which of those
+  VMs are up. Add a command that lists every [projects.<name>] table with its
+  host, box, cpus and memory, plus the state vagrant reports for it. Registry
+  exposes only read and project and cannot enumerate, so it needs a third
+  function. The command takes no --project, which fits neither SelfUpdate nor
+  VmCmd: main.rs relies on every VmCmd variant having a project and a host,
+  which is what makes action_of total. Group the projects by owning host and
+  call each host once, and print unknown for a host that does not answer rather
+  than failing the listing, the way doctor's skip cascade already does. Open:
+  the command's name, whether scratch VMs are found on the host or left out, and
+  whether contacting the hosts is opt-in. Local counterpart to #14 and #15,
+  which both assume an enumeration like this exists. Filed as #72.
+
 ## Done
 
 - [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)
