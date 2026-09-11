@@ -329,8 +329,16 @@ bombyx destroy myproject  # destroy the VM and remove its dir
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
 
+bombyx list               # every registered project and its VM state
 bombyx self-update        # update this binary to the newest release
 ```
+
+`list` is the one VM command that names no project. It reads
+your config file, asks every machine named in it what its
+projects are doing, and prints a row each. A machine that does
+not answer leaves its own projects `unknown` with a note under
+the table, and costs the other machines nothing. `--offline`
+contacts no machine and leaves the `STATE` column out.
 
 Two lifecycles, on purpose:
 

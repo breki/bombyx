@@ -480,6 +480,102 @@ pub fn vagrant(cfg: &Config, args: &[&str], tty: Tty) -> RemoteCommand {
     vagrant_in(cfg, &cfg.remote_project_dir(), args, tty)
 }
 
+/// Introduces one project's block in a listing reply.
+///
+/// The workstation splits the host's reply on these lines, so
+/// the marker has to be something vagrant never prints. Every
+/// machine-readable line vagrant writes begins with a timestamp,
+/// and no line of it begins with `#`.
+///
+/// The project name follows the marker. It comes from the
+/// operator's own config file, which bombyx trusts the way it
+/// trusts a command-line argument, and the parser matches it
+/// against the names it asked about rather than believing the
+/// reply.
+pub const LISTING_MARKER: &str = "##bombyx ";
+
+/// Builds the one command that asks a VM host what every
+/// project on it is doing.
+///
+/// `cfg` supplies the route and is the first project reported;
+/// `rest` are the others on that same host. One command rather
+/// than one per project, because each `ssh` invocation pays for
+/// its own connection and a machine usually carries several
+/// projects.
+///
+/// **Every config in `rest` must name `cfg`'s host.** The route
+/// is built from `cfg` alone, so an entry belonging elsewhere
+/// would be asked about on the wrong machine. The `debug_assert`
+/// catches a caller that builds the group some other way; it is
+/// not the mechanism, `listing::group_by_host` is.
+///
+/// The provider comes from each project's own config rather than
+/// from `cfg`, because two projects sharing a machine may name
+/// different ones.
+///
+/// Each fragment reads:
+///
+/// ```sh
+/// printf '##bombyx %s\n' 'web'
+/// if [ -f ~/'vms/web/Vagrantfile' ]; then
+///   ( cd ~/'vms/web' && ... vagrant 'status' '--machine-readable' )
+/// fi
+/// ```
+///
+/// The parentheses keep the `cd` inside the fragment. `cd`
+/// changes the shell's own working directory, so without them
+/// the next project's `cd` would be relative to this project's
+/// directory, and every fragment after the first would ask about
+/// a path nobody named.
+///
+/// The `if` is what keeps one project from answering for the
+/// rest. `vagrant status` in a directory holding no Vagrantfile
+/// exits non-zero and explains itself on stderr, and a project
+/// bombyx has never built is the ordinary case rather than a
+/// fault. A project the guard skips emits its marker and no
+/// vagrant block at all, which is how the parser tells "never
+/// built" from "the host said nothing".
+///
+/// **Always [`Tty::NoPty`]**, and that is not the caller's
+/// choice. bombyx parses this reply rather than printing it, and
+/// a PTY breaks parsing two ways: `ssh -t` merges the remote's
+/// stderr into stdout, so the `fog` warning `vagrant-libvirt`
+/// writes would arrive inside a project's block, and the remote
+/// tty translates `\n` to `\r\n`, so a state would be read as
+/// `running\r`. [`shell_into_vm`] forces the opposite for the
+/// mirror-image reason.
+#[must_use]
+pub fn vagrant_status_many(cfg: &Config, rest: &[&Config]) -> RemoteCommand {
+    debug_assert!(
+        rest.iter().all(|c| c.host == cfg.host),
+        "vagrant_status_many given a project from another host"
+    );
+    let script = std::iter::once(cfg)
+        .chain(rest.iter().copied())
+        .map(status_fragment)
+        .collect::<Vec<_>>()
+        .join("; ");
+    transport(cfg, &script, Tty::NoPty)
+}
+
+/// The part of a listing script that asks about one project.
+///
+/// `printf` rather than `echo`, because a project named `-n`
+/// would be read as an option by some shells and swallowed
+/// instead of printed. The name is an argument to the format
+/// string rather than part of it, so a `%` in it cannot be read
+/// as a conversion.
+fn status_fragment(cfg: &Config) -> String {
+    let dir = cfg.remote_project_dir();
+    format!(
+        "printf '{LISTING_MARKER}%s\\n' {name}; \
+         if [ -f {vagrantfile} ]; then ( {run} ); fi",
+        name = shell_quote(cfg.project.as_str()),
+        vagrantfile = quote_remote_path(&format!("{dir}/Vagrantfile")),
+        run = vagrant_script(cfg, &dir, &["status", "--machine-readable"]),
+    )
+}
+
 /// Builds the command that creates `dir` on the VM host if it
 /// does not yet exist.
 #[must_use]
@@ -1402,5 +1498,91 @@ mod tests {
             remote_script(&c),
             format!("cd '/srv/x' && {env} vagrant 'halt'")
         );
+    }
+
+    #[test]
+    fn one_status_call_carries_every_project_on_the_host() {
+        // The whole point of the builder: several projects share
+        // a machine, and asking each of them separately would
+        // pay for an ssh handshake per project.
+        let web = cfg();
+        let mut api = cfg();
+        api.project = crate::name::ProjectName::parse("api").unwrap();
+        let cmd = vagrant_status_many(&web, &[&api]);
+        let script = remote_script(&cmd);
+
+        for name in ["myproject", "api"] {
+            assert!(
+                script.contains(&format!("{LISTING_MARKER}%s\\n' '{name}'")),
+                "{name} must be announced: {script}"
+            );
+        }
+        assert_eq!(
+            script
+                .matches("vagrant 'status' '--machine-readable'")
+                .count(),
+            2,
+            "one status call per project: {script}"
+        );
+    }
+
+    #[test]
+    fn a_listing_command_never_asks_for_a_remote_terminal() {
+        // The reply is parsed. `ssh -t` merges the remote's
+        // stderr into stdout, so the fog warning would land
+        // inside a project's block, and the remote tty turns
+        // every `\n` into `\r\n`, so a state would be read as
+        // `running\r`. Neither is the caller's decision to get
+        // wrong, so the builder does not take one.
+        let cmd = vagrant_status_many(&cfg(), &[]);
+        assert!(
+            !cmd.args.iter().any(|a| a == "-t"),
+            "no PTY may be requested: {:?}",
+            cmd.args
+        );
+    }
+
+    #[test]
+    fn a_project_directory_is_entered_in_a_subshell() {
+        // `cd` inside one project's fragment must not decide
+        // where the next project's fragment runs. The
+        // parentheses are what keep it local; without them the
+        // second `cd` is relative to the first project's
+        // directory and the guard above it has already answered
+        // for the wrong path.
+        let cmd = vagrant_status_many(&cfg(), &[]);
+        let script = remote_script(&cmd);
+        assert!(
+            script.contains("then ( cd "),
+            "the cd must run in a subshell: {script}"
+        );
+    }
+
+    #[test]
+    fn a_project_with_no_vagrantfile_is_never_asked() {
+        // vagrant fails outright in a directory holding no
+        // Vagrantfile, and its failure would be the whole host's
+        // reply. The guard is what keeps one untouched project
+        // from hiding the states of the others.
+        let cmd = vagrant_status_many(&cfg(), &[]);
+        let script = remote_script(&cmd);
+        assert!(
+            script.contains("if [ -f ~/'vms/myproject/Vagrantfile' ]"),
+            "the guard must name the project's Vagrantfile: {script}"
+        );
+    }
+
+    #[test]
+    fn each_project_is_asked_with_its_own_provider() {
+        // Two projects on one machine may name different
+        // providers, and the reply for each has to come from the
+        // one its own table names.
+        let web = cfg();
+        let mut api = cfg();
+        api.project = crate::name::ProjectName::parse("api").unwrap();
+        api.vm.provider = crate::config::Provider::Hyperv;
+        let script = remote_script(&vagrant_status_many(&web, &[&api]));
+        assert!(script.contains("=\'libvirt\'"), "{script}");
+        assert!(script.contains("=\'hyperv\'"), "{script}");
     }
 }

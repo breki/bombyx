@@ -41,6 +41,8 @@ bombyx destroy myproject  # destroy the VM and remove its dir
 
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
+
+bombyx list               # every registered project and its VM state
 ```
 
 There are two lifecycles, on purpose:
@@ -190,6 +192,80 @@ least 1 directory below that anchor, with no `.` or `..`
 segment. So `/`, `~`, `~/` and `~/.` are all refused. bombyx
 deletes the directory it derives from this value, which is why
 the check runs when the config loads rather than at teardown.
+
+## Seeing every project at once
+
+Every other bombyx command is about one project, named with
+`--project`. `bombyx list` is about all of them. It reads your
+config file, asks each machine named in it what its projects
+are doing, and prints one row per project:
+
+```
+$ bombyx list
+NAME        HOST             BOX                 CPUS    MEM  STATE
+faraway     offsite.invalid  generic/ubuntu2204     4   8192  unknown
+jutro       frosti           generic/ubuntu2404     8  16384  not created
+neverbuilt  frosti           generic/ubuntu2204     4   8192  not created
+vmtest      frosti           generic/ubuntu2204     2   4096  running
+bombyx: offsite.invalid: ssh: Could not resolve hostname
+offsite.invalid: Name or service not known
+```
+
+The last line is wrapped here to fit this document. bombyx
+prints it as one line.
+
+Everything but `STATE` comes from your config file. `STATE`
+comes from `vagrant status` on the machine that owns the
+project.
+
+### One call per machine, not per project
+
+Several projects usually share a machine, and each `ssh`
+invocation pays for its own connection and authentication. So
+bombyx groups the projects by the machine that owns them and
+sends one command per machine, which asks about every project
+on it in turn.
+
+Remember that a project's own `host` key beats the file-wide
+one, so which machine owns a project is a question the config
+file answers per entry. `faraway` above is on its own machine
+for exactly that reason.
+
+### A machine that does not answer
+
+The VM host is often off, asleep or off the network, and a
+listing that failed because one machine of four was asleep
+would be useless. So a machine that cannot be reached leaves
+its own projects `unknown` and costs the other machines
+nothing.
+
+The reason goes under the table rather than in the `STATE`
+column, once per machine. It is a sentence from `ssh`, and a
+column wide enough to hold one would push every other column
+off the screen.
+
+### `not created` means two things, and both are true
+
+A project reads `not created` when vagrant says so about a
+machine it has no domain for, and also when the project's
+directory on the host holds no `Vagrantfile` at all -- which is
+a project bombyx has never run `up` for. In both cases there is
+no VM, so the listing says the same thing about both.
+
+### Listing without contacting anything
+
+`bombyx list --offline` reads your config file and asks no
+machine anything. It is for a workstation away from the hosts,
+and it answers instantly. The `STATE` column is left out rather
+than filled with dashes, because a column of dashes would stand
+in for a question nobody put.
+
+### What it does not list
+
+Scratch VMs. They live in `<remote_root>/scratch/<project>/<name>`
+and no config table names them, so bombyx would have to search
+directories on the host and trust the names it found there. The
+listing describes what your config file holds.
 
 ## Checking a host with doctor
 

@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use super::text::sanitize;
 use super::{
     Finding, Outcome, ProbeResult, Scope, VersionAnswer, cannot_run,
     not_on_path,
 };
+use crate::term::sanitize;
 
 /// The detail for a local tool, from whatever it printed.
 ///

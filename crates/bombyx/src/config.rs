@@ -358,6 +358,30 @@ impl Config {
         Self::from_registry(&registry, name, None).map(|(cfg, _origin)| cfg)
     }
 
+    /// Loads every project out of a registry given as a string.
+    ///
+    /// [`Config::load_all`] without the file, and the sibling of
+    /// `Config::parse_registry` above.
+    ///
+    /// **Test-only.** Production code calls
+    /// [`Config::load_all`].
+    ///
+    /// # Errors
+    ///
+    /// Every error [`Config::load_all`] lists except the ones
+    /// about reading a file.
+    #[cfg(test)]
+    pub(crate) fn parse_registry_all(
+        source: &str,
+        path: &Path,
+    ) -> Result<Vec<(Self, HostOrigin)>, ConfigError> {
+        let registry = registry::parse_for_tests(source, path)?;
+        // `None` for the same reason `parse_registry` passes it:
+        // a test must not depend on the name of the machine
+        // running it.
+        Self::all_from_registry(&registry, None)
+    }
+
     /// The config every module's tests use.
     ///
     /// It lives next to the type it builds, so every test module
@@ -450,6 +474,62 @@ impl Config {
             name,
             transport::this_machine().as_deref(),
         )
+    }
+
+    /// Loads every project in the registry, in key order.
+    ///
+    /// Each entry is assembled exactly as [`Config::load_project`]
+    /// assembles the one it is asked for, host ranking included,
+    /// so a listing shows the host each VM would really run on.
+    ///
+    /// A registry naming no project returns an empty vector. The
+    /// file is legal and there is nothing to report about it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::NoRegistry`] when there is no
+    /// registry file, then [`ConfigError::Read`],
+    /// [`ConfigError::NotAFile`], [`ConfigError::TooLarge`] or
+    /// [`ConfigError::Parse`] if the file cannot be read or
+    /// understood, and [`ConfigError::HostMissing`] when an
+    /// entry has no `host` and the file names no default.
+    ///
+    /// One bad entry fails the whole call. A missing `host` is
+    /// the only error an entry can add here -- every other value
+    /// was checked by its own type while the file parsed -- and
+    /// it is a property of the file, since the file-wide `host`
+    /// is what every entry without one falls back to.
+    pub fn load_all(
+        registry: Option<&Path>,
+    ) -> Result<Vec<(Self, HostOrigin)>, ConfigError> {
+        let missing = || ConfigError::NoRegistry {
+            place: registry_place(registry),
+        };
+        let path = registry.ok_or_else(missing)?;
+        let registry = Registry::read(path)?.ok_or_else(missing)?;
+        Self::all_from_registry(&registry, transport::this_machine().as_deref())
+    }
+
+    /// [`Config::load_all`] against a registry already read.
+    ///
+    /// Split out for the reason `from_registry` is: a test
+    /// parses a string literal and calls this, so nothing has to
+    /// write a file.
+    ///
+    /// # Errors
+    ///
+    /// Every error [`Config::load_all`] lists except the ones
+    /// about reading the file.
+    fn all_from_registry(
+        registry: &Registry,
+        this_machine: Option<&str>,
+    ) -> Result<Vec<(Self, HostOrigin)>, ConfigError> {
+        registry
+            .names()
+            .map(|name| {
+                Self::from_registry(registry, name.as_str(), this_machine)
+            })
+            .collect()
     }
 
     /// [`Config::load_project`] against a registry already read.
@@ -1153,6 +1233,16 @@ mod load_project_tests {
         load_on(source, name, None)
     }
 
+    /// [`Config::load_all`] against a registry given as text.
+    ///
+    /// The sibling of [`load`] above, and it writes no file for
+    /// the same reason.
+    fn load_all(
+        source: &str,
+    ) -> Result<Vec<(Config, HostOrigin)>, ConfigError> {
+        Config::parse_registry_all(source, Path::new("/home/dev/config.toml"))
+    }
+
     /// A registry whose `[source]` table carries one extra
     /// key.
     ///
@@ -1315,6 +1405,59 @@ mod load_project_tests {
         assert!(text.contains("myproject"), "{text}");
         assert!(text.contains("/home/dev/elsewhere.toml"), "{text}");
         assert!(!text.contains(USER_CONFIG_FILE), "{text}");
+    }
+
+    #[test]
+    fn loading_them_all_returns_every_entry_in_key_order() {
+        // Three entries, written out of order. Each keeps its
+        // own settings, so a listing cannot show one project's
+        // box beside another's name.
+        let source = format!(
+            "{}\n{}\n{}",
+            test_registry("web", "vmhost", None),
+            test_entry("api", None),
+            test_entry("db", None),
+        );
+        let loaded = load_all(&source).expect("three entries must load");
+        let names: Vec<&str> =
+            loaded.iter().map(|(cfg, _)| cfg.project.as_str()).collect();
+        assert_eq!(names, ["api", "db", "web"]);
+    }
+
+    #[test]
+    fn each_loaded_entry_keeps_the_host_that_wins_for_it() {
+        // The ranking runs per entry. Applying one entry's
+        // winner to the whole file would list a project against
+        // a machine its VM is not on.
+        let source = format!(
+            "{}\n{}",
+            test_registry("web", "file-wide", Some("mine")),
+            test_entry("api", None),
+        );
+        let loaded = load_all(&source).unwrap();
+        let hosts: Vec<(&str, &str)> = loaded
+            .iter()
+            .map(|(cfg, _)| (cfg.project.as_str(), cfg.host.as_str()))
+            .collect();
+        assert_eq!(hosts, [("api", "file-wide"), ("web", "mine")]);
+    }
+
+    #[test]
+    fn a_file_with_no_entries_loads_an_empty_listing() {
+        // Not an error. The file is legal and names no project,
+        // so there is nothing to list and nothing to report.
+        let loaded = load_all("host = \"vmhost\"\n").unwrap();
+        assert!(loaded.is_empty(), "got {} entries", loaded.len());
+    }
+
+    #[test]
+    fn an_entry_with_no_host_anywhere_fails_the_whole_listing() {
+        // The file-wide `host` is the default for every entry,
+        // so its absence is not one project's problem. Reporting
+        // it once beats listing the other projects beside a
+        // blank column.
+        let err = load_all(&test_entry("web", None)).unwrap_err();
+        assert!(matches!(err, ConfigError::HostMissing { .. }), "{err}");
     }
 
     #[test]

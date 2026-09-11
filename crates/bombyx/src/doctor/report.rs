@@ -2,8 +2,8 @@
 
 use std::fmt::Write as _;
 
-use super::text::{clip, sanitize};
 use super::{Finding, Outcome, Scope};
+use crate::term::{clip, sanitize};
 
 /// Width the rendered report aims to fit inside.
 const LINE_WIDTH: usize = 80;
@@ -121,7 +121,7 @@ impl Report {
     /// Renders the report, aligned, with a closing summary.
     ///
     /// This is where host-supplied text is made safe to print;
-    /// see `text::sanitize`.
+    /// see `crate::term::sanitize`.
     #[must_use]
     pub fn render(&self, host: &str) -> String {
         let name_width = self

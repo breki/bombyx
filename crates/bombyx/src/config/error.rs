@@ -241,6 +241,22 @@ pub enum ConfigError {
         place: String,
     },
 
+    /// Every project's settings were asked for and there is no
+    /// registry file to hold them.
+    ///
+    /// Separate from [`ConfigError::RegistryNotFound`], whose
+    /// message names the one project that was looked up. Nothing
+    /// here looked a project up, so there is no name to quote
+    /// and the advice has to describe the file instead.
+    #[error(
+        "no registry file -- create {place} and give each project \
+         you drive a `[projects.<name>]` table"
+    )]
+    NoRegistry {
+        /// The registry file bombyx would have read.
+        place: String,
+    },
+
     /// A `host` key in the registry named an unusable host.
     ///
     /// Separate from [`ConfigError::Invalid`] so the message can

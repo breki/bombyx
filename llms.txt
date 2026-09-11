@@ -31,9 +31,13 @@ Cargo workspace, CLI only:
   - `doctor.rs` — the check model; submodules own the rest
     - `doctor/probes.rs` — which probes run, reading a result
     - `doctor/readonly.rs` — proving a probe script writes nothing
-    - `doctor/text.rs` — host text made safe to print, clipping
     - `doctor/local.rs` — the workstation-side checks
     - `doctor/report.rs` — collecting and rendering findings
+  - `listing.rs` — grouping projects by host, reading a
+    `vagrant status` reply, rendering the `list` table
+  - `term.rs` — text on its way to the terminal: line endings,
+    host text made safe to print, clipping, the line of a
+    failure that explains it
   - `tool.rs` — `PATH` lookup, never the working directory
   - `bin/bombyx/main.rs` — clap parsing, host-provenance
     reporting, process spawning, the self-update ordering
@@ -82,6 +86,7 @@ bombyx provision          # re-run provisioning in the guest
 bombyx down               # halt the VM
 bombyx shell              # shell inside the VM (ssh -t)
 bombyx status             # vagrant status
+bombyx list               # every registered project and its VM state
 bombyx doctor             # check preconditions, read-only
 bombyx reset              # restore fresh-install snapshot
 bombyx snapshot           # replace fresh-install snapshot
@@ -105,8 +110,16 @@ runs that constructor while the file parses.
 `remote::remove_dir` carries a `debug_assert` that is a backstop
 for a hand-built path, not the guard.
 
+`list` reads the config file and asks every host named in it
+what its projects are doing, one command per host rather than
+one per project. A host that does not answer leaves its own
+projects `unknown` and a note under the table, and costs the
+other hosts nothing. `--offline` contacts no machine and drops
+the `STATE` column. It is the only subcommand that reads the
+config without naming one project.
+
 Global flags: `--project <name>` (required by every subcommand
-but `self-update`), `--config <path>` (the registry file;
+but `self-update` and `list`), `--config <path>` (the registry file;
 defaults to `config.toml` in the config directory), `--dry-run`
 (print the argv instead of running it).
 
