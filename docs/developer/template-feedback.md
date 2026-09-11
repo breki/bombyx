@@ -52,11 +52,11 @@ deferred because adding an entry changes what every future sync
 offers, which is a decision about the workflow rather than a
 defect to patch.
 
-One thing is still unchecked, and it decides how much this
-matters: whether upstream rustbase accumulates its own
-`docs/todo.md`. There is no `template` remote configured here,
-so `git ls-tree <upstream>:docs` has never run. If upstream
-keeps the file empty the noise is theoretical.
+Upstream does accumulate its own copy, so the noise is real
+rather than theoretical. `git show template/main:docs/todo.md`
+at `6528907` returns 76 lines with its own pending items in
+them, `xtask-strip-web` among them. Every future sync would
+offer that file to every downstream.
 
 ### tf-2026-08-18-skills-json-registers-a-missing-skill -- skills.json registers a missing skill
 
@@ -343,7 +343,9 @@ The template's `.claude/commands/commit.md` spawns the two
 reviewer agents in the middle of a commit: step 3 launches
 `red-team` and `artisan` in parallel, before the commit is
 written, and step 4 presents their findings. So every commit is
-also a review.
+also a review. Checked against `template/main` at `6528907`,
+which is two commits ahead of the SHA this project is pinned
+to, so the arrangement is current and not a snapshot artefact.
 
 bombyx ran that arrangement and abandoned it in `6055f93`.
 What it cost: a save-point became a multi-round session. The
