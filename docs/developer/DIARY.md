@@ -4,6 +4,28 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-11
 
+**The workflow actions were running on a deprecated Node**
+
+Every CI job printed the same warning: `actions/checkout@v4` and
+`actions/cache@v4` target Node.js 20, which GitHub deprecated,
+and the runner was forcing them onto Node.js 24 instead. A
+forced runtime is a grace period, not a fix -- the jobs fail
+when the fallback goes.
+
+The bump is to the newest major of each action that runs on
+Node.js 24: checkout v7, cache v6, upload-artifact v7 and
+download-artifact v8. Nothing about how they are called changed.
+Every input the workflows pass still exists in the new majors --
+`path`, `key` and `restore-keys` for the cache, `merge-multiple`
+on the download, `if-no-files-found` on the upload -- and
+`checkout` is called with no inputs at all here. The oldest of
+the four releases is from March 2026, so the cooldown rule the
+cargo dependencies follow is satisfied several times over.
+
+The release workflow's artifact steps run on a tag and nothing
+else, so a CI run does not exercise them. The first release
+after this is where they are proven.
+
 **The feedback file's placeholder outlived the empty section**
 
 `_None yet._` is the line a section of
