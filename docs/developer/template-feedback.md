@@ -89,8 +89,6 @@ silent dangling reference into a failed gate. The prune instructions
 should also name `skills.json` explicitly, since it is the one place a
 removed subsystem leaves a description behind.
 
-_None yet._
-
 ## Resolved
 
 _None yet._
@@ -1357,5 +1355,3 @@ Suggested fix, as applied in bombyx:
 
 Both need unit tests over fixture markdown covering each bullet
 spelling.
-
-_None yet._

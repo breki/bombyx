@@ -4,6 +4,22 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-11
 
+**The feedback file's placeholder outlived the empty section**
+
+`_None yet._` is the line a section of
+`docs/developer/template-feedback.md` carries while it holds no
+entries. `cargo xtask feedback-add` inserts each new entry at
+the top of its section, so the placeholder was never removed --
+it was pushed down under the entries instead, and sat at the
+bottom of a section with twenty of them. The retrospective for
+the first template-feedback sweep found it in two sections.
+
+`insert_entry` now drops the placeholder as it inserts. The
+search runs from the section header to the next one rather than
+looking only under the header, because that is where earlier
+inserts had left it. The two stale copies came out of the file
+in the same commit.
+
 **One review command, and it is the staged one**
 
 `/review` and `/review2` both reviewed the working tree, and
