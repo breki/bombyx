@@ -241,8 +241,23 @@ Do not try to fix it by pinning `fog-libvirt` to an older
 release. That means overriding dependency resolution inside
 Vagrant's embedded Ruby, and a pin that resolves badly breaks
 the provider completely -- a much worse outcome than one line
-of noise. It will stop appearing when `vagrant-libvirt`
-releases a version that no longer passes the option.
+of noise. The warning will stop appearing when `vagrant-libvirt`
+releases a version that no longer passes the option, but do not
+wait for that: 0.12.2 came out in June 2023 and is still the
+newest release on rubygems.
+
+bombyx does not silence the line either, and that is a decision
+rather than an omission. fog-core writes each warning to a
+channel a Vagrantfile can replace, so about twenty lines of Ruby
+in every generated Vagrantfile would drop this one message and
+forward the rest. We chose to keep the generated file free of a
+workaround for another project's bug, on the grounds that a
+reader who has read this section is no longer misled by the
+line. Filtering it inside bombyx is not an option at all: bombyx
+asks `ssh` for a PTY on every vagrant call, so the warning
+arrives merged into the command's normal output, and
+intercepting that output would break `bombyx shell` and every
+progress display.
 
 ## Checking that it worked
 
