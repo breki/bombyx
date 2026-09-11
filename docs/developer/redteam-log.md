@@ -222,10 +222,10 @@ backlogs by shape and lists the diary, the changelog, the
 feedback file, the backfeed ledger and `docs/issues/`.
 `docs/todo.md` is not in it, and `cargo xtask todo` writes that
 file per project, so it is the same kind of record as the rest.
-Whether upstream rustbase accumulates its own `docs/todo.md`
-was not checked -- there is no `template` remote configured
-here, so confirm with `git ls-tree <upstream>:docs` before
-deciding.
+Upstream rustbase does accumulate its own `docs/todo.md`: the
+`template` remote is configured now, and
+`git show template/main:docs/todo.md` at `6528907` returns 76
+lines carrying upstream's own pending items.
 
 Deferred: adding it changes what a `/template-sync` run offers,
 which is a decision about the workflow rather than a defect in
