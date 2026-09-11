@@ -4,13 +4,78 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-11
 
+**The exit status of a `;`-joined script answers for one project**
+
+The review of `bombyx list` found this and it is the one worth
+remembering. `remote::vagrant_status_many` joins one fragment per
+project with `; `, and a POSIX shell reports the status of the
+*last* command in such a list. So the status says nothing about
+any particular project, and `listing::entries` was reading the
+reply only when that status was zero. One project with a broken
+Vagrantfile, sorted last, blanked every other project on a
+reachable machine -- while the doc comment two lines above
+promised the opposite.
+
+The reply is now read whatever the status, and the status only
+chooses what to say about a project the reply skipped. Proven
+against the real host: `~/vms/zzz/Vagrantfile` holding invalid
+Ruby makes vagrant exit 1, and `vmtest` still reported
+`running`.
+
+**An empty answer is not a statement**
+
+The same review found the sibling mistake. A project's block
+arriving empty was read as "bombyx never built this VM", on the
+assumption that only the `[ -f Vagrantfile ]` guard could
+produce one. A second producer is any failure that writes
+nothing to stdout -- and the first candidate is a `vagrant` the
+non-interactive shell cannot find, which
+`docs/vm-host-setup.md` records as this project's recurring
+VM-host failure. The operator would have read `not created`
+about a machine bombyx could not ask at all.
+
+The guard's `else` now writes a `##bombyx-never-built` token, so
+"never built" is something the host stated rather than the
+absence of anything, and silence reads as unknown. The general
+form is worth keeping: **an absence cannot carry a reason, so
+where the reason matters, say the thing positively.**
+
+Two more of the same shape came out of it. The host's own error
+text was being discarded, because the marker is printed before
+the guard by `printf` -- a shell builtin that is always present
+-- so every project always has a block and the failure reason
+was never reached. And the `ssh` call carried none of the five
+connection options `remote::probe` sets and explains, so one
+machine that swallowed packets would have blocked every machine
+queued behind it. Both are fixed, and the options now come from
+one `remote::unattended` that the doctor probes and the listing
+share.
+
+**A rule in five documents is a rule with no owner**
+
+Two rounds of review produced prose defects from one cause. The
+exit-status rule was written into the clap help, `README.md`,
+`docs/usage.md`, `llms.txt` and `CHANGELOG.md`; correcting the
+copies is what made the next round's findings, twice. The
+second round found that the code implements a wider rule than
+any copy stated, and that "`--offline` always exits zero" was
+false in three of them -- a bad config file exits 1 whatever
+`--offline` says.
+
+Every copy now agrees with the code. Giving each rule one owner
+is deferred to its own commit, as
+`docs/developer/redteam-log.md` records, because collapsing five
+statements into one plus four pointers is exactly the kind of
+change that wants reviewing on its own.
+
 **Nothing printed the projects the config file holds**
 
 Every bombyx command takes `--project`, and nothing told the
-operator what that flag accepts. `Registry` had two functions,
-`read` and `project`, and `project` needs a name -- so the type
-that holds every project could not be asked for the list of
-them. Learning what you had registered meant opening the file.
+operator what that flag accepts. `Registry` could be asked to
+read the file and to hand back one named entry, and `project`
+needs that name -- so the type that holds every project could
+not be asked to enumerate its keys. Learning what you had
+registered meant opening the file.
 
 `bombyx list` answers that, and the VM state with it. Issue #72
 asked the three open questions and they were settled before any

@@ -112,16 +112,21 @@ for a hand-built path, not the guard.
 
 `list` reads the config file and asks every host named in it
 what its projects are doing, one command per host rather than
-one per project. A host that does not answer leaves its own
-projects `unknown` and a note under the table, and costs the
-other hosts nothing. `--offline` contacts no machine and drops
-the `STATE` column. It is the only subcommand that reads the
-config without naming one project.
+one per project. The table goes to stdout; a host that does
+not answer leaves its own projects `unknown`, puts one note on
+stderr, and costs the other hosts nothing -- the `ssh` options
+that bound a dead host are the ones `doctor` uses, from the
+same builder. Any project left `unknown` makes the command
+exit non-zero, which is wider than unreachability: a host that
+answers without naming a state leaves the same gap.
+`--offline` contacts no machine and drops the `STATE` column,
+so only the config file itself can fail it. It is the only
+subcommand that reads the config without naming one project.
 
 Global flags: `--project <name>` (required by every subcommand
-but `self-update` and `list`), `--config <path>` (the registry file;
-defaults to `config.toml` in the config directory), `--dry-run`
-(print the argv instead of running it).
+but `self-update` and `list`), `--config <path>` (the registry
+file; defaults to `config.toml` in the config directory),
+`--dry-run` (print the argv instead of running it).
 
 ## Configuration
 

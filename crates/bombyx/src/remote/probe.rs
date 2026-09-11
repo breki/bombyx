@@ -22,73 +22,17 @@
 //! `crate::doctor`.
 
 use super::{RemoteCommand, quote_remote_path, shell_quote};
-use crate::config::{Config, Transport};
+use crate::config::Config;
 
 /// Builds a non-interactive probe running `script`.
 ///
-/// Each option closes a way a diagnostic can be worse than
-/// useless:
-///
-/// - `BatchMode=yes` -- without it, a host that will not accept
-///   the key waits for a password, so the probe hangs instead
-///   of failing.
-/// - `ConnectTimeout=10` -- `BatchMode` bounds interaction, not
-///   duration. A host that blackholes TCP (a DROP rule, or a
-///   dead address behind a live DNS record) would otherwise
-///   block for the OS timeout, minutes, with no output at all.
-///   It bounds the direct `connect()` and nothing more: it is
-///   not inherited by a `ProxyCommand`/`ProxyJump`, and it does
-///   not cover the banner exchange or authentication.
-/// - `ServerAliveInterval=5` with `ServerAliveCountMax=3` --
-///   which *does* bound a session that connects and then stalls,
-///   proxied or not. Without it a hung sshd, or a jump host that
-///   accepts the TCP connection and then goes quiet, hangs the
-///   diagnostic indefinitely.
-/// - `LogLevel=ERROR` -- suppresses banners and host-key
-///   notices that would otherwise be the text reported as the
-///   failure reason.
-///
-/// Setting them in one place is what makes the guarantee
-/// structural rather than something each builder remembers.
+/// `super::unattended` carries the connection options and says
+/// what each one closes. A probe and a listing are the same
+/// shape -- nobody is at the keyboard and the reply is parsed --
+/// so both go through that one builder rather than each
+/// remembering the list.
 fn probe(cfg: &Config, script: &str) -> RemoteCommand {
-    // The same decision every other builder applies, read from
-    // the same place -- not a second one. `probe` matches here
-    // rather than calling `super::transport` because its `ssh`
-    // arm carries five connection options the wrapper does not
-    // add.
-    //
-    // Every variant named, so a third route is a compile error
-    // here rather than one that quietly takes the `ssh` arm.
-    match cfg.transport() {
-        // Running here, none of the options below has anything
-        // to configure: there is no connection to time out, no
-        // session to keep alive and no banner to suppress. The
-        // script is unchanged, so the shared wrapper builds it
-        // -- and it is the wrapper that adds the `unset`.
-        Transport::Local => super::transport(cfg, script, super::Tty::NoPty),
-        // This arm builds its own command, so it adds the
-        // `unset` itself. `doctor` reports the environment
-        // bombyx's own commands run in, so a probe reading an
-        // environment bombyx clears would answer about a state
-        // no other command ever sees.
-        Transport::Ssh => RemoteCommand::new(
-            "ssh",
-            &[
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                "-o",
-                "LogLevel=ERROR",
-                "-o",
-                "ServerAliveInterval=5",
-                "-o",
-                "ServerAliveCountMax=3",
-                cfg.host.as_str(),
-                &format!("{}{script}", super::DISARM_VAGRANT_REDIRECTS),
-            ],
-        ),
-    }
+    super::unattended(cfg, script)
 }
 
 /// Builds the probe that proves the host is reachable and key

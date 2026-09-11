@@ -4,6 +4,39 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-11-exit-rule-has-no-single-home
+
+**Category:** Duplicated rule deferred for its own commit
+
+`bombyx list`'s exit-status rule is stated in five places -- the
+clap help in `main.rs`, `README.md`, `docs/usage.md`, `llms.txt`
+and `CHANGELOG.md` -- and the `--project` requirement in three:
+`README.md`, `crates/bombyx/README.md` and `docs/usage.md`. None
+of them says which copy owns the rule.
+
+Two rounds of the review that added `list` produced prose
+defects from exactly this. Round 1 wrote the exit rule into all
+five; round 2 found the code implements a wider rule than any of
+them states ("any project left `unknown`", not "a machine that
+does not answer"), and that "`--offline` always exits zero" was
+false in three of them, since a bad config file exits 1 whatever
+`--offline` says. Correcting copies is what made the next
+round's findings, both times.
+
+Every copy now agrees with the code and with the others, so
+nothing is wrong today. What is deferred is giving each rule one
+owner and leaving pointers behind. `/review` forbids a
+consolidation in the round that finds it, because N copies
+become one statement plus N-1 pointers and a pointer can name
+the wrong section or chain two deep -- so it wants a commit of
+its own with nothing else in it.
+
+Worth deciding at the same time: whether the clap help can be a
+pointer at all. It is what `bombyx list --help` prints, so it
+has to state the rule rather than refer to a document, which
+means the real question is which of the four remaining copies
+survive.
+
 ### rt-2026-09-07-snapshot-outlives-the-deploy-key
 
 **Category:** Behaviour defect deferred deliberately

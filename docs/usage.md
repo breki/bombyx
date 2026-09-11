@@ -10,14 +10,18 @@ builds a working project from nothing.
 The examples all use the config from the README: a host alias
 of `vmhost` and a project named `myproject`.
 
-**Every command below takes `--project myproject`**, left out of
-the examples so the line under discussion stays readable.
-bombyx reads nothing out of the project's own directory, so it
-cannot work out which project you mean from where you are
-standing. `--config <path>` names a registry file other than
-the one in your config directory. `self-update` needs neither.
+**Every command below but `list` takes `--project myproject`**,
+left out of the examples so the line under discussion stays
+readable. bombyx reads nothing out of the project's own
+directory, so it cannot work out which project you mean from
+where you are standing. `--config <path>` names a registry file
+other than the one in your config directory. `self-update` needs
+neither, and `list` is about every project at once rather than
+one, so it ignores `--project` and reads only the registry.
 
 - [Commands](#commands)
+- [Seeing every project at
+  once](#seeing-every-project-at-once)
 - [Checking a host with doctor](#checking-a-host-with-doctor)
 - [Where the snapshot reset restores comes
   from](#where-the-snapshot-reset-restores-comes-from)
@@ -200,23 +204,34 @@ Every other bombyx command is about one project, named with
 config file, asks each machine named in it what its projects
 are doing, and prints one row per project:
 
-```
+```console
 $ bombyx list
 NAME        HOST             BOX                 CPUS    MEM  STATE
 faraway     offsite.invalid  generic/ubuntu2204     4   8192  unknown
 jutro       frosti           generic/ubuntu2404     8  16384  not created
 neverbuilt  frosti           generic/ubuntu2204     4   8192  not created
 vmtest      frosti           generic/ubuntu2204     2   4096  running
-bombyx: offsite.invalid: ssh: Could not resolve hostname
-offsite.invalid: Name or service not known
 ```
 
-The last line is wrapped here to fit this document. bombyx
-prints it as one line.
+That is the whole of stdout. Rows are sorted by project name,
+so one config file always lists in the same order however you
+arrange the tables in it.
 
 Everything but `STATE` comes from your config file. `STATE`
 comes from `vagrant status` on the machine that owns the
 project.
+
+`faraway` reads `unknown` above, and the reason for it goes to
+stderr rather than into the table, one line per machine:
+
+```
+bombyx: offsite.invalid: ssh: Could not resolve hostname
+offsite.invalid: Name or service not known
+```
+
+bombyx prints that as a single line; it is wrapped here to fit
+this page, and its length is the argument for keeping it out of
+the `STATE` column.
 
 ### One call per machine, not per project
 
@@ -237,12 +252,26 @@ The VM host is often off, asleep or off the network, and a
 listing that failed because one machine of four was asleep
 would be useless. So a machine that cannot be reached leaves
 its own projects `unknown` and costs the other machines
-nothing.
+nothing. That last part is why the `ssh` call carries
+`ConnectTimeout`, `BatchMode` and the two `ServerAlive`
+options, from the same builder `bombyx doctor` uses: without
+them a machine that swallows packets would block the machines
+after it in the queue for minutes.
 
-The reason goes under the table rather than in the `STATE`
-column, once per machine. It is a sentence from `ssh`, and a
-column wide enough to hold one would push every other column
-off the screen.
+The reason goes to stderr rather than into the `STATE` column,
+once per machine. It is a sentence from `ssh`, and a column
+wide enough to hold one would push every other column off the
+screen. Keeping it off stdout also leaves the table clean for
+anything you pipe it into.
+
+Any project left `unknown` makes `bombyx list` exit non-zero, so
+a script can tell a complete table from one with gaps in it.
+That is deliberately wider than "a machine was unreachable": a
+machine that answers but cannot run vagrant leaves the same gap,
+and a script wants to see both. `--offline` establishes no
+states at all, so nothing there can leave a gap -- but it still
+reads your config file, and a missing or unparseable one fails
+the command as it would any other.
 
 ### `not created` means two things, and both are true
 

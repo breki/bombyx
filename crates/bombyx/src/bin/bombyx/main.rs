@@ -16,7 +16,6 @@
 //! post-extraction re-check in `update::asset::confirm_unchanged`,
 //! because both are decisions and neither needs a process.
 
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::io::IsTerminal;
@@ -28,7 +27,7 @@ use bombyx::config::{Config, HostOrigin, Transport};
 use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
-use bombyx::listing::{self, Entry as ListEntry};
+use bombyx::listing;
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
 use bombyx::remote::{RemoteCommand, Tty};
@@ -79,8 +78,14 @@ enum Cmd {
     ///
     /// Reads your config file and asks each machine named in it
     /// what its projects are doing. A machine that does not
-    /// answer leaves its projects `unknown` and a note under the
-    /// table; it does not stop the listing.
+    /// answer leaves its projects `unknown` and a note on
+    /// stderr; it does not stop the listing.
+    ///
+    /// Any project whose state could not be established makes
+    /// the command exit non-zero, so a script can tell a
+    /// complete table from one with gaps in it. That covers a
+    /// machine bombyx could not reach and a machine that
+    /// answered without naming a state.
     ///
     /// The only subcommand that reads the config without naming
     /// one project, so `--project` is ignored here.
@@ -850,10 +855,7 @@ fn list_run(
     registry: Option<&Path>,
     dry_run: bool,
 ) -> Result<Ran> {
-    let configs: Vec<Config> = Config::load_all(registry)?
-        .into_iter()
-        .map(|(cfg, _origin)| cfg)
-        .collect();
+    let configs = Config::load_all(registry)?;
 
     if dry_run {
         let commands = if offline {
@@ -864,35 +866,51 @@ fn list_run(
         return execute(&commands, true);
     }
 
-    // Empty on the offline route, so every entry's state is
-    // `None` and `listing::render` leaves the column out.
-    let mut states = if offline {
-        BTreeMap::new()
+    // Two routes rather than a flag, so the offline one cannot
+    // reach the code that spawns anything. The library owns the
+    // join between a project and its state; that is the step
+    // that could print `running` against the wrong machine, and
+    // this file is outside the coverage gate.
+    let entries = if offline {
+        listing::offline_entries(configs)
     } else {
-        listing::states(&configs, spawn_listing)
+        listing::entries(configs, run_command)
     };
-    let entries: Vec<ListEntry> = configs
-        .into_iter()
-        .map(|cfg| {
-            let state = states.remove(cfg.project.as_str());
-            ListEntry { config: cfg, state }
-        })
-        .collect();
 
     print_lines(&listing::render(&entries));
-    Ok(Ran::Ok)
+    // stderr, because a note is a diagnostic rather than a row:
+    // it carries the `bombyx:` prefix the rest of this file uses,
+    // and it must not land in output somebody pipes into `awk`.
+    let notes = listing::notes(&entries);
+    for note in &notes {
+        eprint_lines(&format!("{note}\n"));
+    }
+
+    // A machine that could not be asked leaves the question
+    // half-answered, and a script reading the table has no other
+    // way to learn that -- the `unknown` cells are prose and the
+    // reason is on a stream it may not be reading. `doctor_run`
+    // fails its run for the same reason.
+    if notes.is_empty() {
+        Ok(Ran::Ok)
+    } else {
+        Ok(Ran::Failed(1))
+    }
 }
 
-/// Runs one listing command, turning a spawn failure into a
-/// reason.
+/// Runs one command, turning a spawn failure into a reason.
 ///
-/// `Err` carries what could not be started. `listing::states`
-/// turns it into an `unknown` row for that host's projects, for
-/// the reason `spawn_probe` below gives about the report: a
-/// listing that refuses to list because one machine is asleep is
-/// worth less than one with gaps in it.
-fn spawn_listing(cmd: &RemoteCommand) -> Result<ProbeResult, String> {
-    // No bare-name fallback, for the reason `spawn_probe` gives.
+/// `Err` carries what could not be started, so a caller can
+/// report it as one row's problem instead of the whole run's.
+/// Both callers want that: a diagnostic that refuses to
+/// diagnose, and a listing that refuses to list because one
+/// machine is asleep, are each worse than an answer with a gap
+/// in it.
+fn run_command(cmd: &RemoteCommand) -> Result<ProbeResult, String> {
+    // No bare-name fallback. Spawning the unresolved name goes
+    // straight back through the OS search that `tool` exists to
+    // avoid -- and doctor is the command run first in a fresh
+    // clone, so it is the worst place to reintroduce it.
     let Some(program) = bombyx::tool::resolve(&cmd.program) else {
         return Err(doctor::not_on_path(&cmd.program));
     };
@@ -903,30 +921,15 @@ fn spawn_listing(cmd: &RemoteCommand) -> Result<ProbeResult, String> {
         .map_err(|e| doctor::cannot_run(&cmd.program, &e.to_string()))
 }
 
-/// Runs one host probe, turning a spawn failure into a finding.
+/// Runs one host probe and reads its result as a finding.
 ///
 /// Propagating the error instead would discard the whole report
 /// -- including findings already gathered -- for the most likely
 /// local misconfiguration there is, `ssh` missing from `PATH`.
-/// A diagnostic that refuses to diagnose is worse than a wrong
-/// answer.
 fn spawn_probe(p: &HostProbe) -> Outcome {
-    // No bare-name fallback. Spawning the unresolved name goes
-    // straight back through the OS search that `tool` exists to
-    // avoid -- and doctor is the command run first in a fresh
-    // clone, so it is the worst place to reintroduce it.
-    let Some(program) = bombyx::tool::resolve(&p.command.program) else {
-        return Outcome::Fail(doctor::not_on_path(&p.command.program));
-    };
-    match std::process::Command::new(&program)
-        .args(&p.command.args)
-        .output()
-    {
-        Ok(o) => doctor::classify(&ProbeResult::from_output(&o), p.verdict),
-        Err(e) => Outcome::Fail(doctor::cannot_run(
-            &p.command.program,
-            &e.to_string(),
-        )),
+    match run_command(&p.command) {
+        Ok(result) => doctor::classify(&result, p.verdict),
+        Err(why) => Outcome::Fail(why),
     }
 }
 

@@ -321,6 +321,19 @@ impl Registry {
         Some((key, project.host.as_deref()?))
     }
 
+    /// Every project name in the file, in key order.
+    ///
+    /// The names only. A caller wanting one entry's settings
+    /// asks [`Registry::project`] for it, which is the function
+    /// that reports a name no table holds.
+    ///
+    /// Sorted, because the keys live in a `BTreeMap`.
+    /// [`super::Config::load_all`] is where that ordering is
+    /// described for the caller who acts on it.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &ProjectName> {
+        self.projects.keys()
+    }
+
     /// Returns the entry for `name`.
     ///
     /// The error names the file this registry was read from, so
@@ -356,19 +369,6 @@ impl Registry {
     /// Returns [`ConfigError::Invalid`] when `name` is not a
     /// legal project name, and [`ConfigError::ProjectNotFound`]
     /// when the file has no table for it.
-    /// Every project name in the file, in key order.
-    ///
-    /// The names only. A caller wanting one entry's settings
-    /// asks [`Registry::project`] for it, which is the function
-    /// that reports a name no table holds.
-    ///
-    /// `BTreeMap` keeps the keys sorted, so two runs against one
-    /// file list the projects in the same order however the
-    /// operator arranged the tables.
-    pub fn names(&self) -> impl Iterator<Item = &ProjectName> {
-        self.projects.keys()
-    }
-
     pub fn project(
         &self,
         name: &str,

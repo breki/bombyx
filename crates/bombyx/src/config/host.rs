@@ -402,9 +402,11 @@ pub fn registry_file() -> Option<PathBuf> {
 
 /// Names the registry file, for an error message.
 ///
-/// [`ConfigError::RegistryNotFound`] is what needs it, and it is
-/// the one message about a file bombyx did not open. Every other
-/// message asks the `Registry` for the path it was read from.
+/// The messages about a file bombyx did not open are what need
+/// it: [`ConfigError::RegistryNotFound`], raised when one
+/// project was asked for, and [`ConfigError::NoRegistry`], when
+/// every project was. Every other message asks the `Registry`
+/// for the path it was read from.
 ///
 /// It is a path the operator can act on, so it is printed in
 /// full rather than described. Only a machine whose environment

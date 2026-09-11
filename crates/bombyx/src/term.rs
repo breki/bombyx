@@ -1,9 +1,14 @@
 //! Text on its way to the operator's terminal.
 //!
-//! Four pure functions, and they are here rather than in the
+//! Five pure functions, and they are here rather than in the
 //! binary because `src/bin/` is outside the coverage gate: the
 //! line-ending substitution below had no test while the far less
 //! interesting question of where `-t` sits in an argv had four.
+//!
+//! The table covers the whole module. Only `line_endings` is
+//! public; the other four are crate-private and so do not appear
+//! on this page, which is also why comments elsewhere name
+//! `sanitize` in backticks rather than linking to it.
 //!
 //! | Function | Answers |
 //! |----------|---------|
@@ -11,6 +16,7 @@
 //! | `sanitize` | what the VM host is allowed to put on the screen |
 //! | `clip` | how much of a detail fits one column |
 //! | `fail_reason` | which line of a failed command explains it |
+//! | `first_line` | which line of a successful one describes it |
 
 use std::borrow::Cow;
 
@@ -93,13 +99,16 @@ fn is_safe_to_print(c: char) -> bool {
 /// decide whether to push, so the host must not be able to write
 /// it.
 ///
-/// Each renderer is the enforcement point, not the callers that
-/// build the text: `doctor::Report::render` and
-/// `listing::render` both call this over everything they print.
-/// Detail reaches a report from several places -- including the
-/// binary, which builds it from spawn errors and tool banners --
-/// and requiring each one to remember the call is how one of
-/// them eventually does not.
+/// The renderer is the enforcement point, not the code that
+/// builds the text. A value reaches a report from several places
+/// -- including the binary, which builds one from spawn errors
+/// and tool banners -- and requiring each of them to remember
+/// the call is how one of them eventually does not.
+///
+/// What needs it is every value that came from a VM host. A
+/// value the operator wrote in their own `config.toml` is
+/// printed as written: bombyx trusts that file the way it trusts
+/// a command-line argument.
 pub(crate) fn sanitize(text: &str) -> String {
     text.chars()
         .map(|c| if is_safe_to_print(c) { c } else { '?' })

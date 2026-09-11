@@ -374,7 +374,7 @@ impl Config {
     pub(crate) fn parse_registry_all(
         source: &str,
         path: &Path,
-    ) -> Result<Vec<(Self, HostOrigin)>, ConfigError> {
+    ) -> Result<Vec<Self>, ConfigError> {
         let registry = registry::parse_for_tests(source, path)?;
         // `None` for the same reason `parse_registry` passes it:
         // a test must not depend on the name of the machine
@@ -476,7 +476,13 @@ impl Config {
         )
     }
 
-    /// Loads every project in the registry, in key order.
+    /// Loads every project in the registry, sorted by name.
+    ///
+    /// **Alphabetical by project name, not the order the tables
+    /// were written in.** The registry holds them in a
+    /// `BTreeMap`, so the sort is free and two runs against one
+    /// file always list the projects the same way, however the
+    /// operator rearranges it.
     ///
     /// Each entry is assembled exactly as [`Config::load_project`]
     /// assembles the one it is asked for, host ranking included,
@@ -484,6 +490,12 @@ impl Config {
     ///
     /// A registry naming no project returns an empty vector. The
     /// file is legal and there is nothing to report about it.
+    ///
+    /// No [`HostOrigin`], unlike [`Config::load_project`]. That
+    /// value exists so the binary can print one line saying
+    /// which key supplied the host, and a listing prints the
+    /// winning host in a column of its own for every project
+    /// instead.
     ///
     /// # Errors
     ///
@@ -499,9 +511,7 @@ impl Config {
     /// was checked by its own type while the file parsed -- and
     /// it is a property of the file, since the file-wide `host`
     /// is what every entry without one falls back to.
-    pub fn load_all(
-        registry: Option<&Path>,
-    ) -> Result<Vec<(Self, HostOrigin)>, ConfigError> {
+    pub fn load_all(registry: Option<&Path>) -> Result<Vec<Self>, ConfigError> {
         let missing = || ConfigError::NoRegistry {
             place: registry_place(registry),
         };
@@ -523,11 +533,12 @@ impl Config {
     fn all_from_registry(
         registry: &Registry,
         this_machine: Option<&str>,
-    ) -> Result<Vec<(Self, HostOrigin)>, ConfigError> {
+    ) -> Result<Vec<Self>, ConfigError> {
         registry
             .names()
             .map(|name| {
                 Self::from_registry(registry, name.as_str(), this_machine)
+                    .map(|(cfg, _origin)| cfg)
             })
             .collect()
     }
@@ -1237,9 +1248,7 @@ mod load_project_tests {
     ///
     /// The sibling of [`load`] above, and it writes no file for
     /// the same reason.
-    fn load_all(
-        source: &str,
-    ) -> Result<Vec<(Config, HostOrigin)>, ConfigError> {
+    fn load_all(source: &str) -> Result<Vec<Config>, ConfigError> {
         Config::parse_registry_all(source, Path::new("/home/dev/config.toml"))
     }
 
@@ -1420,7 +1429,7 @@ mod load_project_tests {
         );
         let loaded = load_all(&source).expect("three entries must load");
         let names: Vec<&str> =
-            loaded.iter().map(|(cfg, _)| cfg.project.as_str()).collect();
+            loaded.iter().map(|cfg| cfg.project.as_str()).collect();
         assert_eq!(names, ["api", "db", "web"]);
     }
 
@@ -1437,7 +1446,7 @@ mod load_project_tests {
         let loaded = load_all(&source).unwrap();
         let hosts: Vec<(&str, &str)> = loaded
             .iter()
-            .map(|(cfg, _)| (cfg.project.as_str(), cfg.host.as_str()))
+            .map(|cfg| (cfg.project.as_str(), cfg.host.as_str()))
             .collect();
         assert_eq!(hosts, [("api", "file-wide"), ("web", "mine")]);
     }

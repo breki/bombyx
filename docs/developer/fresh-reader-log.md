@@ -9,6 +9,38 @@ leaves no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-11-named-rather-than-linked-is-explained-everywhere
+
+**Category:** Duplicated explanation deferred for its own commit
+
+Five doc comments each spend a line or three explaining that a
+public rustdoc page may not link to a private item, so the
+comment names it in backticks instead:
+`crates/bombyx/src/listing.rs:431`,
+`crates/bombyx/src/config/host.rs:73`,
+`crates/bombyx/src/config.rs:551`,
+`crates/bombyx/src/config/registry.rs:360` and
+`crates/bombyx/src/config/vm.rs:121`. A sixth, in `term.rs`'s
+module header, now states the same thing for that module.
+
+`fresh-reader` reported it as reading cost rather than as an
+error: by the third occurrence a reader skims the parentheses,
+and one of them sits inside `render`'s doc, which is a place the
+reader does want to read closely.
+
+The convention is real and the `doc` gate enforces the
+underlying rule (`xtask/src/doc_cmd.rs` runs rustdoc twice under
+`-D warnings`). What is deferred is stating it once -- in
+`CLAUDE.md` under **Code comments**, or in
+`docs/architecture.md` -- and letting each comment simply write
+the name in backticks with no apology.
+
+Deferred rather than applied because `/review` forbids
+collapsing copies in the round that finds them: the replacement
+is a rule in one place plus five sites that must each be trimmed
+without changing what they were explaining, and that is a commit
+of its own.
+
 ### fr-2026-09-11-doctor-transcript-omits-project
 
 **Category:** False claim about the tool

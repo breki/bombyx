@@ -136,10 +136,11 @@ and this project adheres to
   `[example.com]:2222` while the published keys carry bare names.
 - `bombyx list` prints every project in your `config.toml` with its host, box,
   CPUs, memory and VM state, taking no `--project`. It asks each machine once
-  for all the projects on it; a machine that does not answer leaves its own
-  projects `unknown` with a note under the table and costs the others nothing.
-  `--offline` contacts no machine and leaves the state column out. Scratch VMs
-  are not listed: no config table names them.
+  for all the projects on it. The table goes to stdout; a machine that does not
+  answer leaves its own projects `unknown`, puts one note on stderr, and costs
+  the others nothing. Any project left `unknown` makes the command exit
+  non-zero. `--offline` contacts no machine and leaves the state column out.
+  Scratch VMs are not listed: no config table names them.
 
 ### Changed
 

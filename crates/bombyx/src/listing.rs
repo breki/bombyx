@@ -8,7 +8,7 @@
 //! Nothing here runs a process, for the reason `doctor` gives:
 //! `src/bin/` is outside the coverage gate, so every decision
 //! lives in the library and the binary supplies spawning. That
-//! is what [`states`] takes its `run` argument for.
+//! is what [`entries`] takes its `run` argument for.
 //!
 //! One rule shaped the module: **a state bombyx cannot support
 //! is printed as unknown.** A machine that does not answer, and
@@ -19,9 +19,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use crate::config::Config;
+use crate::config::{Config, ProjectName};
 use crate::doctor::ProbeResult;
-use crate::remote::{self, LISTING_MARKER, RemoteCommand};
+use crate::remote::{self, LISTING_MARKER, NEVER_BUILT, RemoteCommand};
 use crate::term::{clip, fail_reason, sanitize};
 
 /// The vagrant field carrying the state in one short word.
@@ -37,11 +37,25 @@ use crate::term::{clip, fail_reason, sanitize};
 /// This one is the only field of the three meant for a person.
 const STATE_FIELD: &str = "state-human-short";
 
+/// What vagrant writes where a value contains a comma.
+///
+/// Read from a run of vagrant 2.4.9: the `state-human-long`
+/// field came back as `To stop this machine%!(VAGRANT_COMMA) you
+/// can run`. Spelled once here rather than at the call site, so
+/// the escape and the split that requires it stay together.
+const COMMA_ESCAPE: &str = "%!(VAGRANT_COMMA)";
+
 /// How wide a state may print before it is clipped.
 ///
 /// The column is sized from its contents, so a host returning a
 /// long state would otherwise decide the width of the whole
 /// table.
+///
+/// 24 is a budget rather than a measurement. The longest state
+/// seen from vagrant 2.4.9 is `not created`, at 11 characters,
+/// so this clips nothing a working host produces and leaves the
+/// table inside 80 columns for the host names and boxes bombyx
+/// is used with. Change it if a real provider needs more.
 const STATE_BUDGET: usize = 24;
 
 /// What a project's VM turned out to be doing.
@@ -62,6 +76,30 @@ pub enum VmState {
     Unknown(String),
 }
 
+impl std::fmt::Display for VmState {
+    /// The word an operator reads, safe to put on a terminal.
+    ///
+    /// `Reported` carries whatever the VM host printed, so this
+    /// sanitizes it here rather than telling the caller to. The
+    /// rule that makes that necessary is on `term::sanitize`,
+    /// which is crate-private. A caller outside this crate
+    /// cannot call it, so a doc comment telling them to would be
+    /// advice they cannot act on. That is why the guard runs
+    /// here instead.
+    ///
+    /// Not clipped, because a width belongs to a table rather
+    /// than to a value; `describe` clips for this module's own.
+    /// An `Unknown` prints as the bare word: its reason is a
+    /// sentence from `ssh` and belongs in [`notes`], not a cell.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reported(word) => f.write_str(&sanitize(word)),
+            Self::NotCreated => f.write_str("not created"),
+            Self::Unknown(_) => f.write_str("unknown"),
+        }
+    }
+}
+
 /// One row of the listing.
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -77,58 +115,80 @@ pub struct Entry {
     pub state: Option<VmState>,
 }
 
+/// The projects on one VM host.
+///
+/// Private fields, and `group_by_host` is the only thing that
+/// builds one, so holding a `HostGroup` *is* the proof of the
+/// two rules it carries: it names at least one project, and
+/// every project in it runs on the same host.
+///
+/// A type rather than an assertion, because a release build
+/// compiles a `debug_assert` out and the second rule decides
+/// which machine a project is asked about.
+struct HostGroup<'a> {
+    /// The project that supplies the route, and the first row
+    /// this group contributes.
+    first: &'a Config,
+    /// The others on the same host, in the order they arrived.
+    rest: Vec<&'a Config>,
+}
+
+impl<'a> HostGroup<'a> {
+    /// Every project on this host, first one first.
+    fn configs(&self) -> impl Iterator<Item = &'a Config> {
+        std::iter::once(self.first).chain(self.rest.clone())
+    }
+
+    /// The one command that asks this host about its projects.
+    fn status_command(&self) -> RemoteCommand {
+        remote::vagrant_status_many(self.first, &self.rest)
+    }
+}
+
 /// Splits `configs` into one group per VM host.
 ///
 /// Each group's projects share a host, so one command can ask
 /// about all of them. The groups come out in the order their
 /// first project appears, and a project keeps its place inside
-/// its group, so a listing built from these is ordered by the
-/// key order [`Config::load_all`] produced.
-///
-/// Every group holds at least one project, which is what
-/// [`states`] relies on when it takes the first as the one
-/// supplying the route.
-#[must_use]
-pub fn group_by_host(configs: &[Config]) -> Vec<Vec<&Config>> {
-    let mut groups: Vec<Vec<&Config>> = Vec::new();
+/// its group.
+fn group_by_host(configs: &[Config]) -> Vec<HostGroup<'_>> {
+    let mut groups: Vec<HostGroup<'_>> = Vec::new();
     for cfg in configs {
-        if let Some(group) = groups.iter_mut().find(|g| g[0].host == cfg.host) {
-            group.push(cfg);
+        if let Some(group) =
+            groups.iter_mut().find(|g| g.first.host == cfg.host)
+        {
+            group.rest.push(cfg);
         } else {
-            groups.push(vec![cfg]);
+            groups.push(HostGroup {
+                first: cfg,
+                rest: Vec::new(),
+            });
         }
     }
     groups
 }
 
-/// The commands [`states`] would run, in the order it runs them.
+/// The commands [`entries`] would run, in that order.
 ///
-/// What `--dry-run` prints. It comes from the same builder the
-/// live run uses, so the printed plan cannot describe a run
-/// bombyx would not perform -- the rule `plan::plan` holds for
-/// every VM action, kept here by sharing `command_for` rather
-/// than by going through `plan`, which builds from one `Config`
-/// and so has no shape for a command spanning several.
+/// What `--dry-run` prints. [`entries`] builds its commands the
+/// same way, through `group_by_host` and
+/// `HostGroup::status_command`, so a printed plan cannot
+/// describe a run bombyx would not perform.
+///
+/// That property belongs to every VM subcommand and `plan::plan`
+/// is where the others get it, by being the one place a plan is
+/// built. A `plan` is built from a single `Config`, and this
+/// command spans all of them, so there is no `Action` shape for
+/// it and the property is kept by sharing a builder instead.
 #[must_use]
 pub fn status_commands(configs: &[Config]) -> Vec<RemoteCommand> {
     group_by_host(configs)
         .iter()
-        .map(|group| command_for(group))
+        .map(HostGroup::status_command)
         .collect()
 }
 
-/// The one command that asks about `group`'s host.
-///
-/// The first project supplies the route, which is why
-/// [`group_by_host`] never builds an empty group.
-fn command_for(group: &[&Config]) -> RemoteCommand {
-    let (first, rest) = group
-        .split_first()
-        .expect("group_by_host never builds an empty group");
-    remote::vagrant_status_many(first, rest)
-}
-
-/// Asks every host what its projects are doing.
+/// One row per project, with the state its host reported.
 ///
 /// `run` carries out one command. It is a parameter so this
 /// module stays free of process spawning; the binary passes the
@@ -142,51 +202,97 @@ fn command_for(group: &[&Config]) -> RemoteCommand {
 /// other machine, and a listing that refuses to list is worth
 /// less than one with gaps in it.
 ///
-/// The result is keyed by project name, and only the names in
-/// `configs` reach it: a reply is read for the projects it was
-/// asked about rather than for the ones it mentions.
-pub fn states<F>(configs: &[Config], mut run: F) -> BTreeMap<String, VmState>
+/// A reply is read for the projects bombyx asked about rather
+/// than for the ones it mentions, so a host naming a project
+/// that is not in `configs` contributes no row.
+///
+/// The rows come back in `configs` order, not host order, so
+/// the table reads the same whichever machines answered.
+/// [`Config::load_all`] is what decides that order.
+pub fn entries<F>(configs: Vec<Config>, mut run: F) -> Vec<Entry>
 where
     F: FnMut(&RemoteCommand) -> Result<ProbeResult, String>,
 {
-    let mut out = BTreeMap::new();
-    for group in group_by_host(configs) {
+    let mut states: BTreeMap<ProjectName, VmState> = BTreeMap::new();
+    for group in group_by_host(&configs) {
         // The states the host reported, and what to say about a
         // project it did not mention. One match, so the two
         // cannot describe different replies.
-        let (mut parsed, fallback) = match run(&command_for(&group)) {
-            Ok(result) if result.success => (
+        // The match produces both the parsed states and the
+        // reason to give a project the host said nothing useful
+        // about, so the two cannot describe different replies.
+        //
+        // The reply is read whatever the exit status, because
+        // that status answers for one project only --
+        // `remote::vagrant_status_many` says why.
+        let (mut parsed, host_reason) = match run(&group.status_command()) {
+            Ok(result) => (
                 parse_states(&result.stdout),
-                "the host did not report this project".to_owned(),
+                (!result.success)
+                    .then(|| fail_reason(&result.stdout, &result.stderr)),
             ),
-            Ok(result) => {
-                (BTreeMap::new(), fail_reason(&result.stdout, &result.stderr))
-            }
-            Err(why) => (BTreeMap::new(), sanitize(&why)),
+            Err(why) => (BTreeMap::new(), Some(sanitize(&why))),
         };
-        for cfg in &group {
-            let name = cfg.project.as_str();
-            let state = parsed
-                .remove(name)
-                .unwrap_or_else(|| VmState::Unknown(fallback.clone()));
-            out.insert(name.to_owned(), state);
+        for cfg in group.configs() {
+            let state = parsed.remove(&cfg.project).unwrap_or_else(|| {
+                VmState::Unknown(
+                    "the host did not report this project".to_owned(),
+                )
+            });
+            // Where no state could be established, the host's own
+            // words beat this module's guess at why. A project
+            // vagrant did answer about keeps its state, so one
+            // project's problem cannot overwrite a sibling's row.
+            //
+            // The guess is worth little here: the marker is
+            // printed before the `Vagrantfile` guard by `printf`,
+            // a shell builtin, so a project always has a block
+            // and an empty one says only that vagrant wrote
+            // nothing to stdout. `sh: vagrant: not found` is on
+            // stderr, and it is the sentence the operator needs.
+            let state = match (state, &host_reason) {
+                (VmState::Unknown(_), Some(why)) => {
+                    VmState::Unknown(why.clone())
+                }
+                (state, _) => state,
+            };
+            states.insert(cfg.project.clone(), state);
         }
     }
-    out
+    configs
+        .into_iter()
+        .map(|config| {
+            let state = states.remove(&config.project);
+            Entry { config, state }
+        })
+        .collect()
+}
+
+/// One row per project, with no state and no machine contacted.
+///
+/// What `--offline` produces. A separate function rather than a
+/// flag on [`entries`], so the route that asks nothing cannot
+/// reach the code that spawns anything.
+#[must_use]
+pub fn offline_entries(configs: Vec<Config>) -> Vec<Entry> {
+    configs
+        .into_iter()
+        .map(|config| Entry {
+            config,
+            state: None,
+        })
+        .collect()
 }
 
 /// Reads one host's reply into a state per project.
 ///
 /// The reply is a run of blocks, each introduced by a
-/// [`LISTING_MARKER`] line naming the project.
+/// `remote::LISTING_MARKER` line naming the project.
 ///
 /// Anything before the first marker belongs to no project and is
-/// dropped. Nothing bombyx sends is expected to put text there:
-/// the `vagrant-libvirt` fog warning, the obvious candidate,
-/// goes to stderr, and that stays a separate stream because
-/// [`remote::vagrant_status_many`] never allocates a PTY.
-/// Dropping such a line is what stops it being attributed to
-/// whichever project happens to come first.
+/// dropped. Charging such a line to whichever project came first
+/// would report something about a project the host never said,
+/// and the parser does not need to know what could produce one.
 ///
 /// A marker with no lines after it is [`VmState::NotCreated`]:
 /// the `if [ -f Vagrantfile ]` guard in
@@ -196,7 +302,7 @@ where
 /// this parser does not recognise and inventing a state would be
 /// a claim bombyx cannot support.
 #[must_use]
-pub fn parse_states(reply: &str) -> BTreeMap<String, VmState> {
+fn parse_states(reply: &str) -> BTreeMap<ProjectName, VmState> {
     let mut out = BTreeMap::new();
     let mut open: Option<Block> = None;
     for line in reply.lines() {
@@ -218,6 +324,8 @@ struct Block {
     name: String,
     lines: usize,
     state: Option<String>,
+    /// Whether the host stated that bombyx never built this VM.
+    never_built: bool,
 }
 
 impl Block {
@@ -226,6 +334,7 @@ impl Block {
             name: name.to_owned(),
             lines: 0,
             state: None,
+            never_built: false,
         }
     }
 
@@ -237,34 +346,74 @@ impl Block {
     /// them beats reporting none.
     fn read(&mut self, line: &str) {
         self.lines += 1;
+        if line.trim() == NEVER_BUILT {
+            self.never_built = true;
+            return;
+        }
         if self.state.is_none() {
             self.state = state_of(line);
         }
     }
 
     fn finish(self) -> (String, VmState) {
-        let state = match (self.lines, self.state) {
-            (0, _) => VmState::NotCreated,
-            (_, Some(word)) => VmState::Reported(word),
-            (_, None) => VmState::Unknown("vagrant named no state".to_owned()),
+        let state = match (self.never_built, self.lines, self.state) {
+            (true, _, _) => VmState::NotCreated,
+            (_, _, Some(word)) => VmState::Reported(word),
+            (_, 0, _) => VmState::Unknown(
+                "the host said nothing about this project".to_owned(),
+            ),
+            (_, _, None) => {
+                VmState::Unknown("vagrant named no state".to_owned())
+            }
         };
         (self.name, state)
     }
 }
 
-/// Adds `block`'s verdict to `out`, if there is a block.
-fn close(out: &mut BTreeMap<String, VmState>, block: Option<Block>) {
-    if let Some(block) = block {
-        let (name, state) = block.finish();
-        out.insert(name, state);
+/// Adds `block`'s verdict to `out`, if there is a block whose
+/// name is a legal project name.
+///
+/// The name arrives as text from the VM host. Parsing it here
+/// means the map is keyed by the same checked type `Registry`
+/// keys its own by, so the join back to a `Config` cannot
+/// succeed on a string no project could be called. A name that
+/// does not parse is dropped: bombyx asked about names it took
+/// from the operator's file, so anything else is the host
+/// answering a question nobody put.
+///
+/// **A name that arrives twice reports no state at all.** Only
+/// bombyx's own `printf` should open a block, but the marker is
+/// a fixed string and this is host text: any stdout line
+/// beginning with it opens one, including a line a project's
+/// `Vagrantfile` printed while vagrant loaded it. A second block
+/// cannot be told from the first, so taking either would let one
+/// project write another's row. Refusing both says what is known
+/// -- that the reply is not trustworthy about this project.
+fn close(out: &mut BTreeMap<ProjectName, VmState>, block: Option<Block>) {
+    let Some(block) = block else { return };
+    let (name, state) = block.finish();
+    let Ok(name) = ProjectName::parse(&name) else {
+        return;
+    };
+    match out.entry(name) {
+        std::collections::btree_map::Entry::Vacant(slot) => {
+            slot.insert(state);
+        }
+        std::collections::btree_map::Entry::Occupied(mut slot) => {
+            slot.insert(VmState::Unknown(
+                "the reply named this project twice".to_owned(),
+            ));
+        }
     }
 }
 
 /// The state `line` carries, if it is the record that holds one.
 ///
-/// vagrant escapes a comma inside the data as
-/// `%!(VAGRANT_COMMA)`, so splitting the record on commas cannot
-/// cut a value in half.
+/// A record is comma-separated, so vagrant cannot put a bare
+/// comma in a value and writes [`COMMA_ESCAPE`] instead. That
+/// means splitting on commas cannot cut a value in half, and it
+/// means the escape has to be turned back before anybody reads
+/// it.
 fn state_of(line: &str) -> Option<String> {
     let mut fields = line.split(',');
     let _timestamp = fields.next()?;
@@ -272,7 +421,7 @@ fn state_of(line: &str) -> Option<String> {
     if fields.next()? != STATE_FIELD {
         return None;
     }
-    Some(fields.next()?.to_owned())
+    Some(fields.next()?.replace(COMMA_ESCAPE, ","))
 }
 
 /// Renders the listing as an aligned table.
@@ -287,11 +436,15 @@ fn state_of(line: &str) -> Option<String> {
 /// state. `--offline` asked no machine anything, so a column of
 /// dashes would stand in for a question nobody put.
 ///
-/// A host that could not answer contributes an `unknown` cell
-/// and one note under the table. The reason goes there rather
-/// than in the cell because it is a sentence from `ssh`, and a
-/// column wide enough for it would push every other column off
-/// the screen.
+/// A host that could not answer contributes an `unknown` cell,
+/// and [`notes`] carries the reason. The reason is not a cell
+/// because it is a sentence from `ssh`, and a column wide enough
+/// for one would push every other column off the screen.
+///
+/// The table alone, so the caller can send it to stdout and the
+/// notes to stderr. Appending the notes here would put
+/// `bombyx: ...` prose in the middle of output somebody pipes
+/// into `awk`.
 #[must_use]
 pub fn render(entries: &[Entry]) -> String {
     if entries.is_empty() {
@@ -304,9 +457,6 @@ pub fn render(entries: &[Entry]) -> String {
     widths.write(&mut out, &Row::heading(), with_state);
     for row in &cells {
         widths.write(&mut out, row, with_state);
-    }
-    for note in notes(entries) {
-        let _ = writeln!(out, "{note}");
     }
     out
 }
@@ -346,16 +496,14 @@ impl Row {
     }
 }
 
-/// The word a state prints as.
+/// The word a state prints as, fitted to the column.
 ///
-/// Sanitized and clipped here because [`VmState::Reported`]
-/// carries whatever the host said.
+/// [`Display`](std::fmt::Display) has already made it safe to
+/// print; this only clips it, because the column is sized from
+/// its contents and [`VmState::Reported`] carries whatever the
+/// host said.
 fn describe(state: &VmState) -> String {
-    match state {
-        VmState::Reported(word) => sanitize(&clip(word, STATE_BUDGET)),
-        VmState::NotCreated => "not created".to_owned(),
-        VmState::Unknown(_) => "unknown".to_owned(),
-    }
+    clip(&state.to_string(), STATE_BUDGET)
 }
 
 /// One note per host that could not answer, in host order.
@@ -363,7 +511,18 @@ fn describe(state: &VmState) -> String {
 /// Keyed by host and reason together, so two hosts failing for
 /// the same reason each get their own line and one host does not
 /// get a line per project.
-fn notes(entries: &[Entry]) -> Vec<String> {
+///
+/// Separate from [`render`] because these belong on stderr: they
+/// carry the `bombyx:` prefix every other diagnostic in the
+/// binary uses, and the reason inside one is text from `ssh`
+/// rather than a row of the table.
+///
+/// **Non-empty exactly when some project's state is
+/// [`VmState::Unknown`]**, whatever left it that way. That is
+/// the condition `bombyx list` exits non-zero on, so this is
+/// where the documented rule is decided.
+#[must_use]
+pub fn notes(entries: &[Entry]) -> Vec<String> {
     let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
     for entry in entries {
         if let Some(VmState::Unknown(why)) = &entry.state {
@@ -442,6 +601,19 @@ mod tests {
     use crate::config::Config;
     use crate::name::ProjectName;
 
+    /// The state of the row named `name`, if there is one.
+    fn state_named<'a>(rows: &'a [Entry], name: &str) -> Option<&'a VmState> {
+        rows.iter()
+            .find(|e| e.config.project.as_str() == name)?
+            .state
+            .as_ref()
+    }
+
+    /// The state `parse_states` read for `name`.
+    fn parsed_state(reply: &str, name: &str) -> Option<VmState> {
+        parse_states(reply).remove(&ProjectName::parse(name).unwrap())
+    }
+
     /// A config for `name` on `host`.
     fn cfg(name: &str, host: &str) -> Config {
         let mut c = Config::for_tests();
@@ -457,7 +629,7 @@ mod tests {
         let groups = group_by_host(&configs);
         let names: Vec<Vec<&str>> = groups
             .iter()
-            .map(|g| g.iter().map(|c| c.project.as_str()).collect())
+            .map(|g| g.configs().map(|c| c.project.as_str()).collect())
             .collect();
         assert_eq!(names, vec![vec!["api", "db"], vec!["web"]]);
     }
@@ -480,16 +652,32 @@ mod tests {
     }
 
     #[test]
-    fn a_project_whose_marker_carries_no_block_was_never_built() {
-        // The `if [ -f Vagrantfile ]` guard emitted the marker
-        // and skipped vagrant, which is the shape this reads.
-        let reply = "##bombyx api\n##bombyx web\n\
-             1789149586,default,state-human-short,running\n";
-        let states = parse_states(reply);
-        assert_eq!(states.get("api"), Some(&VmState::NotCreated));
+    fn a_comma_in_a_state_is_decoded_rather_than_printed_raw() {
+        // vagrant cannot put a bare comma in a record, because
+        // the record is comma-separated, so it writes the
+        // escape instead. Left alone, the operator reads
+        // `not%!(VAGRANT_COMMA)created`.
+        let reply = "##bombyx web\n\
+             1789149586,default,state-human-short,not%!(VAGRANT_COMMA)yet\n";
         assert_eq!(
-            states.get("web"),
-            Some(&VmState::Reported("running".into()))
+            parsed_state(reply, "web"),
+            Some(VmState::Reported("not,yet".into()))
+        );
+    }
+
+    #[test]
+    fn a_block_ends_where_the_next_marker_begins() {
+        // Two projects in one reply: the first was never built
+        // and says so, and its block must not swallow the state
+        // that belongs to the second.
+        let reply = format!(
+            "##bombyx api\n{NEVER_BUILT}\n##bombyx web\n\
+             1789149586,default,state-human-short,running\n"
+        );
+        assert_eq!(parsed_state(&reply, "api"), Some(VmState::NotCreated));
+        assert_eq!(
+            parsed_state(&reply, "web"),
+            Some(VmState::Reported("running".into()))
         );
     }
 
@@ -509,8 +697,7 @@ mod tests {
     fn text_before_the_first_marker_is_ignored() {
         // A line ahead of every marker belongs to no project,
         // so it must not be counted as the first project's
-        // output. The text is the fog warning vagrant-libvirt
-        // writes, which reaches stderr rather than this reply.
+        // output.
         let reply = "[fog][WARNING] Unrecognized arguments\n\
              ##bombyx web\n1789149586,default,state-human-short,running\n";
         let states = parse_states(reply);
@@ -535,11 +722,171 @@ mod tests {
     }
 
     #[test]
+    fn the_host_s_own_words_beat_this_module_s_guess() {
+        // vagrant missing from the non-interactive PATH is this
+        // project's recurring VM-host failure. The marker is
+        // printed by `printf`, a shell builtin, so the block
+        // exists and is empty -- and saying "the host said
+        // nothing" is both unactionable and untrue, because the
+        // host said plenty on stderr.
+        let configs = vec![cfg("web", "one")];
+        let rows = entries(configs, |_| {
+            Ok(crate::doctor::ProbeResult {
+                success: false,
+                stdout: "##bombyx web\n".to_owned(),
+                stderr: "sh: 1: vagrant: not found".to_owned(),
+            })
+        });
+        let Some(VmState::Unknown(why)) = state_named(&rows, "web") else {
+            panic!("expected an unknown state");
+        };
+        assert!(why.contains("vagrant: not found"), "{why}");
+    }
+
+    #[test]
+    fn a_host_that_answered_keeps_its_good_rows_when_another_failed() {
+        // The failure reason stands in only where no state was
+        // established. A project vagrant answered about must not
+        // be overwritten by a sibling's problem.
+        let configs = vec![cfg("api", "one"), cfg("web", "one")];
+        let rows = entries(configs, |_| {
+            Ok(crate::doctor::ProbeResult {
+                success: false,
+                stdout: "##bombyx api\n\
+                     1789149586,default,state-human-short,running\n\
+                     ##bombyx web\n"
+                    .to_owned(),
+                stderr: "web: the provider plugin is not installed".to_owned(),
+            })
+        });
+        assert_eq!(
+            state_named(&rows, "api"),
+            Some(&VmState::Reported("running".into()))
+        );
+        let Some(VmState::Unknown(why)) = state_named(&rows, "web") else {
+            panic!("expected an unknown state");
+        };
+        assert!(why.contains("provider plugin"), "{why}");
+    }
+
+    #[test]
+    fn one_failing_project_does_not_blank_its_neighbours() {
+        // The fragments are joined with `;`, so the script's exit
+        // status is the last fragment's alone. Reading the reply
+        // only on a zero status throws away correct blocks for
+        // every other project on a reachable host.
+        let configs = vec![cfg("api", "one"), cfg("zzz", "one")];
+        let rows = entries(configs, |_| {
+            Ok(crate::doctor::ProbeResult {
+                success: false,
+                stdout: "##bombyx api\n\
+                     1789149586,default,state-human-short,running\n\
+                     ##bombyx zzz\n"
+                    .to_owned(),
+                stderr: "zzz: the provider plugin is not installed".to_owned(),
+            })
+        });
+        assert_eq!(
+            state_named(&rows, "api"),
+            Some(&VmState::Reported("running".into())),
+            "a reachable project must keep its state"
+        );
+        assert!(matches!(
+            state_named(&rows, "zzz"),
+            Some(VmState::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn a_project_the_host_said_nothing_about_is_unknown() {
+        // An empty block is not proof the VM was never built.
+        // vagrant missing from the non-interactive PATH writes to
+        // stderr and leaves stdout empty, and reading that as
+        // `not created` tells the operator bombyx looked when it
+        // could not.
+        let reply = "##bombyx web\n";
+        assert!(matches!(
+            parsed_state(reply, "web"),
+            Some(VmState::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn the_never_built_token_is_what_says_never_built() {
+        // The guard says so positively, so "never built" is a
+        // statement the host made rather than an absence.
+        let reply = format!("##bombyx web\n{NEVER_BUILT}\n");
+        assert_eq!(parsed_state(&reply, "web"), Some(VmState::NotCreated));
+    }
+
+    #[test]
+    fn rows_keep_the_config_order_whatever_the_grouping_did() {
+        // Grouping reorders: `api` and `db` share a host and
+        // `web` sits between them. The rows must come back in
+        // the order they were given, so that whatever order
+        // `Config::load_all` chose survives the grouping.
+        let configs =
+            vec![cfg("api", "one"), cfg("web", "two"), cfg("db", "one")];
+        let rows = entries(configs, |_| {
+            Ok(crate::doctor::ProbeResult {
+                success: true,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        });
+        let names: Vec<&str> =
+            rows.iter().map(|e| e.config.project.as_str()).collect();
+        assert_eq!(names, ["api", "web", "db"]);
+    }
+
+    #[test]
+    fn a_project_named_twice_in_one_reply_is_unknown() {
+        // Only bombyx's own `printf` should open a block, but
+        // the marker is a fixed string and the reply is text
+        // from the host: anything on stdout that starts with it
+        // opens one. A second block for a name bombyx already
+        // has cannot be told from the first, so neither is
+        // trustworthy and the row says so rather than picking.
+        let reply = "##bombyx web\n\
+             1789149586,default,state-human-short,running\n\
+             ##bombyx web\n\
+             1789149586,default,state-human-short,shutoff\n";
+        let Some(VmState::Unknown(why)) = parsed_state(reply, "web") else {
+            panic!("a doubled name must not report a state");
+        };
+        assert!(why.contains("twice"), "{why}");
+    }
+
+    #[test]
+    fn a_marker_naming_no_legal_project_is_dropped() {
+        // The name comes back as text from the VM host. A value
+        // no project could be called cannot key the map bombyx
+        // joins on, so it contributes nothing.
+        let reply = "##bombyx ../etc\n\
+             1789149586,default,state-human-short,running\n";
+        assert!(parse_states(reply).is_empty(), "{reply}");
+    }
+
+    #[test]
+    fn every_project_on_a_host_reaches_the_one_command() {
+        // The group's first project supplies the route and the
+        // rest ride along; a group that dropped its tail would
+        // leave those projects `unknown` on a reachable machine.
+        let configs =
+            vec![cfg("api", "one"), cfg("db", "one"), cfg("web", "one")];
+        let groups = group_by_host(&configs);
+        assert_eq!(groups.len(), 1, "one host");
+        let named: Vec<&str> =
+            groups[0].configs().map(|c| c.project.as_str()).collect();
+        assert_eq!(named, ["api", "db", "web"]);
+    }
+
+    #[test]
     fn a_host_that_cannot_be_reached_leaves_its_projects_unknown() {
         // One sleeping machine must not cost the states of the
         // projects on the other machines.
         let configs = vec![cfg("api", "one"), cfg("web", "two")];
-        let states = states(&configs, |cmd| {
+        let rows = entries(configs, |cmd| {
             if cmd.args.iter().any(|a| a.contains("api")) {
                 Err("ssh: connect: no route to host".to_owned())
             } else {
@@ -552,10 +899,12 @@ mod tests {
                 })
             }
         });
-        assert!(matches!(states.get("api"), Some(VmState::Unknown(r))
-            if r.contains("no route to host")));
+        assert!(
+            matches!(state_named(&rows, "api"), Some(VmState::Unknown(r))
+            if r.contains("no route to host"))
+        );
         assert_eq!(
-            states.get("web"),
+            state_named(&rows, "web"),
             Some(&VmState::Reported("running".into()))
         );
     }
@@ -563,15 +912,17 @@ mod tests {
     #[test]
     fn a_host_that_answers_with_a_failure_leaves_its_projects_unknown() {
         let configs = vec![cfg("api", "one")];
-        let states = states(&configs, |_| {
+        let rows = entries(configs, |_| {
             Ok(crate::doctor::ProbeResult {
                 success: false,
                 stdout: String::new(),
                 stderr: "Permission denied (publickey).".to_owned(),
             })
         });
-        assert!(matches!(states.get("api"), Some(VmState::Unknown(r))
-            if r.contains("Permission denied")));
+        assert!(
+            matches!(state_named(&rows, "api"), Some(VmState::Unknown(r))
+            if r.contains("Permission denied"))
+        );
     }
 
     #[test]
@@ -636,25 +987,28 @@ mod tests {
             config: cfg(name, "one"),
             state: Some(VmState::Unknown("no route to host".to_owned())),
         };
-        let table = render(&[unreachable("api"), unreachable("web")]);
-        assert_eq!(
-            table.matches("no route to host").count(),
-            1,
-            "one note per host: {table}"
-        );
-        assert!(table.contains("bombyx: one: no route"), "{table}");
+        let entries = [unreachable("api"), unreachable("web")];
+        let table = render(&entries);
+        let notes = notes(&entries);
+        assert_eq!(notes.len(), 1, "one note per host: {notes:?}");
+        assert!(notes[0].starts_with("bombyx: one: no route"), "{notes:?}");
         assert_eq!(table.matches("unknown").count(), 2, "{table}");
+        // The reason belongs on stderr, so it must not be in
+        // the text the caller sends to stdout.
+        assert!(!table.contains("no route to host"), "{table}");
     }
 
     #[test]
     fn a_reason_from_the_host_cannot_repaint_the_table_either() {
         // The note carries text from `ssh` and from the host's
         // stderr, so it needs the same protection the cells get.
-        let table = render(&[Entry {
+        let entries = [Entry {
             config: cfg("web", "one"),
             state: Some(VmState::Unknown("den\u{1b}[2Jied".to_owned())),
-        }]);
-        assert!(!table.contains('\u{1b}'), "{table}");
+        }];
+        for note in notes(&entries) {
+            assert!(!note.contains('\u{1b}'), "{note}");
+        }
     }
 
     #[test]
@@ -669,6 +1023,17 @@ mod tests {
         for line in table.lines() {
             assert!(line.chars().count() < 80, "{line}");
         }
+    }
+
+    #[test]
+    fn a_state_is_safe_to_print_however_a_caller_reaches_it() {
+        // `VmState` is public and so is `Entry.state`, so a
+        // library caller can print one without going through
+        // `render`. `term::sanitize` is crate-private, so an
+        // instruction to call it would be one they cannot
+        // follow: the guard has to be in `Display` itself.
+        let hostile = VmState::Reported("run\u{1b}[2Jning".into());
+        assert_eq!(hostile.to_string(), "run?[2Jning");
     }
 
     #[test]
