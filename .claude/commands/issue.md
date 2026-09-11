@@ -1,14 +1,14 @@
 ---
 description: Work a GitHub issue end to end -- verify it is still real, settle the approach, implement with TDD, review, and open a PR that says what was not verified
 argument-hint: "<issue number>"
-allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(git merge-base:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(review2), Skill(todo)
+allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(git merge-base:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(todo)
 ---
 
 Work the GitHub issue given as the argument, from reading it to
 reporting back on it.
 
 Committing happens through `/commit`, and reviewing through
-`/review2`, which every issue gets once the branch is pushed --
+`/review`, which every issue gets once the branch is pushed --
 step 10 holds it. This command reimplements neither, and
 `CLAUDE.md` under **Reviewing is its own process** says why
 they are separate here.
@@ -119,7 +119,7 @@ describe how bombyx is run:
 - `llms.txt`, which inventories types field by field, so an
   omission there reads as "no such field exists"
 
-The last two are the ones nobody opens. A `/review2` on #25
+The last two are the ones nobody opens. A `/review` on #25
 found `docs/architecture.md` claiming `Project` had no `host`
 field on the branch that added one, and `llms.txt` listing three
 of `HostSources`' four. Neither was in any snapshot, because
@@ -192,7 +192,7 @@ The body carries what a reviewer cannot get from the diff:
 
 ### 10. The review rounds, on the pushed branch
 
-`/review2` owns the loop, the snapshots, the reviewers, the
+`/review` owns the loop, the snapshots, the reviewers, the
 stopping rule and what happens to a finding nobody fixes.
 `.claude/commands/code-reviewers.md` owns which reviewers run
 and what each is handed. Read those rather than working from a
@@ -201,12 +201,8 @@ summary here.
 **Every issue gets one.** `CLAUDE.md` under **Reviewing is its
 own process** leaves the choice to the developer in general.
 Working an issue is where we have already made it: run
-`/review2` here without asking, and report what it found even
+`/review` here without asking, and report what it found even
 when it found nothing.
-
-`/review2` reviews source code, and refuses a change that has
-none. An issue answered entirely in documents or canon goes to
-`/review` instead, which is the only substitution allowed here.
 
 **Hand it the branch point.** The work is committed by now, so
 a diff against `HEAD` holds nothing. `git merge-base main HEAD`
@@ -214,13 +210,13 @@ gives the commit the branch started from, and that value is the
 argument:
 
 ```bash
-git merge-base main HEAD     # pass the result to /review2
+git merge-base main HEAD     # pass the result to /review
 ```
 
-`/review2` under **What the reviewers read** describes what it
+`/review` under **What the reviewers read** describes what it
 does with it.
 
-**Its fixes become their own commits.** `/review2` edits the
+**Its fixes become their own commits.** `/review` edits the
 tree and commits nothing, so when a stage changes something,
 commit through `/commit` and push again. Commit those edits
 separately rather than amending the implementation, so a bad
@@ -229,13 +225,13 @@ body, per step 9.
 
 **A round asked for by a PR comment reviews the fixes, not the
 branch.** Make the edits the comment asks for, leave them
-uncommitted, and run `/review2` with no argument -- against
+uncommitted, and run `/review` with no argument -- against
 `HEAD` it reads those edits and nothing else.
 
-**The PR body must list the findings nobody fixed.** `/review2`
+**The PR body must list the findings nobody fixed.** `/review`
 logs the deferred ones under `docs/developer/`, which a reader
 of the branch will not think to open. A finding it *declined*
-is logged nowhere, and `target/review2-*.findings` is not
+is logged nowhere, and `target/review-*.findings` is not
 committed, so copy that one into the PR body while the report
 is still in front of you. Do not send either kind to `/todo`;
 that is for a problem you found yourself while implementing.
@@ -283,7 +279,7 @@ dead link.
 - Never work an issue on `main`.
 - No behaviour change without a failing test first.
 - A regression test nobody has seen fail does not count.
-- Always run `/review2` on the pushed branch; it owns the
+- Always run `/review` on the pushed branch; it owns the
   loop.
 - Never report a gate as passing on the strength of a
   document. Run it.

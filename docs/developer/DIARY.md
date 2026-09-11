@@ -2,6 +2,40 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-11
+
+**One review command, and it is the staged one**
+
+`/review` and `/review2` both reviewed the working tree, and
+the second was the one we reached for. Its findings were worth
+more per round: a defect in three files got reported once
+rather than three times, and each reviewer read the previous
+one's fixes, so a bad fix was caught inside the run. The
+operator asked for the parallel command to go and the staged
+one to take its name.
+
+The merge was not a rename. `/review2` had leaned on `/review`
+for six sections -- the snapshot recipe, the artifact run, the
+fixing bar, the deferral log, the non-convergence chain and
+the reporting shape -- so those moved into the surviving file.
+The fixing rules became one section ahead of the stages,
+because all three stages obey them and no stage owns them.
+
+The decision worth recording is what happens to a change with
+no source code in it. `/review2` refused those and sent them
+to `/review`, which no longer exists. The operator chose to
+run `fresh-reader` alone on them and skip the first two
+stages. The reason is measured: the first run of the staged
+sequence against a canon-only change produced eleven findings,
+because the `artisan` and `red-team` lanes are defined for
+code and stage 2's stop rule needs a behaviour defect to turn
+on. A canon change produces none, so those two stages spin.
+
+That costs us `red-team` on a document stating a rule the code
+does not follow. `cargo xtask canon-check` reaches part of
+that class and not all of it, and the gap is written into the
+command rather than left for somebody to rediscover.
+
 ### 2026-09-08
 
 **The guest checks who it is cloning from**
