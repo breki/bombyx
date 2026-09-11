@@ -368,6 +368,16 @@ for tools that are not present:
   `gh repo view --json visibility`, `echo $HOME`. A claim about
   what a variable, a file or a platform actually contains needs
   the command that read it, in the same breath.
+
+  **Which stream carries a message is the same kind of claim.**
+  A doc comment said the `vagrant-libvirt` fog warning arrives
+  in the reply bombyx parses; it is on stderr, so it never gets
+  there. Two commands settled it -- `cmd 2>/dev/null` and
+  `cmd 2>&1 >/dev/null` -- and the second is the one people
+  forget, because the redirections have to be in that order to
+  keep stdout out of the way. A count is the same kind of claim
+  too: "`Registry` had two functions" was five, and
+  `grep -n "fn "` said so.
 - **Test an SSH identity with `-F /dev/null`.**
   `IdentitiesOnly=yes` does not exclude identities named
   in `ssh_config`, so `ssh -i key -o IdentitiesOnly=yes`
