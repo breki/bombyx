@@ -2,6 +2,42 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-12
+
+**`git push --tags` published another project's releases**
+
+`/release` ended by telling the operator to run
+`git push && git push --tags`. The second half pushes *every*
+local tag, and two of the local tags were not bombyx's: the
+`template` remote points at rustbase, `git fetch` takes tags
+along by default, and rustbase was at `v0.17.0` in July while
+bombyx was at `v0.4.1`. So tagging `v0.5.0` published
+`v0.16.0` and `v0.17.0` to bombyx's repository beside it.
+
+The consequence is not cosmetic.
+`update::version::newest_release` takes the `max()` of the
+remote tag listing, so `bombyx self-update` would have resolved
+0.17.0 as the newest release and gone looking for assets that do
+not exist. The release workflow also fired for `v0.16.0` and
+failed, correctly: that tree is `crates/rustbase`.
+
+What hid it was the check, not the absence of one. `git tag
+--list | tail -3` printed `v0.4.0 v0.4.1 v0.5.0` and looked
+conclusive. Git sorts tags **lexically**, so `v0.16.0` sorts
+above `v0.2.0` and can never appear at the tail.
+`--sort=-v:refname` is the flag that orders them by version.
+
+Three changes, because one would not have been enough. `/release`
+now names the tag rather than pushing all of them.
+`/template-sync` adds the remote with `--no-tags` and checks an
+existing one carries `tagOpt`. And the repository's own
+`remote.template.tagOpt` is set, which a real `git fetch
+template main` then confirmed brings back no tags.
+
+The general form is worth keeping: **a command that acts on
+"all of X" is only as safe as your list of X**, and the listing
+you check it with has to be ordered the way you are reasoning.
+
 ### 2026-09-11
 
 **The exit status of a `;`-joined script answers for one project**

@@ -179,9 +179,27 @@ step for a release to gate.
 13. **Tell the user what to do next** -- print:
     - The new version and tag name
     - The CHANGELOG bullets that were released
-    - "Push with `git push && git push --tags`" -- the
-      tag is the release, so an unpushed one has shipped
-      nothing
+    - "Push with `git push && git push origin vX.Y.Z`" --
+      the tag is the release, so an unpushed one has
+      shipped nothing
+
+    **Name the tag in that line; never the all-tags
+    form.** Pushing every local tag at once is what this
+    warns against, and a local tag is not always one this
+    project made: the `template` remote brings rustbase's
+    own tags in, and rustbase is at a higher version than
+    bombyx. Releasing `v0.5.0` that way published
+    `v0.16.0` and `v0.17.0` alongside it.
+    `update::version::newest_release` takes the `max()` of
+    the remote tag listing, so `bombyx self-update` then
+    resolved 0.17.0 as newest and would have gone looking
+    for a release that does not exist.
+
+    `git tag --list | tail -3` does not catch this, which
+    is how it got past a check. Git sorts tags lexically,
+    so `v0.16.0` sorts *above* `v0.2.0` and never appears
+    at the tail. Use `git tag --list --sort=-v:refname`
+    when you want to see the newest.
 
 ## Rules
 

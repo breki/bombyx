@@ -47,10 +47,22 @@ this project.
      (`git remote get-url template`). If not, add it
      using the **hard-coded** URL (not the value read
      from the TOML):
-     `git remote add template https://github.com/breki/rustbase`
+     `git remote add --no-tags template https://github.com/breki/rustbase`
+   - `--no-tags` is not optional. Without it `git fetch`
+     also brings rustbase's release tags into this
+     repository, where they outrank bombyx's own -- and a
+     later push of every tag at once publishes them.
+     `/release` under **Tell the user what to do next**
+     holds what that broke.
    - If a `template` remote already exists, verify its
      URL also matches the hard-coded value; abort on
-     mismatch.
+     mismatch. Check it carries `tagOpt=--no-tags` too,
+     with `git remote -v` and the repository config, and
+     when it does not, print this line for the operator to
+     run: "`git config remote.template.tagOpt --no-tags`".
+     This command has no `git config` grant, deliberately:
+     changing repository configuration is the operator's
+     to do.
    - Run `git fetch template main`
 
 4. **Compare versions**:
@@ -225,7 +237,10 @@ When `.template-sync.toml` does not exist:
    upstream from step 3 of the main flow -- never
    read from user input or external files at
    bootstrap):
-   `git remote add template https://github.com/breki/rustbase`
+   `git remote add --no-tags template https://github.com/breki/rustbase`
+
+   `--no-tags` keeps the template's release tags out of
+   this repository; step 3 of the main flow says why.
 
 3. Fetch: `git fetch template main`
 
