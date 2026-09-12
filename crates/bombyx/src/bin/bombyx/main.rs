@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,6 +27,7 @@ use bombyx::config::{Config, HostOrigin, Transport};
 use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
+use bombyx::listing;
 use bombyx::name::ScratchName;
 use bombyx::plan::{Action, plan};
 use bombyx::remote::{RemoteCommand, Tty};
@@ -39,7 +40,7 @@ use tempfile::TempDir;
 #[command(name = "bombyx", version, about)]
 struct Cli {
     /// Which project to act on; required by every subcommand
-    /// except `self-update`
+    /// except `self-update` and `list`
     ///
     /// Names a `[projects.<name>]` table in your config file.
     /// bombyx reads nothing from the project's own directory, so
@@ -72,6 +73,31 @@ enum Cmd {
     /// and never downgrades a local build that is newer than any
     /// release. Needs `git`, `curl` and `tar`.
     SelfUpdate,
+
+    /// List the registered projects and what their VMs are doing
+    ///
+    /// Reads your config file and asks each machine named in it
+    /// what its projects are doing. A machine that does not
+    /// answer leaves its projects `unknown` and a note on
+    /// stderr; it does not stop the listing.
+    ///
+    /// Any project whose state could not be established makes
+    /// the command exit non-zero, so a script can tell a
+    /// complete table from one with gaps in it. That covers a
+    /// machine bombyx could not reach and a machine that
+    /// answered without naming a state.
+    ///
+    /// The only subcommand that reads the config without naming
+    /// one project, so `--project` is ignored here.
+    List {
+        /// List what the config file holds, contacting no machine
+        ///
+        /// For a workstation away from the hosts. The `STATE`
+        /// column is left out rather than filled with dashes,
+        /// because no machine was asked.
+        #[arg(long)]
+        offline: bool,
+    },
 
     // Everything else. Flattened, so the *invocation* surface is
     // identical -- `bombyx up`, not `bombyx vm up`. The `--help`
@@ -274,37 +300,40 @@ fn crlf_wanted(stream: &impl IsTerminal) -> bool {
 fn run() -> Result<Ran> {
     let cli = Cli::parse();
 
-    // Handled before anything reads a config, because it is the
-    // one subcommand that is not about a VM. Every other command
-    // needs a project and a host; `self-update` needs neither,
-    // and loading the config first would make updating bombyx
+    // `self-update` is handled before anything reads a config,
+    // because it is the one subcommand that is not about a VM at
+    // all. Loading the config first would make updating bombyx
     // fail on a machine with no registry -- which is exactly the
     // machine somebody is trying to install bombyx on.
     //
-    // An exhaustive `match`, not a `let ... else`: the point of the
-    // `Cmd`/`VmCmd` split is that a third config-less subcommand
-    // fails to compile here rather than being routed silently into
-    // `self_update`.
+    // An exhaustive `match`, not a `let ... else`: the three arms
+    // are three different requirements, and a fourth subcommand
+    // has to say which of them it has rather than being routed
+    // silently into one.
+    //
+    // `--config` when the operator passed one, and otherwise the
+    // file in whichever config directory the environment names.
+    // `list` needs it too, which is why it is read before the
+    // `list` arm rather than after it.
+    let registry = cli.config.or_else(bombyx::config::registry_file);
     let vm = match cli.command {
         Cmd::SelfUpdate => return self_update(cli.dry_run),
+        Cmd::List { offline } => {
+            return list_run(offline, registry.as_deref(), cli.dry_run);
+        }
         Cmd::Vm(vm) => vm,
     };
 
     // clap cannot mark one global argument required for some
     // subcommands and not others, so the requirement is stated
-    // here instead -- on the far side of the `self-update`
-    // return above, which is the subcommand that must work
-    // without it.
+    // here instead -- on the far side of the two returns above,
+    // which are the subcommands that must work without it.
     let project = cli.project.ok_or_else(|| {
         anyhow!(
             "--project is required: name the `[projects.<name>]` \
              table this command is about"
         )
     })?;
-
-    // `--config` when the operator passed one, and otherwise the
-    // file in whichever config directory the environment names.
-    let registry = cli.config.or_else(bombyx::config::registry_file);
 
     // No arm names the registry file here. Every error that
     // could want one names it already: a value breaking its
@@ -808,30 +837,99 @@ fn doctor_run(cfg: &Config) -> Ran {
     if report.ok() { Ran::Ok } else { Ran::Failed(1) }
 }
 
-/// Runs one host probe, turning a spawn failure into a finding.
+/// Lists the registered projects, and what their VMs are doing.
 ///
-/// Propagating the error instead would discard the whole report
-/// -- including findings already gathered -- for the most likely
-/// local misconfiguration there is, `ssh` missing from `PATH`.
-/// A diagnostic that refuses to diagnose is worse than a wrong
-/// answer.
-fn spawn_probe(p: &HostProbe) -> Outcome {
+/// Outside `plan`, which every VM subcommand goes through. A
+/// plan is built from one `Config` and this command spans all of
+/// them, so there is no `Action` shape for it. The property that
+/// rule protects is kept another way: the dry run and the live
+/// run both take their commands from
+/// `listing::status_commands`, so neither can describe a run the
+/// other would not perform.
+///
+/// `--offline` asks no machine anything, so its dry run prints
+/// nothing. That is honest rather than empty: there is no
+/// command to show.
+fn list_run(
+    offline: bool,
+    registry: Option<&Path>,
+    dry_run: bool,
+) -> Result<Ran> {
+    let configs = Config::load_all(registry)?;
+
+    if dry_run {
+        let commands = if offline {
+            Vec::new()
+        } else {
+            listing::status_commands(&configs)
+        };
+        return execute(&commands, true);
+    }
+
+    // Two routes rather than a flag, so the offline one cannot
+    // reach the code that spawns anything. The library owns the
+    // join between a project and its state; that is the step
+    // that could print `running` against the wrong machine, and
+    // this file is outside the coverage gate.
+    let entries = if offline {
+        listing::offline_entries(configs)
+    } else {
+        listing::entries(configs, run_command)
+    };
+
+    print_lines(&listing::render(&entries));
+    // stderr, because a note is a diagnostic rather than a row:
+    // it carries the `bombyx:` prefix the rest of this file uses,
+    // and it must not land in output somebody pipes into `awk`.
+    let notes = listing::notes(&entries);
+    for note in &notes {
+        eprint_lines(&format!("{note}\n"));
+    }
+
+    // A machine that could not be asked leaves the question
+    // half-answered, and a script reading the table has no other
+    // way to learn that -- the `unknown` cells are prose and the
+    // reason is on a stream it may not be reading. `doctor_run`
+    // fails its run for the same reason.
+    if notes.is_empty() {
+        Ok(Ran::Ok)
+    } else {
+        Ok(Ran::Failed(1))
+    }
+}
+
+/// Runs one command, turning a spawn failure into a reason.
+///
+/// `Err` carries what could not be started, so a caller can
+/// report it as one row's problem instead of the whole run's.
+/// Both callers want that: a diagnostic that refuses to
+/// diagnose, and a listing that refuses to list because one
+/// machine is asleep, are each worse than an answer with a gap
+/// in it.
+fn run_command(cmd: &RemoteCommand) -> Result<ProbeResult, String> {
     // No bare-name fallback. Spawning the unresolved name goes
     // straight back through the OS search that `tool` exists to
     // avoid -- and doctor is the command run first in a fresh
     // clone, so it is the worst place to reintroduce it.
-    let Some(program) = bombyx::tool::resolve(&p.command.program) else {
-        return Outcome::Fail(doctor::not_on_path(&p.command.program));
+    let Some(program) = bombyx::tool::resolve(&cmd.program) else {
+        return Err(doctor::not_on_path(&cmd.program));
     };
-    match std::process::Command::new(&program)
-        .args(&p.command.args)
+    std::process::Command::new(&program)
+        .args(&cmd.args)
         .output()
-    {
-        Ok(o) => doctor::classify(&ProbeResult::from_output(&o), p.verdict),
-        Err(e) => Outcome::Fail(doctor::cannot_run(
-            &p.command.program,
-            &e.to_string(),
-        )),
+        .map(|o| ProbeResult::from_output(&o))
+        .map_err(|e| doctor::cannot_run(&cmd.program, &e.to_string()))
+}
+
+/// Runs one host probe and reads its result as a finding.
+///
+/// Propagating the error instead would discard the whole report
+/// -- including findings already gathered -- for the most likely
+/// local misconfiguration there is, `ssh` missing from `PATH`.
+fn spawn_probe(p: &HostProbe) -> Outcome {
+    match run_command(&p.command) {
+        Ok(result) => doctor::classify(&result, p.verdict),
+        Err(why) => Outcome::Fail(why),
     }
 }
 

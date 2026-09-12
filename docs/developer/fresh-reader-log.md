@@ -7,7 +7,49 @@ An entry here is a place where the code did not explain itself
 and we chose not to fix it yet. A finding that *was* fixed
 leaves no entry -- the comment it produced is the record.
 
+**Two sections, and only the first is a backlog.** `/review`
+says that ten or more open items mean the backlog has itself
+become the problem, and that count is about work nobody has
+done. The **Explanations to keep** section at the end is the
+opposite: passages a comprehension review named as carrying a
+reason, recorded so a later tidy-up cannot take them without
+noticing. Those are finished work and are not counted.
+
+## Deferred findings
+
 ---
+
+### fr-2026-09-11-named-rather-than-linked-is-explained-everywhere
+
+**Category:** Duplicated explanation deferred for its own commit
+
+Five doc comments each spend a line or three explaining that a
+public rustdoc page may not link to a private item, so the
+comment names it in backticks instead:
+`crates/bombyx/src/listing.rs:431`,
+`crates/bombyx/src/config/host.rs:73`,
+`crates/bombyx/src/config.rs:551`,
+`crates/bombyx/src/config/registry.rs:360` and
+`crates/bombyx/src/config/vm.rs:121`. A sixth, in `term.rs`'s
+module header, now states the same thing for that module.
+
+`fresh-reader` reported it as reading cost rather than as an
+error: by the third occurrence a reader skims the parentheses,
+and one of them sits inside `render`'s doc, which is a place the
+reader does want to read closely.
+
+The convention is real and the `doc` gate enforces the
+underlying rule (`xtask/src/doc_cmd.rs` runs rustdoc twice under
+`-D warnings`). What is deferred is stating it once -- in
+`CLAUDE.md` under **Code comments**, or in
+`docs/architecture.md` -- and letting each comment simply write
+the name in backticks with no apology.
+
+Deferred rather than applied because `/review` forbids
+collapsing copies in the round that finds them: the replacement
+is a rule in one place plus five sites that must each be trimmed
+without changing what they were explaining, and that is a commit
+of its own.
 
 ### fr-2026-09-11-doctor-transcript-omits-project
 
@@ -63,138 +105,6 @@ The reviewer reached this while judging how much to trust the
 gem versions quoted in the fog section, which are Step 3's
 output. Either extend the header to Steps 1 to 3, or mark the
 fallback unverified.
-
----
-
-### fr-2026-09-11-vm-host-setup-what-worked
-
-**Category:** What worked -- do not trim
-
-Two comprehension reviews of `docs/vm-host-setup.md` named these
-passages as carrying a reason rather than padding. They are
-pre-existing prose, so a later trim could take them without
-anyone noticing what was lost.
-
-The `usermod -a` warning: it states the mechanism (`-G` without
-`-a` replaces the supplementary group list), then the
-consequence (losing `sudo` on a machine reached only over SSH),
-then the follow-on fact, that bombyx opens a new connection per
-command and so picks the groups up on its own.
-
-**Why the non-interactive PATH causes trouble**: it prints the
-actual default `PATH`, names the startup files that kind of
-shell skips, and gives the two `ssh` commands that show the
-difference on the reader's own host. The reviewer reported being
-able to diagnose a variant without returning to the page.
-
-**Always name the libvirt URI** and the pair under "Two of those
-commands need care": both explain why the obvious check passes
-while the real thing is broken -- a bare `virsh list` reaching
-the per-user daemon, and `sudo vagrant plugin install` landing
-in `/root/.vagrant.d`.
-
-The storage-pool autostart note: it states that the consequence
-is delayed and shows the `pool-list` row with the `no` in it,
-which is what connects a later failure to the reboot that caused
-it.
-
----
-
-### fr-2026-09-07-clone-in-home-what-worked
-
-**Category:** What worked -- do not trim
-
-From the comprehension review of the clone-in-home work. Four
-passages were named as carrying a reason rather than padding.
-
-`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
-table with its worked failure, named as the model the rest of
-that file should follow.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
-showing four spellings of one address collapse to one string.
-
-`crates/bombyx/templates/bootstrap.sh` and its mirror in
-`crates/bombyx/src/vagrantfile.rs`, the `safe.directory`
-paragraph: git normally refuses another user's repository, that
-guard does not apply under `sudo`, and a `post-checkout` hook
-was measured running at `uid=0`. The reviewer called it the only
-passage that explains why the privilege arrangement exists at
-all -- without it the rest reads as ceremony.
-
-`crates/bombyx/templates/bootstrap.sh`, the "deliberately no
-`git clean`" paragraph, the only place stating that committing
-inside the guest does not survive a provision and that pushing
-is what does. Four other comments depend on that fact.
-
----
-
-### fr-2026-09-07-explanations-worth-keeping-two
-
-**Category:** What worked -- do not trim
-
-From the comprehension review of the branch that made the
-project's script run as the agent. Five passages were named as
-carrying a reason rather than padding.
-
-`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
-table and the `${VAR:?message}` paragraph: three flags with one
-consequence each, then a concrete failure that names the
-mechanism, and the bare `:` explained before three lines that
-would otherwise read as statements with no verb. The reviewer
-called it the shape the rest of the file should be measured
-against.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
-showing four spellings of one repository address collapse to one
-string.
-
-`crates/bombyx/src/config/guards.rs`, the argument for the
-leading-dash rule: `git` accepts options after positionals,
-which most tools do not. It is the one forward reference out of
-the script that answered the question the reader arrives with.
-
-`docs/architecture.md`, "That is not hypothetical" with
-`/root/.rustup` and `/root/jutro` named. One measured symptom
-turns a preference into an incident report; the paths are the
-load-bearing part.
-
-`docs/trust-boundary.md`, the paragraph on what an on-path
-attacker does *not* get: the wrong intuition named first, then
-the mechanism, then the real consequence.
-
----
-
-### fr-2026-09-07-explanations-worth-keeping
-
-**Category:** What worked -- do not trim
-
-From the comprehension review of the `deploy_key` work. Four
-passages were named as carrying a reason rather than padding, so
-a later tidy-up has something to check against.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR:?message}`
-explanation: it states the mechanism before using it -- `:` is
-the shell's do-nothing command, so each line is a bare check
-that the variable arrived -- and draws the conclusion second.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
-that lays out the four spellings of one repository address.
-Three lines of example did what a paragraph could not, and it is
-the passage most at risk of reading as decoration.
-
-`config.toml.sample`, the `deploy_key` comment: it answers an
-operator's questions in the order they ask them, and the line
-"vagrant runs on the VM host, so `~` is that machine's home
-directory and not yours" is nine words of mechanism.
-
-`crates/bombyx/src/plan.rs`, the four-line comment on the
-deploy-key check step: local fact, then a name to follow for the
-reason, then stop. The same review found that reason argued in
-full in four places and half-argued in three more; this is the
-shape the others should have.
-
----
 
 ### fr-2026-09-06-round-local-finding-ids-promise-a-record
 
@@ -451,8 +361,16 @@ judge it themselves from the **What** field. `red-team`'s
 statement in any of the three briefs, and nothing says so.
 
 Deferred: naming the field per reviewer touches all three agent
-briefs, and `/review` is frozen until a run against a real code
-diff has exercised the bar.
+briefs, and `/review` was frozen until a run against a real code
+diff had exercised the bar.
+
+**Swept 2026-09-11: that blocker is discharged.** The review of
+`bombyx list` ran all three stages against a real code diff, 39
+findings. The gap held: sorting them by what would make somebody
+act wrongly was done by reading each **What** field, because no
+brief names a field that answers it. `red-team`'s **Example
+trigger** was again the closest thing. The entry is now
+actionable rather than blocked.
 
 Found by the Fresh Reader review (FR-4), 2026-09-03.
 
@@ -475,6 +393,15 @@ third is probably meant, and only a guess gets you there.
 Deferred: naming the destination is one clause, but it changes
 what a stop condition counts, so it wants deciding rather than
 guessing.
+
+**Swept 2026-09-11: the ambiguity fired.** Stage 2 of the review
+of `bombyx list` stopped after two rounds because three of round
+2's findings were defects in round 1's fixes. Deciding that
+meant counting them, and nothing said where the count lives, so
+it was kept in the run's report and in
+`target/review-2-2.findings` -- which `target/` does not commit.
+The third reading in the paragraph above is the one that was
+guessed.
 
 Found by the Fresh Reader review (FR-3), 2026-09-03.
 
@@ -612,5 +539,144 @@ Deferred: outside the diff of the commit under review.
 
 Found by the Fresh Reader review (FR-14) and the red team review
 (RT-12), 2026-09-03.
+
+---
+
+## Explanations to keep
+
+Not findings. Each entry below is a passage a comprehension
+review named as carrying a reason rather than padding, kept so
+that somebody trimming comments later has something to check
+against. Nothing here is outstanding work.
+
+---
+
+### fr-2026-09-11-vm-host-setup-what-worked
+
+**Category:** What worked -- do not trim
+
+Two comprehension reviews of `docs/vm-host-setup.md` named these
+passages as carrying a reason rather than padding. They are
+pre-existing prose, so a later trim could take them without
+anyone noticing what was lost.
+
+The `usermod -a` warning: it states the mechanism (`-G` without
+`-a` replaces the supplementary group list), then the
+consequence (losing `sudo` on a machine reached only over SSH),
+then the follow-on fact, that bombyx opens a new connection per
+command and so picks the groups up on its own.
+
+**Why the non-interactive PATH causes trouble**: it prints the
+actual default `PATH`, names the startup files that kind of
+shell skips, and gives the two `ssh` commands that show the
+difference on the reader's own host. The reviewer reported being
+able to diagnose a variant without returning to the page.
+
+**Always name the libvirt URI** and the pair under "Two of those
+commands need care": both explain why the obvious check passes
+while the real thing is broken -- a bare `virsh list` reaching
+the per-user daemon, and `sudo vagrant plugin install` landing
+in `/root/.vagrant.d`.
+
+The storage-pool autostart note: it states that the consequence
+is delayed and shows the `pool-list` row with the `no` in it,
+which is what connects a later failure to the reboot that caused
+it.
+
+---
+
+### fr-2026-09-07-clone-in-home-what-worked
+
+**Category:** What worked -- do not trim
+
+From the comprehension review of the clone-in-home work. Four
+passages were named as carrying a reason rather than padding.
+
+`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
+table with its worked failure, named as the model the rest of
+that file should follow.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
+showing four spellings of one address collapse to one string.
+
+`crates/bombyx/templates/bootstrap.sh` and its mirror in
+`crates/bombyx/src/vagrantfile.rs`, the `safe.directory`
+paragraph: git normally refuses another user's repository, that
+guard does not apply under `sudo`, and a `post-checkout` hook
+was measured running at `uid=0`. The reviewer called it the only
+passage that explains why the privilege arrangement exists at
+all -- without it the rest reads as ceremony.
+
+`crates/bombyx/templates/bootstrap.sh`, the "deliberately no
+`git clean`" paragraph, the only place stating that committing
+inside the guest does not survive a provision and that pushing
+is what does. Four other comments depend on that fact.
+
+---
+
+### fr-2026-09-07-explanations-worth-keeping-two
+
+**Category:** What worked -- do not trim
+
+From the comprehension review of the branch that made the
+project's script run as the agent. Five passages were named as
+carrying a reason rather than padding.
+
+`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
+table and the `${VAR:?message}` paragraph: three flags with one
+consequence each, then a concrete failure that names the
+mechanism, and the bare `:` explained before three lines that
+would otherwise read as statements with no verb. The reviewer
+called it the shape the rest of the file should be measured
+against.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
+showing four spellings of one repository address collapse to one
+string.
+
+`crates/bombyx/src/config/guards.rs`, the argument for the
+leading-dash rule: `git` accepts options after positionals,
+which most tools do not. It is the one forward reference out of
+the script that answered the question the reader arrives with.
+
+`docs/architecture.md`, "That is not hypothetical" with
+`/root/.rustup` and `/root/jutro` named. One measured symptom
+turns a preference into an incident report; the paths are the
+load-bearing part.
+
+`docs/trust-boundary.md`, the paragraph on what an on-path
+attacker does *not* get: the wrong intuition named first, then
+the mechanism, then the real consequence.
+
+---
+
+### fr-2026-09-07-explanations-worth-keeping
+
+**Category:** What worked -- do not trim
+
+From the comprehension review of the `deploy_key` work. Four
+passages were named as carrying a reason rather than padding, so
+a later tidy-up has something to check against.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR:?message}`
+explanation: it states the mechanism before using it -- `:` is
+the shell's do-nothing command, so each line is a bare check
+that the variable arrived -- and draws the conclusion second.
+
+`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
+that lays out the four spellings of one repository address.
+Three lines of example did what a paragraph could not, and it is
+the passage most at risk of reading as decoration.
+
+`config.toml.sample`, the `deploy_key` comment: it answers an
+operator's questions in the order they ask them, and the line
+"vagrant runs on the VM host, so `~` is that machine's home
+directory and not yours" is nine words of mechanism.
+
+`crates/bombyx/src/plan.rs`, the four-line comment on the
+deploy-key check step: local fact, then a name to follow for the
+reason, then stop. The same review found that reason argued in
+full in four places and half-argued in three more; this is the
+shape the others should have.
 
 ---

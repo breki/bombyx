@@ -10,7 +10,7 @@ const MAX_DIAGNOSTIC_LINES: usize = 10;
 /// rather than assumed:
 ///
 /// - A link inside a *private* module that names something not in
-///   scope. Breaking one in `bombyx`'s `doctor::text` produced
+///   scope. Breaking one in a private `bombyx` module produced
 ///   **0** errors in the public pass and **2** in the private one,
 ///   because the public pass never renders a private module's
 ///   docs at all.

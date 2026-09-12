@@ -5,10 +5,10 @@
 //! [`crate::remote::probe`]; this module decides which of them
 //! run and what their output means.
 
-use super::text::{fail_reason, first_line, sanitize};
 use super::{Finding, Outcome, ProbeResult, Scope};
 use crate::config::{Config, Provider, Transport};
 use crate::remote::{self, RemoteCommand};
+use crate::term::{fail_reason, first_line, sanitize};
 
 /// A check applied to a probe's stdout when a zero exit is not
 /// the whole answer.

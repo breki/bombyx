@@ -4,6 +4,39 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-11-exit-rule-has-no-single-home
+
+**Category:** Duplicated rule deferred for its own commit
+
+`bombyx list`'s exit-status rule is stated in five places -- the
+clap help in `main.rs`, `README.md`, `docs/usage.md`, `llms.txt`
+and `CHANGELOG.md` -- and the `--project` requirement in three:
+`README.md`, `crates/bombyx/README.md` and `docs/usage.md`. None
+of them says which copy owns the rule.
+
+Two rounds of the review that added `list` produced prose
+defects from exactly this. Round 1 wrote the exit rule into all
+five; round 2 found the code implements a wider rule than any of
+them states ("any project left `unknown`", not "a machine that
+does not answer"), and that "`--offline` always exits zero" was
+false in three of them, since a bad config file exits 1 whatever
+`--offline` says. Correcting copies is what made the next
+round's findings, both times.
+
+Every copy now agrees with the code and with the others, so
+nothing is wrong today. What is deferred is giving each rule one
+owner and leaving pointers behind. `/review` forbids a
+consolidation in the round that finds it, because N copies
+become one statement plus N-1 pointers and a pointer can name
+the wrong section or chain two deep -- so it wants a commit of
+its own with nothing else in it.
+
+Worth deciding at the same time: whether the clap help can be a
+pointer at all. It is what `bombyx list --help` prints, so it
+has to state the rule rather than refer to a document, which
+means the real question is which of the four remaining copies
+survive.
+
 ### rt-2026-09-07-snapshot-outlives-the-deploy-key
 
 **Category:** Behaviour defect deferred deliberately
@@ -90,10 +123,18 @@ wording for a machine with no config directory to be reachable
 from the binary, and `config::host::registry_place` is
 `pub(crate)` today.
 
-Deferred by the operator during the `/review2` on #18: it is a
+Deferred by the operator during the review on #18: it is a
 public-signature change proposed at the end of a review that had
 already stopped on non-convergence, and it has no user-visible
 effect. Found as RT-5 in round 2.
+
+**Swept 2026-09-11.** Half of it is stale and half has grown.
+The `"the registry"` fallback is gone from `main.rs`; the
+`describe` path is still there
+(`crates/bombyx/src/config/host.rs:327`). And `Config::load_all`
+now takes the same `Option<&Path>` and raises `NoRegistry` the
+same way, so the signature change would be two functions rather
+than one.
 
 ### rt-2026-09-04-doc-cannot-link-a-plans-own-section
 
@@ -155,63 +196,6 @@ Deferred: raised by red-team during the `/review2` on #7 and not
 fixed there. Every machine that has run this command is Linux,
 so the case-insensitive half has never fired; the symlink half
 needs somebody to place a symlink under `docs/` deliberately.
-
-### rt-2026-09-04-provenance-line-names-the-default-filename
-
-**Category:** Misleading provenance on the path `destroy` uses
-
-`HostOrigin::Overlay` renders as the fixed literal
-`bombyx.local.toml` in `crates/bombyx/src/config/host.rs`. That
-Display value is now the only thing bombyx prints about the
-file, because the `<local> overrides <config>` notice is gone.
-Under `--config staging.toml` the host comes from
-`staging.local.toml` and the line says `bombyx.local.toml`,
-naming a file that supplied nothing and need not exist.
-Verified against the built binary. `Config::load` already
-resolves the real path for its `InvalidHost` error, so the
-machinery exists; the fix is to return that path alongside
-`HostOrigin`. `destroy` runs `rm -rf` on the host this line
-reports, and `README.md` under **A different machine for one
-project** rests its guarantee on it. `docs/usage.md` and `README.md`
-both carry a marker naming this ID.
-
-Deferred by the operator: step 2 of the config move
-(`overlay-drop-host-source`, #23) deletes `bombyx.local.toml`
-and this branch with it.
-
-This does not block
-`rt-2026-09-04-overlay-and-local-config-path-are-pub`, though
-an earlier version of this entry said it did. The fix above
-returns the path from `Config::load`, so `main.rs` never calls
-`local_config_path` -- and after step 1 it calls nothing in
-that module, so the narrowing is free to go ahead. Only the
-alternative fix, resolving the path in `main.rs`, would need
-`local_config_path` to stay `pub`.
-
-**Closed 2026-09-04 by #23.** `bombyx.local.toml` is gone, so
-nothing in bombyx reaches the code this describes.
-
-### rt-2026-09-03-round-three-findings-have-no-durable-home
-
-**Category:** A disposition with nowhere to go
-
-Round three reports and fixes nothing, and `/review` logs only
-deferred findings. So a round-three finding is neither fixed nor
-deferred, and no rule writes it anywhere that outlives the run:
-`target/review-<n>.findings` is the only record and `target/` is
-not committed. Commit `d1908d6` exists because of exactly this
--- round three's findings lived only in the session and had to be
-back-filled into 14 backlog entries by hand afterwards.
-
-Deferred: the fix is either to log a round-three finding the way
-a deferred one is logged, or to say that round three's report is
-the developer's to act on before committing. That is a decision
-about who owns the last round, and `/review` is frozen until a
-run against a real code diff has exercised it.
-
-Found by the red team review (RT-2), 2026-09-03.
-
----
 
 ### rt-2026-09-03-todo-md-unclassified-for-never-sync
 
@@ -281,20 +265,6 @@ grep, or correct the record in the commit that next touches
 Found by the red team review (RT-5), 2026-09-03.
 
 ---
-
-### rt-2026-09-03-review-has-no-allowed-tools
-
-**Category:** Command definition
-
-`.claude/commands/review.md` declares only `description`, while
-`commit.md` declares an `allowed-tools` list. `/review` needs
-`Bash`, `Agent`, `Edit` and `AskUserQuestion`, and a reader
-cannot tell whether the omission means unrestricted or means it
-inherits the session's permissions. Deferred because the right
-scoping is a decision about the whole command set, not about
-this file: `check.md` scopes to a single `cargo xtask` pattern,
-and nothing states what the convention is for a command that
-edits files and spawns agents.
 
 ### rt-2026-09-02-home-does-not-isolate-ssh-config
 

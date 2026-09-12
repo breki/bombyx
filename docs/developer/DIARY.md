@@ -4,6 +4,140 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-11
 
+**The exit status of a `;`-joined script answers for one project**
+
+The review of `bombyx list` found this and it is the one worth
+remembering. `remote::vagrant_status_many` joins one fragment per
+project with `; `, and a POSIX shell reports the status of the
+*last* command in such a list. So the status says nothing about
+any particular project, and `listing::entries` was reading the
+reply only when that status was zero. One project with a broken
+Vagrantfile, sorted last, blanked every other project on a
+reachable machine -- while the doc comment two lines above
+promised the opposite.
+
+The reply is now read whatever the status, and the status only
+chooses what to say about a project the reply skipped. Proven
+against the real host: `~/vms/zzz/Vagrantfile` holding invalid
+Ruby makes vagrant exit 1, and `vmtest` still reported
+`running`.
+
+**An empty answer is not a statement**
+
+The same review found the sibling mistake. A project's block
+arriving empty was read as "bombyx never built this VM", on the
+assumption that only the `[ -f Vagrantfile ]` guard could
+produce one. A second producer is any failure that writes
+nothing to stdout -- and the first candidate is a `vagrant` the
+non-interactive shell cannot find, which
+`docs/vm-host-setup.md` records as this project's recurring
+VM-host failure. The operator would have read `not created`
+about a machine bombyx could not ask at all.
+
+The guard's `else` now writes a `##bombyx-never-built` token, so
+"never built" is something the host stated rather than the
+absence of anything, and silence reads as unknown. The general
+form is worth keeping: **an absence cannot carry a reason, so
+where the reason matters, say the thing positively.**
+
+Two more of the same shape came out of it. The host's own error
+text was being discarded, because the marker is printed before
+the guard by `printf` -- a shell builtin that is always present
+-- so every project always has a block and the failure reason
+was never reached. And the `ssh` call carried none of the five
+connection options `remote::probe` sets and explains, so one
+machine that swallowed packets would have blocked every machine
+queued behind it. Both are fixed, and the options now come from
+one `remote::unattended` that the doctor probes and the listing
+share.
+
+**A rule in five documents is a rule with no owner**
+
+Two rounds of review produced prose defects from one cause. The
+exit-status rule was written into the clap help, `README.md`,
+`docs/usage.md`, `llms.txt` and `CHANGELOG.md`; correcting the
+copies is what made the next round's findings, twice. The
+second round found that the code implements a wider rule than
+any copy stated, and that "`--offline` always exits zero" was
+false in three of them -- a bad config file exits 1 whatever
+`--offline` says.
+
+Every copy now agrees with the code. Giving each rule one owner
+is deferred to its own commit, as
+`docs/developer/redteam-log.md` records, because collapsing five
+statements into one plus four pointers is exactly the kind of
+change that wants reviewing on its own.
+
+**Nothing printed the projects the config file holds**
+
+Every bombyx command takes `--project`, and nothing told the
+operator what that flag accepts. `Registry` could be asked to
+read the file and to hand back one named entry, and `project`
+needs that name -- so the type that holds every project could
+not be asked to enumerate its keys. Learning what you had
+registered meant opening the file.
+
+`bombyx list` answers that, and the VM state with it. Issue #72
+asked the three open questions and they were settled before any
+code: the command is `list` rather than `status --all`, because
+#15 already proposes that spelling for the network version and
+taking it here would leave that work without a name; it contacts
+the hosts by default, with `--offline` for a workstation away
+from them; and it lists registered projects only, since a
+scratch VM is in no config table and finding one would mean
+trusting directory names read off the host.
+
+Two new things carry it. `Config::load_all` assembles every
+entry exactly as `load_project` assembles one, host ranking
+included, so a row shows the machine that project's VM would
+really run on. `listing` groups the projects by that machine and
+sends one command per machine rather than one per project, since
+each `ssh` invocation pays for its own connection.
+
+A machine that does not answer leaves its own projects `unknown`
+with a note under the table, and costs the other machines
+nothing. `doctor`'s skip cascade is the precedent: a diagnostic
+that refuses to diagnose because one host is asleep is worth
+less than one with gaps in it.
+
+**A parsed reply must never ask for a terminal**
+
+Self-review caught this before it shipped. `list` was passing
+`tty_choice()` like every VM command, and `list` is the one
+command that *parses* what comes back. On Windows that function
+returns `Allocate` when both streams are terminals, and `ssh -t`
+does two things to a parsed reply: it merges the remote's stderr
+into stdout, and the remote tty turns every `\n` into `\r\n`.
+So a state would have been read as `running\r`, and the
+`vagrant-libvirt` fog warning would have landed inside a
+project's block.
+
+The fix is not to pass `NoPty` at the call site but to stop
+`remote::vagrant_status_many` taking the choice at all, the way
+`shell_into_vm` forces the opposite. A test asserts no `-t`
+reaches the argv, and it was proven to fail with `Allocate` in
+place.
+
+Writing that up also corrected a claim made from expectation
+rather than measurement: the fog warning is on **stderr**, so it
+never reaches the parser in the first place. Two commands
+settled it, `2>/dev/null` and `2>&1 >/dev/null`. The guard that
+drops text before the first marker stays, because attributing a
+stray line to whichever project came first is the failure worth
+preventing, but the comment no longer says the warning is what
+puts it there.
+
+**`sanitize` moved out of `doctor`**
+
+The listing prints a state string that came from a VM host, so
+it needs the same protection the doctor report has: an escape
+sequence in there would let the host repaint rows it does not
+own. That guard lived in `doctor/text.rs`, and reaching through
+`doctor` for it -- or copying it -- were both wrong. All four
+functions moved into `term`, which already owned what reaches
+the terminal, and `doctor/text.rs` is gone rather than left as
+a two-function shim.
+
 **The workflow actions were running on a deprecated Node**
 
 Every CI job printed the same warning: `actions/checkout@v4` and

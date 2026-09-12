@@ -163,11 +163,12 @@ would be refused.
 and in `docs/usage.md`, because it registers one table per
 project. There is only ever the one file.
 
-**Name the project on every command**: `bombyx --project
-myproject up`. bombyx reads nothing out of the project's own
-directory, so it cannot work out which project you mean from
-where you happen to be standing. `--config <path>` reads a
-different registry file, which is how you keep two setups
+**Name the project on every command but `list`**: `bombyx
+--project myproject up`. bombyx reads nothing out of the
+project's own directory, so it cannot work out which project you
+mean from where you happen to be standing. `list` is about every
+project at once, so it takes no project name. `--config <path>`
+reads a different registry file, which is how you keep two setups
 apart.
 
 **bombyx writes the Vagrantfile; the project does not.** It is
@@ -329,8 +330,20 @@ bombyx destroy myproject  # destroy the VM and remove its dir
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
 
+bombyx list               # every registered project and its VM state
 bombyx self-update        # update this binary to the newest release
 ```
+
+`list` is the one VM command that names no project. It reads
+your config file, asks every machine named in it what its
+projects are doing, and prints a row each on stdout. A machine
+that does not answer leaves its own projects `unknown`, puts one
+note on stderr, and costs the other machines nothing. Any
+project left `unknown` -- whether the machine was unreachable or
+answered without naming a state -- makes the command exit
+non-zero. `--offline` contacts no machine and leaves the `STATE`
+column out, so the only thing that can fail it is the config
+file itself.
 
 Two lifecycles, on purpose:
 

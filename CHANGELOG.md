@@ -134,6 +134,13 @@ and this project adheres to
 - A repository whose ssh URL names a port other than 22 keeps the first-sight
   behaviour rather than being verified, because `known_hosts` spells such a host
   `[example.com]:2222` while the published keys carry bare names.
+- `bombyx list` prints every project in your `config.toml` with its host, box,
+  CPUs, memory and VM state, taking no `--project`. It asks each machine once
+  for all the projects on it. The table goes to stdout; a machine that does not
+  answer leaves its own projects `unknown`, puts one note on stderr, and costs
+  the others nothing. Any project left `unknown` makes the command exit
+  non-zero. `--offline` contacts no machine and leaves the state column out.
+  Scratch VMs are not listed: no config table names them.
 
 ### Changed
 

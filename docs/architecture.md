@@ -142,6 +142,7 @@ flowchart TD
   main --> plan
   main --> update
   main --> doctor
+  main --> listing
   main --> term
   main --> tool
 
@@ -159,6 +160,12 @@ flowchart TD
   update --> config
 
   doctor <--> remote
+  doctor --> term
+
+  listing --> remote
+  listing --> config
+  listing --> doctor
+  listing --> term
 
   remote --> config
   remote --> name
@@ -167,6 +174,12 @@ flowchart TD
 
 `doctor` and `remote` reference each other: `remote` builds the
 probe commands, `doctor` decides what their output means.
+
+`listing` depends on `doctor` for one type. `ProbeResult` is
+what running a command produced -- its exit status, its stdout
+and its stderr -- and a listing command produces exactly that,
+so `listing` holds the same type rather than declaring a second
+one with the same three fields.
 
 | Module | Owns |
 |--------|------|
@@ -187,9 +200,10 @@ probe commands, `doctor` decides what their output means.
 | `remote` | building the argv for either route, quoting |
 | `remote::write` | the heredoc that writes a generated file |
 | `doctor` | preconditions, and what a result means |
+| `listing` | grouping by host, reading a reply, the `list` table |
 | `update` | `self-update`: download, verify, swap |
 | `name` | scratch-VM names, and path segments |
-| `term` | line endings, per stream |
+| `term` | text reaching the terminal: endings, sanitizing, clipping |
 | `tool` | resolving a program, never via the cwd |
 
 `main` parses arguments, spawns processes and prints. Nothing

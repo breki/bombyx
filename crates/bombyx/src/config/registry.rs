@@ -321,6 +321,19 @@ impl Registry {
         Some((key, project.host.as_deref()?))
     }
 
+    /// Every project name in the file, in key order.
+    ///
+    /// The names only. A caller wanting one entry's settings
+    /// asks [`Registry::project`] for it, which is the function
+    /// that reports a name no table holds.
+    ///
+    /// Sorted, because the keys live in a `BTreeMap`.
+    /// [`super::Config::load_all`] is where that ordering is
+    /// described for the caller who acts on it.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &ProjectName> {
+        self.projects.keys()
+    }
+
     /// Returns the entry for `name`.
     ///
     /// The error names the file this registry was read from, so
@@ -482,6 +495,20 @@ mod tests {
          ref = \"main\"\n\
          script = \"vagrant/provision.sh\"\n"
             .to_owned()
+    }
+
+    /// One `[projects.<name>]` table, the header's example with
+    /// the name swapped.
+    ///
+    /// Derived from [`registry_toml`] so the example keeps one
+    /// copy: a key renamed in the module header reaches these
+    /// tests too.
+    fn entry(name: &str) -> String {
+        let file = registry_toml();
+        let (_file_wide, tables) = file
+            .split_once("\n\n")
+            .expect("the file-wide host is followed by a blank line");
+        tables.replace("myproject", name)
     }
 
     /// A `[projects.<name><suffix>]` header, name quoted so any
@@ -923,5 +950,29 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{good:?} must be accepted: {e}"));
             assert_eq!(host_of(&registry, "myproject"), Some(good));
         }
+    }
+
+    #[test]
+    fn every_entry_is_listed_in_the_file_s_key_order() {
+        // Written out of order, so a pass cannot come from the
+        // file happening to be sorted already.
+        let source = format!(
+            "host = \"vmhost\"\n\n{}{}{}",
+            entry("web"),
+            entry("api"),
+            entry("db"),
+        );
+        let registry = parsed(&source);
+        let names: Vec<&str> =
+            registry.names().map(ProjectName::as_str).collect();
+        assert_eq!(names, ["api", "db", "web"]);
+    }
+
+    #[test]
+    fn a_file_with_no_project_table_lists_nothing() {
+        // Not an error. An operator part-way through writing the
+        // file gets an empty listing rather than a parse failure.
+        let registry = parsed("host = \"vmhost\"\n");
+        assert_eq!(registry.names().count(), 0);
     }
 }

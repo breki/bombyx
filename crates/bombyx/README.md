@@ -21,9 +21,9 @@ your own `config.toml` and writes them onto the VM host on
 every boot, so that machine cannot drift and holds none of your
 code. The guest clones the project itself.
 
-Every command but `self-update` takes `--project <name>`, which
-picks a `[projects.<name>]` table in your own `config.toml`.
-Left out below for brevity:
+Every command but `self-update` and `list` takes
+`--project <name>`, which picks a `[projects.<name>]` table in
+your own `config.toml`. Left out below for brevity:
 
 ```bash
 bombyx up                 # write the generated files, boot the VM
@@ -36,6 +36,8 @@ bombyx down               # halt the VM
 
 bombyx scratch pr-1234    # boot a throwaway VM
 bombyx discard pr-1234    # destroy it
+
+bombyx list               # every project and its VM state (no --project)
 ```
 
 Every command accepts `--dry-run`, which prints the exact

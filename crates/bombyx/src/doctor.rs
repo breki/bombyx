@@ -28,7 +28,6 @@
 //! |--------|------|
 //! | `probes` | which probes run, in what order, and how a reply is read |
 //! | `readonly` | the check that a probe script would not change the host |
-//! | `text` | making host-supplied text safe to print, and clipping it |
 //! | `local` | the checks that run on this workstation |
 //! | `report` | collecting findings and rendering them aligned |
 //!
@@ -40,7 +39,6 @@ mod local;
 mod probes;
 mod readonly;
 mod report;
-mod text;
 
 pub use local::local_tool_finding;
 pub use probes::{
