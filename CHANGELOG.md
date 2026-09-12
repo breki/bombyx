@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.5.0] - 2026-09-12
+
+### Added
+
 - The generated Vagrantfile runs a bootstrap script inside the guest that clones
   `source.repo` at `source.ref` and runs `source.script` from the clone. A
   private repository needs a credential inside the guest; see
