@@ -698,7 +698,9 @@ mod tests {
         // Without the `null`, `ssh` reads the operator's
         // terminal and waits for a password. The child here
         // reports what it managed to read.
-        let cmd = sh("cat; echo -n END");
+        // `printf`, not `echo -n`: the `-n` is not portable, and
+        // macOS's `/bin/sh` prints it literally.
+        let cmd = sh("cat; printf END");
         let got = resolver(std::slice::from_ref(&cmd))
             .output(&cmd)
             .expect("sh runs");
