@@ -411,18 +411,19 @@ invocation instead of running it:
 ```console
 $ bombyx --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (N lines elided)
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (N lines elided)
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
-Each generated file prints as one line naming its heredoc and
-how many lines were dropped. Printing both in full would bury
-the five-step plan they belong to; the host receives the whole
-content regardless.
+Neither generated file appears in the plan, and there is
+nothing to elide: the file is not part of the command. It
+travels on the command's standard input, which is a pipe
+between two processes rather than text. The trailing comment is
+how many bytes bombyx will send down that pipe.
 
-The transcript above writes that count as `N` rather than
+The transcript above writes each count as `N` rather than
 quoting one. Both generated files change size with almost every
 release, so a figure copied into this document is stale by the
 next one. Run the command to see the numbers for your version.
@@ -453,8 +454,11 @@ machine's name — **Running bombyx against your own machine** in
 [tutorial.md](tutorial.md) has the rule.
 
 The output is real shell: each argument is printed bare only
-when it is unambiguous, and quoted otherwise, so what you
-read is what runs.
+when it is unambiguous, and quoted otherwise, so what you read
+is what runs. The two write lines are the exception, and the
+trailing comment on each is what marks it: pasting one runs
+`cat` against your own terminal, because the file bombyx would
+have sent is not in the line to be pasted.
 
 The `\$` in the last line is the escaping doing its job rather
 than a stray backslash. `BOMBYX_VM_HOSTNAME` has to be filled in
@@ -469,28 +473,42 @@ for what the two variables are for.
 ## How the generated files are written
 
 bombyx sends the Vagrantfile and the bootstrap script over the
-same SSH connection it uses for everything else, with a shell
-*heredoc*: `cat > <file> <<'BOMBYX_EOF'`, then the file's lines,
-then a line holding the delimiter alone. The remote shell reads
-everything up to that delimiter as data.
+same SSH connection it uses for everything else. The command is
+as short as it looks in the plan above:
 
-Details that look fussy and are not:
+```sh
+cat > ~/'vms/myproject/Vagrantfile'
+```
 
-- **The tilde sits outside the quotes** (`~/'vms/myproject'`). A
-  POSIX shell does not expand `~` inside single quotes, so
-  the obvious `'~/vms/myproject'` would create a directory
-  literally named `~`. Quoting only the rest keeps the path
-  injection-proof *and* expandable.
-- **The delimiter is quoted** (`<<'BOMBYX_EOF'`, not
-  `<<BOMBYX_EOF`). An unquoted delimiter makes the shell expand
-  `$` and backticks inside the body, so a `$` in the generated
-  Vagrantfile would be replaced by the host shell before the
-  file was ever written.
-- **The delimiter grows if the payload contains it.** A file
-  holding a line equal to `BOMBYX_EOF` would end the heredoc
-  early and hand the rest to the shell as commands. bombyx
-  lengthens the delimiter until no payload line matches it,
-  which cannot fail and needs nothing from the caller.
+The file itself is not in that command. bombyx opens a pipe to
+the `ssh` process and writes the file into it; `ssh` passes
+whatever it reads on its own input through to the remote `cat`,
+which redirects it into the file. On a machine that is its own
+VM host, `sh -c` receives the same command and the same pipe.
+
+**Why not simply pass the file as an argument.** On any Unix
+machine, every logged-in account can list the commands other
+accounts are running, arguments included -- that is what `ps`
+prints. A file passed as an argument is therefore readable by
+anyone with a login on the VM host while the write runs, and by
+anyone with a login on your workstation too, since the same
+text sits in the `ssh` command line there. Bytes on a pipe
+between two processes appear in no such listing.
+
+That matters for the Vagrantfile in particular, because it
+carries every value from the project's `[env]` table.
+
+The second benefit is that nothing has to be escaped. Bytes on
+a pipe are bytes: no shell looks inside them for a `$` to
+substitute or an end-word to stop at, so any file at all can be
+sent without the caller having checked it first.
+
+One detail in the command still repays a look. **The tilde sits
+outside the quotes** (`~/'vms/myproject'`). A POSIX shell does
+not expand `~` inside single quotes, so the obvious
+`'~/vms/myproject'` would create a directory literally named
+`~`. Quoting only the rest keeps the path injection-proof *and*
+expandable.
 
 Both files are written on every `up`, `provision` and
 `scratch`, so the host's copy cannot drift from what the

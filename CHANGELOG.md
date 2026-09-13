@@ -14,6 +14,12 @@ and this project adheres to
 
 ### Changed
 
+- bombyx sends the generated Vagrantfile and bootstrap script on the write
+  command's standard input rather than inside a command-line argument, so
+  neither file is visible in a process listing on the VM host or on the
+  workstation. A dry run now ends each write line with the payload's size in
+  bytes instead of naming a heredoc and a line count.
+
 ### Fixed
 
 ### Removed

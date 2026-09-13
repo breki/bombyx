@@ -22,6 +22,12 @@ Cargo workspace, CLI only:
   - `name.rs` — validated `ScratchName` and `ProjectName`
     (one path segment each)
   - `remote.rs` — command construction for either route (pure)
+  - `remote/command.rs` — `RemoteCommand` (`program`, `args`,
+    `dir`, `stdin`) and how one renders for `--dry-run`, plus
+    `Stdin`, which holds a payload and refuses to print it
+  - `remote/write.rs` — `write_file`, which puts a generated
+    file on the command's standard input rather than in an
+    argument
   - `remote/probe.rs` — the read-only `doctor` probe scripts
   - `vagrantfile.rs` — renders the Vagrantfile, embeds the
     bootstrap script
@@ -39,8 +45,10 @@ Cargo workspace, CLI only:
     host text made safe to print, clipping, the line of a
     failure that explains it
   - `tool.rs` — `PATH` lookup, never the working directory
+  - `run.rs` — `spawn`: starts one built command and waits,
+    feeding it a `Stdin` payload down a pipe when it has one
   - `bin/bombyx/main.rs` — clap parsing, host-provenance
-    reporting, process spawning, the self-update ordering
+    reporting, driving `run::spawn`, the self-update ordering
   - `crates/bombyx/templates/bootstrap.sh` — the script the
     guest runs, identical for every project. The generated
     Vagrantfile marks the provisioner `privileged: false`, so
@@ -357,7 +365,13 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 - Logic lives in the library: `src/bin/` is excluded from
   coverage, so code there ships untested
 - `remote.rs` builds commands but never spawns processes,
-  which is what keeps it testable without a VM host
+  which is what keeps it testable without a VM host; `run.rs`
+  is the one module that starts one
+- a generated file travels on the command's standard input, not
+  in an argument, because `ps` shows every account on either
+  machine the arguments of a running command. `Stdin` has no
+  `Display` and a `Debug` reporting only a length, so a payload
+  cannot reach the terminal by accident
 - the registry is the operator's own file rather than a
   committed one, and every field is still validated against an
   allowlist. `host` reaching `ssh` as `-oProxyCommand=...`

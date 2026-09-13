@@ -332,13 +332,13 @@ identical on both routes -- `sh -c` is the same POSIX shell
 `ssh` would have started on a remote host.
 
 On the `ssh` route the host's login shell has to be POSIX,
-because bombyx sends `mkdir -p` and a `cat > file <<'EOF'`
-heredoc for the far side to interpret. On Linux that is already
-true. On Windows, OpenSSH Server starts `cmd.exe` and those
-commands fail, and the fix is the `DefaultShell` registry
-value. That is what `doctor`'s `login shell` row checks. The
-local route asks nothing of your login shell, because bombyx
-starts `sh` itself.
+because bombyx sends `mkdir -p` and `cat > file` for the far
+side to interpret. On Linux that is already true. On Windows,
+OpenSSH Server starts `cmd.exe` and those commands fail, and
+the fix is the `DefaultShell` registry value. That is what
+`doctor`'s `login shell` row checks. The local route asks
+nothing of your login shell, because bombyx starts `sh`
+itself.
 
 One more thing about Windows, since the paragraph above sent
 you elsewhere. Hyper-V is the other way to run VMs there, and
@@ -720,8 +720,8 @@ one a VM command runs.
 ```console
 $ bombyx --project myproject --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile' <<'BOMBYX_EOF' (N lines elided)
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh' <<'BOMBYX_EOF' (N lines elided)
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
@@ -731,14 +731,16 @@ directory, write the two files bombyx generates, boot, then save
 the `fresh-install` snapshot if the VM does not already have
 one. bombyx runs nothing on your workstation.
 
-The two writes print as one line each. Each carries a whole
-file, and printing both in full would bury the plan they belong
-to, so the line identifies the heredoc and says how many lines
-it dropped. The full contents are written to the host either
-way -- this is the one place `--dry-run` summarises rather than
-showing you everything.
+The two writes print as one line each, and neither line holds
+the file it writes. bombyx sends a generated file down a pipe
+to the `ssh` process rather than passing it as an argument,
+because every logged-in account on a machine can list the
+arguments of a running command and none of them can read a
+pipe. So there is nothing of the file for `--dry-run` to print,
+and the trailing comment gives its size instead. The host
+receives the whole file either way.
 
-Where the real output gives that count, the transcript above
+Where the real output gives those sizes, the transcript above
 says `N`. The two files grow and shrink with almost every
 release, so a number copied in here is stale by the next one,
 and it has been wrong more often than right. Run the command to

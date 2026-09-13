@@ -27,6 +27,7 @@ pub mod name;
 mod newtype;
 pub mod plan;
 pub mod remote;
+pub mod run;
 pub mod term;
 pub mod tool;
 pub mod update;

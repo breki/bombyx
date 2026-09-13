@@ -752,10 +752,7 @@ impl Ran {
 fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     if dry_run {
         for cmd in commands {
-            // `abbreviated`, not `Display`: the two file writes
-            // each carry a whole file, and printing them in full
-            // buries the plan. It says where it elided.
-            println!("{}", cmd.abbreviated());
+            println!("{cmd}");
         }
         return Ok(Ran::Ok);
     }
@@ -788,23 +785,10 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     }
 
     for cmd in commands {
-        let mut child =
-            std::process::Command::new(&resolved[cmd.program.as_str()]);
-        child.args(&cmd.args);
-        if let Some(dir) = &cmd.dir {
-            child.current_dir(dir);
-        }
-        let status = child
-            .status()
+        let status = bombyx::run::spawn(&resolved[cmd.program.as_str()], cmd)
             .with_context(|| format!("running {}", cmd.program))?;
         if !status.success() {
-            // `abbreviated`, not `Display`, for the same reason the
-            // dry run uses it: a failed write would otherwise bury
-            // the exit status under forty lines of shell script.
-            eprint_lines(&format!(
-                "bombyx: {} failed: {status}\n",
-                cmd.abbreviated()
-            ));
+            eprint_lines(&format!("bombyx: {cmd} failed: {status}\n"));
             return Ok(Ran::Failed(exit_status_byte(status)));
         }
     }

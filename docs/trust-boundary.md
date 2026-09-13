@@ -92,8 +92,8 @@ because the host runs the hypervisor.
 
 ```
 ssh vmhost "mkdir -p ~/vms/<project>"
-ssh vmhost "cat > ~/vms/<project>/Vagrantfile <<'BOMBYX_EOF' ..."
-ssh vmhost "cat > ~/vms/<project>/bootstrap.sh <<'BOMBYX_EOF' ..."
+ssh vmhost "cat > ~/vms/<project>/Vagrantfile"   # file on stdin
+ssh vmhost "cat > ~/vms/<project>/bootstrap.sh"  # file on stdin
 ssh vmhost "cd ~/vms/<project> && vagrant up"
 ssh vmhost "cd ~/vms/<project> && vagrant snapshot save ..."
 ```
@@ -101,6 +101,18 @@ ssh vmhost "cd ~/vms/<project> && vagrant snapshot save ..."
 The fifth is conditional in the script rather than in the plan:
 it saves the `fresh-install` snapshot only when the machine has
 none, so the reset cycle works without anyone asking for it.
+
+The two files are written onto the commands' standard input
+rather than into their arguments, and that is a trust-boundary
+decision rather than a stylistic one. Every logged-in account
+on a Unix machine can list the full command line of every
+running process, so a file passed as an argument is readable by
+every other account on the VM host while the write runs -- and
+on the workstation too, since the same text sits in the local
+`ssh` command line. The generated Vagrantfile carries every
+value from the project's `[env]` table, which is what makes
+this worth the mechanism. **How the generated files are
+written** in [usage.md](usage.md) describes it.
 
 A configured `deploy_key` adds one more command, and it runs
 first:
