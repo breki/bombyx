@@ -450,14 +450,17 @@ refuses and exits 1.
 
 **Every refusal prints two `bombyx:` lines**, and it is worth
 seeing the shape once. The first says what went wrong; the
-second says what became of any deploy key that had already been
-uploaded, because a guest that stops part-way must not keep a
-credential quietly. Vagrant prefixes each line with `default:`,
-and each reaches the terminal as one long line.
+second says what became of every credential that had already
+been uploaded, because a guest that stops part-way must not keep
+one quietly. There are three it can be talking about -- a deploy
+key, a git credential and a secrets file -- and the second line
+names whichever ones the run could have had. Vagrant prefixes
+each line with `default:`, and each reaches the terminal as one
+long line.
 
 ```
 bombyx: git is not installed in this box. Install it in the box, or choose one with git, so the guest can clone the project.
-bombyx: any uploaded deploy key has been removed from this guest.
+bombyx: any uploaded deploy key and any git credential have been removed from this guest, and so has any secrets file at /home/vagrant/.bombyx-env.
 ```
 
 *(The wording above is taken from the script rather than copied
@@ -761,6 +764,12 @@ arguments of a running command and none of them can read a
 pipe. So there is nothing of the file for `--dry-run` to print,
 and the trailing comment gives its size instead. The host
 receives the whole file either way.
+
+One line gives no size: the git credential a `repo_token`
+produces. That file is fixed text plus the token, so its length
+would measure the token, and `docs/usage.md` says more about
+it. This project configures no token, so the plan above has no
+such line.
 
 Do not feed this plan to a shell -- not `| sh`, not
 `sh < plan.sh`. A shell reading a script from its own standard

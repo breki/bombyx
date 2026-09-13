@@ -1,13 +1,16 @@
 //! Writing the files bombyx generates onto the VM host.
 //!
-//! bombyx sends the Vagrantfile, the bootstrap script and -- when
-//! the config names an `env_file` -- the project's secrets over
-//! SSH. Those are the only project files any machine outside the
-//! guest holds. None of the three comes from the project's
-//! repository: bombyx generates the first two, and the third is
-//! a file on the operator's own workstation that the config
-//! names. So a project cannot supply any of them however it
-//! arranges its own directory. See `docs/trust-boundary.md`.
+//! Every file bombyx stages on the VM host goes through here.
+//! `crate::plan::plan` decides which ones: the Vagrantfile and
+//! the bootstrap script on every run, the project's secrets
+//! when the config names an `env_file`, and a git credential
+//! when it names a `repo_token`. Those are the only project
+//! files any machine outside the guest holds. Not one of them
+//! comes from the project's repository -- bombyx generates the
+//! first two and the last, and the secrets are a file on the
+//! operator's own workstation that the config names. So a
+//! project cannot supply any of them however it arranges its
+//! own directory. See `docs/trust-boundary.md`.
 //!
 //! The command that carries a file is as short as it looks:
 //!
@@ -59,13 +62,13 @@ const FILE_MODE: &str = "600";
 /// split is what lets the interesting part be unit-tested
 /// without a VM host anywhere near it.
 ///
-/// Used for the Vagrantfile and the bootstrap script, which
-/// bombyx generates, and for the project's secrets file, which
-/// comes from the workstation.
+/// Used for every staged file whose length a dry run may
+/// print. [`write_file_of_hidden_size`] below is the one whose
+/// length may not, and it says why.
 ///
-/// `contents` is bytes rather than text, because one of the
-/// three files is the project's secrets and a password need not
-/// be UTF-8. Any bytes at all are legal: they travel on the
+/// `contents` is bytes rather than text, because one of these
+/// files is the project's secrets and a password need not be
+/// UTF-8. Any bytes at all are legal: they travel on the
 /// command's standard input rather than in its arguments, so no
 /// caller has to have checked or escaped them first.
 #[must_use]
@@ -85,6 +88,27 @@ pub fn write_file(
     // write that failed.
     let script = format!("umask 077; cat > {path} && chmod {FILE_MODE} {path}");
     super::transport(cfg, &script, super::Tty::NoPty).with_stdin(contents)
+}
+
+/// [`write_file`] for a file whose size a dry run must not
+/// print.
+///
+/// The same command, so the file gets the same `umask` and the
+/// same mode. The dry run is the whole difference: its line
+/// says the contents are not shown and gives no count, because
+/// this file's length is a measurement of one secret.
+/// `crate::remote::Stdin` says which payloads those are.
+#[must_use]
+pub fn write_file_of_hidden_size(
+    cfg: &Config,
+    dir: &str,
+    name: &str,
+    contents: &[u8],
+) -> RemoteCommand {
+    let path = quote_remote_path(&format!("{dir}/{name}"));
+    let script = format!("umask 077; cat > {path} && chmod {FILE_MODE} {path}");
+    super::transport(cfg, &script, super::Tty::NoPty)
+        .with_stdin_of_hidden_size(contents)
 }
 
 #[cfg(test)]

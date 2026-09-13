@@ -28,6 +28,15 @@ not run: the repository is in use and creating a branch there
 fires pipelines. **So pushing is verified by a dry run and not
 by a real one.**
 
+**bombyx itself has not run against a VM host with this
+configured.** The clone and the push above were `git` on a
+workstation, not bombyx driving `vagrant`. So the parts only a
+real run exercises are untested: whether vagrant's `file`
+provisioner accepts the destination, what mode the upload
+actually lands at, and whether `git-credential-store` answers
+for the host as bombyx spelled it. Definition of Done item 3 is
+outstanding for every command this changes.
+
 The `.netrc` unknown dissolved rather than being answered.
 git's `store` helper is a git mechanism and never goes near
 curl's `.netrc` handling, so choosing it removes the question.
@@ -65,11 +74,21 @@ helper spelled `--file=$HOME/real` found the file there while
 and a `$` is expanded -- and a project's `[env]` table can set
 `HOME`. This is the same trap `KNOWN_HOSTS` is a literal for.
 
-Three rules span more than one key, so no single newtype can
+Four rules span more than one key, so no single newtype can
 hold them, and `Source`'s `TryFrom` runs them while the config
-parses: `repo_token` and `repo_user` are written together or not
+parses. `repo_token` and `repo_user` are written together or not
 at all, `repo_token` requires `env_file`, and it requires `repo`
-to be an `https` URL.
+to be an `https` URL naming no username.
+
+The last of those came out of the review and is the one worth
+knowing. `git` asks its credential helper for whichever username
+the URL carries, and `git-credential-store` answers only when
+that equals the one it stored -- measured, with `git credential
+fill`. So a `repo` of `https://me@bitbucket.org/w/r.git` reads
+the token, stages it, uploads it into the guest, and then cannot
+use it: the clone fails naming the repository. Bitbucket's own
+clone dialog offers that spelling when an account is signed in,
+so it is not a hypothetical.
 
 One thing the work forced along the way. Adding two more
 newtypes pushed `cargo xtask dupes` to 6.4%, over its 6%

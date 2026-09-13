@@ -32,7 +32,7 @@ mod write;
 
 pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
-pub use write::write_file;
+pub use write::{write_file, write_file_of_hidden_size};
 
 use crate::config::{Config, Transport};
 
@@ -535,11 +535,12 @@ pub fn vagrant_in(
 /// Builds the command running `vagrant` in `dir`, then removing
 /// `name` from `dir` whether `vagrant` succeeded or not.
 ///
-/// Used for the project's secrets file, which the VM host holds
-/// only while `vagrant` is uploading it into the guest.
+/// Used for the files the VM host holds only while `vagrant` is
+/// uploading them into the guest: the project's secrets, and
+/// the git credential built from one variable inside them.
 ///
 /// Every verb that writes the generated files runs this, not
-/// only the ones that staged a secrets file. See below.
+/// only the ones that staged either. See below.
 ///
 /// **The removal is inside this one command rather than a step
 /// after it**, and that is the whole reason the function exists.

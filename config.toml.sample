@@ -290,10 +290,16 @@ script = "vagrant/provision.sh"   # path inside the clone
 # can never push. An agent that opens pull requests needs to
 # push, so it needs the token -- and once it has one, the key
 # has nothing left to do. On a host whose keys can push,
-# `deploy_key` is still the better answer: its secret never
-# passes through a command line at all.
+# `deploy_key` reaches fewer machines. Neither secret passes
+# through a command line -- the token travels on standard input
+# the same way this file's contents do. The difference is how
+# many machines hold a copy: bombyx never opens the deploy key,
+# so it exists on the VM host and in the guest and nowhere else,
+# while the token is read here and then exists on your own
+# machine, on the VM host for the length of the vagrant run, and
+# in the guest.
 #
-# Three rules bombyx checks while it reads this file, each of
+# Four rules bombyx checks while it reads this file, each of
 # which stops the run with a message naming the key:
 #
 #   - Both keys or neither. A variable name with no username
@@ -304,22 +310,55 @@ script = "vagrant/provision.sh"   # path inside the clone
 #   - `repo` has to be an `https` URL. `git` sends the token on
 #     every request, so `http` would put it on the wire in plain
 #     text, and an ssh URL never asks for one.
+#   - `repo` must name no username. `git` asks its credential
+#     helper for whichever username the URL carries, and the
+#     helper answers only when that matches the one it stored --
+#     so a `repo` of `https://me@bitbucket.org/w/r.git` would
+#     ship the token into the guest and leave the clone unable
+#     to use it. Bitbucket's own clone dialog offers that
+#     spelling when you are signed in, so it is worth looking
+#     for. Take the `me@` out and let `repo_user` name the
+#     username.
 #
-# A fourth is checked when the file is read, before anything is
+# A fifth is checked when the file is read, before anything is
 # created: if the file holds no variable of that name, or holds
 # it empty, the run stops and the message names both the
 # variable and the file.
 #
 # The file bombyx reads is an ordinary `.env`. A line with no
-# `=` is ignored, which covers blank lines and comments. The
-# name is what comes before the first `=` and the value is
-# everything after it, so a token containing `=` needs no
-# escaping. An `export ` in front of the name is fine. Spaces
-# around either side are dropped, one matching pair of
-# surrounding quotes is dropped, and a file written on Windows
-# loses its trailing carriage return. If a name is assigned
-# twice, the last one wins, which is what a shell reading the
-# same file would do.
+# `=` is ignored, which covers a blank line. A commented-out
+# assignment is ignored too, by a different route: the text in
+# front of its `=` is `# NAME` rather than the name, so it
+# matches nothing.
+#
+# The name is what comes before the first `=`. An `export` in
+# front of it is fine, separated by a space or a tab. Spaces
+# around the name and around the value are dropped, and a file
+# written on Windows loses its trailing carriage return.
+#
+# Where the value ENDS depends on whether it is quoted, and this
+# is the part worth reading twice:
+#
+#   TOKEN=abc=d              the value is `abc=d`; a `=` inside
+#                            a token needs no escaping
+#   TOKEN=abc # rotate soon  the value is `abc`; a `#` with
+#                            whitespace in front ends it, which
+#                            is the note people write beside a
+#                            secret
+#   TOKEN=ab#c               the value is `ab#c`; no whitespace
+#                            in front, so the `#` is part of it
+#   TOKEN= # paste yours     the value is EMPTY, and bombyx
+#                            stops the run naming the variable
+#                            and this file
+#   TOKEN="abc # d"          the value is `abc # d`; quoting is
+#                            how you keep one that really does
+#                            contain a `#`
+#   TOKEN="abc"xyz           the value is `abc`; a quoted value
+#                            ends at its closing quote and the
+#                            rest of the line is discarded
+#
+# If a name is assigned twice, the last one wins, which is what
+# a shell reading the same file would do.
 #
 # Inside the guest the credential lands at
 # `/home/vagrant/.bombyx-git-credentials` at mode 0600, and

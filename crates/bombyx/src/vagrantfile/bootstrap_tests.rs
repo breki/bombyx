@@ -13,10 +13,11 @@
 //! renderer's own tests, and the renderer's tests sit next to
 //! the code they exercise.
 //!
-//! **Two tests in `super::tests` span both files**, and stay
+//! **Three tests in `super::tests` span both files**, and stay
 //! there because neither half is the subject on its own:
-//! `the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to`
-//! and `the_bootstrap_script_branches_on_the_announcement`.
+//! `the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to`,
+//! its twin for the git credential's path, and
+//! `the_bootstrap_script_branches_on_the_announcement`.
 //! Each compares `BOOTSTRAP` against a Rust constant, so each
 //! catches a rename in *either* file. That is a property of
 //! how they assert rather than of where they sit: a needle
@@ -93,7 +94,13 @@ fn every_variable_is_declared_before_it_is_expanded() {
     // `readonly` lines are the declarations; anything of
     // the form `$NAME` or `"$NAME"` before one is a use.
     let flat = flat_bootstrap_lines();
-    for name in ["DEPLOY_KEY", "ENV_FILE", "CLONE_DIR", "KNOWN_HOSTS"] {
+    for name in [
+        "DEPLOY_KEY",
+        "ENV_FILE",
+        "GIT_CRED",
+        "CLONE_DIR",
+        "KNOWN_HOSTS",
+    ] {
         let decl = flat
             .iter()
             .position(|l| l.starts_with(&format!("readonly {name}=")))
@@ -118,7 +125,7 @@ fn every_variable_is_declared_before_it_is_expanded() {
 }
 
 #[test]
-fn every_refusal_clears_both_uploaded_credentials() {
+fn every_refusal_clears_every_uploaded_credential() {
     // Vagrant uploads the key before this script starts, so
     // a refusal that exits without removing it leaves a
     // credential at whatever mode `scp` gave it, in a guest
@@ -158,8 +165,9 @@ fn every_refusal_clears_both_uploaded_credentials() {
         );
     }
     assert!(
-        flat_bootstrap().contains("rm -f \"$DEPLOY_KEY\" \"$ENV_FILE\""),
-        "refuse must remove the uploaded key and the secrets file"
+        flat_bootstrap()
+            .contains("rm -f \"$DEPLOY_KEY\" \"$ENV_FILE\" \"$GIT_CRED\""),
+        "refuse must remove all three uploaded credentials"
     );
 }
 
@@ -328,6 +336,7 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
     for name in [
         "BOMBYX_DEPLOY_KEY",
         "BOMBYX_ENV_FILE_PRESENT",
+        "BOMBYX_GIT_CRED_PRESENT",
         "BOMBYX_GIT_HOST",
         "BOMBYX_HOST_KEYS_URL",
         "BOMBYX_HOST_KEYS_FORMAT",
@@ -586,7 +595,7 @@ fn an_unusable_home_is_refused_by_name() {
     // uploaded deploy key, which then stays in a guest that
     // never provisioned.
     //
-    // `every_refusal_clears_both_uploaded_credentials` cannot see
+    // `every_refusal_clears_every_uploaded_credential` cannot see
     // this: it compares the offsets of `exit 1` and the
     // removal, and an abort is neither.
     let lines = flat_bootstrap_lines();
@@ -1081,6 +1090,83 @@ fn the_missing_upload_refusal_names_a_cause_that_can_happen() {
         !flat.contains("Check the file is still on the"),
         "the refusal must not send the operator to the workstation, \
          which bombyx already read before it built the plan"
+    );
+}
+
+#[test]
+fn the_git_credential_ends_up_readable_only_by_the_agent() {
+    // The same argument the secrets file's `chmod` carries: the
+    // upload leaves an EXISTING file's mode alone, and a
+    // re-provision writes over one.
+    assert!(
+        BOOTSTRAP.contains("chmod 600 \"$GIT_CRED\""),
+        "the git credential must end up at 0600"
+    );
+}
+
+#[test]
+fn a_git_credential_no_upload_replaced_is_deleted() {
+    // The operator took `repo_token` out of the config and
+    // re-provisioned. Without this the guest keeps a token the
+    // config no longer names, and `git` goes on sending it.
+    let flat = flat_bootstrap();
+    let branch = flat
+        .find("if [ \"${BOMBYX_GIT_CRED_PRESENT:-}\" = 1 ]; then")
+        .expect("the branch must be there");
+    let removal = flat
+        .find("rm -f \"$GIT_CRED\"")
+        .expect("the else branch must remove a leftover");
+    assert!(
+        branch < removal,
+        "the removal must sit in the branch for no configured token"
+    );
+}
+
+#[test]
+fn removing_the_token_unpins_the_clone_from_the_credential() {
+    // The mirror of `removing_the_key_unpins_the_clone_from_it`,
+    // and it matters for the same reason: a `credential.helper`
+    // naming a file that is gone makes every later fetch and
+    // push in that clone fail, and the setting outlives the
+    // provision that wrote it.
+    //
+    // `--unset-all` rather than `--unset`, and the exit 5 is
+    // tolerated, for the reasons the deploy key's block gives:
+    // `--unset` against two values warns, exits 5 and removes
+    // nothing, which is the code that also means there was
+    // nothing there.
+    let flat = flat_bootstrap();
+    for clause in [
+        "config --replace-all credential.helper",
+        "config --unset-all credential.helper",
+    ] {
+        assert!(flat.contains(clause), "not in the script: {clause}");
+    }
+    let clone = flat
+        .find("git_net clone --depth 1")
+        .expect("the clone must be there");
+    let unset = flat
+        .find("config --unset-all credential.helper")
+        .expect("the unset must be there");
+    assert!(clone < unset, "the clone must exist before the unset");
+}
+
+#[test]
+fn the_credential_is_named_on_one_command_at_a_time() {
+    // `exec` at the end of this script hands the environment to
+    // the project's own script. A `credential.helper` set
+    // globally would govern every `git` the agent runs
+    // afterwards, against every host. What carries forward is
+    // the setting written into the clone, which reaches one
+    // repository and stops.
+    let flat = flat_bootstrap();
+    assert!(
+        !flat.contains("config --global credential.helper"),
+        "the helper must never be set globally"
+    );
+    assert!(
+        flat.contains("-c \"credential.helper=$git_cred_helper\""),
+        "the helper must ride on one command at a time"
     );
 }
 

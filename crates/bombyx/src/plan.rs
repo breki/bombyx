@@ -138,6 +138,11 @@ impl Action {
 /// [`RemoteCommand::with_stdin`]. That is also what keeps a
 /// secret out of a printed plan.
 ///
+/// The git credential is the one exception, and its line gives
+/// no count. That file is fixed text plus one token, so a count
+/// would measure the token; `write_then` below says so where it
+/// chooses the writer.
+///
 /// `staged` is what the caller read off the workstation: the
 /// contents of the file `source.env_file` names, and the git
 /// credential built from one variable inside it. Reading and
@@ -284,7 +289,7 @@ fn write_then(
     // The two secret-carrying files are written after the
     // generated ones, so the window in which the VM host holds
     // them is the `vagrant` run and nothing more.
-    if let Some(secrets) = staged.secrets.as_ref() {
+    if let Some(secrets) = staged.secrets() {
         cmds.push(remote::write_file(
             cfg,
             dir,
@@ -292,8 +297,14 @@ fn write_then(
             secrets.as_bytes(),
         ));
     }
-    if let Some(credential) = staged.credential.as_ref() {
-        cmds.push(remote::write_file(
+    // `write_file_of_hidden_size`, not `write_file`, and the
+    // difference is only in what a dry run prints. This file is
+    // `https://` plus the username, the host and two
+    // separators, all of which the reader already has -- so a
+    // byte count would measure the token. `remote::Stdin` holds
+    // the rule.
+    if let Some(credential) = staged.credential() {
+        cmds.push(remote::write_file_of_hidden_size(
             cfg,
             dir,
             vagrantfile::CREDENTIAL_FILE_NAME,
@@ -379,9 +390,8 @@ mod tests {
 
             // The per-command rule above is satisfied by a plan
             // with no vagrant step in it at all, so it cannot
-            // notice one that lost its boot. The count the old
-            // version of this test asserted is what caught that,
-            // and this is that half kept.
+            // notice one that lost its boot. Counting the
+            // vagrant steps is what does.
             //
             // `doctor` is excluded because its probes spell the
             // program differently -- `command -v 'vagrant'` and
@@ -1261,7 +1271,7 @@ mod tests {
     /// `repo_token`, which is what makes bombyx build the git
     /// credential as well.
     fn staged(with_token: bool) -> Staged {
-        use crate::config::{EnvFilePath, RepoTokenVar, RepoUser};
+        use crate::config::{EnvFilePath, RepoToken, RepoTokenVar, RepoUser};
 
         let dir = tempfile::tempdir().expect("a temp dir");
         let file = dir.path().join("x.env");
@@ -1273,11 +1283,11 @@ mod tests {
                 .expect("a temp path is absolute"),
         );
         if with_token {
-            cfg.source.repo_token =
-                Some(RepoTokenVar::parse("TOKEN").expect("a plain name"));
-            cfg.source.repo_user = Some(
-                RepoUser::parse("x-token-auth").expect("a plain username"),
-            );
+            cfg.source.repo_token = Some(RepoToken {
+                var: RepoTokenVar::parse("TOKEN").expect("a plain name"),
+                user: RepoUser::parse("x-token-auth")
+                    .expect("a plain username"),
+            });
         }
         cfg.read_staged(|_| None).expect("the file is there")
     }
@@ -1407,6 +1417,41 @@ mod tests {
                 "{action:?}: the credential must be staged before the boot"
             );
         }
+    }
+
+    #[test]
+    fn the_credential_write_does_not_print_its_size() {
+        // The byte count is harmless for `bombyx.env`, where it
+        // is a whole file's size. This file is fixed text plus
+        // one token, so a count measures the token -- and
+        // `docs/usage.md` invites the operator to paste a dry
+        // run into a bug report.
+        let cmds = plan(&Action::Up, &cfg(), Tty::NoPty, &staged(true));
+        let cred = cmds
+            .iter()
+            .find(|c| script(c).contains("bombyx.git-credentials"))
+            .expect("the credential must be staged");
+        let shown = cred.to_string();
+        assert!(
+            !shown.contains("bytes on stdin"),
+            "a count measures the token: {shown}"
+        );
+        assert!(
+            shown.contains("contents on stdin, not shown"),
+            "the reader must still be told a payload is sent: {shown}"
+        );
+
+        // The secrets file keeps its count, so this is a
+        // decision about one file rather than the render losing
+        // the information everywhere.
+        let env = cmds
+            .iter()
+            .find(|c| script(c).contains("bombyx.env"))
+            .expect("the secrets file must be staged");
+        assert!(
+            env.to_string().contains("bytes on stdin"),
+            "the secrets file keeps its size: {env}"
+        );
     }
 
     #[test]

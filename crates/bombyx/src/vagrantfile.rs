@@ -274,12 +274,13 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// without it would fall outside the reservation with every
 /// test still green.
 #[cfg(test)]
-const BOMBYX_ENV_NAMES: [&str; 10] = [
+const BOMBYX_ENV_NAMES: [&str; 11] = [
     REPO_ENV,
     REF_ENV,
     SCRIPT_ENV,
     DEPLOY_KEY_ENV,
     ENV_FILE_PRESENT_ENV,
+    CREDENTIAL_PRESENT_ENV,
     GIT_HOST_ENV,
     HOST_KEYS_URL_ENV,
     HOST_KEYS_FORMAT_ENV,
@@ -630,8 +631,9 @@ fn env_file_block(configured: bool) -> String {
 ///
 /// [`render`] places this ahead of the shell provisioner, so
 /// [`BOOTSTRAP`] finds the file already there -- which it must,
-/// because the clone that needs it is the first thing that
-/// script does with the network.
+/// because the clone that needs it runs inside that same
+/// script. (Not the script's first network call: the git host's
+/// published ssh keys are fetched before it, over https.)
 fn credential_block(configured: bool) -> String {
     if !configured {
         return String::new();
@@ -658,11 +660,14 @@ fn credential_block(configured: bool) -> String {
 /// the VM host, as `(name, contents)` pairs.
 ///
 /// Not every file that lands there. A configured `env_file`
-/// sends a third, and its contents come off the operator's
-/// workstation rather than from here, so `ENV_FILE_NAME` in this
-/// module holds its name and `crate::plan` writes it. Not a
-/// rustdoc link: that constant is crate-private, and a public
-/// page may not link to one.
+/// sends one more and a configured `repo_token` sends another,
+/// and neither is generated here: the first comes off the
+/// operator's workstation and the second is built from a value
+/// inside it. This module holds both names, `ENV_FILE_NAME` and
+/// `CREDENTIAL_FILE_NAME`, and `crate::plan` writes both. Not
+/// rustdoc links: those constants are crate-private, and a
+/// public page may not link to one. `crate::remote::write`'s
+/// own header lists all four.
 ///
 /// The list exists once, here, and everything else reads it:
 /// `plan` to build the write commands, and the tests to check
@@ -726,7 +731,6 @@ mod tests {
             deploy_key: None,
             env_file: None,
             repo_token: None,
-            repo_user: None,
         };
         cfg
     }
@@ -1182,13 +1186,13 @@ mod tests {
 
     /// [`cfg_with_env_file`], carrying a `repo_token` too.
     fn cfg_with_credential() -> Config {
-        use crate::config::{RepoTokenVar, RepoUser};
+        use crate::config::{RepoToken, RepoTokenVar, RepoUser};
 
         let mut cfg = cfg_with_env_file();
-        cfg.source.repo_token =
-            Some(RepoTokenVar::parse("TOKEN").expect("a plain name"));
-        cfg.source.repo_user =
-            Some(RepoUser::parse("x-token-auth").expect("a plain username"));
+        cfg.source.repo_token = Some(RepoToken {
+            var: RepoTokenVar::parse("TOKEN").expect("a plain name"),
+            user: RepoUser::parse("x-token-auth").expect("a plain username"),
+        });
         cfg
     }
 

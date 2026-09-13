@@ -252,9 +252,18 @@ both of those are `bitbucket.org`. So the config states it.
 **On Bitbucket this is the only way an agent can push.** An ssh
 access key there is read-only and always has been, so a key can
 clone and can never push. An agent that opens pull requests
-needs to push, so it needs the token. On a host whose keys can
-push, `deploy_key` is still the better answer, because its
-secret never passes through a command line at all.
+needs to push, so it needs the token.
+
+On a host whose keys can push, `deploy_key` still reaches
+fewer machines, and that is the whole of the difference.
+Neither secret passes through a command line: the token
+travels on standard input the same way the secrets file
+does. What differs is how many machines hold a copy.
+bombyx never opens the deploy key, so that key exists on
+the VM host and in the guest and nowhere else. The token
+is read on your own machine, so it exists there, on the
+VM host for the length of the `vagrant` run, and in the
+guest.
 
 Prefer the narrowest token the host offers. A Bitbucket
 repository access token reaches one repository; an Atlassian API
@@ -262,9 +271,10 @@ token reaches every repository your account can see, and Jira
 and Confluence with them.
 
 **Read-only or not is a decision, and it decides whether work
-can leave the VM.** A commit made in the guest sits on no branch
+can leave the VM.** This paragraph is about `deploy_key` again,
+not the token. A commit made in the guest sits on no branch
 after the next `provision`, so pushing is how the agent's work
-survives -- and pushing uses this key. `bootstrap.sh` records it
+survives -- and pushing uses the deploy key. `bootstrap.sh` records it
 on the clone as `core.sshCommand` for exactly that reason. A
 read-only key is the tighter choice and makes the VM a place
 work goes to die; a key that can push is a key worth stealing.

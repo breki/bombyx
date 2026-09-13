@@ -217,9 +217,21 @@ header above it:
   `git` sends with it -- `x-token-auth` for a Bitbucket
   repository access token, the account's email address for an
   Atlassian API token, which is why there is no table of hosts
-  and the config states it. `Source`'s `TryFrom` runs the three
-  rules spanning more than one key: both or neither, `env_file`
-  required, and `repo` an `https` URL. bombyx reads the named
+  and the config states it. The two keys do not reach `Source`
+  as two fields: it holds one `Option<RepoToken>` carrying both
+  halves, so one without the other cannot be written down.
+  `Source`'s `TryFrom` converts the keys and runs the four
+  rules spanning more than one of them: both or neither,
+  `env_file` required, `repo` an `https` URL, and that URL
+  naming no username -- `git` asks its credential helper for
+  whichever username the URL carries, and the helper answers
+  only on a match, so a `user@` there would leave the token
+  unusable. Two of the four are checked a second time, in
+  `Config::read_staged` and `Config::credential`: the `env_file`
+  rule and the `https` rule. `Config`'s fields are public, so a
+  config built in code can hold a pairing no config file can.
+  The pairing rule itself needs no second check, because
+  `RepoToken` carries both halves. bombyx reads the named
   variable out of the file on the workstation
   (`config::repo_token::lookup`), percent-encodes it into one
   `https://user:token@host` line, and writes that beside the
@@ -228,9 +240,12 @@ header above it:
   `bombyx.env`. The generated Vagrantfile uploads it to
   `/home/vagrant/.bombyx-git-credentials`, spelled out rather
   than written with a `~` because the path ends up inside a
-  `credential.helper` setting that `git` splits on whitespace
-  itself. Whether one was configured reaches the guest as
-  `BOMBYX_GIT_CRED_PRESENT`, always set. `bootstrap.sh` tightens
+  `credential.helper` setting, and a helper string carrying a
+  space is handed to a SHELL -- so a space splits the path and a
+  `$` is expanded, which is what rules out `~` and `$HOME`. A
+  project's `[env]` table can set `HOME`. Whether one was
+  configured reaches the guest as `BOMBYX_GIT_CRED_PRESENT`,
+  always set. `bootstrap.sh` tightens
   it to 0600, names the setting on the clone and the fetch
   through its `git_net` wrapper, and records it on the clone so
   the agent can push; the unconfigured branch removes a leftover
@@ -358,7 +373,8 @@ every rule its field has: `RemoteRoot` in `config/root.rs`,
 `HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
 `GitRef` in `config/source.rs`, `DeployKeyPath` in
 `config/deploy_key.rs`, `EnvFilePath` in `config/env_file.rs`,
-`RepoTokenVar` and `RepoUser` in `config/repo_token.rs`,
+`RepoTokenVar` and `RepoUser` in `config/repo_token.rs`, which
+also holds the `RepoToken` pair the two travel in,
 `BoxName` in `config/vm.rs`, `EnvName`
 and `EnvValue` in `config/env.rs`, and `ProjectName` in
 `name.rs`. All of them but `HostName` carry

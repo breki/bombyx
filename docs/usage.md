@@ -433,6 +433,16 @@ travels on the command's standard input, which is a pipe
 between two processes rather than text. The trailing comment is
 how many bytes bombyx will send down that pipe.
 
+The git credential's line is the one that gives no count. It
+reads `# contents on stdin, not shown` instead, because that
+file is `https://`, your `repo_user`, the host and two
+separators -- everything but the token is text you already have,
+so the count would be a measurement of the token. This document
+tells you to paste a dry run into a bug report, and a token's
+length should not travel with it. Every other write line still
+gives its size, which is a whole file's size and says nothing
+about any one value in it.
+
 The transcript above writes each count as `N` rather than
 quoting one. Both generated files change size with almost every
 release, so a figure copied into this document is stale by the
@@ -650,14 +660,22 @@ about to run that project's code. That is the same hazard
 the VM host, and the same advice covers both.
 
 `repo_token` and `repo_user` are checked differently again,
-because two of their three rules are about keys agreeing rather
-than about one value's shape. They are written together or not
-at all, `repo_token` requires `env_file`, and it requires `repo`
-to be an `https` URL. All three are refused while the config
-parses, so the message names the line. The fourth check happens
-when the file is read: a variable the file does not hold, or
-holds empty, stops the run and the message names both the
-variable and the file.
+because their rules are about keys agreeing rather than about
+one value's shape. They are written together or not at all,
+`repo_token` requires `env_file`, and it requires `repo` to be
+an `https` URL naming no username. That last one is the
+surprising one: `git` asks its credential helper for whichever
+username the URL carries, and the helper answers only when that
+matches the one it stored, so a `repo` of
+`https://me@bitbucket.org/w/r.git` would ship the token into the
+guest and leave the clone unable to use it. All four are refused
+while the config parses, so the message names the line.
+
+One more check happens when the file is read: a variable the
+file does not hold, or holds empty, stops the run and the
+message names both the variable and the file. A value bombyx
+read as a comment gets a message of its own, because the file
+does not look empty to the operator staring at it.
 
 `repo_token`'s own shape is that of a shell variable name -- a
 letter or an underscore, then letters, digits and underscores --

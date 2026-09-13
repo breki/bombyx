@@ -162,14 +162,16 @@ readonly ENV_FILE="${bombyx_home:-/nonexistent}/.bombyx-env"
 # EVERY REFUSAL IN THIS FILE GOES THROUGH HERE, and that is the
 # point.
 #
-# Vagrant uploads the deploy key and the project's secrets file
-# before this script starts. So a refusal that exits without
-# removing them leaves credentials in the guest -- at whatever
-# mode `scp` gave them -- for the life of a VM that never
-# finished provisioning.
+# Vagrant uploads every credential the config named before this
+# script starts. So a refusal that exits without removing them
+# leaves credentials in the guest -- at whatever mode `scp` gave
+# them -- for the life of a VM that never finished provisioning.
 #
-# One function removes the doubt: it clears both, prints what
-# it was given, and exits. A test refuses any `exit` or `return`
+# One function removes the doubt: it clears every one of them,
+# prints what it was given, and exits. The list it clears is the
+# `rm -f` below, and a credential added to this script without
+# being added there is the mistake this paragraph exists to
+# stop. A test refuses any `exit` or `return`
 # outside this function, so a refusal that skips the removal
 # fails bombyx's build rather than this guest. That test is in
 # bombyx's own source, at
@@ -243,8 +245,8 @@ refuse() {
 # in a list, so adding another needs no count corrected
 # anywhere.
 #
-# They sit above the two credential blocks and every one refuses
-# through `refuse`, which removes both uploads -- so a guest that
+# They sit above the credential blocks and every one refuses
+# through `refuse`, which removes every upload -- so a guest that
 # stops here keeps no credential. The banner between these
 # checks and those blocks says why that matters and what the
 # dangerous case is.
@@ -328,14 +330,15 @@ readonly CLONE_DIR="$HOME/project"
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
 # distinction, and the two are easy to run together.
 #
-# Vagrant uploads two credentials before this script starts: the
-# deploy key, and the project's secrets file when the config
-# names one. Two blocks follow, one per credential, and each
-# tightens or removes its own. A refusal before either is
-# harmless, because `refuse` removes both itself. An *abort*
-# before them is not: the script dies without running `refuse`,
-# and the credentials stay in the agent's own directory for the
-# life of a VM that never finished provisioning.
+# Vagrant uploads whichever credentials the config named before
+# this script starts: the project's secrets file, the git
+# credential, the deploy key. One block follows per credential,
+# and each tightens or removes its own. A refusal before any of
+# them is harmless, because `refuse` removes them all itself. An
+# *abort* before them is not: the script dies without running
+# `refuse`, and the credentials stay in the agent's own
+# directory for the life of a VM that never finished
+# provisioning.
 #
 # `set -u` on an undeclared variable is the way to get such an
 # abort, which is why the checks above read `${HOME:-}` before

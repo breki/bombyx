@@ -422,7 +422,9 @@ fn run() -> Result<Ran> {
     // real run performs -- and a plan that describes a different
     // run is worse than one that refuses. The contents never
     // reach the printed output either way: the line carries a
-    // byte count.
+    // byte count, or for the git credential no count at all --
+    // `crate::remote::Stdin` says which payloads may not report
+    // their size and why.
     //
     // Only for the actions that consume them, which
     // `Action::needs_staged_files` decides and explains. The

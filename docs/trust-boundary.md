@@ -94,7 +94,7 @@ because the host runs the hypervisor.
 ssh vmhost "mkdir -p ~/vms/<project>"
 ssh vmhost "cat > ~/vms/<project>/Vagrantfile"   # file on stdin
 ssh vmhost "cat > ~/vms/<project>/bootstrap.sh"  # file on stdin
-ssh vmhost "cd ~/vms/<project> && vagrant up; rm -f .../bombyx.env .../bombyx.git-credentials"
+ssh vmhost "cd ~/vms/<project> && vagrant up; rm -f .../bombyx.env; rm -f .../bombyx.git-credentials"
 ssh vmhost "cd ~/vms/<project> && vagrant snapshot save ..."
 ```
 
@@ -282,6 +282,9 @@ guest at `~/.bombyx-env`, where `bootstrap.sh` tightens it to
 `0600`. The staged copy on the VM host goes when `vagrant`
 finishes, with the one exception **Where project code lives
 today** above describes -- an interrupted run leaves it.
+`bootstrap.sh` puts that file nowhere else in the guest: it
+exports `BOMBYX_ENV_FILE` naming the path, and the project's own
+script is what copies it into place.
 
 `repo_token` and `repo_user` put a git credential on that same
 route, and it is the third secret that reaches the guest.
@@ -305,9 +308,14 @@ Atlassian API token reaches every repository the account can
 see, and Jira and Confluence with it. Which of those is in the
 VM is the operator's choice, and it is the choice that decides
 what a compromised guest reaches.
-`bootstrap.sh` puts the file nowhere else in the
-guest: it exports `BOMBYX_ENV_FILE` naming the path, and the
-project's own script is what copies it into place.
+
+The credential file's own path is written in one further place
+inside the guest, and it is not an export. `bootstrap.sh`
+records `credential.helper` on the clone, so `git` in that
+checkout keeps finding the file after provisioning ends, which
+is what lets the agent push. Taking `repo_token` out of the
+config unsets that setting and removes the file on the next
+run.
 
 The exposure inside the guest is the same as the key's, and for
 the same reason: the agent needs these values to work, so code

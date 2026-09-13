@@ -10,8 +10,8 @@
 //! they carry the checks that cannot be expressed as "a
 //! non-empty string".
 //!
-//! Two more keys are optional, and each is a path rather than
-//! something the guest hands to `git`, so each has its own
+//! Four more keys are optional. Two of them are paths rather
+//! than something the guest hands to `git`, so each has its own
 //! module and its own rules.
 //!
 //! `deploy_key` lives in `super::deploy_key`. It names a file on
@@ -20,6 +20,12 @@
 //! `env_file` lives in `super::env_file`. It names a file on the
 //! workstation, which bombyx opens itself -- and that difference
 //! is what makes its rules unlike the other path's.
+//!
+//! `repo_token` and `repo_user` are the other two, and they live
+//! in `super::repo_token`. Neither is a path. They name a
+//! variable inside the `env_file` and the username `git` sends
+//! the value under, and they arrive here as one field rather
+//! than two, because `super::RepoToken` holds both.
 
 use serde::Deserialize;
 
@@ -27,7 +33,7 @@ use super::deploy_key::DeployKeyPath;
 use super::env_file::EnvFilePath;
 use super::error::FieldError;
 use super::guards;
-use super::repo_token::{RepoTokenVar, RepoUser};
+use super::repo_token::{RepoToken, RepoTokenVar, RepoUser};
 use crate::newtype::{
     checked_str_newtype, checked_str_parse, checked_str_try_from,
 };
@@ -38,6 +44,13 @@ use crate::newtype::{
 /// not paths on the workstation or the VM host -- see
 /// `docs/trust-boundary.md`. `deploy_key` is the exception,
 /// and its own module says why.
+/// **Serde does not read this struct.** It reads the private
+/// `SourceFields` below, whose fields carry the `rename` and
+/// `default` attributes, and converts. So a new key is declared
+/// there as well as here, and the attribute belongs on that
+/// copy: one written here would be read by nothing. (Not a
+/// rustdoc link, because a public page may not link to a
+/// private item.)
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "SourceFields")]
 pub struct Source {
@@ -46,7 +59,6 @@ pub struct Source {
     /// Branch or tag to clone.
     ///
     /// Named `git_ref` because `ref` is a Rust keyword.
-    #[serde(rename = "ref")]
     pub git_ref: GitRef,
     /// Provisioning script to run, relative to the clone root.
     pub script: ScriptPath,
@@ -56,7 +68,6 @@ pub struct Source {
     /// `None` when the config names none, which is what a
     /// public repository wants: `vagrant` then uploads nothing
     /// and the guest clones without a credential.
-    #[serde(default)]
     pub deploy_key: Option<DeployKeyPath>,
     /// File on the **workstation** holding the project's
     /// secrets, which bombyx carries into the guest.
@@ -69,28 +80,21 @@ pub struct Source {
     /// `None` when the config names none: bombyx then writes no
     /// secrets file and the guest gets an empty
     /// `BOMBYX_ENV_FILE`.
-    #[serde(default)]
     pub env_file: Option<EnvFilePath>,
-    /// Which variable inside `env_file` holds the token `git`
-    /// authenticates the clone with.
+    /// How the guest authenticates an https clone: the
+    /// variable inside `env_file` holding the token, and the
+    /// username it is sent under.
     ///
     /// A name, never the token. `None` for a repository that
     /// needs no credential to clone, and for one that clones
     /// over ssh with a `deploy_key` instead.
     ///
-    /// Stated together with `repo_user` or not at all, which
-    /// [`Source::try_from`] enforces.
-    #[serde(default)]
-    pub repo_token: Option<RepoTokenVar>,
-    /// The username that goes with `repo_token`.
-    ///
-    /// The vendor chooses this literal and bombyx cannot work
-    /// it out: a Bitbucket repository access token wants
-    /// `x-token-auth`, an Atlassian API token wants the
-    /// account's email address, and both live on
-    /// `bitbucket.org`. So the config states it.
-    #[serde(default)]
-    pub repo_user: Option<RepoUser>,
+    /// The config file spells two keys, `repo_token` and
+    /// `repo_user`. One field rather than two `Option`s because
+    /// neither key means anything alone, and `super::RepoToken`
+    /// says why the split state is not worth being able to
+    /// write down.
+    pub repo_token: Option<RepoToken>,
 }
 
 /// The `[source]` table as TOML spells it, before the rules
@@ -98,8 +102,8 @@ pub struct Source {
 ///
 /// Every rule belonging to one value is already a type, and
 /// serde has run it by the time this struct exists. What is
-/// left are the three rules about keys *agreeing* with each
-/// other, and no single type can hold one of those.
+/// left are the rules about keys *agreeing* with each other,
+/// and no single type can hold one of those.
 ///
 /// [`Source`] deserializes through this struct rather than
 /// directly, so a config breaking one of those rules is refused
@@ -124,7 +128,7 @@ struct SourceFields {
 impl TryFrom<SourceFields> for Source {
     type Error = FieldError;
 
-    /// Runs the three rules that span more than one key.
+    /// Runs the four rules that span more than one key.
     ///
     /// `repo_token` and `repo_user` are stated together or not
     /// at all. Each is useless without the other: a variable
@@ -141,6 +145,13 @@ impl TryFrom<SourceFields> for Source {
     /// sends the token to the server on every request, so an
     /// `http` URL would put it on the wire in plain text, and
     /// an `ssh` URL never asks for one at all.
+    ///
+    /// And that URL must name no username. `git` asks its
+    /// credential helper for whichever username the URL
+    /// carries, and `git-credential-store` answers only when
+    /// that equals the one it stored -- so a `user@` there ships
+    /// the token into the guest and leaves the clone unable to
+    /// use it.
     fn try_from(raw: SourceFields) -> Result<Self, Self::Error> {
         match (&raw.repo_token, &raw.repo_user) {
             (Some(_), None) => {
@@ -169,6 +180,24 @@ impl TryFrom<SourceFields> for Source {
                      named variable is read from",
                 ));
             }
+            // `git` asks its credential helper for the
+            // username the URL names, and
+            // `git-credential-store` answers only when that
+            // equals the one it stored -- measured against the
+            // real helper. So a `repo` carrying `me@` would
+            // ship the token into the guest and leave the clone
+            // unable to use it. One place names the username,
+            // and it is `repo_user`.
+            if raw.repo.https_userinfo() {
+                return Err(FieldError::invalid(
+                    RepoTokenVar::FIELD,
+                    "needs a `repo` naming no username: take the \
+                     `user@` out of the URL and let `repo_user` \
+                     name it, because `git` asks its credential \
+                     helper for whichever username the URL \
+                     carries",
+                ));
+            }
             if raw.repo.https_host().is_none() {
                 return Err(FieldError::invalid(
                     RepoTokenVar::FIELD,
@@ -185,8 +214,10 @@ impl TryFrom<SourceFields> for Source {
             script: raw.script,
             deploy_key: raw.deploy_key,
             env_file: raw.env_file,
-            repo_token: raw.repo_token,
-            repo_user: raw.repo_user,
+            repo_token: raw
+                .repo_token
+                .zip(raw.repo_user)
+                .map(|(var, user)| RepoToken { var, user }),
         })
     }
 }
@@ -220,8 +251,11 @@ impl TryFrom<SourceFields> for Source {
 /// because it is not a valid URL.
 ///
 /// The value stays whole. It goes to `git` as written and into
-/// the Vagrantfile as written, and the one piece bombyx reads
-/// out of it is the host, which [`RepoUrl::ssh_host`] returns.
+/// the Vagrantfile as written, and bombyx reads two pieces out
+/// of it, one per transport. [`RepoUrl::ssh_host`] returns the
+/// host whose published ssh keys the guest fetches, and
+/// [`RepoUrl::https_host`] returns the authority a token is
+/// sent to.
 ///
 /// `#[serde(try_from = "String")]` is what connects the type to
 /// the config file. It tells serde to read a plain string and
@@ -312,6 +346,28 @@ impl RepoUrl {
             return None;
         }
         (!host.is_empty()).then_some(host)
+    }
+
+    /// Whether an `https` URL carries a `user@` in front of
+    /// the host.
+    ///
+    /// `false` for every other spelling, including one this
+    /// type accepts and [`RepoUrl::https_host`] refuses, so a
+    /// caller reading it gets an answer about `https` and
+    /// nothing else.
+    ///
+    /// Separate from `https_host`, which drops the userinfo
+    /// rather than reporting it. Dropping is right for building
+    /// the credential line; a caller deciding whether the URL
+    /// and `repo_user` disagree about the username needs to
+    /// know it was there.
+    #[must_use]
+    pub fn https_userinfo(&self) -> bool {
+        let Some(rest) = self.0.strip_prefix("https://") else {
+            return false;
+        };
+        let authority = rest.split_once('/').map_or(rest, |(a, _)| a);
+        authority.contains('@')
     }
 
     /// The authority `git` sends an `https` credential to, port
@@ -639,6 +695,26 @@ mod tests {
     }
 
     #[test]
+    fn a_token_needs_a_repository_naming_no_username() {
+        // `git` asks its credential helper for the username the
+        // URL names, and `git-credential-store` answers only
+        // when that matches the one it stored -- measured. So a
+        // `repo` carrying `me@` makes the staged credential
+        // unusable: the token reaches the guest and the clone
+        // still cannot authenticate.
+        let text = "repo = \"https://me@bitbucket.org/w/r.git\"\n\
+                    ref = \"main\"\n\
+                    script = \"vagrant/provision.sh\"\n\
+                    env_file = \"~/s.env\"\n\
+                    repo_token = \"T\"\n\
+                    repo_user = \"x-token-auth\"\n";
+        let err = toml::from_str::<Source>(text)
+            .expect_err("a username in the URL must be refused")
+            .to_string();
+        assert!(err.contains("repo_user"), "{err}");
+    }
+
+    #[test]
     fn a_token_with_everything_it_needs_loads() {
         let source = source_with(
             "env_file = \"~/s.env\"\n\
@@ -647,7 +723,7 @@ mod tests {
         )
         .expect("every rule is satisfied");
         assert_eq!(
-            source.repo_token.map(|t| t.as_str().to_owned()),
+            source.repo_token.map(|t| t.var.as_str().to_owned()),
             Some("BITBUCKET_TOKEN".to_owned())
         );
     }

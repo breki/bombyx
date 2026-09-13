@@ -4,6 +4,80 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-13-bootstrap-guards-enumerated-by-hand
+
+**Category:** Correctness (escalated consolidation)
+
+`crates/bombyx/templates/bootstrap.sh` gained a third uploaded
+credential, and three separate hand-written lists in
+`crates/bombyx/src/vagrantfile/bootstrap_tests.rs` each had to
+be extended to match: the declared-before-expanded list, the
+`refuse` removal assertion, and the bare-expansion list. The
+review found all three lagging, and the file's own prose banners
+had the same lag, counting two credentials where three exist.
+
+Every one of them is now current. The pattern is what is
+logged: each credential added to that script needs the same
+four edits in three files, and nothing fails when one is
+forgotten -- the extended lists were proven to bite only by
+breaking the script deliberately.
+
+`red-team` proposed one table of `(variable, literal guest
+path, presence flag)` triples driving all three guards, so a new
+credential is one row. That is a consolidation across three
+tests and a template, so it is escalated rather than applied in
+the round that found it.
+
+Not applied because it is a refactor of test machinery with no
+defect behind it today, and this branch is already large.
+
+---
+
+### rt-2026-09-13-cross-key-rule-count-stated-in-six-places
+
+**Category:** Correctness (escalated consolidation)
+
+The rules spanning more than one `[source]` key are enumerated
+in `config.toml.sample`, `docs/usage.md`, `docs/architecture.md`
+twice (prose and the refusal table), `llms.txt` and the diary
+entry. Adding the fourth rule -- `repo` must name no username --
+left five of the six stating a count of three, and the
+architecture table, whose own introduction says the table is the
+count, missing a row.
+
+All six are now correct. What is logged is that a seventh rule
+means six more edits, and `cargo xtask canon-check` reads only
+`CLAUDE.md`, `llms.txt` and `.claude/`, so four of the six are
+unchecked.
+
+The repair is one authoritative list with the others pointing at
+it. Escalated rather than applied: `/review` under **A
+consolidation is escalated** says why a 6-to-1 consolidation
+does not belong in the round that found it.
+
+---
+
+### rt-2026-09-13-no-gate-for-a-missing-doc-comment
+
+**Category:** Correctness (missing gate)
+
+`CLAUDE.md` under **Coding Standards** requires a doc comment on
+every public item, and nothing enforces it. A scripted edit
+inserted `RepoUrl::https_userinfo` between `https_host` and its
+doc comment, which silently reassigned the comment to the new
+function and left `https_host` undocumented and published that
+way. Ten gates passed.
+
+Measured while writing this: `RUSTFLAGS="-W missing_docs" cargo
+build -p bombyx` reports zero violations once that one is fixed,
+so turning the lint on in the workspace lint block is a one-line
+change that costs nothing today.
+
+Not applied here because it is a workspace-wide lint change
+outside this branch's scope, and it wants its own commit.
+
+---
+
 ### rt-2026-09-13-env-file-read-has-no-size-cap-and-a-toctou-gap
 
 **Category:** Security (low)

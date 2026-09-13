@@ -228,7 +228,9 @@ pub use host::{
 pub(crate) use host::{is_anchored_dir, registry_place};
 pub(crate) use registry::Registry;
 pub use registry::USER_CONFIG_FILE;
-pub use repo_token::{GitCredential, RepoTokenError, RepoTokenVar, RepoUser};
+pub use repo_token::{
+    GitCredential, RepoToken, RepoTokenError, RepoTokenVar, RepoUser,
+};
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
 pub use vm::{BoxName, Provider, Vm};
@@ -339,25 +341,47 @@ pub struct Config {
 /// the VM host for one run.
 ///
 /// Both parts come out of the single file `source.env_file`
-/// names, and both are `None` when the config names no such
-/// file. [`Config::read_staged`] is the only thing that builds
-/// one, which is what keeps the two consistent with the config
-/// that produced them.
+/// names, and the invariant is that either both came from one
+/// [`Config::read_staged`] call or there is nothing here at
+/// all. The fields are private so those are the only two states
+/// a caller can produce, which matters because
+/// `crate::plan::plan` takes one on trust.
 ///
-/// `Default` is the "nothing to send" value, and it is what an
-/// action that must keep working after the operator deleted the
-/// file gets -- `crate::plan::Action::needs_staged_files` says
-/// which those are.
+/// `Default` is the second state rather than a hole in the
+/// first. It is what an action that must keep working after the
+/// operator deleted the file gets, and
+/// `crate::plan::Action::needs_staged_files` says which those
+/// are.
 #[derive(Debug, Default)]
 pub struct Staged {
     /// The project's secrets, as the file holds them.
-    pub secrets: Option<Secrets>,
+    secrets: Option<Secrets>,
     /// The credential `git` authenticates the clone with, built
     /// from one variable inside those secrets.
     ///
     /// `None` when the config names no `repo_token`, which is
     /// what a public repository and an ssh clone both want.
-    pub credential: Option<GitCredential>,
+    credential: Option<GitCredential>,
+}
+
+impl Staged {
+    /// The project's secrets, when the config names a file.
+    ///
+    /// Both fields are private, and that is what holds the
+    /// promise above up. Public ones would let a caller write a
+    /// `Staged` whose halves came from two different configs,
+    /// and `crate::plan::plan` takes one on trust.
+    #[must_use]
+    pub fn secrets(&self) -> Option<&Secrets> {
+        self.secrets.as_ref()
+    }
+
+    /// The git credential, when the config names a
+    /// `repo_token`.
+    #[must_use]
+    pub fn credential(&self) -> Option<&GitCredential> {
+        self.credential.as_ref()
+    }
 }
 
 /// Why bombyx could not assemble what it stages for a run.
@@ -406,6 +430,19 @@ impl Config {
         F: Fn(&str) -> Option<String>,
     {
         let Some(path) = self.source.env_file.as_ref() else {
+            // A `repo_token` with no file to read it out of is
+            // refused rather than ignored. `Source::try_from`
+            // catches it while a config file parses; this is
+            // the same pairing in a config built in code, where
+            // the fields are public. Ignoring it would render a
+            // Vagrantfile claiming a credential that nothing
+            // stages, and the guest would refuse after booting.
+            if let Some(token) = self.source.repo_token.as_ref() {
+                return Err(RepoTokenError::NoEnvFile {
+                    var: token.var.as_str().to_owned(),
+                }
+                .into());
+            }
             return Ok(Staged::default());
         };
         let secrets = path.read(getenv)?;
@@ -430,10 +467,7 @@ impl Config {
         secrets: &Secrets,
         path: &str,
     ) -> Result<Option<GitCredential>, RepoTokenError> {
-        let (Some(var), Some(user)) = (
-            self.source.repo_token.as_ref(),
-            self.source.repo_user.as_ref(),
-        ) else {
+        let Some(token) = self.source.repo_token.as_ref() else {
             return Ok(None);
         };
         // `Source::try_from` refuses a `repo_token` whose `repo`
@@ -446,8 +480,7 @@ impl Config {
                 repo: self.source.repo.as_str().to_owned(),
             }
         })?;
-        repo_token::credential(host, user, secrets.as_bytes(), var, path)
-            .map(Some)
+        repo_token::credential(host, token, secrets.as_bytes(), path).map(Some)
     }
 
     /// How bombyx reaches [`Config::host`].
@@ -1498,6 +1531,31 @@ mod load_project_tests {
             .secrets
             .expect("a config naming a file must yield secrets");
         assert_eq!(secrets.as_bytes().len(), 14);
+    }
+
+    #[test]
+    fn a_token_with_no_file_to_read_it_from_is_refused() {
+        // Unreachable from a config file -- `Source`'s
+        // `TryFrom` refuses the pairing there. Reachable in
+        // code, because `Config`'s fields are public, and
+        // ignoring it would render a Vagrantfile claiming a
+        // credential that nothing stages.
+        use crate::config::{RepoToken, RepoTokenVar, RepoUser};
+
+        let (mut cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("the fixture registry must load");
+        cfg.source.repo_token = Some(RepoToken {
+            var: RepoTokenVar::parse("TOKEN").expect("a plain name"),
+            user: RepoUser::parse("x-token-auth").expect("a plain username"),
+        });
+        assert!(cfg.source.env_file.is_none(), "the fixture sets none");
+        let err = cfg
+            .read_staged(|_| None)
+            .expect_err("a token with no env_file must be refused");
+        let msg = err.to_string();
+        assert!(msg.contains("TOKEN"), "{msg}");
+        assert!(msg.contains("env_file"), "{msg}");
     }
 
     /// [`load`], told what this machine is called.
