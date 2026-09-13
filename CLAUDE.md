@@ -702,6 +702,15 @@ to be opened.
   machine bombyx was compiled for.
 - All public items must have doc comments
 - Wrap markdown at 80 characters per line
+- **Prose written to GitHub is not wrapped.** An issue body, an
+  issue comment, a PR title and a PR description all get one
+  long line per paragraph. The rule above covers a markdown
+  file in the repository, where the file is what a reader
+  opens; GitHub renders the markdown instead, so a hard wrap
+  there buys the reader nothing and makes the text harder to
+  edit afterwards. Wrap in `docs/`, `README.md`, this file,
+  `llms.txt`, `.claude/` and code comments. Do not wrap in
+  anything handed to `gh`.
 - **Fixing an over-long line means reflowing its whole
   paragraph.** Patching the one line pushes the overflow onto
   the next and leaves half-empty lines mid-paragraph, which a
