@@ -462,7 +462,28 @@ plan, decisions, and outcome.
   refuse, which needs refuse() and DEPLOY_KEY declared above them and both
   currently sit below, or accepting the gap and saying so where the checks are.
 
+- **release-bump-ignores-pre-one-zero** -- a removal infers major even at 0.x
+  `/release` step 3 infers a major bump from a bullet marked `**BREAKING:**` or
+  a non-empty `### Removed`, and `CLAUDE.md` states the same rule under
+  **Commits and releases**. Neither reads the current version. SemVer 2.0.0 says
+  major version zero is for initial development and anything may change at any
+  time, so a breaking change at 0.5.0 is ordinarily 0.6.0, not 1.0.0.
+  **Two consecutive releases have now overridden this by hand.** Commit
+  `428d9ef` cut v0.5.0 as a minor with 21 breaking bullets, and wrote the
+  argument into its own message; the stdin work removed the public
+  `RemoteCommand::abbreviated` and the operator called that a minor too. A rule
+  nobody has followed twice running is a rule that should change, not a prompt
+  people keep answering. Decide whether the inference should read the version
+  first and treat a breaking change below 1.0.0 as a minor bump, or whether the
+  accept-or-override `AskUserQuestion` -- the last bullet of `/release` step 3,
+  not step 4 -- is judged enough on its own. Whichever way, say it in
+  `CLAUDE.md` and in `.claude/commands/release.md` both, so the two cannot
+  disagree.
+
 ## Done
+
+- **generated-files-world-readable** -- the Vagrantfile lands at mode 664
+  (2026-09-13)
 
 - **list-registered-vms** -- list the registered projects and their VM state
   (2026-09-12)

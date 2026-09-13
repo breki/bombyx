@@ -112,6 +112,25 @@ In practice:
   ours to say", "the operator's to fix". Each one saves two
   words and costs a re-read. Name the actor and give them a
   verb.
+- **A comparative needs its comparison, or it is not a claim.**
+  "the exposure is narrower" says nothing: narrower than what?
+  The reader has to reconstruct the measurement, and cannot
+  disagree with a sentence that makes no statement. Say the
+  thing itself. "It stops one account in the guest reading the
+  key; it stops nothing the agent does" is checkable, and
+  "narrower than it looks" is not. **This is a house habit, not
+  a hypothetical** -- `narrower than` appears seven times across
+  `docs/` and `crates/`, and reading them is what produced this
+  rule. The same objection covers *bounded*, *tighter*, *a
+  smaller step than it appears* and *limits what stealing it is
+  worth*. `scoped` survives where it names a real reach --
+  "scoped to one repository" -- because the reach is in the
+  sentence; bare "scoped" does not. The repair is mechanical:
+  delete the comparative and name what it reaches, or name both
+  costs and let the reader weigh them. **In a document about
+  risk this matters twice over**, because a hedged comparative
+  reads as reassurance and a reader cannot check reassurance.
+
 - **Avoid verbs that can be read as nouns.** "Each field
   names the program it actually reaches" garden-paths:
   "names" reads as a plural noun after "field", and the
@@ -683,6 +702,15 @@ to be opened.
   machine bombyx was compiled for.
 - All public items must have doc comments
 - Wrap markdown at 80 characters per line
+- **Prose written to GitHub is not wrapped.** An issue body, an
+  issue comment, a PR title and a PR description all get one
+  long line per paragraph. The rule above covers a markdown
+  file in the repository, where the file is what a reader
+  opens; GitHub renders the markdown instead, so a hard wrap
+  there buys the reader nothing and makes the text harder to
+  edit afterwards. Wrap in `docs/`, `README.md`, this file,
+  `llms.txt`, `.claude/` and code comments. Do not wrap in
+  anything handed to `gh`.
 - **Fixing an over-long line means reflowing its whole
   paragraph.** Patching the one line pushes the overflow onto
   the next and leaves half-empty lines mid-paragraph, which a

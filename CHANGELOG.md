@@ -12,11 +12,36 @@ and this project adheres to
 
 ### Added
 
+- A new bombyx::run module starts every RemoteCommand bombyx runs. Its Resolver
+  looks each program up before any of them runs, and its Error names which stage
+  failed: the program is not on PATH, the child would not start, the payload
+  could not be sent, or the wait failed. remote::Stdin, RemoteCommand::stdin and
+  RemoteCommand::with_stdin carry a payload for it. The one process bombyx still
+  starts outside it is doctor's local `--version` probe, which asks about this
+  workstation rather than the VM host.
+
 ### Changed
+
+- bombyx sends the generated Vagrantfile and bootstrap script on the write
+  command's standard input rather than inside a command-line argument, so
+  neither file is visible in a process listing on the VM host or on the
+  workstation. The copy on the VM host is covered too: the write carries `umask
+  077` so the file is created private, and a `chmod 600` after it corrects a
+  file an earlier bombyx left at 0664. Both generated files end up readable by
+  their owner alone, which matters because the Vagrantfile carries every value
+  from the project's `[env]` table. A dry run now ends each write line with the
+  payload's size in bytes instead of naming a heredoc and a line count.
 
 ### Fixed
 
 ### Removed
+
+- **BREAKING:** RemoteCommand::abbreviated, which shortened a command that
+  carried a whole file inside a shell heredoc. No file rides in a command line
+  any more, so it had nothing left to shorten; Display now renders every command
+  in full. This is a library API only: nothing about the `bombyx` command line
+  changed incompatibly, and bombyx is on 0.x, so release this as a minor bump
+  (`/release minor`) rather than the major one the CHANGELOG headings infer.
 
 ## [0.5.0] - 2026-09-12
 

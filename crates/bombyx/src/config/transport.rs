@@ -12,8 +12,8 @@
 //! itself is unchanged. Every VM action already builds a POSIX
 //! shell *script string* and hands it to the far shell, and
 //! `sh -c` supplies the same shell, so the quoting, the
-//! heredocs, the `cd` and the `$(hostname -s)` all keep working
-//! the way they do over `ssh`.
+//! redirections, the `cd` and the `$(hostname -s)` all keep
+//! working the way they do over `ssh`.
 //!
 //! **What this costs.** One `config.toml` now behaves
 //! differently depending on which machine reads it, and the

@@ -87,13 +87,13 @@ pub enum Action {
 /// invocation -- but it does mean a captured plan is not a script
 /// you can paste and expect byte-identical behaviour from.
 ///
-/// **A dry run also elides the two file writes' payloads.** Each
-/// carries a whole file -- the generated Vagrantfile and the
-/// bootstrap script -- and printing both in full buries the plan
-/// they belong to. The printed line identifies the heredoc and how
-/// many lines it dropped, and what is written to the host is the
-/// full content regardless; see
-/// [`RemoteCommand::abbreviated`].
+/// **The two file writes are the exception, and cannot be
+/// otherwise.** Each carries a whole file -- the generated
+/// Vagrantfile and the bootstrap script -- and neither file is
+/// in the command at all: it travels on the command's standard
+/// input, which is a pipe and not text a printed line can hold.
+/// The line says how many bytes bombyx will send; see
+/// [`RemoteCommand::with_stdin`].
 #[must_use]
 pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
     match action {
@@ -417,22 +417,26 @@ mod tests {
         remote::script_without_disarm(c)
     }
 
-    /// Like [`scripts`], with each entry cut at its first line.
+    /// Like [`scripts`], with the two file writes' payloads
+    /// cleared before rendering.
     ///
-    /// Only the two file writes span more than one line, and
-    /// what they carry is a whole Vagrantfile and a whole shell
-    /// script. Pinning those here would put forty lines of
-    /// another file's prose inside a test about command order,
-    /// and would fail whenever a comment in `bootstrap.sh` was
-    /// reworded. Their contents are pinned where they belong:
+    /// A write carries a whole Vagrantfile or a whole
+    /// `bootstrap.sh`, and [`Display`](std::fmt::Display) ends
+    /// such a command with the payload's size in bytes. Pinning
+    /// that number here would fail whenever a comment in
+    /// `bootstrap.sh` was reworded, in a test about command
+    /// order. The contents are pinned where they belong:
     /// `vagrantfile::tests` for what is rendered, and
-    /// `remote::tests` for the heredoc that carries it. What
-    /// this test owns is the shell shape and the order, and the
-    /// first line carries both.
-    fn scripts_head(action: &Action) -> Vec<String> {
-        scripts(action)
+    /// `remote::write::tests` for what reaches the pipe. What
+    /// these tests own is the shell shape and the order.
+    ///
+    /// [`RemoteCommand::without_payload`] beats cutting the
+    /// rendered string, which would need a parser for the note
+    /// it is removing.
+    fn scripts_without_payloads(action: &Action) -> Vec<String> {
+        run(action)
             .iter()
-            .map(|s| s.lines().next().unwrap_or_default().to_owned())
+            .map(|c| remote::rendered_without_disarm(&c.without_payload()))
             .collect()
     }
 
@@ -461,16 +465,18 @@ mod tests {
         // being reviewed, wrongly on each of them. The length
         // assertion below is what still catches a step that goes
         // missing.
-        let s = scripts_head(&Action::Up);
+        let s = scripts_without_payloads(&Action::Up);
         assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
         assert_eq!(
             s[..4],
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
-                "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
-                 <<'BOMBYX_EOF'",
-                "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh' \
-                 <<'BOMBYX_EOF'",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/Vagrantfile' && \
+                 chmod 600 ~/'vms/myproject/Vagrantfile'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/bootstrap.sh' && \
+                 chmod 600 ~/'vms/myproject/bootstrap.sh'\"",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
@@ -644,13 +650,15 @@ mod tests {
         // Pins the literal shell, so the command's whole effect
         // on the host is readable in one place.
         assert_eq!(
-            scripts_head(&Action::Provision),
+            scripts_without_payloads(&Action::Provision),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
-                "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile' \
-                 <<'BOMBYX_EOF'",
-                "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh' \
-                 <<'BOMBYX_EOF'",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/Vagrantfile' && \
+                 chmod 600 ~/'vms/myproject/Vagrantfile'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/bootstrap.sh' && \
+                 chmod 600 ~/'vms/myproject/bootstrap.sh'\"",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \

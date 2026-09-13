@@ -28,7 +28,7 @@ flowchart LR
 
   reg --> cli
   cli -- "ssh, or sh -c here" --> vg
-  cli -- "heredoc, same two routes" --> dir
+  cli -- "file on stdin, same two routes" --> dir
   vg -- creates --> guest
   git -- clone --> clone
   agent --> clone
@@ -122,8 +122,9 @@ workstation.
 
 The diagram shows no box for the project's repository, and that
 is the point: neither the workstation nor the VM host reads any
-file from it. The VM host reads none because the push that sent
-it `vagrant/` is gone. The workstation reads none because every
+file from it. The VM host reads none because the only two files
+bombyx puts there are ones it generates itself. The workstation
+reads none because every
 setting comes out of `config.toml`, which lives in the
 operator's config directory, and `--project` names the project
 rather than the working directory implying it. The workstation
@@ -198,16 +199,20 @@ one with the same three fields.
 | `vagrantfile` | rendering the Vagrantfile and the bootstrap |
 | `hostkeys` | which git hosts publish ssh keys, and where |
 | `remote` | building the argv for either route, quoting |
-| `remote::write` | the heredoc that writes a generated file |
+| `remote::write` | the command that writes a generated file |
 | `doctor` | preconditions, and what a result means |
 | `listing` | grouping by host, reading a reply, the `list` table |
 | `update` | `self-update`: download, verify, swap |
 | `name` | scratch-VM names, and path segments |
 | `term` | text reaching the terminal: endings, sanitizing, clipping |
 | `tool` | resolving a program, never via the cwd |
+| `run` | looking a program up, starting a command, feeding it input |
 
-`main` parses arguments, spawns processes and prints. Nothing
-else.
+`main` parses arguments, drives `run` and prints. It starts no
+process against the VM host itself. The one process it does
+start is `local_tool`'s `--version` call, which asks a program
+on this workstation about itself rather than running a
+`RemoteCommand`.
 
 ## Domain entities
 
@@ -370,6 +375,10 @@ classDiagram
     +String program
     +Vec~String~ args
     +Option~PathBuf~ dir
+    +Option~Stdin~ stdin
+  }
+  class Stdin {
+    -Vec~u8~ bytes
   }
   class Tty {
     <<enumeration>>
@@ -378,14 +387,36 @@ classDiagram
   }
 
   Action --> ScratchName : Scratch and Discard carry one
+  RemoteCommand --> Stdin : a write carries one
   Action ..> RemoteCommand : plan() produces a list
   Tty ..> RemoteCommand : decides ssh -t
 ```
 
 `plan()` turns one `Action` and a `Config` into an ordered
-`Vec<RemoteCommand>`, and nothing else in the library spawns a
-process. That is what makes `--dry-run` honest and the ordering
-testable.
+`Vec<RemoteCommand>`. `run` is the only module that starts a
+`RemoteCommand`, and `plan` and `remote` never call it -- they
+build commands and run none. That is what makes `--dry-run`
+honest and the ordering testable.
+
+`run::Resolver` holds the resolved path of every program a
+command list names, and runs the commands itself, so no caller
+ever pairs a path with a command and has to keep the two in
+step. It looks all of them up **before any of them runs**:
+resolving inside the loop would let a plan change something on
+the VM host and only then find that its next program is missing.
+
+It has two ways to run one, and which a command gets decides
+what the operator sees. `execute` leaves the child bombyx's own
+streams, so a provisioning run scrolls past as it happens.
+`output` collects what the child printed, which is what a
+`doctor` probe and a `list` status call need, because bombyx
+parses those replies rather than showing them.
+
+`Stdin` holds the bytes a command feeds its child instead of
+putting them in an argument, and it keeps them private. It has
+no `Display`, and its `Debug` reports a length rather than the
+bytes, so a payload cannot reach the terminal through an error
+message or a failing assertion.
 
 `Scratch` and `Discard` carry a `ScratchName`, which is a
 validated newtype rather than a `String`: it must be one path
@@ -407,8 +438,8 @@ sequenceDiagram
   op->>cli: bombyx --project p up
   cli->>cli: read config.toml, check every value
   cli->>host: mkdir -p the project dir
-  cli->>host: cat > Vagrantfile (heredoc)
-  cli->>host: cat > bootstrap.sh (heredoc)
+  cli->>host: cat > Vagrantfile (file on stdin)
+  cli->>host: cat > bootstrap.sh (file on stdin)
   cli->>host: cd the project dir, then vagrant up
   host->>vg: vagrant up
   vg->>guest: create from box
@@ -425,7 +456,7 @@ sequenceDiagram
 ```
 
 Three things matter about the order. The directory is created
-first, because the heredocs write into it. `vagrant up` runs
+first, because the two writes redirect into it. `vagrant up` runs
 after them, because it reads the Vagrantfile they just wrote.
 And the snapshot is saved after the boot, so it records a
 machine that has finished provisioning.
@@ -998,23 +1029,22 @@ flowchart TD
   toml --> val
   val -- "checked Config" --> render
   render -- "Ruby text" --> write
-  write -- "quoted heredoc" --> out
+  write -- "bytes on stdin" --> out
 ```
 
 Each stage is safe on its own rather than trusting the one
-before it. `render` escapes every `"`, `\` and `#` even though
-`BoxName`, `RepoUrl`, `GitRef`, `ScriptPath` and
-`DeployKeyPath` already refused them. `write_file` lengthens
-its heredoc delimiter until no payload line equals it, rather
-than assuming the payload came from `render`.
+before it.
 
-The repetition is not redundant, and the newtypes narrowed it
-rather than removing it. A library caller can no longer hand
-`render` a quote at all: every value it writes into the Ruby is
-a newtype whose inner value is private. What survives is the
-stage below it -- `write_file` can still be handed a payload no
-renderer produced -- and the fact that a guard living in another
-module is the one a new field gets added without.
+`render` escapes every `"`, `\` and `#` in whatever it is
+handed. That escaping is a precaution rather than a
+requirement: `BoxName`, `RepoUrl`, `GitRef`, `ScriptPath` and
+`DeployKeyPath` are newtypes whose inner value is private, so a
+caller cannot hand `render` a quote in the first place.
+
+`write_file` needs no escaping rule at all. Bytes travelling
+down a pipe reach the far side unread by any shell, so it
+carries a payload no renderer produced exactly as faithfully as
+one that came straight from `render`.
 
 ## Quality gates
 

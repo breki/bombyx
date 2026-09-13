@@ -30,7 +30,7 @@ pub mod probe;
 mod quote;
 mod write;
 
-pub use command::RemoteCommand;
+pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::write_file;
 
@@ -370,20 +370,9 @@ impl Tty {
 /// documented startup order rather than measured
 /// *(unverified)*.
 ///
-/// **Ends in `; ` rather than a newline or `&&`.** A `cat`
-/// heredoc is why. The shell reads the body of
-///
-/// ```text
-/// unset ...; cat > f <<'EOF'
-/// first line of the file
-/// EOF
-/// ```
-///
-/// starting on the line after the redirection, so a prefix
-/// ending in a newline would put the `cat` on its own line and
-/// hand the file's first line to the shell instead. `&&` would
-/// work but ties the script to the `unset` succeeding, and a
-/// separator that can fail is one the script does not need.
+/// **Ends in `; ` rather than `&&`.** `&&` would work, and it
+/// ties the whole script to the `unset` succeeding. A separator
+/// that can fail is one the script does not need.
 const DISARM_VAGRANT_REDIRECTS: &str = "unset VAGRANT_CWD \
      VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH \
      VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; ";
@@ -891,9 +880,9 @@ pub fn save_snapshot_if_absent(
 /// segment. bombyx then joins the project name onto that root,
 /// so every path derived from a loaded `Config` is already at
 /// least two real segments deep. A type running the rules once
-/// is what
-/// keeps the write path (`mkdir`, then the heredocs) and this
-/// removal path agreeing about which roots are usable.
+/// is what keeps the write path (`mkdir`, then the two file
+/// writes) and this removal path agreeing about which roots are
+/// usable.
 ///
 /// The `debug_assert` catches a caller that builds a path some
 /// other way; it is not the safety mechanism.
@@ -963,7 +952,7 @@ mod tests {
     #[test]
     fn the_local_route_runs_the_same_script_through_sh() {
         // The script is the delicate part: quoting, the `cd`,
-        // the heredoc delimiter and the `$(hostname -s)` the far
+        // the redirection and the `$(hostname -s)` the far
         // side must evaluate. `sh -c` is the same POSIX shell
         // `ssh` starts on the host, so every builder keeps one
         // script. The only difference on this route is the two

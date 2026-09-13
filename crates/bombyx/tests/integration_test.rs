@@ -184,6 +184,40 @@ fn programs(lines: &[String]) -> Vec<&str> {
 }
 
 #[test]
+fn no_value_from_the_config_reaches_the_printed_plan() {
+    // The reason the two writes use standard input at all. A
+    // value from `[env]` is rendered into the generated
+    // Vagrantfile; if the Vagrantfile were an argument of the
+    // write command, that value would be in the printed plan --
+    // and, when the command runs, in every `ps` listing on both
+    // machines.
+    //
+    // The whole binary rather than the builder, because the
+    // printing is `main`'s and a builder-level test would not
+    // notice `main` printing the wrong rendering of a command.
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+    write_user_config(
+        &dir,
+        &format!(
+            "{}\n[projects.myproject.env]\n\
+             API_TOKEN = \"hunter2-do-not-print-me\"\n",
+            registry("host = \"vmhost.invalid\"\n", "")
+        ),
+    );
+    let lines = dry_run(&dir, &["--dry-run", "up"]);
+    let plan = lines.join("\n");
+    assert!(!plan.contains("hunter2"), "{plan}");
+    // And the value really is in the file being sent, so the
+    // assertion above is about the printing rather than about a
+    // fixture that never carried it.
+    let path = dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE);
+    let (cfg, _) =
+        bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
+    assert!(bombyx::vagrantfile::render(&cfg).contains("hunter2"));
+}
+
+#[test]
 fn up_makes_the_dir_writes_the_files_then_boots() {
     // Order is the assertion: a `contains` check would pass
     // even if the boot ran before the writes.
@@ -191,9 +225,11 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     let lines = dry_run(&dir, &["--dry-run", "up"]);
     assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
-    // Each generated file prints as one elided line.
+    // Each generated file prints as one line naming only its
+    // size: the file travels on standard input, so there is
+    // nothing of it in the command for a plan to print.
     assert!(lines[1].contains("cat > ~/'vms/myproject/Vagrantfile'"));
-    assert!(lines[1].contains("lines elided"), "{}", lines[1]);
+    assert!(lines[1].contains("bytes on stdin"), "{}", lines[1]);
     assert!(lines[2].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
     assert!(
         lines[3].ends_with(&format!(

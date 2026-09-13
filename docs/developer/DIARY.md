@@ -2,6 +2,87 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-13
+
+**A generated file now travels on standard input, not in an
+argument**
+
+bombyx sent the Vagrantfile and `bootstrap.sh` to the VM host by
+wrapping each in a shell heredoc and passing the result as one
+argument of `ssh`. That works, and it puts every byte of the
+file in a command line. On any Unix machine `ps` shows every
+logged-in account the full command line of every running
+process, so while a write ran, the file was readable by anyone
+with a login on the VM host -- and on the workstation too, since
+the same text sat in the local `ssh` command line.
+
+The Vagrantfile is not secret-free: it carries every value from
+the project's `[env]` table. Issue #76 has the table of where a
+secret ends up today, and this is the first of its two bold
+rows.
+
+`RemoteCommand` gained a `stdin` field holding a `Stdin`, and a
+new `run` module writes that payload into a pipe rather than
+passing it as text. `write_file` builds `cat > path` and hands
+over the bytes, so `HEREDOC`, `delimiter_for` and the public
+`RemoteCommand::abbreviated` all went -- about 90 lines with
+their tests. `abbreviated` went entirely rather than in part: it
+existed to shorten a command carrying a whole file, and no
+command carries one any more. Nothing has to be escaped any more
+either: bytes on a pipe are bytes, and no shell looks inside
+them for a `$` to substitute or an end-word to stop at.
+
+Three things were worth the trouble they caused.
+
+**The payload must not print.** `Stdin` is a newtype rather than
+a `Vec<u8>` for one reason: it has no `Display`, and its `Debug`
+reports a length. `RemoteCommand` derives `Debug`, so a plain
+vector would have printed in full from any `{:?}` in an error
+context or a failing assertion -- which would undo the whole
+point.
+
+**The pipe has to be closed.** `cat` returns on end-of-file and
+nothing else, so holding the write handle open hangs both
+processes. Proven rather than assumed: with the `drop` removed,
+the test did not finish inside 90 seconds.
+
+**A broken pipe is usually not the answer to report.** A child
+that stops reading breaks the pipe, and `write_all` then fails.
+With that error propagated, `sh -c 'exit 3'` reported a write
+failure instead of the 3. So the write error is dropped in
+favour of the child's status -- but **only when that status is
+itself a failure**. A child that stops reading and then exits 0
+has taken part of the file and reported success, and the next
+command reads that file, so a broken pipe over a success stays
+an error. The review caught that second half; the first cut
+swallowed every broken pipe.
+
+The review reshaped the module twice more. `Stdin::bytes` became
+crate-private, so the type's "nothing renders these" rule is
+something the compiler holds rather than something a caller is
+asked to respect. And `run::Resolver` replaced a pair of loose
+arguments: it looks every program up through `tool` before any
+command runs, then runs the commands itself, so no call site
+holds a resolved path beside a command and has to keep the two
+in step. That moved the up-front lookup out of `main`, which is
+outside the coverage gate, and it closed a real gap -- the
+binary had a second runner for `doctor` and `list` that built
+its own child and read neither `dir` nor `stdin`. Both now go
+through `Resolver`.
+
+The errors are a `thiserror` enum naming the stage that failed:
+the program is not on `PATH`, the child would not start, the
+payload could not be sent, the wait failed. One `io::Error`
+behind an "running ssh" context left the operator to guess
+which, and those have different fixes.
+
+Both routes were checked with the exact command bombyx emits,
+`unset` prefix and tilde-outside-quotes path included, against a
+payload holding `$(id)`, backticks, a `BOMBYX_EOF` line and no
+trailing newline: `sh -c` on this machine, and `ssh` to a real
+remote host. Both arrived byte-identical. What has not run is a
+full `bombyx up` against a VM host, which would boot a machine.
+
 ### 2026-09-12
 
 **`git push --tags` published another project's releases**

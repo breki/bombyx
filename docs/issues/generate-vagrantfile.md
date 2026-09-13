@@ -5,6 +5,16 @@
 **Started:** 2026-08-30
 **Completed:** 2026-08-30
 
+> **This is a record, not a description of bombyx today.**
+> Everything below describes the tree as it stood on the
+> completion date, in the present tense it was written in, and
+> parts of it have since changed -- the heredoc it discusses was
+> replaced by a write on standard input, and
+> `RemoteCommand::abbreviated` no longer exists. It is kept for
+> the argument that was available at the time, which is the one
+> thing rewriting it would destroy. For current behaviour read
+> `docs/architecture.md` and `docs/usage.md`.
+
 ## Problem
 
 bombyx ships the project's `vagrant/` directory to the VM host and
