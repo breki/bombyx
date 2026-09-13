@@ -75,78 +75,74 @@ pub fn spawn(
     }
 }
 
-#[cfg(test)]
+// These tests start `sh`, which bombyx itself only ever starts
+// on Unix: `config::transport` refuses the local route on
+// Windows, so `sh -c` is not a command that runs there. The
+// whole module is therefore gated, and the pipe handling above
+// -- the same std code on every platform -- goes unexercised on
+// Windows.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::os::unix::process::ExitStatusExt;
+    use tempfile::TempDir;
 
-    // These start `sh`, which bombyx itself only ever starts on
-    // Unix: `config::transport` refuses the local route on
-    // Windows, so `sh -c` is not a command that runs there. The
-    // pipe handling above is the same std code on every
-    // platform, but no test here exercises it on Windows.
-    #[cfg(unix)]
-    mod unix {
-        use super::*;
-        use std::os::unix::process::ExitStatusExt;
-        use tempfile::TempDir;
+    fn sh(script: &str) -> RemoteCommand {
+        RemoteCommand::new("sh", &["-c", script])
+    }
 
-        fn sh(script: &str) -> RemoteCommand {
-            RemoteCommand::new("sh", &["-c", script])
-        }
+    fn shell() -> &'static Path {
+        Path::new("/bin/sh")
+    }
 
-        fn shell() -> &'static Path {
-            Path::new("/bin/sh")
-        }
+    #[test]
+    fn the_child_reads_the_payload_from_its_input() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cmd = sh("cat > out").in_dir(dir.path()).with_stdin(
+            b"TOKEN=hunter2\nlines\xffwith a byte no text has\n",
+        );
+        let status = spawn(shell(), &cmd).expect("sh runs");
+        assert!(status.success(), "{status}");
+        let got = std::fs::read(dir.path().join("out"))
+            .expect("the file sh wrote");
+        assert_eq!(
+            got,
+            b"TOKEN=hunter2\nlines\xffwith a byte no text has\n"
+        );
+    }
 
-        #[test]
-        fn the_child_reads_the_payload_from_its_input() {
-            let dir = TempDir::new().expect("a temporary directory");
-            let cmd = sh("cat > out").in_dir(dir.path()).with_stdin(
-                b"TOKEN=hunter2\nlines\xffwith a byte no text has\n",
-            );
-            let status = spawn(shell(), &cmd).expect("sh runs");
-            assert!(status.success(), "{status}");
-            let got = std::fs::read(dir.path().join("out"))
-                .expect("the file sh wrote");
-            assert_eq!(
-                got,
-                b"TOKEN=hunter2\nlines\xffwith a byte no text has\n"
-            );
-        }
+    #[test]
+    fn a_child_ignoring_its_input_still_reports_its_status() {
+        // Bigger than a pipe's buffer, so the write really
+        // does hit the closed end rather than fitting in the
+        // kernel and succeeding. Without the broken-pipe arm
+        // in `spawn`, this reports a write error and loses
+        // the 3.
+        let payload = vec![b'x'; 256 * 1024];
+        let status = spawn(shell(), &sh("exit 3").with_stdin(&payload))
+            .expect("sh runs");
+        assert_eq!(status.code(), Some(3), "{status}");
+    }
 
-        #[test]
-        fn a_child_ignoring_its_input_still_reports_its_status() {
-            // Bigger than a pipe's buffer, so the write really
-            // does hit the closed end rather than fitting in the
-            // kernel and succeeding. Without the broken-pipe arm
-            // in `spawn`, this reports a write error and loses
-            // the 3.
-            let payload = vec![b'x'; 256 * 1024];
-            let status = spawn(shell(), &sh("exit 3").with_stdin(&payload))
-                .expect("sh runs");
-            assert_eq!(status.code(), Some(3), "{status}");
-        }
+    #[test]
+    fn a_command_without_a_payload_runs_unchanged() {
+        let status = spawn(shell(), &sh("exit 7")).expect("sh runs");
+        assert_eq!(status.code(), Some(7), "{status}");
+    }
 
-        #[test]
-        fn a_command_without_a_payload_runs_unchanged() {
-            let status = spawn(shell(), &sh("exit 7")).expect("sh runs");
-            assert_eq!(status.code(), Some(7), "{status}");
-        }
-
-        #[test]
-        fn an_empty_payload_still_closes_the_pipe() {
-            // `cat` returns on end-of-file and nothing else, so
-            // a payload with no bytes in it is the shortest test
-            // that the pipe is closed rather than merely written
-            // to.
-            let dir = TempDir::new().expect("a temporary directory");
-            let cmd = sh("cat > out").in_dir(dir.path()).with_stdin(b"");
-            let status = spawn(shell(), &cmd).expect("sh runs");
-            assert_eq!(status.into_raw() & 0x7f, 0, "sh was signalled");
-            assert_eq!(
-                std::fs::read(dir.path().join("out")).expect("the file"),
-                b""
-            );
-        }
+    #[test]
+    fn an_empty_payload_still_closes_the_pipe() {
+        // `cat` returns on end-of-file and nothing else, so
+        // a payload with no bytes in it is the shortest test
+        // that the pipe is closed rather than merely written
+        // to.
+        let dir = TempDir::new().expect("a temporary directory");
+        let cmd = sh("cat > out").in_dir(dir.path()).with_stdin(b"");
+        let status = spawn(shell(), &cmd).expect("sh runs");
+        assert_eq!(status.into_raw() & 0x7f, 0, "sh was signalled");
+        assert_eq!(
+            std::fs::read(dir.path().join("out")).expect("the file"),
+            b""
+        );
     }
 }
