@@ -188,7 +188,24 @@ header above it:
   the Vagrantfile too. Whether a key was configured reaches the
   guest as `BOMBYX_DEPLOY_KEY`, always set, so the guest's own
   environment cannot answer it. Left out, no upload is rendered
-  and no check is planned.
+  and no check is planned. `env_file` is optional too: a path on
+  the **workstation** naming a file of secrets, which is the one
+  path in this table that is not resolved on the VM host. bombyx
+  reads it before the plan is built, so a missing file stops the
+  run naming the path it looked for; the contents reach the VM
+  host on the command's standard input and are written beside
+  the Vagrantfile as `bombyx.env`. The generated Vagrantfile
+  uploads that to `~/.bombyx-env`, which vagrant expands inside
+  the guest, so it lands in the real home of the account vagrant
+  logs in as. The same step that runs vagrant removes the staged
+  file, whether vagrant succeeded or not
+  (`remote::vagrant_in_then_remove`). `bootstrap.sh` tightens it
+  to 0600 and exports `BOMBYX_ENV_FILE` naming it; it places the
+  file nowhere itself, so the project's own script does the copy.
+  Whether one was configured reaches the guest as
+  `BOMBYX_ENV_FILE_PRESENT`, always set, and the unconfigured
+  branch removes a leftover and exports an empty
+  `BOMBYX_ENV_FILE`.
 - Host-key verification, which is **independent of
   `deploy_key`** -- it applies to a public repository cloned
   over ssh just as much. A repository reached over ssh carries
@@ -307,11 +324,12 @@ one directory below that anchor. bombyx creates, writes into and
 value, so a root that resolves to a top-level directory is
 refused when the config loads.
 
-Ten config values are newtypes, and each constructor holds
+Eleven config values are newtypes, and each constructor holds
 every rule its field has: `RemoteRoot` in `config/root.rs`,
 `HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
 `GitRef` in `config/source.rs`, `DeployKeyPath` in
-`config/deploy_key.rs`, `BoxName` in `config/vm.rs`, `EnvName`
+`config/deploy_key.rs`, `EnvFilePath` in `config/env_file.rs`,
+`BoxName` in `config/vm.rs`, `EnvName`
 and `EnvValue` in `config/env.rs`, and `ProjectName` in
 `name.rs`. All of them but `HostName` carry
 `#[serde(try_from = "String")]`, so serde refuses a bad value

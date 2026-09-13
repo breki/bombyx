@@ -86,6 +86,7 @@ use crate::name::{ScratchName, check_segment};
 
 mod deploy_key;
 mod env;
+mod env_file;
 mod error;
 mod guards;
 mod host;
@@ -206,6 +207,7 @@ pub use deploy_key::DeployKeyPath;
 #[cfg(test)]
 pub(crate) use env::RESERVED_PREFIX;
 pub use env::{EnvName, EnvValue};
+pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -1298,6 +1300,44 @@ mod load_project_tests {
         .expect_err("an unanchored deploy_key must be refused");
         let text = err.to_string();
         assert!(text.contains("deploy_key"), "{text}");
+    }
+
+    #[test]
+    fn a_source_table_without_an_env_file_loads_none() {
+        // The ordinary case, the same as `deploy_key`: a project
+        // whose provisioning needs no credential leaves it out.
+        let (cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("a registry with no env_file must load");
+        assert_eq!(cfg.source.env_file, None);
+    }
+
+    #[test]
+    fn an_env_file_reaches_the_loaded_config() {
+        let (cfg, _) = load(
+            &registry_with_source_key("env_file = \"~/.secrets/x.env\""),
+            "myproject",
+        )
+        .expect("a registry with a valid env_file must load");
+        assert_eq!(
+            cfg.source.env_file.as_ref().map(EnvFilePath::as_str),
+            Some("~/.secrets/x.env")
+        );
+    }
+
+    #[test]
+    fn an_env_file_the_type_refuses_is_refused_by_the_loader() {
+        // The `try_from` attribute on `EnvFilePath` is what makes
+        // this true: without it serde would assign the private
+        // field and the checks would never run on the path a
+        // config load actually takes.
+        let err = load(
+            &registry_with_source_key("env_file = \"secrets/x.env\""),
+            "myproject",
+        )
+        .expect_err("a relative env_file must be refused");
+        let text = err.to_string();
+        assert!(text.contains("env_file"), "{text}");
     }
 
     /// [`load`], told what this machine is called.

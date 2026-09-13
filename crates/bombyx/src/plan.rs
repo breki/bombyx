@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::{Config, DeployKeyPath};
+use crate::config::{Config, DeployKeyPath, Secrets};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -87,15 +87,29 @@ pub enum Action {
 /// invocation -- but it does mean a captured plan is not a script
 /// you can paste and expect byte-identical behaviour from.
 ///
-/// **The two file writes are the exception, and cannot be
+/// **The file writes are the exception, and cannot be
 /// otherwise.** Each carries a whole file -- the generated
-/// Vagrantfile and the bootstrap script -- and neither file is
-/// in the command at all: it travels on the command's standard
-/// input, which is a pipe and not text a printed line can hold.
-/// The line says how many bytes bombyx will send; see
-/// [`RemoteCommand::with_stdin`].
+/// Vagrantfile, the bootstrap script, and the project's secrets
+/// when the config names an `env_file` -- and no file is in the
+/// command at all: it travels on the command's standard input,
+/// which is a pipe and not text a printed line can hold. The
+/// line says how many bytes bombyx will send; see
+/// [`RemoteCommand::with_stdin`]. That is also what keeps a
+/// secret out of a printed plan.
+///
+/// `secrets` is the contents of the file `source.env_file`
+/// names, already read from the workstation by the caller, and
+/// `None` when the config names no such file. Reading it here
+/// would put a file open in the one module whose job is to
+/// decide which commands run, and would make every test of that
+/// decision need a file on disk.
 #[must_use]
-pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
+pub fn plan(
+    action: &Action,
+    cfg: &Config,
+    tty: Tty,
+    secrets: Option<&Secrets>,
+) -> Vec<RemoteCommand> {
     match action {
         // The snapshot save is here rather than inside
         // `write_then` because `provision` and `scratch` share
@@ -104,13 +118,17 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
         // discarded rather than reset.
         Action::Up => {
             let dir = cfg.remote_project_dir();
-            let mut cmds = write_then(cfg, &dir, &["up"], tty);
+            let mut cmds = write_then(cfg, &dir, &["up"], tty, secrets);
             cmds.push(remote::save_snapshot_if_absent(cfg, &dir, tty));
             cmds
         }
-        Action::Provision => {
-            write_then(cfg, &cfg.remote_project_dir(), &["provision"], tty)
-        }
+        Action::Provision => write_then(
+            cfg,
+            &cfg.remote_project_dir(),
+            &["provision"],
+            tty,
+            secrets,
+        ),
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
         Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
@@ -128,9 +146,13 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir(), tty),
-        Action::Scratch(name) => {
-            write_then(cfg, &cfg.remote_scratch_dir(name), &["up"], tty)
-        }
+        Action::Scratch(name) => write_then(
+            cfg,
+            &cfg.remote_scratch_dir(name),
+            &["up"],
+            tty,
+            secrets,
+        ),
         Action::Discard(name) => {
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
@@ -183,6 +205,7 @@ fn write_then(
     dir: &str,
     args: &[&str],
     tty: Tty,
+    secrets: Option<&Secrets>,
 ) -> Vec<RemoteCommand> {
     // Before the `mkdir`, so a config naming a key the VM host
     // does not have leaves no directory and no Vagrantfile
@@ -200,7 +223,30 @@ fn write_then(
     for (name, contents) in vagrantfile::files(cfg) {
         cmds.push(remote::write_file(cfg, dir, name, &contents));
     }
-    cmds.push(remote::vagrant_in(cfg, dir, args, tty));
+
+    // The secrets file is written last of the three and removed
+    // by the step that follows it, so the window in which the VM
+    // host holds it is the `vagrant` run and nothing more.
+    // `remote::vagrant_in_then_remove` holds why the removal is
+    // inside that step rather than after it.
+    match secrets {
+        Some(secrets) => {
+            cmds.push(remote::write_file(
+                cfg,
+                dir,
+                vagrantfile::ENV_FILE_NAME,
+                secrets.as_str(),
+            ));
+            cmds.push(remote::vagrant_in_then_remove(
+                cfg,
+                dir,
+                args,
+                tty,
+                vagrantfile::ENV_FILE_NAME,
+            ));
+        }
+        None => cmds.push(remote::vagrant_in(cfg, dir, args, tty)),
+    }
     cmds
 }
 
@@ -220,7 +266,7 @@ mod tests {
     }
 
     fn plan_for(action: &Action, tty: Tty) -> Vec<RemoteCommand> {
-        plan(action, &cfg(), tty)
+        plan(action, &cfg(), tty, None)
     }
 
     fn local_cfg() -> Config {
@@ -303,7 +349,7 @@ mod tests {
             for c in &plan_for(&action, Tty::Allocate) {
                 assert_eq!(c.program, "ssh", "{action:?} over ssh");
             }
-            let here = plan(&action, &local_cfg(), Tty::Allocate);
+            let here = plan(&action, &local_cfg(), Tty::Allocate, None);
             for c in &here {
                 assert_eq!(c.program, "sh", "{action:?} here");
                 assert!(
@@ -392,7 +438,7 @@ mod tests {
     }
 
     fn run(action: &Action) -> Vec<RemoteCommand> {
-        plan(action, &cfg(), Tty::NoPty)
+        plan(action, &cfg(), Tty::NoPty, None)
     }
 
     /// Each command of `action`'s plan as `--dry-run` prints
@@ -555,7 +601,7 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
+            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty, None);
             assert!(
                 script(&cmds[0]).contains("'deploy_key'"),
                 "{action:?}: the key check is not the first step"
@@ -575,7 +621,7 @@ mod tests {
         // writes that file, so the bare name would match the
         // write step.
         for action in all_actions() {
-            let cmds = plan(&action, &cfg(), Tty::NoPty);
+            let cmds = plan(&action, &cfg(), Tty::NoPty, None);
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: a check was built with no key configured"
@@ -603,7 +649,7 @@ mod tests {
             Action::Down,
             Action::Status,
         ] {
-            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
+            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty, None);
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: teardown must not check the key"
@@ -1085,6 +1131,108 @@ mod tests {
                 !script.contains(remote::VM_HOST_ENV),
                 "doctor probe should not carry the identity: {script}"
             );
+        }
+    }
+
+    /// Contents standing in for a project's secrets file, with a
+    /// value distinctive enough that a test can look for it.
+    fn secrets() -> Secrets {
+        use crate::config::EnvFilePath;
+
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("x.env");
+        std::fs::write(&file, "TOKEN=hunter2\n").expect("write");
+        EnvFilePath::parse(&file.display().to_string())
+            .expect("a temp path is absolute")
+            .read(|_| None)
+            .expect("the file is there")
+    }
+
+    #[test]
+    fn a_configured_env_file_is_written_and_then_removed() {
+        // Three properties, and the order between them is the
+        // whole design: the file is written before vagrant runs,
+        // vagrant is what reads it, and the removal is inside
+        // that same step rather than after it.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            let cmds = plan(&action, &cfg(), Tty::NoPty, Some(&secrets()));
+            let write = cmds
+                .iter()
+                .position(|c| script(c).contains("bombyx.env"))
+                .unwrap_or_else(|| panic!("{action:?}: nothing writes it"));
+            let vagrant = cmds
+                .iter()
+                .position(|c| script(c).contains("rm -f"))
+                .unwrap_or_else(|| panic!("{action:?}: nothing removes it"));
+            assert!(
+                write < vagrant,
+                "{action:?}: the write must come before the removal"
+            );
+            let removing = script(&cmds[vagrant]);
+            assert!(
+                removing.contains(" vagrant '"),
+                "{action:?}: the removal must be in the vagrant step, so a \
+                 failed boot still clears the file: {removing}"
+            );
+            assert!(
+                removing.contains("exit $rc"),
+                "{action:?}: the vagrant step must hand back its own \
+                 status: {removing}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_env_file_leaves_the_vagrant_step_alone() {
+        for action in all_actions() {
+            for c in plan(&action, &cfg(), Tty::NoPty, None) {
+                let s = script(&c);
+                assert!(
+                    !s.contains("bombyx.env"),
+                    "{action:?}: a file nobody configured: {s}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_secrets_reach_no_command_line_and_no_printed_plan() {
+        // The reason the contents travel on a pipe at all. Every
+        // account on the VM host can read another's arguments,
+        // and a dry run prints the plan to a terminal.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            for c in plan(&action, &cfg(), Tty::NoPty, Some(&secrets())) {
+                for arg in &c.args {
+                    assert!(!arg.contains("hunter2"), "{action:?}: {arg}");
+                }
+                assert!(
+                    !c.to_string().contains("hunter2"),
+                    "{action:?}: a printed plan holds the secret: {c}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_teardown_verbs_write_no_secrets_file() {
+        // They take the whole directory with `rm -rf`, so the
+        // staged file goes with it and there is nothing for
+        // these plans to write or remove on their own.
+        for action in [Action::Destroy, Action::Discard(scratch("pr-1234"))] {
+            for c in plan(&action, &cfg(), Tty::NoPty, Some(&secrets())) {
+                assert!(
+                    !script(&c).contains("bombyx.env"),
+                    "{action:?}: teardown must not stage anything"
+                );
+            }
         }
     }
 }

@@ -1046,7 +1046,7 @@ mod snapshot_guard_states {
             .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
         let (cfg, _) =
             Config::load_project("myproject", Some(&cfg_path)).unwrap();
-        let cmds = plan(&Action::Up, &cfg, Tty::NoPty);
+        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, None);
         let script = cmds.last().unwrap().args.last().unwrap().clone();
 
         let out = StdCommand::new("sh")

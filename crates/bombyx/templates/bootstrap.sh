@@ -101,15 +101,45 @@ set -euo pipefail
 # the key would stay.
 readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 
+# WHERE THE SECRETS FILE LANDS, and why this one is computed
+# while DEPLOY_KEY above is a literal.
+#
+# The generated Vagrantfile uploads it with a `file` provisioner
+# whose destination is written `~/.bombyx-env`. Vagrant expands
+# that itself, before sending anything: it runs `printf` on the
+# path through a shell in this guest, as the account it logs in
+# as. So the file is in that account's real home, whatever the
+# box calls the account.
+#
+# `$HOME` cannot name the same file. A project's `[env]` table
+# may set HOME, and this script's environment carries that value
+# while Vagrant's upload used the real home. The passwd entry is
+# what the two agree on, and `getent` is how a shell asks for
+# it.
+#
+# `|| bombyx_home=""` puts the assignment in a condition, which
+# exempts it from `set -e` and `set -o pipefail`. Without it a
+# box whose `getent` is missing or whose account is absent from
+# passwd would abort here, before `refuse` could name the
+# problem. The emptiness is handled below instead.
+#
+# Declared before `refuse`, which removes this file: a refusal
+# must not leave the project's secrets in a guest that never
+# finished provisioning.
+bombyx_home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) ||
+    bombyx_home=""
+readonly ENV_FILE="${bombyx_home:-/nonexistent}/.bombyx-env"
+
 # EVERY REFUSAL IN THIS FILE GOES THROUGH HERE, and that is the
 # point.
 #
-# Vagrant uploads the deploy key before this script starts. So a
-# refusal that exits without removing it leaves a credential in
-# the guest -- at whatever mode `scp` gave it -- for the life of
-# a VM that never finished provisioning.
+# Vagrant uploads the deploy key and the project's secrets file
+# before this script starts. So a refusal that exits without
+# removing them leaves credentials in the guest -- at whatever
+# mode `scp` gave them -- for the life of a VM that never
+# finished provisioning.
 #
-# One function removes the doubt: it clears the key, prints what
+# One function removes the doubt: it clears both, prints what
 # it was given, and exits. A test refuses any `exit` or `return`
 # outside this function, so a refusal that skips the removal
 # fails bombyx's build rather than this guest. That test is in
@@ -129,13 +159,13 @@ readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 # A command inside an `if` condition is exempt from `set -e`,
 # which is what makes testing the status possible here at all.
 refuse() {
-    if rm -f "$DEPLOY_KEY"; then
-        key_note="any uploaded deploy key has been removed from"
-        key_note="$key_note this guest."
+    if rm -f "$DEPLOY_KEY" "$ENV_FILE"; then
+        key_note="any uploaded deploy key and secrets file have"
+        key_note="$key_note been removed from this guest."
     else
-        key_note="THE UPLOADED DEPLOY KEY IS STILL IN THIS"
-        key_note="$key_note GUEST at $DEPLOY_KEY, because it"
-        key_note="$key_note could not be removed. The error"
+        key_note="AN UPLOADED CREDENTIAL IS STILL IN THIS GUEST,"
+        key_note="$key_note at $DEPLOY_KEY or $ENV_FILE, because"
+        key_note="$key_note it could not be removed. The error"
         key_note="$key_note above says why. Remove it in the"
         key_note="$key_note guest."
     fi
@@ -267,6 +297,70 @@ readonly CLONE_DIR="$HOME/project"
 # because a box without `git` has to reach a refusal rather
 # than an abort, and no command above needs `git` anyway.
 
+
+# THE PROJECT'S SECRETS FILE, and what this script does and does
+# not do with it.
+#
+# It does two things: it checks the upload arrived, and it tells
+# the project's own script where the file is. It does not put
+# the file anywhere. bombyx does not know that a project keeps
+# its secrets at the top of the clone, or that it calls them
+# `.env`, so the project's script does the copy:
+#
+#     cp "$BOMBYX_ENV_FILE" .env
+#
+# BOMBYX_ENV_FILE_PRESENT answers whether the operator
+# configured one. It arrives from the generated Vagrantfile,
+# which sets it to 1 or 0 on every render. The same reasoning
+# the deploy-key block gives applies: the file sits in an
+# account the agent works as, so asking the filesystem would
+# let the guest answer on the operator's behalf.
+#
+# Read as `${VAR:-}` because a `vagrant provision` run by hand
+# in a directory an older bombyx wrote leaves it unset, and
+# `set -u` would abort before `refuse` could say anything.
+if [ "${BOMBYX_ENV_FILE_PRESENT:-}" = 1 ]; then
+    # An empty passwd home means the lookup at the top of this
+    # file found nothing, so ENV_FILE names a placeholder and
+    # the real upload is somewhere this script cannot spell.
+    if [ -z "$bombyx_home" ]; then
+        refuse "this account has no home directory in the" \
+            "passwd database, so bombyx cannot tell where the" \
+            "secrets file was uploaded."
+    fi
+
+    if [ ! -f "$ENV_FILE" ]; then
+        refuse "an env_file is configured but nothing arrived at" \
+            "$ENV_FILE. Check the file is still on the" \
+            "workstation and re-run bombyx."
+    fi
+
+    # `scp` leaves the file at the mode the uploading side had,
+    # which is usually world-readable. The agent is not the only
+    # account in every guest, so tighten it before anything else
+    # can open it.
+    if ! chmod 600 "$ENV_FILE"; then
+        refuse "could not tighten the mode on $ENV_FILE." \
+            "The error above says why."
+    fi
+
+    export BOMBYX_ENV_FILE="$ENV_FILE"
+else
+    # Nothing configured, so the name still has to be exported:
+    # the project's script reads it, and an unset name under
+    # `set -u` would abort that script instead of telling it
+    # there is no file.
+    export BOMBYX_ENV_FILE=""
+
+    # An earlier run may have left one, and the operator has
+    # since removed `env_file` from the config. Leaving it would
+    # keep a credential alive that the config no longer names.
+    if ! rm -f "$ENV_FILE"; then
+        refuse "no env_file is configured and the one at" \
+            "$ENV_FILE could not be removed. The error above" \
+            "says why."
+    fi
+fi
 
 if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # The config named a key, so the upload must have happened.

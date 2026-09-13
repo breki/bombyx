@@ -19,6 +19,7 @@
 use serde::Deserialize;
 
 use super::deploy_key::DeployKeyPath;
+use super::env_file::EnvFilePath;
 use super::error::FieldError;
 use super::guards;
 use crate::newtype::checked_str_newtype;
@@ -49,6 +50,19 @@ pub struct Source {
     /// and the guest clones without a credential.
     #[serde(default)]
     pub deploy_key: Option<DeployKeyPath>,
+    /// File on the **workstation** holding the project's
+    /// secrets, which bombyx carries into the guest.
+    ///
+    /// The other path in this table, `deploy_key`, names a file
+    /// on the VM host. This one names one on the machine bombyx
+    /// runs on, and `super::EnvFilePath` holds why that changes
+    /// every rule.
+    ///
+    /// `None` when the config names none: bombyx then writes no
+    /// secrets file and the guest gets an empty
+    /// `BOMBYX_ENV_FILE`.
+    #[serde(default)]
+    pub env_file: Option<EnvFilePath>,
 }
 
 /// A repository address that `git` will download from, and not

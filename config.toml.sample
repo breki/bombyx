@@ -188,6 +188,55 @@ script = "vagrant/provision.sh"   # path inside the clone
 #
 # deploy_key = "~/.secrets/myproject-deploy-key"
 
+# Optional, and the only key in this table that is a path on
+# YOUR OWN MACHINE. `deploy_key` above names one on the VM host;
+# this one names one here.
+#
+# It is for the project's `.env` -- the API keys and passwords
+# the project's own provisioning script needs. That file is
+# untracked, so the guest's clone never has one, and this is how
+# it gets in.
+#
+# bombyx reads the file, sends it to the VM host down the
+# connection it already has, and has vagrant put it inside the
+# guest. The contents never appear in a command line, on either
+# machine, and never appear in the generated Vagrantfile. The VM
+# host does not keep the file: bombyx removes it as soon as
+# vagrant has finished, whether the boot worked or not.
+#
+# Inside the guest it lands at `~/.bombyx-env`, in the home of
+# the account the agent works as, at mode 0600. bombyx puts it
+# nowhere else. Your provisioning script is what copies it into
+# place, and the path arrives in `BOMBYX_ENV_FILE`:
+#
+#   cp "$BOMBYX_ENV_FILE" .env
+#
+# That variable is always set. It holds the path when this key
+# is present and an empty string when it is not, so a script
+# running under `set -u` can test it either way.
+#
+# Use this for a secret and the `[projects.myproject.env]` table
+# below for anything that is not one. A table of plain settings
+# is easier to read than a file, and its values are written into
+# the generated Vagrantfile in plain text.
+#
+# The value must start with `~/` or be an absolute path -- `~`
+# is expanded against your own home directory, not the VM
+# host's. A relative path is refused, because it would resolve
+# against whatever directory you happened to run bombyx from.
+# Spaces and quotes in the file name are fine: bombyx opens the
+# file itself and hands it to no shell.
+#
+# bombyx reads the file before it creates anything, so a path
+# this machine does not have stops the run with a message naming
+# the path it looked for.
+#
+# What this does not do: the secrets still end up inside the VM,
+# and code in the VM can read them. That is unavoidable, since
+# the agent needs them to work. See docs/trust-boundary.md.
+#
+# env_file = "~/.secrets/myproject.env"
+
 # Optional. Variables the project's own provisioning script
 # reads.
 #

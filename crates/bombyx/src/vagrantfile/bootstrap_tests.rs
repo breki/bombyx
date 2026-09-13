@@ -93,7 +93,7 @@ fn every_variable_is_declared_before_it_is_expanded() {
     // `readonly` lines are the declarations; anything of
     // the form `$NAME` or `"$NAME"` before one is a use.
     let flat = flat_bootstrap_lines();
-    for name in ["DEPLOY_KEY", "CLONE_DIR", "KNOWN_HOSTS"] {
+    for name in ["DEPLOY_KEY", "ENV_FILE", "CLONE_DIR", "KNOWN_HOSTS"] {
         let decl = flat
             .iter()
             .position(|l| l.starts_with(&format!("readonly {name}=")))
@@ -158,8 +158,8 @@ fn every_refusal_clears_the_uploaded_key() {
         );
     }
     assert!(
-        flat_bootstrap().contains("rm -f \"$DEPLOY_KEY\""),
-        "refuse must remove the uploaded key"
+        flat_bootstrap().contains("rm -f \"$DEPLOY_KEY\" \"$ENV_FILE\""),
+        "refuse must remove the uploaded key and the secrets file"
     );
 }
 
@@ -327,6 +327,7 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
     // count 1 against 1, and `${NAME}` would match neither.
     for name in [
         "BOMBYX_DEPLOY_KEY",
+        "BOMBYX_ENV_FILE_PRESENT",
         "BOMBYX_GIT_HOST",
         "BOMBYX_HOST_KEYS_URL",
         "BOMBYX_HOST_KEYS_FORMAT",
@@ -901,4 +902,96 @@ fn the_bootstrap_script_guards_every_variable_it_needs() {
         assert!(BOOTSTRAP.contains(guard), "{guard} missing");
     }
     assert!(BOOTSTRAP.contains("set -euo pipefail"));
+}
+
+#[test]
+fn the_secrets_file_is_named_the_same_way_in_both_halves() {
+    // Two files have to agree on this name and neither can read
+    // the other: the generated Vagrantfile writes it as the
+    // upload's `destination:`, and this script builds the same
+    // path from the passwd entry. The leading `~` differs on
+    // purpose -- vagrant expands that inside the guest -- so the
+    // last component is what the two share.
+    let name = super::ENV_FILE_GUEST_PATH
+        .rsplit('/')
+        .next()
+        .expect("the guest path must have a last component");
+    assert!(
+        BOOTSTRAP.contains(&format!("/{name}\"")),
+        "the script must build a path ending in {name}"
+    );
+}
+
+#[test]
+fn the_project_script_is_always_told_where_the_secrets_are() {
+    // The project's own script reads `$BOMBYX_ENV_FILE`, and it
+    // runs under `set -u` as often as not. A name exported on
+    // one branch and left unset on the other would abort that
+    // script instead of telling it there is no file.
+    //
+    // Counted rather than merely found: one export per branch is
+    // the property, and a single one would satisfy a `contains`.
+    let exports = BOOTSTRAP
+        .lines()
+        .filter(|l| l.trim_start().starts_with("export BOMBYX_ENV_FILE="))
+        .count();
+    assert_eq!(
+        exports, 2,
+        "both branches must export BOMBYX_ENV_FILE, the configured \
+         one with the path and the other with an empty value"
+    );
+    assert!(
+        BOOTSTRAP.contains("export BOMBYX_ENV_FILE=\"\""),
+        "the unconfigured branch must export an empty value"
+    );
+}
+
+#[test]
+fn the_script_places_the_secrets_file_nowhere_itself() {
+    // bombyx stages the file and stops. It does not know that a
+    // project keeps its secrets at the top of the clone or that
+    // it calls them `.env`, so the project's own script does the
+    // copy. A line here that guessed would put the file where a
+    // project with another layout cannot use it, and would
+    // write into the clone before the project's script runs.
+    for placed in ["cp \"$ENV_FILE\"", "mv \"$ENV_FILE\"", "$CLONE_DIR/.env"] {
+        assert!(
+            !BOOTSTRAP.contains(placed),
+            "{placed}: placing the file is the project script's job"
+        );
+    }
+}
+
+#[test]
+fn the_secrets_file_ends_up_readable_only_by_the_agent() {
+    // `scp` leaves the file at the mode the uploading side had,
+    // which is usually world-readable, and a guest may have
+    // accounts besides the agent's.
+    assert!(
+        BOOTSTRAP.contains("chmod 600 \"$ENV_FILE\""),
+        "the secrets file must end up at 0600"
+    );
+}
+
+#[test]
+fn a_secrets_file_no_upload_replaced_is_deleted() {
+    // The operator removed `env_file` from the config and
+    // re-provisioned. The upload no longer happens, so a file
+    // from the earlier run would stay in the guest holding
+    // credentials the config no longer names.
+    //
+    // The same shape as `the_bootstrap_script_deletes_a_key_no_
+    // upload_replaced` above, and it is the half that a
+    // `contains` on the configured branch would miss.
+    let flat = flat_bootstrap();
+    let branch = flat
+        .find("if [ \"${BOMBYX_ENV_FILE_PRESENT:-}\" = 1 ]; then")
+        .expect("the branch must be there");
+    let removal = flat
+        .find("rm -f \"$ENV_FILE\"")
+        .expect("the else branch must remove a leftover");
+    assert!(
+        branch < removal,
+        "the removal must sit in the branch for no configured file"
+    );
 }
