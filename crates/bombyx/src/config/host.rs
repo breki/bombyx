@@ -30,7 +30,7 @@ use super::error::FieldError;
 use super::registry::{self, USER_CONFIG_FILE};
 use super::{ConfigError, guards};
 use crate::name::ProjectName;
-use crate::newtype::checked_str_newtype;
+use crate::newtype::{checked_str_newtype, checked_str_parse};
 
 /// Characters allowed in an SSH destination.
 ///
@@ -75,7 +75,7 @@ pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostName(String);
 
-impl HostName {
+checked_str_parse!(
     /// Applies the three rules to `raw` and wraps it.
     ///
     /// The rules are the private `check` below. All three come
@@ -96,11 +96,10 @@ impl HostName {
     /// [`FieldError::Invalid`] when it starts with `-` or holds
     /// a character outside the allowed set: letters, digits,
     /// `.`, `_`, `-` and `@`.
-    pub fn parse(raw: &str) -> Result<Self, FieldError> {
-        check(raw)?;
-        Ok(Self(raw.to_owned()))
-    }
-}
+    HostName,
+    FieldError,
+    check
+);
 
 checked_str_newtype!(HostName, "The value, as `ssh` sees it.");
 

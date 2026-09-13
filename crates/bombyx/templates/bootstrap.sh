@@ -101,6 +101,35 @@ set -euo pipefail
 # the key would stay.
 readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 
+# WHERE THE GIT CREDENTIAL LANDS, and why this one is a literal
+# while ENV_FILE below is computed.
+#
+# The file holds one `https://user:token@host` line, and `git`
+# reads it through its `store` credential helper. That helper is
+# configured as the string `store --file=<path>`, and a helper
+# string carrying a space is handed to a SHELL -- measured: with
+# HOME set to a temporary directory, a helper spelled
+# `--file=$HOME/real` found the file there, while `--file=$NOPE/real`
+# found nothing. So the path inside that string gets everything a
+# shell does to a word: a space splits it in two, and a `$` is
+# expanded. A path bombyx chose has neither; one read out of this
+# guest's passwd entry might, and a project's `[env]` table can
+# set `HOME`.
+#
+# This is the same trap KNOWN_HOSTS further down is a literal
+# for, and for the same reason: that path ends up inside
+# `core.sshCommand`, which `git` also hands to a shell.
+#
+# It shares DEPLOY_KEY's assumption that the account is
+# `vagrant`, for the same reason: this is the `destination:` of
+# a `file` provisioner, which Vagrant evaluates before this
+# guest exists.
+#
+# Declared before anything expands it, like DEPLOY_KEY above:
+# `refuse` removes this file, and `set -u` would make the
+# refusal itself fatal otherwise.
+readonly GIT_CRED=/home/vagrant/.bombyx-git-credentials
+
 # WHERE THE SECRETS FILE LANDS, and why this one is computed
 # while DEPLOY_KEY above is a literal.
 #
@@ -133,14 +162,16 @@ readonly ENV_FILE="${bombyx_home:-/nonexistent}/.bombyx-env"
 # EVERY REFUSAL IN THIS FILE GOES THROUGH HERE, and that is the
 # point.
 #
-# Vagrant uploads the deploy key and the project's secrets file
-# before this script starts. So a refusal that exits without
-# removing them leaves credentials in the guest -- at whatever
-# mode `scp` gave them -- for the life of a VM that never
-# finished provisioning.
+# Vagrant uploads every credential the config named before this
+# script starts. So a refusal that exits without removing them
+# leaves credentials in the guest -- at whatever mode `scp` gave
+# them -- for the life of a VM that never finished provisioning.
 #
-# One function removes the doubt: it clears both, prints what
-# it was given, and exits. A test refuses any `exit` or `return`
+# One function removes the doubt: it clears every one of them,
+# prints what it was given, and exits. The list it clears is the
+# `rm -f` below, and a credential added to this script without
+# being added there is the mistake this paragraph exists to
+# stop. A test refuses any `exit` or `return`
 # outside this function, so a refusal that skips the removal
 # fails bombyx's build rather than this guest. That test is in
 # bombyx's own source, at
@@ -159,8 +190,9 @@ readonly ENV_FILE="${bombyx_home:-/nonexistent}/.bombyx-env"
 # A command inside an `if` condition is exempt from `set -e`,
 # which is what makes testing the status possible here at all.
 refuse() {
-    if rm -f "$DEPLOY_KEY" "$ENV_FILE"; then
-        key_note="any uploaded deploy key has been removed from"
+    if rm -f "$DEPLOY_KEY" "$ENV_FILE" "$GIT_CRED"; then
+        key_note="any uploaded deploy key and any git"
+        key_note="$key_note credential have been removed from"
         key_note="$key_note this guest"
         # The secrets half is claimed only when the passwd
         # lookup found a home. Otherwise `$ENV_FILE` is the
@@ -181,7 +213,8 @@ refuse() {
         fi
     else
         key_note="AN UPLOADED CREDENTIAL IS STILL IN THIS GUEST,"
-        key_note="$key_note at $DEPLOY_KEY or $ENV_FILE, because"
+        key_note="$key_note at $DEPLOY_KEY, $GIT_CRED or"
+        key_note="$key_note $ENV_FILE, because"
         key_note="$key_note it could not be removed. The error"
         key_note="$key_note above says why. Remove it in the"
         key_note="$key_note guest."
@@ -212,8 +245,8 @@ refuse() {
 # in a list, so adding another needs no count corrected
 # anywhere.
 #
-# They sit above the two credential blocks and every one refuses
-# through `refuse`, which removes both uploads -- so a guest that
+# They sit above the credential blocks and every one refuses
+# through `refuse`, which removes every upload -- so a guest that
 # stops here keeps no credential. The banner between these
 # checks and those blocks says why that matters and what the
 # dangerous case is.
@@ -297,14 +330,15 @@ readonly CLONE_DIR="$HOME/project"
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
 # distinction, and the two are easy to run together.
 #
-# Vagrant uploads two credentials before this script starts: the
-# deploy key, and the project's secrets file when the config
-# names one. Two blocks follow, one per credential, and each
-# tightens or removes its own. A refusal before either is
-# harmless, because `refuse` removes both itself. An *abort*
-# before them is not: the script dies without running `refuse`,
-# and the credentials stay in the agent's own directory for the
-# life of a VM that never finished provisioning.
+# Vagrant uploads whichever credentials the config named before
+# this script starts: the project's secrets file, the git
+# credential, the deploy key. One block follows per credential,
+# and each tightens or removes its own. A refusal before any of
+# them is harmless, because `refuse` removes them all itself. An
+# *abort* before them is not: the script dies without running
+# `refuse`, and the credentials stay in the agent's own
+# directory for the life of a VM that never finished
+# provisioning.
 #
 # `set -u` on an undeclared variable is the way to get such an
 # abort, which is why the checks above read `${HOME:-}` before
@@ -417,6 +451,55 @@ else
         refuse "no env_file is configured and the one at" \
             "$ENV_FILE could not be removed. The error above" \
             "says why."
+    fi
+fi
+
+# THE GIT CREDENTIAL, when the operator's config named a
+# `repo_token`.
+#
+# bombyx read one variable out of the secrets file on the
+# workstation and built this file from it: a single
+# `https://user:token@host` line, which is the format `git`'s
+# `store` credential helper reads. The conversion happens there
+# rather than here because a `.env` file is not that format and
+# the project's own script runs long after the clone.
+#
+# BOMBYX_GIT_CRED_PRESENT answers whether one was configured,
+# and it arrives from the generated Vagrantfile on every render.
+# The deploy-key banner above argues at length why that is the
+# only trustworthy answer: this file sits in an account the
+# agent works as, so asking the filesystem would let the guest
+# answer on the operator's behalf and keep a credential alive
+# that the config no longer names.
+if [ "${BOMBYX_GIT_CRED_PRESENT:-}" = 1 ]; then
+    # Configured, so the upload must have happened. Carrying on
+    # would reach the clone with no credential and fail there,
+    # naming the repository rather than the file that went
+    # missing.
+    if [ ! -f "$GIT_CRED" ]; then
+        refuse "a repo_token is configured but no git credential" \
+            "arrived at $GIT_CRED. bombyx stages that file only" \
+            "for the length of its own vagrant run, so a vagrant" \
+            "provision started by hand on the VM host does not" \
+            "find it. Re-run the bombyx command instead."
+    fi
+
+    # The upload does not decide the mode on its own, for the
+    # reason the secrets block above gives: `scp` carries the
+    # mode across for a file it creates and leaves an existing
+    # file's alone, and a re-provision writes over one.
+    if ! chmod 600 "$GIT_CRED"; then
+        refuse "could not tighten the mode on $GIT_CRED." \
+            "The error above says why."
+    fi
+else
+    # Not configured, so a file an earlier run left has to go.
+    # Leaving it would keep a token alive that the config no
+    # longer names, and `git` would go on sending it.
+    if ! rm -f "$GIT_CRED"; then
+        refuse "no repo_token is configured and the git" \
+            "credential at $GIT_CRED could not be removed. The" \
+            "error above says why."
     fi
 fi
 
@@ -813,6 +896,49 @@ elif [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     git_ssh="$git_ssh -o StrictHostKeyChecking=accept-new"
 fi
 
+# HOW `git` AUTHENTICATES AN https CLONE, when a token was
+# configured.
+#
+# `credential.helper` tells `git` which program to ask for a
+# username and a password. `store --file=<path>` names the
+# helper `git-credential-store` and hands it that path, and the
+# helper answers from the line bombyx put there. GIT_CRED's
+# banner near the top of this file says why that path is a
+# literal.
+#
+# The setting is named on one command at a time, the way
+# `git_ssh` is, and for the same reason: `exec` at the end of
+# this script hands the environment to the project's own script,
+# and a global setting would govern every `git` that script and
+# the agent afterwards run. What carries forward instead is the
+# setting written into the clone further down, which reaches
+# that one repository and stops.
+#
+# Empty when nothing was configured, which covers a public
+# repository and an ssh clone.
+if [ "${BOMBYX_GIT_CRED_PRESENT:-}" = 1 ]; then
+    git_cred_helper="store --file=$GIT_CRED"
+else
+    git_cred_helper=""
+fi
+
+# The two `git` commands below that talk to the network go
+# through here, so the credential and the ssh command are added
+# in one place rather than twice.
+#
+# Two branches rather than one command with a variable in it.
+# The helper string carries a space, so an unquoted expansion
+# would split it and a quoted one would hand `git` an empty
+# `-c` when nothing is configured.
+git_net() {
+    if [ -n "$git_cred_helper" ]; then
+        GIT_SSH_COMMAND="$git_ssh" git \
+            -c "credential.helper=$git_cred_helper" "$@"
+    else
+        GIT_SSH_COMMAND="$git_ssh" git "$@"
+    fi
+}
+
 # If the clone came from a different repository than the one
 # bombyx was asked for, throw it away rather than fetching over
 # it.
@@ -925,7 +1051,7 @@ if [ -d "$CLONE_DIR/.git" ]; then
     # Named on the command rather than exported, and it wins
     # over any `core.sshCommand` an earlier provision left in
     # this clone: `git` prefers GIT_SSH_COMMAND to that setting.
-    if ! GIT_SSH_COMMAND="$git_ssh" git -C "$CLONE_DIR" \
+    if ! git_net -C "$CLONE_DIR" \
         fetch --depth 1 origin -- "$BOMBYX_REF"
     then
         refuse "could not update the clone. The message above" \
@@ -980,7 +1106,7 @@ else
             "guest, then provision again."
     fi
 
-    GIT_SSH_COMMAND="$git_ssh" git clone \
+    git_net clone \
         --depth 1 --branch "$BOMBYX_REF" \
         -- "$BOMBYX_REPO" "$CLONE_DIR"
 fi
@@ -1022,6 +1148,22 @@ else
     # that means there was nothing there. Only that code is
     # tolerated.
     git -C "$CLONE_DIR" config --unset-all core.sshCommand \
+        || { rc=$?; [ "$rc" = 5 ]; }
+fi
+
+# And the same for the credential, so the agent can fetch and
+# push in this clone after provisioning has finished.
+#
+# `--replace-all` and the tolerated exit 5 are there for the
+# reasons the `core.sshCommand` block above gives: a plain set
+# refuses once the key has two values, and `--unset` against two
+# values exits 5 having removed nothing, which is the same code
+# as "there was nothing there".
+if [ -n "$git_cred_helper" ]; then
+    git -C "$CLONE_DIR" config --replace-all \
+        credential.helper "$git_cred_helper"
+else
+    git -C "$CLONE_DIR" config --unset-all credential.helper \
         || { rc=$?; [ "$rc" = 5 ]; }
 fi
 

@@ -23,7 +23,8 @@
 //! **Every field is checked by its *type*, so none can be built
 //! wrong at all.** Each field named below is a newtype of
 //! bombyx's own -- `remote_root`, `host`, `repo`, `script`,
-//! `box`, `ref`, `deploy_key`, `env_file` and `project` -- and
+//! `box`, `ref`, `deploy_key`, `env_file`, `repo_token`,
+//! `repo_user` and `project` -- and
 //! an `[env]` entry is two more, an [`EnvName`] keying an
 //! [`EnvValue`]. No count here: the list grows, and a figure in
 //! prose costs the next reader a recount. See [`RepoUrl`] for
@@ -71,6 +72,9 @@
 //! - `env_file` -- every rule the path to a secrets file on the
 //!   workstation must pass, and the type holding what bombyx
 //!   reads out of it.
+//! - `repo_token` -- every rule `repo_token` and `repo_user`
+//!   must pass, and the git credential bombyx builds from the
+//!   variable the first one names.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
@@ -87,6 +91,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use thiserror::Error;
+
 use crate::name::{ScratchName, check_segment};
 
 mod deploy_key;
@@ -97,6 +103,7 @@ mod guards;
 mod host;
 mod read;
 mod registry;
+mod repo_token;
 mod root;
 mod source;
 mod transport;
@@ -221,6 +228,9 @@ pub use host::{
 pub(crate) use host::{is_anchored_dir, registry_place};
 pub(crate) use registry::Registry;
 pub use registry::USER_CONFIG_FILE;
+pub use repo_token::{
+    GitCredential, RepoToken, RepoTokenError, RepoTokenVar, RepoUser,
+};
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
 pub use vm::{BoxName, Provider, Vm};
@@ -327,11 +337,77 @@ pub struct Config {
     transport: Transport,
 }
 
-impl Config {
-    /// Reads the file `source.env_file` names, if it names one.
+/// Everything bombyx reads off the workstation and stages on
+/// the VM host for one run.
+///
+/// Both parts come out of the single file `source.env_file`
+/// names, and the invariant is that either both came from one
+/// [`Config::read_staged`] call or there is nothing here at
+/// all. The fields are private so those are the only two states
+/// a caller can produce, which matters because
+/// `crate::plan::plan` takes one on trust.
+///
+/// `Default` is the second state rather than a hole in the
+/// first. It is what an action that must keep working after the
+/// operator deleted the file gets, and
+/// `crate::plan::Action::needs_staged_files` says which those
+/// are.
+#[derive(Debug, Default)]
+pub struct Staged {
+    /// The project's secrets, as the file holds them.
+    secrets: Option<Secrets>,
+    /// The credential `git` authenticates the clone with, built
+    /// from one variable inside those secrets.
     ///
-    /// The one supported way to build the `secrets` argument
-    /// `crate::plan::plan` takes. Both halves come from here, so
+    /// `None` when the config names no `repo_token`, which is
+    /// what a public repository and an ssh clone both want.
+    credential: Option<GitCredential>,
+}
+
+impl Staged {
+    /// The project's secrets, when the config names a file.
+    ///
+    /// Both fields are private, and that is what holds the
+    /// promise above up. Public ones would let a caller write a
+    /// `Staged` whose halves came from two different configs,
+    /// and `crate::plan::plan` takes one on trust.
+    #[must_use]
+    pub fn secrets(&self) -> Option<&Secrets> {
+        self.secrets.as_ref()
+    }
+
+    /// The git credential, when the config names a
+    /// `repo_token`.
+    #[must_use]
+    pub fn credential(&self) -> Option<&GitCredential> {
+        self.credential.as_ref()
+    }
+}
+
+/// Why bombyx could not assemble what it stages for a run.
+///
+/// Two causes, kept apart because they send the operator to
+/// different places. [`StagedError::File`] is about reaching the
+/// file at all, and [`StagedError::Token`] is about what was
+/// inside it once bombyx had.
+#[derive(Debug, Error)]
+pub enum StagedError {
+    /// The file `env_file` names could not be read.
+    #[error(transparent)]
+    File(#[from] EnvFileError),
+
+    /// The file was read and the token could not be taken out
+    /// of it.
+    #[error(transparent)]
+    Token(#[from] RepoTokenError),
+}
+
+impl Config {
+    /// Reads the file `source.env_file` names, if it names one,
+    /// and builds whatever bombyx sends alongside it.
+    ///
+    /// The one supported way to build the [`Staged`] argument
+    /// `crate::plan::plan` takes. Every part comes from here, so
     /// a caller cannot pair a config that names a file with
     /// contents read from somewhere else, or with none at all --
     /// a mismatch the generated Vagrantfile and the plan would
@@ -344,21 +420,67 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns whatever [`EnvFilePath::read`] returns: the
-    /// environment names no home directory, the path is not a
-    /// regular file, or the file could not be opened.
-    pub fn read_secrets<F>(
-        &self,
-        getenv: F,
-    ) -> Result<Option<Secrets>, EnvFileError>
+    /// Returns [`StagedError::File`] when the environment names
+    /// no home directory, the path is not a regular file, or the
+    /// file could not be opened; and [`StagedError::Token`] when
+    /// the file holds no variable of the name `repo_token`
+    /// states, or holds it empty.
+    pub fn read_staged<F>(&self, getenv: F) -> Result<Staged, StagedError>
     where
         F: Fn(&str) -> Option<String>,
     {
-        self.source
-            .env_file
-            .as_ref()
-            .map(|p| p.read(getenv))
-            .transpose()
+        let Some(path) = self.source.env_file.as_ref() else {
+            // A `repo_token` with no file to read it out of is
+            // refused rather than ignored. `Source::try_from`
+            // catches it while a config file parses; this is
+            // the same pairing in a config built in code, where
+            // the fields are public. Ignoring it would render a
+            // Vagrantfile claiming a credential that nothing
+            // stages, and the guest would refuse after booting.
+            if let Some(token) = self.source.repo_token.as_ref() {
+                return Err(RepoTokenError::NoEnvFile {
+                    var: token.var.as_str().to_owned(),
+                }
+                .into());
+            }
+            return Ok(Staged::default());
+        };
+        let secrets = path.read(getenv)?;
+        let credential = self.credential(&secrets, path.as_str())?;
+        Ok(Staged {
+            secrets: Some(secrets),
+            credential,
+        })
+    }
+
+    /// Builds the credential file, when the config names a
+    /// token.
+    ///
+    /// Split out of [`Config::read_staged`] so the file reading
+    /// and the parsing of what was read stay separate, and
+    /// private because the two belong together: a credential
+    /// built from contents that did not come from
+    /// `source.env_file` would name a file the error messages
+    /// then misdescribe.
+    fn credential(
+        &self,
+        secrets: &Secrets,
+        path: &str,
+    ) -> Result<Option<GitCredential>, RepoTokenError> {
+        let Some(token) = self.source.repo_token.as_ref() else {
+            return Ok(None);
+        };
+        // `Source::try_from` refuses a `repo_token` whose `repo`
+        // has no https host, so a config that was parsed cannot
+        // arrive here. A config assembled by hand can: the
+        // fields are public. Hence an error rather than an
+        // `expect`.
+        let host = self.source.repo.https_host().ok_or_else(|| {
+            RepoTokenError::NoHttpsHost {
+                repo: self.source.repo.as_str().to_owned(),
+            }
+        })?;
+        repo_token::credential(host, token, secrets.as_bytes(), path).map(Some)
     }
 
     /// How bombyx reaches [`Config::host`].
@@ -1392,8 +1514,9 @@ mod load_project_tests {
             load(&test_registry("myproject", "vmhost", None), "myproject")
                 .expect("a registry with no env_file must load");
         assert!(
-            cfg.read_secrets(|_| None)
+            cfg.read_staged(|_| None)
                 .expect("no env_file, nothing to read")
+                .secrets
                 .is_none(),
             "a config naming no file must yield no secrets"
         );
@@ -1403,10 +1526,36 @@ mod load_project_tests {
                 .expect("a temp path is absolute"),
         );
         let secrets = cfg
-            .read_secrets(|_| None)
+            .read_staged(|_| None)
             .expect("the file is there")
+            .secrets
             .expect("a config naming a file must yield secrets");
         assert_eq!(secrets.as_bytes().len(), 14);
+    }
+
+    #[test]
+    fn a_token_with_no_file_to_read_it_from_is_refused() {
+        // Unreachable from a config file -- `Source`'s
+        // `TryFrom` refuses the pairing there. Reachable in
+        // code, because `Config`'s fields are public, and
+        // ignoring it would render a Vagrantfile claiming a
+        // credential that nothing stages.
+        use crate::config::{RepoToken, RepoTokenVar, RepoUser};
+
+        let (mut cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("the fixture registry must load");
+        cfg.source.repo_token = Some(RepoToken {
+            var: RepoTokenVar::parse("TOKEN").expect("a plain name"),
+            user: RepoUser::parse("x-token-auth").expect("a plain username"),
+        });
+        assert!(cfg.source.env_file.is_none(), "the fixture sets none");
+        let err = cfg
+            .read_staged(|_| None)
+            .expect_err("a token with no env_file must be refused");
+        let msg = err.to_string();
+        assert!(msg.contains("TOKEN"), "{msg}");
+        assert!(msg.contains("env_file"), "{msg}");
     }
 
     /// [`load`], told what this machine is called.

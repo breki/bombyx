@@ -19,6 +19,30 @@ noticing. Those are finished work and are not counted.
 
 ---
 
+### fr-2026-09-13-comparatives-without-their-comparison
+
+**Category:** Comprehension
+
+`CLAUDE.md` under **Voice** names "limits what stealing it is
+worth" as *the* example of a comparative with no comparison, and
+says the defect matters twice over in a document about risk,
+because a hedged comparative reads as reassurance and a reader
+cannot check reassurance.
+
+The phrase is still in `README.md`, `config.toml.sample` and
+`docs/trust-boundary.md`, alongside "narrower than it first
+looks", "narrower than it looks", "the tighter choice" and
+"Read-only is tighter". A reader deciding what scope of token to
+give a VM gets nothing actionable from any of them; the passage
+in `docs/trust-boundary.md` that names what each token type
+actually reaches is what answers the question.
+
+Every one of them predates this branch, and the repair is to
+name the reach instead, the way that passage already does.
+Deferred as out of scope for the `repo_token` work rather than
+because it is wrong.
+
+
 ### fr-2026-09-13-trust-boundary-opening-qualifies-early
 
 **Category:** Structure

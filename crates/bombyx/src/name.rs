@@ -26,7 +26,7 @@
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::newtype::checked_str_newtype;
+use crate::newtype::{checked_str_newtype, checked_str_parse};
 
 /// Longest accepted name.
 pub const MAX_NAME_LEN: usize = 64;
@@ -117,7 +117,7 @@ pub fn check_segment(value: &str) -> Result<(), NameError> {
 #[serde(try_from = "String")]
 pub struct ProjectName(String);
 
-impl ProjectName {
+checked_str_parse!(
     /// Validates `raw` as a project name.
     ///
     /// # Errors
@@ -125,11 +125,10 @@ impl ProjectName {
     /// Returns [`NameError`] when `raw` is empty, longer than
     /// [`MAX_NAME_LEN`], does not start with a letter or digit,
     /// or contains anything outside `[A-Za-z0-9._-]`.
-    pub fn parse(raw: &str) -> Result<Self, NameError> {
-        check_segment(raw)?;
-        Ok(Self(raw.to_owned()))
-    }
-}
+    ProjectName,
+    NameError,
+    check_segment
+);
 
 checked_str_newtype!(ProjectName, "Returns the validated name.");
 
@@ -163,7 +162,7 @@ impl std::borrow::Borrow<str> for ProjectName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScratchName(String);
 
-impl ScratchName {
+checked_str_parse!(
     /// Validates `raw` as a scratch VM name.
     ///
     /// # Errors
@@ -172,11 +171,10 @@ impl ScratchName {
     /// [`MAX_NAME_LEN`], does not start with a letter or
     /// digit, or contains anything outside
     /// `[A-Za-z0-9._-]`.
-    pub fn parse(raw: &str) -> Result<Self, NameError> {
-        check_segment(raw)?;
-        Ok(Self(raw.to_owned()))
-    }
-}
+    ScratchName,
+    NameError,
+    check_segment
+);
 
 checked_str_newtype!(ScratchName, "Returns the validated name.");
 

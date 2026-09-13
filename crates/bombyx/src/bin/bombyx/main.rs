@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
-use bombyx::config::{Config, HostOrigin, Transport};
+use bombyx::config::{Config, HostOrigin, Staged, Transport};
 use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
@@ -422,18 +422,19 @@ fn run() -> Result<Ran> {
     // real run performs -- and a plan that describes a different
     // run is worse than one that refuses. The contents never
     // reach the printed output either way: the line carries a
-    // byte count.
+    // byte count, or for the git credential no count at all --
+    // `crate::remote::Stdin` says which payloads may not report
+    // their size and why.
     //
-    // Only for the actions that consume it, which
-    // `Action::needs_secrets` decides and explains. The verbs it
-    // excludes are the ones that must keep working after the
-    // operator has deleted the file.
-    let secrets = if action.needs_secrets() {
-        cfg.read_secrets(|k| std::env::var(k).ok())?
+    // Only for the actions that consume them, which
+    // `Action::needs_staged_files` decides and explains. The
+    // verbs it excludes are the ones that must keep working
+    // after the operator has deleted the file.
+    let staged = if action.needs_staged_files() {
+        cfg.read_staged(|k| std::env::var(k).ok())?
     } else {
-        None
+        Staged::default()
     };
-    let secrets = secrets.as_ref();
 
     // Every action renders its dry run the same way, through
     // `plan`, so no subcommand can describe a run it would not
@@ -442,12 +443,12 @@ fn run() -> Result<Ran> {
     // structs, and a live run never builds their command lines
     // twice.
     if cli.dry_run {
-        return execute(&plan(&action, &cfg, tty, secrets), true);
+        return execute(&plan(&action, &cfg, tty, &staged), true);
     }
     if matches!(action, Action::Doctor) {
         return Ok(doctor_run(&cfg));
     }
-    execute(&plan(&action, &cfg, tty, secrets), false)
+    execute(&plan(&action, &cfg, tty, &staged), false)
 }
 
 /// Checks for a newer release and installs it.

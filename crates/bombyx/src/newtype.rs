@@ -16,13 +16,20 @@
 //! blocks per type, and `cargo xtask dupes` counts every one of
 //! them against a 6% budget.
 //!
-//! [`checked_str_newtype`] writes those three. What it
-//! deliberately does not write is `parse` or `TryFrom`: those
-//! bodies really do differ. `RemoteRoot` drops a trailing slash
-//! before storing the value, and `ProjectName` fails with
-//! `name::NameError` rather than `config::FieldError`. A macro
-//! covering them would have to grow an arm per exception, and
-//! the exceptions are the parts worth reading.
+//! [`checked_str_newtype`] writes those three.
+//!
+//! Two more macros write the constructors, and they are separate
+//! because a type may want one, both or neither.
+//! [`checked_str_parse`] writes `parse`, and
+//! [`checked_str_try_from`] writes `TryFrom<String>`, which is
+//! what connects a type to serde. Both take the check function
+//! and the error type as parameters, so a type failing with
+//! `name::NameError` uses the same macro as one failing with
+//! `config::FieldError`.
+//!
+//! `config::RemoteRoot` uses neither. It drops a trailing slash
+//! before storing the value, so its bodies are not the shared
+//! shape, and that difference is the part worth reading.
 
 /// Writes `as_str`, `Display` and `AsRef<str>` for a newtype
 /// wrapping one private `String`.
@@ -64,6 +71,61 @@ macro_rules! checked_str_newtype {
     };
 }
 
+/// Writes `parse` for a newtype wrapping one private `String`.
+///
+/// `$ty` is the type, `$err` the error its check returns, and
+/// `$check` the function holding every rule the value has. The
+/// doc comment is written at the call site, ahead of the type
+/// name, and passed through: each one names that field's own
+/// rules, and clippy requires the `# Errors` section.
+///
+/// The body is the same for every caller -- run the check, wrap
+/// a copy -- which is why it is here rather than written out
+/// once per type.
+macro_rules! checked_str_parse {
+    (
+        $(#[$doc:meta])*
+        $ty:ident, $err:ty, $check:path
+    ) => {
+        impl $ty {
+            $(#[$doc])*
+            pub fn parse(raw: &str) -> Result<Self, $err> {
+                $check(raw)?;
+                Ok(Self(raw.to_owned()))
+            }
+        }
+    };
+}
+
+/// Writes `TryFrom<String>` for a newtype wrapping one private
+/// `String`.
+///
+/// The parameters are [`checked_str_parse`]'s. The body differs
+/// from `parse`'s in one way that matters: serde arrives owning
+/// a `String`, so the check runs against a borrow and the value
+/// moves into the newtype, with no second copy on the path a
+/// config load actually takes.
+///
+/// **This is what makes a type's rules run while the config
+/// parses.** Without it serde assigns the private field
+/// directly and every check is skipped.
+macro_rules! checked_str_try_from {
+    (
+        $(#[$doc:meta])*
+        $ty:ident, $err:ty, $check:path
+    ) => {
+        impl ::std::convert::TryFrom<String> for $ty {
+            type Error = $err;
+
+            $(#[$doc])*
+            fn try_from(raw: String) -> Result<Self, Self::Error> {
+                $check(&raw)?;
+                Ok(Self(raw))
+            }
+        }
+    };
+}
+
 // A `macro_rules!` macro is not an item like a function or a
 // struct. It is visible only to code that appears *after* it in
 // the crate's source order, whatever module that code is in, so
@@ -72,4 +134,4 @@ macro_rules! checked_str_newtype {
 // path, which is why every call site writes
 // `use crate::newtype::checked_str_newtype;` and why the order
 // of the `mod` lines in `lib.rs` then stops mattering.
-pub(crate) use checked_str_newtype;
+pub(crate) use {checked_str_newtype, checked_str_parse, checked_str_try_from};

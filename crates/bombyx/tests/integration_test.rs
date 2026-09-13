@@ -943,6 +943,7 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
 #[cfg(unix)]
 mod snapshot_guard_states {
     use super::{CONFIG_HOME, project_dir};
+    use bombyx::config::Staged;
     use bombyx::config::{Config, USER_CONFIG_FILE};
     use bombyx::plan::{Action, plan};
     use bombyx::remote::Tty;
@@ -1046,7 +1047,7 @@ mod snapshot_guard_states {
             .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
         let (cfg, _) =
             Config::load_project("myproject", Some(&cfg_path)).unwrap();
-        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, None);
+        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, &Staged::default());
         let script = cmds.last().unwrap().args.last().unwrap().clone();
 
         let out = StdCommand::new("sh")

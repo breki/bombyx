@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::{Config, DeployKeyPath, Secrets};
+use crate::config::{Config, DeployKeyPath, Staged};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -72,12 +72,13 @@ pub enum Action {
 
 impl Action {
     /// Whether this action needs the file `source.env_file`
-    /// names.
+    /// names, and the git credential bombyx builds out of it.
     ///
     /// The caller reads that file, and reading it can fail --
     /// the operator rotated it, or moved it, or the config names
-    /// a path this machine never had. So this decides which
-    /// actions a missing file is allowed to stop.
+    /// a path this machine never had. The variable `repo_token`
+    /// names can be missing from it too. So this decides which
+    /// actions either failure is allowed to stop.
     ///
     /// **The teardown verbs are the reason it exists.** A
     /// `destroy` refused because the secrets file has gone would
@@ -94,7 +95,7 @@ impl Action {
     /// Written as an exhaustive match rather than a `matches!`,
     /// so a new variant is a decision somebody makes here.
     #[must_use]
-    pub fn needs_secrets(&self) -> bool {
+    pub fn needs_staged_files(&self) -> bool {
         match self {
             Self::Up | Self::Provision | Self::Scratch(_) => true,
             Self::Down
@@ -128,26 +129,32 @@ impl Action {
 ///
 /// **The file writes are the exception, and cannot be
 /// otherwise.** Each carries a whole file -- the generated
-/// Vagrantfile, the bootstrap script, and the project's secrets
-/// when the config names an `env_file` -- and no file is in the
+/// Vagrantfile, the bootstrap script, the project's secrets
+/// when the config names an `env_file`, and the git credential
+/// when it names a `repo_token` -- and no file is in the
 /// command at all: it travels on the command's standard input,
 /// which is a pipe and not text a printed line can hold. The
 /// line says how many bytes bombyx will send; see
 /// [`RemoteCommand::with_stdin`]. That is also what keeps a
 /// secret out of a printed plan.
 ///
-/// `secrets` is the contents of the file `source.env_file`
-/// names, already read from the workstation by the caller, and
-/// `None` when the config names no such file. Reading it here
-/// would put a file open in the one module whose job is to
-/// decide which commands run, and would make every test of that
-/// decision need a file on disk.
+/// The git credential is the one exception, and its line gives
+/// no count. That file is fixed text plus one token, so a count
+/// would measure the token; `write_then` below says so where it
+/// chooses the writer.
+///
+/// `staged` is what the caller read off the workstation: the
+/// contents of the file `source.env_file` names, and the git
+/// credential built from one variable inside it. Reading and
+/// parsing them here would put a file open in the one module
+/// whose job is to decide which commands run, and would make
+/// every test of that decision need a file on disk.
 #[must_use]
 pub fn plan(
     action: &Action,
     cfg: &Config,
     tty: Tty,
-    secrets: Option<&Secrets>,
+    staged: &Staged,
 ) -> Vec<RemoteCommand> {
     match action {
         // The snapshot save is here rather than inside
@@ -177,7 +184,7 @@ pub fn plan(
         // day-old working tree under a name that says otherwise.
         Action::Up => {
             let dir = cfg.remote_project_dir();
-            let mut cmds = write_then(cfg, &dir, &["up"], tty, secrets);
+            let mut cmds = write_then(cfg, &dir, &["up"], tty, staged);
             cmds.push(remote::save_snapshot_if_absent(cfg, &dir, tty));
             cmds
         }
@@ -186,7 +193,7 @@ pub fn plan(
             &cfg.remote_project_dir(),
             &["provision"],
             tty,
-            secrets,
+            staged,
         ),
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
@@ -205,13 +212,9 @@ pub fn plan(
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir(), tty),
-        Action::Scratch(name) => write_then(
-            cfg,
-            &cfg.remote_scratch_dir(name),
-            &["up"],
-            tty,
-            secrets,
-        ),
+        Action::Scratch(name) => {
+            write_then(cfg, &cfg.remote_scratch_dir(name), &["up"], tty, staged)
+        }
         Action::Discard(name) => {
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
@@ -264,7 +267,7 @@ fn write_then(
     dir: &str,
     args: &[&str],
     tty: Tty,
-    secrets: Option<&Secrets>,
+    staged: &Staged,
 ) -> Vec<RemoteCommand> {
     // Before the `mkdir`, so a config naming a key the VM host
     // does not have leaves no directory and no Vagrantfile
@@ -283,15 +286,29 @@ fn write_then(
         cmds.push(remote::write_file(cfg, dir, name, contents.as_bytes()));
     }
 
-    // The secrets file is written last of the three, so the
-    // window in which the VM host holds it is the `vagrant` run
-    // and nothing more.
-    if let Some(secrets) = secrets {
+    // The two secret-carrying files are written after the
+    // generated ones, so the window in which the VM host holds
+    // them is the `vagrant` run and nothing more.
+    if let Some(secrets) = staged.secrets() {
         cmds.push(remote::write_file(
             cfg,
             dir,
             vagrantfile::ENV_FILE_NAME,
             secrets.as_bytes(),
+        ));
+    }
+    // `write_file_of_hidden_size`, not `write_file`, and the
+    // difference is only in what a dry run prints. This file is
+    // `https://` plus the username, the host and two
+    // separators, all of which the reader already has -- so a
+    // byte count would measure the token. `remote::Stdin` holds
+    // the rule.
+    if let Some(credential) = staged.credential() {
+        cmds.push(remote::write_file_of_hidden_size(
+            cfg,
+            dir,
+            vagrantfile::CREDENTIAL_FILE_NAME,
+            credential.as_bytes(),
         ));
     }
 
@@ -312,7 +329,10 @@ fn write_then(
         dir,
         args,
         tty,
-        vagrantfile::ENV_FILE_NAME,
+        &[
+            vagrantfile::ENV_FILE_NAME,
+            vagrantfile::CREDENTIAL_FILE_NAME,
+        ],
     ));
     cmds
 }
@@ -333,7 +353,7 @@ mod tests {
     }
 
     fn plan_for(action: &Action, tty: Tty) -> Vec<RemoteCommand> {
-        plan(action, &cfg(), tty, None)
+        plan(action, &cfg(), tty, &Staged::default())
     }
 
     fn local_cfg() -> Config {
@@ -370,9 +390,8 @@ mod tests {
 
             // The per-command rule above is satisfied by a plan
             // with no vagrant step in it at all, so it cannot
-            // notice one that lost its boot. The count the old
-            // version of this test asserted is what caught that,
-            // and this is that half kept.
+            // notice one that lost its boot. Counting the
+            // vagrant steps is what does.
             //
             // `doctor` is excluded because its probes spell the
             // program differently -- `command -v 'vagrant'` and
@@ -416,7 +435,8 @@ mod tests {
             for c in &plan_for(&action, Tty::Allocate) {
                 assert_eq!(c.program, "ssh", "{action:?} over ssh");
             }
-            let here = plan(&action, &local_cfg(), Tty::Allocate, None);
+            let here =
+                plan(&action, &local_cfg(), Tty::Allocate, &Staged::default());
             for c in &here {
                 assert_eq!(c.program, "sh", "{action:?} here");
                 assert!(
@@ -505,7 +525,7 @@ mod tests {
     }
 
     fn run(action: &Action) -> Vec<RemoteCommand> {
-        plan(action, &cfg(), Tty::NoPty, None)
+        plan(action, &cfg(), Tty::NoPty, &Staged::default())
     }
 
     /// Each command of `action`'s plan as `--dry-run` prints
@@ -599,6 +619,11 @@ mod tests {
                  { printf 'bombyx: could not remove %s from the VM \
                  host; it may hold secrets for this project\\\\n' \
                  ~/'vms/myproject/bombyx.env' >&2; \
+                 [ \\\"\\$rc\\\" = 0 ] && rc=1; }; \
+                 rm -f ~/'vms/myproject/bombyx.git-credentials' || \
+                 { printf 'bombyx: could not remove %s from the VM \
+                 host; it may hold secrets for this project\\\\n' \
+                 ~/'vms/myproject/bombyx.git-credentials' >&2; \
                  [ \\\"\\$rc\\\" = 0 ] && rc=1; }; exit \\$rc\"",
             ]
         );
@@ -674,7 +699,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty, None);
+            let cmds =
+                plan(&action, &cfg_with_key(), Tty::NoPty, &Staged::default());
             assert!(
                 script(&cmds[0]).contains("'deploy_key'"),
                 "{action:?}: the key check is not the first step"
@@ -694,7 +720,7 @@ mod tests {
         // writes that file, so the bare name would match the
         // write step.
         for action in all_actions() {
-            let cmds = plan(&action, &cfg(), Tty::NoPty, None);
+            let cmds = plan(&action, &cfg(), Tty::NoPty, &Staged::default());
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: a check was built with no key configured"
@@ -722,7 +748,8 @@ mod tests {
             Action::Down,
             Action::Status,
         ] {
-            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty, None);
+            let cmds =
+                plan(&action, &cfg_with_key(), Tty::NoPty, &Staged::default());
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: teardown must not check the key"
@@ -787,6 +814,11 @@ mod tests {
                  { printf 'bombyx: could not remove %s from the VM \
                  host; it may hold secrets for this project\\\\n' \
                  ~/'vms/myproject/bombyx.env' >&2; \
+                 [ \\\"\\$rc\\\" = 0 ] && rc=1; }; \
+                 rm -f ~/'vms/myproject/bombyx.git-credentials' || \
+                 { printf 'bombyx: could not remove %s from the VM \
+                 host; it may hold secrets for this project\\\\n' \
+                 ~/'vms/myproject/bombyx.git-credentials' >&2; \
                  [ \\\"\\$rc\\\" = 0 ] && rc=1; }; exit \\$rc\"",
             ]
         );
@@ -1226,18 +1258,38 @@ mod tests {
         }
     }
 
-    /// Contents standing in for a project's secrets file, with a
-    /// value distinctive enough that a test can look for it.
-    fn secrets() -> Secrets {
-        use crate::config::EnvFilePath;
+    /// What a caller stages for a project naming an `env_file`,
+    /// with a token value distinctive enough to search for.
+    ///
+    /// Built by writing a real file and going through
+    /// `Config::read_staged`, rather than by assembling the
+    /// parts here. That is the only supported way to pair them,
+    /// and it means these tests exercise the same path a run
+    /// takes.
+    ///
+    /// `with_token` decides whether the config also names a
+    /// `repo_token`, which is what makes bombyx build the git
+    /// credential as well.
+    fn staged(with_token: bool) -> Staged {
+        use crate::config::{EnvFilePath, RepoToken, RepoTokenVar, RepoUser};
 
         let dir = tempfile::tempdir().expect("a temp dir");
         let file = dir.path().join("x.env");
         std::fs::write(&file, "TOKEN=hunter2\n").expect("write");
-        EnvFilePath::parse(&file.display().to_string())
-            .expect("a temp path is absolute")
-            .read(|_| None)
-            .expect("the file is there")
+
+        let mut cfg = cfg();
+        cfg.source.env_file = Some(
+            EnvFilePath::parse(&file.display().to_string())
+                .expect("a temp path is absolute"),
+        );
+        if with_token {
+            cfg.source.repo_token = Some(RepoToken {
+                var: RepoTokenVar::parse("TOKEN").expect("a plain name"),
+                user: RepoUser::parse("x-token-auth")
+                    .expect("a plain username"),
+            });
+        }
+        cfg.read_staged(|_| None).expect("the file is there")
     }
 
     #[test]
@@ -1256,7 +1308,7 @@ mod tests {
                 action,
                 Action::Up | Action::Provision | Action::Scratch(_)
             );
-            assert_eq!(action.needs_secrets(), want, "{action:?}");
+            assert_eq!(action.needs_staged_files(), want, "{action:?}");
         }
     }
 
@@ -1271,7 +1323,7 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg(), Tty::NoPty, Some(&secrets()));
+            let cmds = plan(&action, &cfg(), Tty::NoPty, &staged(true));
             let write = cmds
                 .iter()
                 .position(|c| script(c).contains("bombyx.env"))
@@ -1315,12 +1367,14 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg(), Tty::NoPty, None);
-            assert!(
-                cmds.iter().any(|c| script(c).contains("rm -f")
-                    && script(c).contains("bombyx.env")),
-                "{action:?}: nothing collects a leftover staged file"
-            );
+            let cmds = plan(&action, &cfg(), Tty::NoPty, &Staged::default());
+            for name in ["bombyx.env", "bombyx.git-credentials"] {
+                assert!(
+                    cmds.iter().any(|c| script(c).contains("rm -f")
+                        && script(c).contains(name)),
+                    "{action:?}: nothing collects a leftover {name}"
+                );
+            }
         }
     }
 
@@ -1329,10 +1383,88 @@ mod tests {
         // The removal above is not a write. A project with no
         // `env_file` must still send nothing.
         for action in all_actions() {
-            for c in plan(&action, &cfg(), Tty::NoPty, None) {
+            for c in plan(&action, &cfg(), Tty::NoPty, &Staged::default()) {
                 assert!(
                     c.stdin.is_none() || !script(&c).contains("bombyx.env"),
                     "{action:?}: a file nobody configured was written"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_configured_repo_token_stages_a_credential_file() {
+        // A second file travelling the same way as the secrets,
+        // and it has to be there before vagrant runs: the clone
+        // it authenticates is the first thing the guest does
+        // with the network.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            let cmds = plan(&action, &cfg(), Tty::NoPty, &staged(true));
+            let write = cmds
+                .iter()
+                .position(|c| script(c).contains("bombyx.git-credentials"))
+                .unwrap_or_else(|| panic!("{action:?}: nothing writes it"));
+            let vagrant = cmds
+                .iter()
+                .position(|c| script(c).contains(" vagrant '"))
+                .unwrap_or_else(|| panic!("{action:?}: nothing runs vagrant"));
+            assert!(
+                write < vagrant,
+                "{action:?}: the credential must be staged before the boot"
+            );
+        }
+    }
+
+    #[test]
+    fn the_credential_write_does_not_print_its_size() {
+        // The byte count is harmless for `bombyx.env`, where it
+        // is a whole file's size. This file is fixed text plus
+        // one token, so a count measures the token -- and
+        // `docs/usage.md` invites the operator to paste a dry
+        // run into a bug report.
+        let cmds = plan(&Action::Up, &cfg(), Tty::NoPty, &staged(true));
+        let cred = cmds
+            .iter()
+            .find(|c| script(c).contains("bombyx.git-credentials"))
+            .expect("the credential must be staged");
+        let shown = cred.to_string();
+        assert!(
+            !shown.contains("bytes on stdin"),
+            "a count measures the token: {shown}"
+        );
+        assert!(
+            shown.contains("contents on stdin, not shown"),
+            "the reader must still be told a payload is sent: {shown}"
+        );
+
+        // The secrets file keeps its count, so this is a
+        // decision about one file rather than the render losing
+        // the information everywhere.
+        let env = cmds
+            .iter()
+            .find(|c| script(c).contains("bombyx.env"))
+            .expect("the secrets file must be staged");
+        assert!(
+            env.to_string().contains("bytes on stdin"),
+            "the secrets file keeps its size: {env}"
+        );
+    }
+
+    #[test]
+    fn an_env_file_without_a_repo_token_stages_no_credential() {
+        // The secrets travel and the credential does not. A
+        // project cloning a public repository over https, or one
+        // cloning over ssh with a deploy key, is in this case.
+        for action in all_actions() {
+            for c in plan(&action, &cfg(), Tty::NoPty, &staged(false)) {
+                assert!(
+                    c.stdin.is_none()
+                        || !script(&c).contains("bombyx.git-credentials"),
+                    "{action:?}: a credential nobody configured was written"
                 );
             }
         }
@@ -1348,7 +1480,7 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            for c in plan(&action, &cfg(), Tty::NoPty, Some(&secrets())) {
+            for c in plan(&action, &cfg(), Tty::NoPty, &staged(true)) {
                 for arg in &c.args {
                     assert!(!arg.contains("hunter2"), "{action:?}: {arg}");
                 }
@@ -1366,7 +1498,7 @@ mod tests {
         // staged file goes with it and there is nothing for
         // these plans to write or remove on their own.
         for action in [Action::Destroy, Action::Discard(scratch("pr-1234"))] {
-            for c in plan(&action, &cfg(), Tty::NoPty, Some(&secrets())) {
+            for c in plan(&action, &cfg(), Tty::NoPty, &staged(true)) {
                 assert!(
                     !script(&c).contains("bombyx.env"),
                     "{action:?}: teardown must not stage anything"

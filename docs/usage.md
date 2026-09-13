@@ -413,23 +413,35 @@ $ bombyx --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; rm -f ~/'vms/myproject/bombyx.git-credentials' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.git-credentials' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
-The tail on the boot line removes the secrets file `env_file`
-stages on the VM host. It is there on every run, whether or not
-the project sets `env_file`, because a run you interrupt can
-leave one behind and a later config may no longer name it. A
-project that does set `env_file` gets one more line than this,
-a `cat > ~/'vms/myproject/bombyx.env'` beside the other two
-writes.
+The tail on the boot line removes the two files bombyx stages
+on the VM host: the secrets file `env_file` sends, and the git
+credential `repo_token` produces. Both removals are there on
+every run, whether or not the project sets either key, because a
+run you interrupt can leave a file behind and a later config may
+no longer name it. A project that sets `env_file` gets one more
+line than this, a `cat > ~/'vms/myproject/bombyx.env'` beside
+the other two writes, and one that also sets `repo_token` gets a
+`cat > ~/'vms/myproject/bombyx.git-credentials'` as well.
 
 Neither generated file appears in the plan, and there is
 nothing to elide: the file is not part of the command. It
 travels on the command's standard input, which is a pipe
 between two processes rather than text. The trailing comment is
 how many bytes bombyx will send down that pipe.
+
+The git credential's line is the one that gives no count. It
+reads `# contents on stdin, not shown` instead, because that
+file is `https://`, your `repo_user`, the host and two
+separators -- everything but the token is text you already have,
+so the count would be a measurement of the token. This document
+tells you to paste a dry run into a bug report, and a token's
+length should not travel with it. Every other write line still
+gives its size, which is a whole file's size and says nothing
+about any one value in it.
 
 The transcript above writes each count as `N` rather than
 quoting one. Both generated files change size with almost every
@@ -578,6 +590,13 @@ The difference is what happens next: the step that runs
 `vagrant` removes it again, so the VM host holds it for the
 length of that run rather than for the life of the VM.
 
+A project that also sets `repo_token` sends a fourth on the same
+terms. bombyx builds it from one variable inside the third one,
+so it is a file bombyx generates out of a file you supplied
+rather than a copy of anything. It is separate because `git`
+reads it itself and the format it reads is not the format a
+`.env` file is written in.
+
 ## What is checked, and what is not
 
 Your `config.toml` is normally your own file, and every field
@@ -639,6 +658,32 @@ your account can read, and bombyx will deliver it into a VM
 about to run that project's code. That is the same hazard
 `deploy_key` carries, aimed at your own machine rather than at
 the VM host, and the same advice covers both.
+
+`repo_token` and `repo_user` are checked differently again,
+because their rules are about keys agreeing rather than about
+one value's shape. They are written together or not at all,
+`repo_token` requires `env_file`, and it requires `repo` to be
+an `https` URL naming no username. That last one is the
+surprising one: `git` asks its credential helper for whichever
+username the URL carries, and the helper answers only when that
+matches the one it stored, so a `repo` of
+`https://me@bitbucket.org/w/r.git` would ship the token into the
+guest and leave the clone unable to use it. All four are refused
+while the config parses, so the message names the line.
+
+One more check happens when the file is read: a variable the
+file does not hold, or holds empty, stops the run and the
+message names both the variable and the file. A value bombyx
+read as a comment gets a message of its own, because the file
+does not look empty to the operator staring at it.
+
+`repo_token`'s own shape is that of a shell variable name -- a
+letter or an underscore, then letters, digits and underscores --
+because that is what an `export` line in the secrets file could
+have set. `repo_user` has to be printable and carry no
+surrounding whitespace, and nothing more: bombyx percent-encodes
+it into the credential line, where no character has a meaning
+left.
 
 `host` gets the sharpest rule, because it is handed to `ssh` as
 its first argument and `ssh` reads a leading `-` as an option:

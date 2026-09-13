@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use super::error::FieldError;
 use super::guards;
-use crate::newtype::checked_str_newtype;
+use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
 /// A secrets file on the workstation, as the operator wrote it.
 ///
@@ -254,16 +254,13 @@ checked_str_newtype!(
     "The value, as the operator wrote it in the config file."
 );
 
-impl TryFrom<String> for EnvFilePath {
-    type Error = FieldError;
-
+checked_str_try_from!(
     /// What serde calls. It already owns the `String`, so the
     /// rules run against a borrow of it rather than a copy.
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        check(&raw)?;
-        Ok(Self(raw))
-    }
-}
+    EnvFilePath,
+    FieldError,
+    check
+);
 
 /// Checks an `env_file` value against every rule here.
 ///

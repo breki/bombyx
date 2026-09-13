@@ -28,6 +28,19 @@ and this project adheres to
   one -- so an interrupted run's leftover is collected by the next boot. The guest's
   provisioning script is told the path in `BOMBYX_ENV_FILE`, which is set on
   every run and empty when no `env_file` is configured.
+- `repo_token` and `repo_user` in `[source]` clone a private repository over
+  https. `repo_token` names a variable inside the file `env_file` points at,
+  never the token itself, and `repo_user` the username git sends with it --
+  `x-token-auth` for a Bitbucket repository access token, the account's email
+  address for an Atlassian API token. bombyx reads that variable on the
+  workstation, percent-encodes it into one credential line, and carries it to
+  the VM host on standard input the way the secrets file travels; vagrant
+  uploads it to /home/vagrant/.bombyx-git-credentials, where bombyx's own
+  provisioning script sets it to mode 0600 and points the clone at it, so the
+  agent can fetch and push afterwards. The two keys are written together or not
+  at all, `repo_token` requires `env_file`, `repo` has to be an https URL, and
+  that URL must name no username -- git asks its credential helper for whichever
+  username the URL carries, so a `user@` there would leave the token unusable.
 
 ### Changed
 
@@ -39,7 +52,17 @@ and this project adheres to
   file an earlier bombyx left at 0664. Both generated files end up readable by
   their owner alone, which matters because the Vagrantfile carries every value
   from the project's `[env]` table. A dry run now ends each write line with the
-  payload's size in bytes instead of naming a heredoc and a line count.
+  payload's size in bytes instead of naming a heredoc and a line count -- except
+  the git credential, whose line says the contents are not shown and gives no
+  size, because that file is fixed text plus one token and the size would
+  measure it.
+- **BREAKING:** `plan::plan` takes a `&Staged` as its fourth argument. In 0.5.0
+  it took three, and the env_file work in this same unreleased block added a
+  fourth as `Option<&Secrets>`; it now carries both the secrets and the git
+  credential, which `Config::read_staged` is the only supported way to build. A
+  caller of the library has to change; the CLI is unaffected.
+  `Config::read_secrets` and `Action::needs_secrets` were renamed in the same
+  move, but neither ever shipped in a release, so neither is listed as removed.
 
 ### Fixed
 

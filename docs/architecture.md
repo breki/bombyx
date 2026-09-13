@@ -15,7 +15,7 @@ flowchart LR
   end
 
   subgraph host["VM host"]
-    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh<br/>bombyx.env (staged, with env_file)"]
+    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh<br/>bombyx.env (staged, with env_file)<br/>bombyx.git-credentials (staged, with repo_token)"]
     vg["vagrant"]
   end
 
@@ -125,7 +125,9 @@ is the point: neither the workstation nor the VM host reads any
 file from it. The VM host reads none because the files bombyx
 puts there are two it generates itself and, when the config
 names an `env_file`, a third that comes off the operator's own
-machine rather than out of the repository. That third one is
+machine rather than out of the repository. A configured
+`repo_token` adds a fourth, which bombyx builds from one
+variable inside that third one. The two that carry secrets are
 staged for the length of the `vagrant` run and removed by the
 step that runs it. The workstation reads none because every
 setting comes out of `config.toml`, which lives in the
@@ -197,6 +199,7 @@ one with the same three fields.
 | `config::root` | what `remote_root` may be, and why it is strict |
 | `config::deploy_key` | what `deploy_key` may be, and why |
 | `config::env_file` | what `env_file` may be, and the file it names |
+| `config::repo_token` | `repo_token` and `repo_user`, and the credential built from them |
 | `config::source` | `[source]`, and the three checked types it holds |
 | `config::transport` | whether `host` names this very machine |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
@@ -242,6 +245,11 @@ classDiagram
     +ScriptPath script
     +Option~DeployKeyPath~ deploy_key
     +Option~EnvFilePath~ env_file
+    +Option~RepoToken~ repo_token
+  }
+  class RepoToken {
+    +RepoTokenVar var
+    +RepoUser user
   }
   class RepoUrl {
     +String value
@@ -312,6 +320,9 @@ classDiagram
   Source *-- GitRef : ref
   Source *-- DeployKeyPath : deploy_key
   Source *-- EnvFilePath : env_file
+  Source *-- RepoToken : repo_token
+  RepoToken *-- RepoTokenVar : var
+  RepoToken *-- RepoUser : user
   Vm *-- BoxName : box
   Config *-- ProjectName : project
   Config *-- EnvName : env keys
@@ -735,7 +746,7 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Nine fields are enforced by a newtype of bombyx's own:
+The checked fields are enforced by a newtype of bombyx's own:
 `remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
 `ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `deploy_key`
 a `DeployKeyPath`, `env_file` an `EnvFilePath`, `project` a
@@ -752,18 +763,44 @@ key rather than as a field, `ProjectName` being the first. That
 is the reason it is a type: nothing calls a checking function
 on a key while serde is building the map.
 
-`deploy_key` and `env_file` are the two optional ones. Each is
-an `Option`, so a project cloning a public repository leaves the
-key out and a project with no secrets leaves the file out: the
-generated Vagrantfile then carries no upload block for the
-absent one, and no write step is planned for it.
+`deploy_key`, `env_file` and the `repo_token`/`repo_user` pair
+are the optional ones. Each is an `Option`, so a project cloning a
+public repository leaves the key out and a project with no
+secrets leaves the file out: the generated Vagrantfile then
+carries no upload block for the absent one, and no write step is
+planned for it.
 
-The *removal* of the staged secrets file is planned either way,
-which is the one place these two optional keys behave
-differently. A run interrupted after the `vagrant` step began
-leaves `bombyx.env` on the VM host, and taking `env_file` out of
-the config afterwards would stop a conditional removal from ever
-collecting it. `plan::write_then` holds that argument.
+`repo_token` and `repo_user` are the one pair among them, and
+they do not reach `Source` as two fields. `Source` holds a
+single `Option<RepoToken>`, and `RepoToken` carries both halves,
+so a config with one and not the other cannot be written down at
+all -- not by a config file and not by code assembling a
+`Source` by hand. `Source`'s `TryFrom` is what turns the two
+TOML keys into that one field, and it carries the message for
+one without the other along with three more rules of the same
+kind: `repo_token` needs `env_file`, it needs `repo` to be an
+`https` URL, and it needs that URL to name no username --
+`git` asks its credential helper for whichever username the URL
+carries, and the helper answers only on a match.
+
+**Two of those rules are checked twice**, and deliberately.
+`Config::read_staged` refuses a `repo_token` with no `env_file`
+as well, and `Config::credential` refuses one whose `repo` names
+no https host. Both exist because `Config`'s fields are public:
+a config built in code can hold a pairing no config file can,
+and ignoring it would render a Vagrantfile claiming a credential
+that nothing stages. `RepoTokenError::NoEnvFile` and
+`RepoTokenError::NoHttpsHost` are the two. The pairing rule
+itself needs no second check, because `RepoToken` makes the
+split state unrepresentable.
+
+The *removal* of the two staged files is planned either way,
+which is the one place these optional keys behave differently. A
+run interrupted after the `vagrant` step began leaves
+`bombyx.env` and `bombyx.git-credentials` on the VM host, and
+taking the keys out of the config afterwards would stop a
+conditional removal from ever collecting them.
+`plan::write_then` holds that argument.
 
 `deploy_key`'s value reaches two places and neither is an argv
 slot. One
@@ -997,6 +1034,12 @@ because no config can reach it.
 | `env_file` | empty or blank | no meaning when blank |
 | `env_file` | anything but a `~/` anchor or an absolute path on this machine | bombyx opens the file itself, so a relative value would resolve against whatever directory bombyx was started in |
 | `env_file` | a bare `~`, a trailing separator, or a final `.` or `..` segment | each names a directory rather than a file, and the general message would send the operator looking for the wrong mistake. The separator is the one this machine writes paths with, so `\` counts on Windows |
+| `repo_token` | empty or blank, a leading digit, or any character outside letters, digits and `_` | it names a shell variable inside the secrets file, so a value outside that shape names something no `export` line could have set |
+| `repo_user` | empty or blank, leading or trailing whitespace, a control character | it reaches the server as the username, and whitespace is a copy-paste artifact. The quote and backslash rules do not apply: nothing renders this value into Ruby, and it is percent-encoded into the credential line |
+| `repo_token` without `repo_user`, or `repo_user` without `repo_token` | one without the other | a variable name with no username leaves bombyx guessing the vendor's literal, which is what stating it exists to avoid, and a username with no variable name has no token to go with |
+| `repo_token` without `env_file` | the pairing | the variable is read out of that file, so without it there is nothing to look in |
+| `repo_token` with a `repo` that is not an `https` URL naming a host | the pairing | `git` sends the token on every request, so `http` would put it on the wire in plain text and an ssh URL never asks for one |
+| `repo_token` with a `repo` whose authority carries a `user@` | the pairing | `git` asks its credential helper for whichever username the URL names, and `git-credential-store` answers only when that equals the one it stored -- measured. The token would reach the guest and the clone still could not use it. One place names the username, and it is `repo_user` |
 | `[env]` names | anything but a leading letter or `_` followed by letters, digits and `_` | the guest exports each one as a shell variable, and `9LIVES=1` is a syntax error while `WITH-DASH=1` is read as a command to run |
 | `[env]` names | a leading `BOMBYX_` | the generated Vagrantfile writes bombyx's own variables and the project's into one Ruby hash literal, and a repeated key there takes its last value, so a project could otherwise choose which script bombyx runs |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |
