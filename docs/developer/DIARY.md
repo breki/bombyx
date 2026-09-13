@@ -28,14 +28,38 @@ not run: the repository is in use and creating a branch there
 fires pipelines. **So pushing is verified by a dry run and not
 by a real one.**
 
-**bombyx itself has not run against a VM host with this
-configured.** The clone and the push above were `git` on a
-workstation, not bombyx driving `vagrant`. So the parts only a
-real run exercises are untested: whether vagrant's `file`
-provisioner accepts the destination, what mode the upload
-actually lands at, and whether `git-credential-store` answers
-for the host as bombyx spelled it. Definition of Done item 3 is
-outstanding for every command this changes.
+**Definition of Done item 3 is satisfied.** bombyx drove the
+whole path against frosti and a real guest, after the branch had
+already merged, and the record is worth keeping because the
+failures taught more than the success did.
+
+The clone authenticated over `https` with the token and
+completed. `credential.helper` reached the clone, `core.sshCommand`
+was correctly left unset, and a `git push --dry-run` from inside
+the guest answered `[new branch]` -- so an agent in that VM can
+push, which is the whole reason the feature exists. Both
+uploaded files landed at mode 0600 owned by `vagrant`, the
+credential at the literal path, and the project's script found
+the secrets where bombyx left them.
+
+Three runs, and the first two failed. The first named a `ref`
+that is not on the remote; the second found no provisioning
+script on `main`. Both were the operator's repository rather
+than bombyx, and both were more useful than the third: **the VM
+host kept neither secret after either failure.** The removal
+sits inside the `vagrant` step so that a failed boot still
+clears it, and that is now measured rather than argued. The
+second run also printed the refusal wording the review had just
+corrected, naming all three credentials.
+
+One thing the run exposed that reading would not have. A `repo`
+carrying a username reaches the guest, stages the token and then
+cannot use it -- `git` asks its helper for the URL's username
+and the helper answers only on a match. The review had already
+caught it and `Source::try_from` refuses the pairing, but the
+shape of the failure -- everything working, nothing usable -- is
+the argument for running the thing rather than reasoning about
+it.
 
 The `.netrc` unknown dissolved rather than being answered.
 git's `store` helper is a git mechanism and never goes near
