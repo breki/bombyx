@@ -404,6 +404,29 @@ fn run() -> Result<Ran> {
     let action = action_of(&vm, &cfg)?;
     let tty = tty_choice();
 
+    // Read here, at the edge, because this is the only place in
+    // bombyx that is allowed to touch the filesystem on a whim --
+    // `plan` decides which commands run and nothing else.
+    //
+    // Before the plan is built, so a config naming a file this
+    // machine does not have stops the run with the path in the
+    // message. That mirrors what `remote::require_file` does for
+    // `deploy_key` on the VM host, and it is the same promise:
+    // nothing is created anywhere before the credential is known
+    // to be there.
+    //
+    // Every action reads it, `status` and `doctor` included,
+    // rather than only the three that boot. A `status` that
+    // succeeded while `up` refused would be reporting on a
+    // config bombyx cannot act on.
+    let secrets = cfg
+        .source
+        .env_file
+        .as_ref()
+        .map(|p| p.read(|k| std::env::var(k).ok()))
+        .transpose()?;
+    let secrets = secrets.as_ref();
+
     // Every action renders its dry run the same way, through
     // `plan`, so no subcommand can describe a run it would not
     // perform -- doctor included. Ordered so the two doctor
@@ -411,12 +434,12 @@ fn run() -> Result<Ran> {
     // structs, and a live run never builds their command lines
     // twice.
     if cli.dry_run {
-        return execute(&plan(&action, &cfg, tty), true);
+        return execute(&plan(&action, &cfg, tty, secrets), true);
     }
     if matches!(action, Action::Doctor) {
         return Ok(doctor_run(&cfg));
     }
-    execute(&plan(&action, &cfg, tty), false)
+    execute(&plan(&action, &cfg, tty, secrets), false)
 }
 
 /// Checks for a newer release and installs it.

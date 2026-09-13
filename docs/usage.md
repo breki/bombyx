@@ -599,6 +599,29 @@ open is refused here rather than inside Vagrant. The teardown
 verbs check nothing, so `destroy` still clears a directory
 whose key has since gone.
 
+`env_file` is checked in the same spirit and by different
+rules, because bombyx is what opens it. The value names a file
+on the machine you are typing on, so bombyx reads it before it
+builds the plan and stops with a message naming the path it
+looked for when the file is not there. Nothing is created on the
+VM host first.
+
+The rules are shorter than `deploy_key`'s for a reason worth
+knowing: the path never reaches a shell on either machine.
+bombyx opens the file itself and the contents travel on the
+command's standard input, so there is nothing to quote. The
+value has to start with `~/` or be an absolute path, and a bare
+`~` is refused because the home directory is a directory rather
+than a file. A relative path is refused because it would
+resolve against whatever directory you happened to run bombyx
+from. A space or a quote in the file name is accepted.
+
+A config you did not write can point `env_file` at any file
+your account can read, and bombyx will deliver it into a VM
+about to run that project's code. That is the same hazard
+`deploy_key` carries, aimed at your own machine rather than at
+the VM host, and the same advice covers both.
+
 `host` gets the sharpest rule, because it is handed to `ssh` as
 its first argument and `ssh` reads a leading `-` as an option:
 `host = "-oProxyCommand=..."` would run code on your

@@ -125,10 +125,18 @@ file does not change its mode.
 Both halves are needed and neither replaces the other. What is
 still true is that the VM host's owner, and root on it, can read
 anything there -- a mode stops other accounts, not the machine's
-administrator. Issue #78 proposes carrying a secrets
-file from the workstation into the guest without putting its
-values in `[env]` at all, and #79 builds the git credential on
-top of it; #76 holds the design behind both.
+administrator.
+
+`env_file` in `[source]` is the answer for a value that should
+not be in `[env]` at all. It names a file on the workstation,
+and its contents reach the VM host on the same standard input
+the two generated files use, so they appear in no command line
+and in no generated file. The staged copy on the VM host is
+removed by the step that runs `vagrant`, whether `vagrant`
+succeeded or not, so the machine in the middle holds it only
+while the upload into the guest is happening. Issue #79 builds
+the git credential on top of it; #76 holds the design behind
+both.
 
 A configured `deploy_key` adds one more command, and it runs
 first:
@@ -257,6 +265,22 @@ provisioner that Vagrant runs before the bootstrap script, and
 uploaded it, names that key on each `git` command it runs
 itself so `git` uses it and no other, and records the same command on the clone so the
 agent can push with it.
+
+`env_file` carries the project's other secrets and takes a
+different route, because bombyx opens the file rather than
+`vagrant`. bombyx reads it on the workstation before the plan is
+built, writes it beside the generated Vagrantfile on the VM host
+over standard input, and the Vagrantfile uploads it into the
+guest at `~/.bombyx-env`, where `bootstrap.sh` tightens it to
+`0600`. The staged copy on the VM host goes as soon as `vagrant`
+finishes. `bootstrap.sh` puts the file nowhere else in the
+guest: it exports `BOMBYX_ENV_FILE` naming the path, and the
+project's own script is what copies it into place.
+
+The exposure inside the guest is the same as the key's, and for
+the same reason: the agent needs these values to work, so code
+in the VM can read them. What changes is how many machines hold
+a copy on the way, not whether one arrives.
 
 Where that check runs is worth a sentence, because the obvious
 place is wrong. The Vagrantfile could test the file itself and
@@ -453,6 +477,10 @@ than reasoned about. A later `up` does not refresh the
 snapshot either, because it only takes one when the machine
 has none.
 
+The same holds for `env_file`. `bootstrap.sh` deletes the
+secrets file whenever the config names none, and the snapshot
+keeps whatever the disk held when it was taken.
+
 So a revoked key comes back on every reset for the life of that
 VM. `bombyx destroy` is what certainly removes it, because it
 takes the disk and the snapshot with it.
@@ -508,8 +536,9 @@ its seven steps done; the seventh is under **Not built** below:
   `[source]` inside the guest and runs a script from it, and the
   push is gone. `vagrant_dir`, the `tar`/`scp` pair and the
   remote unpack all went with it, so `bombyx up` is five `ssh`
-  commands -- six with a `deploy_key` configured -- and the VM
-  host holds no project file outside the guest's disk image.
+  commands -- six with a `deploy_key` configured, and one more
+  again with an `env_file` -- and the VM host holds no project
+  file outside the guest's disk image.
 - GitHub issue #50 -- `deploy_key` in `[source]` names a
   private key file on the VM host, and the guest clones a
   private repository with it. Cited by issue number rather than

@@ -145,7 +145,7 @@ What a project's table holds:
 | Key | |
 |-----|---|
 | `[vm]` | required; `box` (needs `git`, and two more programs for an ssh clone -- see below), `cpus`, `memory`. `provider` is optional, `libvirt` |
-| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host |
+| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host. `env_file` is optional -- a secrets file on your workstation |
 | `remote_root` | optional, `~/vms`; must sit above the two tables |
 | `host` | optional; only for a project that runs elsewhere |
 
@@ -197,6 +197,30 @@ stealing it is worth. bombyx checks the file is on the VM host
 before it creates anything, so naming a path that is not there
 stops the run with a message rather than booting a VM whose
 clone then fails.
+
+**`env_file` is the other optional key, and it points the other
+way.** It names a file on the machine you are typing on --
+usually the project's own `.env`, which is untracked and so
+never reaches the guest's clone. bombyx reads it, sends it to
+the VM host on the connection it already has, and has `vagrant`
+put it inside the guest at `~/.bombyx-env`. The contents never
+appear in a command line on either machine and never appear in
+the generated Vagrantfile, and the VM host does not keep the
+file: bombyx removes it once `vagrant` has finished, whether the
+boot worked or not.
+
+bombyx puts the file nowhere else inside the guest. Your
+provisioning script is what copies it where the project expects
+it, and the path arrives in `BOMBYX_ENV_FILE`:
+
+```sh
+cp "$BOMBYX_ENV_FILE" .env
+```
+
+Use `env_file` for a secret and the `[env]` table for anything
+that is not one. A table of plain settings is easier to read
+than a file, and its values are written into the generated
+Vagrantfile in plain text.
 
 **Read-only or not is a decision, and it decides whether work
 can leave the VM.** A commit made in the guest sits on no branch

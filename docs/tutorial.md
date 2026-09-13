@@ -396,6 +396,12 @@ the guest before provisioning. Code in the VM can read that
 key -- see [trust-boundary.md](trust-boundary.md) for what
 that costs.
 
+A project's own secrets go the other way. `env_file` in
+`[source]` names a file on the machine you are typing on,
+usually the project's untracked `.env`, and bombyx carries it
+into the guest. Your provisioning script copies it into place
+from `$BOMBYX_ENV_FILE`. The sample config explains it in full.
+
 The layout, in two places:
 
 ```
@@ -520,7 +526,8 @@ parse as `projects.myproject.vm.remote_root` and the whole file
 would be refused.
 
 `[vm]` and `[source]` are required, and every key in them
-except `provider` and `deploy_key` is required too. bombyx
+except `provider`, `deploy_key` and `env_file` is required
+too. bombyx
 builds the VM from the first and the guest clones the second,
 so there is nothing sensible for bombyx to guess: a base image
 is a choice, and a repository bombyx invented would be cloned

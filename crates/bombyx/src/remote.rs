@@ -532,6 +532,45 @@ pub fn vagrant_in(
     transport(cfg, &script, tty)
 }
 
+/// Builds the command running `vagrant` in `dir`, then removing
+/// `name` from `dir` whether `vagrant` succeeded or not.
+///
+/// Used for the project's secrets file, which the VM host holds
+/// only while `vagrant` is uploading it into the guest.
+///
+/// **The removal is inside this one command rather than a step
+/// after it**, and that is the whole reason the function exists.
+/// `run::Resolver::execute` stops a plan at the first command
+/// that fails, so a removal written as its own step would be
+/// skipped exactly when a boot failed -- and a failed boot is
+/// the case where the secrets would otherwise sit on a machine
+/// other accounts can log in to.
+///
+/// The shell reads this as `(cd && vagrant); rc=$?; rm; exit`,
+/// because `&&` binds tighter than `;`. So `rc` holds the status
+/// of the whole `cd`-and-`vagrant` list, and `exit $rc` hands it
+/// back: a failed boot is still reported as a failure, with the
+/// `rm` in between contributing nothing.
+///
+/// The path is absolute rather than relative to the `cd`. A `cd`
+/// that failed leaves the shell in the login directory, where a
+/// bare `rm -f bombyx.env` would name a different file.
+#[must_use]
+pub fn vagrant_in_then_remove(
+    cfg: &Config,
+    dir: &str,
+    args: &[&str],
+    tty: Tty,
+    name: &str,
+) -> RemoteCommand {
+    let script = format!(
+        "{run}; rc=$?; rm -f {path}; exit $rc",
+        run = vagrant_script(cfg, dir, args),
+        path = quote_remote_path(&format!("{dir}/{name}")),
+    );
+    transport(cfg, &script, tty)
+}
+
 /// Builds the command running `vagrant` in the project
 /// directory on the VM host.
 #[must_use]
@@ -1593,6 +1632,48 @@ mod tests {
         assert_eq!(
             remote_script(&c),
             format!("cd '/srv/x' && {env} vagrant 'halt'")
+        );
+    }
+
+    #[test]
+    fn the_removal_runs_whether_vagrant_worked_or_not() {
+        // A `&&` here would skip the removal on a failed boot,
+        // which is the case where the secrets would otherwise be
+        // left on a machine other accounts can log in to.
+        let c = vagrant_in_then_remove(
+            &cfg(),
+            "/srv/x",
+            &["up"],
+            Tty::NoPty,
+            "bombyx.env",
+        );
+        let env = vagrant_env();
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "cd '/srv/x' && {env} vagrant 'up'; rc=$?; \
+                 rm -f '/srv/x/bombyx.env'; exit $rc"
+            )
+        );
+    }
+
+    #[test]
+    fn the_removal_names_the_file_absolutely() {
+        // The `cd` can fail -- a directory removed between the
+        // `mkdir` and this step -- and the shell is then in the
+        // login directory. A bare `rm -f bombyx.env` would name
+        // a file there instead.
+        let c = vagrant_in_then_remove(
+            &cfg(),
+            "/srv/x",
+            &["up"],
+            Tty::NoPty,
+            "bombyx.env",
+        );
+        let s = remote_script(&c);
+        assert!(
+            s.contains("rm -f '/srv/x/bombyx.env'"),
+            "the removal must carry the whole path: {s}"
         );
     }
 

@@ -4,6 +4,69 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-13
 
+**A secrets file now travels from the workstation into the
+guest**
+
+A project's `.env` is untracked, so the guest's clone never had
+one, and bombyx copied no files. Listing the values under
+`[env]` was the only route, and that route writes every one of
+them into the generated Vagrantfile and through two command
+lines. Issue #78 is the second of the two bold rows in #76's
+table; #77, above, was the first.
+
+`env_file` in `[source]` names a file on the **workstation**,
+which makes it the only path in that table not resolved on the
+VM host. `deploy_key` beside it names one on the VM host, and
+the difference decides every rule: bombyx opens this file
+itself, so `Path::is_absolute` answers for the right machine and
+none of `deploy_key`'s quoting rules applies. A file name
+holding a space or a quote is accepted.
+
+`main.rs` reads the file before the plan is built, so a path
+this machine does not have stops the run naming what it looked
+for -- the workstation-side twin of what `remote::require_file`
+does for the deploy key. The contents reach the VM host on the
+standard input #77 added, land beside the Vagrantfile as
+`bombyx.env`, and the generated Vagrantfile uploads them into
+the guest.
+
+Three decisions are worth recording, because two of them could
+have gone the other way.
+
+The upload's `destination:` is written `~/.bombyx-env` rather
+than spelled out. Vagrant expands a destination by running
+`printf` on it through a shell **inside the guest**, as the
+account it logs in as -- read in vagrant 2.4.9, the file
+provisioner's `expand_guest_path` and the Linux guest's
+`shell_expand_guest_path`, whose `execute` defaults to
+`sudo: false`. So the file lands in that account's real home
+whatever the box calls the account. `bootstrap.sh` cannot spell
+the same path with `$HOME`, because a project's `[env]` table
+may set it, so it reads the passwd entry instead. On a real box
+the two agree, checked rather than assumed.
+`DEPLOY_KEY_GUEST_PATH` still hard-codes `/home/vagrant`, and
+that is now `deploy-key-path-names-vagrant` in `docs/todo.md`.
+
+`bootstrap.sh` puts the file nowhere else. It exports
+`BOMBYX_ENV_FILE` and the project's own script does the copy.
+bombyx does not know that a project keeps its secrets at the top
+of the clone or that it calls them `.env`, and the shipped
+script carries nothing project-specific.
+
+The removal of the staged copy is folded into the same shell
+script as the `vagrant` invocation --
+`vagrant up; rc=$?; rm -f ...; exit $rc` -- rather than
+following it as a step. `execute` stops a plan at the first
+failure, so a removal written as its own step would be skipped
+exactly when a boot failed, and a failed boot is when secrets
+would otherwise sit on a machine other accounts can log in to.
+
+Verified end to end on frosti with a scratch VM: the file
+provisioner reported `bombyx.env => ~/.bombyx-env`, the guest's
+copy held the exact contents at mode 0600 owned by the SSH
+account, and the staged copy was gone from the VM host while the
+Vagrantfile and `bootstrap.sh` remained.
+
 **A generated file now travels on standard input, not in an
 argument**
 
