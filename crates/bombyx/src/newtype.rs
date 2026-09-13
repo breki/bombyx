@@ -4,8 +4,8 @@
 //! already checked: `config::RepoUrl`, `config::ScriptPath`,
 //! `config::GitRef`, `config::BoxName`, `config::RemoteRoot`,
 //! `config::HostName`, `config::DeployKeyPath`,
-//! `config::EnvName`, `config::EnvValue`, `name::ProjectName`
-//! and `name::ScratchName`. Each explains
+//! `config::EnvFilePath`, `config::EnvName`, `config::EnvValue`,
+//! `name::ProjectName` and `name::ScratchName`. Each explains
 //! its own rules, and those explanations are the reason the
 //! types are worth reading.
 //!

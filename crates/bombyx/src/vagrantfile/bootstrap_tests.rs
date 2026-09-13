@@ -118,7 +118,7 @@ fn every_variable_is_declared_before_it_is_expanded() {
 }
 
 #[test]
-fn every_refusal_clears_the_uploaded_key() {
+fn every_refusal_clears_both_uploaded_credentials() {
     // Vagrant uploads the key before this script starts, so
     // a refusal that exits without removing it leaves a
     // credential at whatever mode `scp` gave it, in a guest
@@ -586,7 +586,7 @@ fn an_unusable_home_is_refused_by_name() {
     // uploaded deploy key, which then stays in a guest that
     // never provisioned.
     //
-    // `every_refusal_clears_the_uploaded_key` cannot see
+    // `every_refusal_clears_both_uploaded_credentials` cannot see
     // this: it compares the offsets of `exit 1` and the
     // removal, and an abort is neither.
     let lines = flat_bootstrap_lines();
@@ -964,12 +964,123 @@ fn the_script_places_the_secrets_file_nowhere_itself() {
 
 #[test]
 fn the_secrets_file_ends_up_readable_only_by_the_agent() {
-    // `scp` leaves the file at the mode the uploading side had,
-    // which is usually world-readable, and a guest may have
-    // accounts besides the agent's.
+    // The upload does not decide the mode on its own: bombyx
+    // writes the staged copy at 0600 and `scp` carries that
+    // across for a file it creates. What it does not do is
+    // change an EXISTING file's mode, and a re-provision writes
+    // over one -- so a guest whose earlier run left this file
+    // readable keeps that mode until the `chmod`.
     assert!(
         BOOTSTRAP.contains("chmod 600 \"$ENV_FILE\""),
         "the secrets file must end up at 0600"
+    );
+}
+
+#[test]
+fn both_branches_handle_a_passwd_lookup_that_found_nothing() {
+    // `ENV_FILE` falls back to a placeholder when the lookup
+    // finds nothing, so a branch that acts on the variable
+    // without checking acts on the wrong path. The rule guards
+    // the computed path, so BOTH branches need it -- and they
+    // need different answers.
+    //
+    // Configured: refuse. bombyx cannot say where the upload
+    // landed, and a provisioning run that carried on would leave
+    // the secrets somewhere nobody named.
+    //
+    // Not configured: say so and carry on. `bombyx_home` is used
+    // for nothing but this file, so refusing here would stop a
+    // project that has never had an `env_file` from provisioning
+    // at all, on the very boxes the fallback exists for.
+    let flat = flat_bootstrap_lines();
+    let checks = flat
+        .iter()
+        .filter(|l| !l.starts_with('#') && l.contains("-z \"$bombyx_home\""))
+        .count();
+    assert_eq!(
+        checks, 2,
+        "each branch of the env-file block must handle an empty \
+         passwd home, and they must handle it differently"
+    );
+    // The one that carries on must not be a refusal.
+    let flat = flat_bootstrap();
+    assert!(
+        flat.contains("secrets file an earlier run may have left"),
+        "the unconfigured branch must warn rather than refuse"
+    );
+}
+
+#[test]
+fn the_note_never_claims_a_file_it_could_not_find_was_removed() {
+    // `refuse` prints what it cleared. When the passwd lookup
+    // found nothing, `$ENV_FILE` names a placeholder, `rm -f`
+    // succeeds on it, and a note saying "any secrets file at
+    // /nonexistent/.bombyx-env has been removed" reassures the
+    // operator in the same breath as the refusal telling them to
+    // go and look for it by hand. Of the two, the reassuring one
+    // would be the false one.
+    let flat = flat_bootstrap();
+    assert!(
+        flat.contains("if [ -n \"$bombyx_home\" ]; then"),
+        "the note must branch on whether the home was found"
+    );
+    // The claim about the secrets file lives inside that branch,
+    // so the placeholder case cannot reach it.
+    let branch = flat
+        .find("if [ -n \"$bombyx_home\" ]; then")
+        .expect("the branch must be there");
+    let claim = flat
+        .find("and so has any secrets file at")
+        .expect("the note must name the secrets file somewhere");
+    assert!(
+        branch < claim,
+        "the claim must sit inside the branch that knows the path"
+    );
+}
+
+#[test]
+fn a_lookup_that_found_nothing_names_every_cause_it_has() {
+    // `bombyx_home` comes out empty for three reasons, and the
+    // declaration comment names all three: `getent` is missing,
+    // the account is absent from passwd, or the entry's home
+    // field is empty. A message blaming only the second sends an
+    // operator on a busybox box to /etc/passwd, where they find
+    // a good entry and conclude bombyx is broken.
+    //
+    // The command that settles it belongs in the message too,
+    // because nothing else in the guest will tell them.
+    let flat = flat_bootstrap();
+    let mentions = flat.matches("getent passwd").count();
+    assert!(
+        mentions >= 4,
+        "each of the three messages about an empty passwd home \
+         must name `getent`, alongside the lookup itself; found \
+         {mentions} mentions"
+    );
+    assert!(
+        !flat.contains("no passwd entry"),
+        "no message may assert the entry is missing: that is one \
+         of three causes and not the likeliest"
+    );
+}
+
+#[test]
+fn the_missing_upload_refusal_names_a_cause_that_can_happen() {
+    // bombyx reads the workstation file before it builds the
+    // plan, so on any bombyx-driven run that file existed. A
+    // message sending the operator to check it points at the one
+    // place that cannot be the cause. The reachable cause is a
+    // `vagrant provision` started by hand on the VM host, after
+    // bombyx removed the staged copy.
+    let flat = flat_bootstrap();
+    assert!(
+        flat.contains("started by hand on the VM host"),
+        "the refusal must name the hand-run case"
+    );
+    assert!(
+        !flat.contains("Check the file is still on the"),
+        "the refusal must not send the operator to the workstation, \
+         which bombyx already read before it built the plan"
     );
 }
 

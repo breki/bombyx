@@ -124,15 +124,16 @@ const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
 /// The secrets file's name in the project directory on the VM
 /// host.
 ///
-/// Public because `crate::plan` builds the command that writes
-/// it and the command that removes it again, and both have to
-/// spell it the same way [`render`] does.
+/// `pub(crate)` rather than `pub`, unlike [`VAGRANTFILE_NAME`]
+/// and [`BOOTSTRAP_NAME`], which the integration suite opens by
+/// name. Only `crate::plan` needs this one, to write the file
+/// and to remove it again, and a `pub` constant would make the
+/// name on the VM host something a release has to keep.
 ///
-/// Unlike [`VAGRANTFILE_NAME`] and [`BOOTSTRAP_NAME`] this file
-/// is not generated, so it is absent from [`files`]. Its
-/// contents come from the workstation and reach the VM host on
-/// a pipe.
-pub const ENV_FILE_NAME: &str = "bombyx.env";
+/// This file is not generated, so it is absent from [`files`].
+/// Its contents come from the workstation and reach the VM host
+/// on a pipe.
+pub(crate) const ENV_FILE_NAME: &str = "bombyx.env";
 
 /// Where the secrets file lands inside the guest.
 ///
@@ -162,10 +163,11 @@ const ENV_FILE_GUEST_PATH: &str = "~/.bombyx-env";
 /// is left to `/etc/profile`, so the guest could answer the
 /// question on the operator's behalf.
 ///
-/// Distinct from `BOMBYX_ENV_FILE`, which [`BOOTSTRAP`] exports
-/// for the project's own script and which holds the guest path
-/// rather than a flag.
-const ENV_FILE_ENV: &str = "BOMBYX_ENV_FILE_PRESENT";
+/// `BOMBYX_ENV_FILE`, which [`BOOTSTRAP`] exports for the
+/// project's own script, is a different variable holding the
+/// guest path. The `PRESENT` in both names here is what keeps
+/// the two apart.
+const ENV_FILE_PRESENT_ENV: &str = "BOMBYX_ENV_FILE_PRESENT";
 
 /// Environment variable naming the git host, lower-cased, when
 /// bombyx knows where that host publishes its ssh keys.
@@ -216,9 +218,10 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// Every variable bombyx sets in the provisioner itself.
 ///
 /// Test-only, because nothing in the rendering reads it: the
-/// nine names are written into the template one by one, in
-/// shapes that differ. What this array buys is a list to walk,
-/// and the test below is the only walker.
+/// names are written into the template one by one, in shapes
+/// that differ. What this array buys is a list to walk. No count
+/// here on purpose -- the array grows, and a figure in prose
+/// costs the next reader a recount.
 ///
 /// The `[env]` table refuses a name carrying the prefix
 /// `RESERVED_PREFIX` names, and `config::env` holds why. This
@@ -229,11 +232,12 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// without it would fall outside the reservation with every
 /// test still green.
 #[cfg(test)]
-const BOMBYX_ENV_NAMES: [&str; 9] = [
+const BOMBYX_ENV_NAMES: [&str; 10] = [
     REPO_ENV,
     REF_ENV,
     SCRIPT_ENV,
     DEPLOY_KEY_ENV,
+    ENV_FILE_PRESENT_ENV,
     GIT_HOST_ENV,
     HOST_KEYS_URL_ENV,
     HOST_KEYS_FORMAT_ENV,
@@ -434,7 +438,7 @@ end
         script_env = SCRIPT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
-        env_file_env_name = ENV_FILE_ENV,
+        env_file_env_name = ENV_FILE_PRESENT_ENV,
         env_file_env = if source.env_file.is_some() { "1" } else { "0" },
         git_host_env = GIT_HOST_ENV,
         git_host = ruby_string(host_keys.map_or("", |k| k.host())),
@@ -548,9 +552,10 @@ fn env_file_block(configured: bool) -> String {
     format!(
         "  # The project's secrets, carried from the workstation.
   # bombyx wrote this file beside the Vagrantfile a moment ago
-  # and removes it again when vagrant finishes, so the VM host
-  # keeps no copy. docs/trust-boundary.md says what keeping it
-  # inside the guest costs.
+  # and removes it again when vagrant finishes. A run somebody
+  # interrupted does not get that far, so finding the file here
+  # means the last run stopped early. docs/trust-boundary.md
+  # says what keeping a copy inside the guest costs.
   #
   # The destination is expanded by a shell inside the guest, so
   # it lands in the real home of the account vagrant logs in as.
@@ -567,8 +572,15 @@ fn env_file_block(configured: bool) -> String {
     )
 }
 
-/// Every file bombyx writes into the project directory on the
-/// VM host, as `(name, contents)` pairs.
+/// Every file bombyx *generates* for the project directory on
+/// the VM host, as `(name, contents)` pairs.
+///
+/// Not every file that lands there. A configured `env_file`
+/// sends a third, and its contents come off the operator's
+/// workstation rather than from here, so `ENV_FILE_NAME` in this
+/// module holds its name and `crate::plan` writes it. Not a
+/// rustdoc link: that constant is crate-private, and a public
+/// page may not link to one.
 ///
 /// The list exists once, here, and everything else reads it:
 /// `plan` to build the write commands, and the tests to check
@@ -1121,11 +1133,14 @@ mod tests {
         // guest would then be answering a question about the
         // operator's config.
         assert_eq!(
-            rendered(&render(&cfg_with_env_file()), ENV_FILE_ENV),
+            rendered(&render(&cfg_with_env_file()), ENV_FILE_PRESENT_ENV),
             "\"1\""
         );
         assert_eq!(
-            rendered(&render(&cfg_with(Provider::Libvirt)), ENV_FILE_ENV),
+            rendered(
+                &render(&cfg_with(Provider::Libvirt)),
+                ENV_FILE_PRESENT_ENV
+            ),
             "\"0\""
         );
     }

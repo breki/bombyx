@@ -22,8 +22,10 @@ and this project adheres to
 - `env_file` in `[source]` names a file on the workstation holding the project's
   secrets. bombyx reads it, carries the contents to the VM host on standard
   input rather than in a command line, and has vagrant upload them into the
-  guest at `~/.bombyx-env` at mode 0600. The VM host's copy is removed by the
-  same step that runs vagrant, whether the boot succeeded or not. The guest's
+  guest at `~/.bombyx-env`, where bombyx's own provisioning script sets it to
+  mode 0600. The VM host's copy is removed by the same step that runs vagrant,
+  whether the boot succeeded or not, and whether or not this project configured
+  one -- so an interrupted run's leftover is collected by the next boot. The guest's
   provisioning script is told the path in `BOMBYX_ENV_FILE`, which is set on
   every run and empty when no `env_file` is configured.
 

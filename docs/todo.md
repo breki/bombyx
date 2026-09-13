@@ -498,6 +498,30 @@ plan, decisions, and outcome.
   may set it; it reads the passwd entry instead, which is what ENV_FILE already
   does. Found while working issue #78, deliberately left out of that change.
 
+- **env-file-rules-stated-five-times** -- one rule, five documents, drifting
+  Two facts about `env_file` are each written out in four or five documents, and
+  nothing keeps them in step. What the value refuses -- a bare `~`, a trailing
+  separator, a final `.` or `..` segment, and anything neither `~/`-anchored nor
+  absolute -- is stated in `config.toml.sample`, `docs/usage.md`,
+  `docs/architecture.md`'s refused-values table and the `# Errors` block on
+  `config::env_file::check`. How long the VM host holds the staged copy is
+  stated in `config.toml.sample`, `README.md`, `docs/trust-boundary.md` twice,
+  and in the comment `vagrantfile::env_file_block` renders into the generated
+  Vagrantfile -- which is the copy that sits on the VM host beside the leftover
+  file it denies can exist. Both
+  drifted twice inside one review of #78: one round reconciled four copies of
+  the path rule and the next round found a fifth saying "slash" where the others
+  said "separator", and a separate round found all three copies of the retention
+  claim promising the VM host holds the file "only while the upload is
+  happening" when it holds it for the whole vagrant run and an interrupted run
+  leaves it behind. `/review` names this shape under **When it stops
+  converging** as "the rule has no single home", and forbids the repair inside a
+  review round, because the N-1 pointers that replace the copies become the next
+  round's findings. The repair wanted is one authoritative statement per fact
+  with the other documents pointing at it. `deploy_key` has the same shape and
+  the same number of copies, so whatever is decided here should cover both.
+  Raised on 2026-09-13 while working issue #78 and deliberately kept out of it.
+
 ## Done
 
 - **generated-files-world-readable** -- the Vagrantfile lands at mode 664

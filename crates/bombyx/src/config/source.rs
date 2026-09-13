@@ -1,20 +1,25 @@
 //! The `[source]` table: where the guest fetches the project
-//! from, and the three checked types that hold its values.
+//! from, and the three checked types that hold the values it
+//! hands to `git`.
 //!
-//! All three are *newtypes* -- a struct wrapping one private
-//! `String`, buildable only through a function that checks the
-//! value first. [`RepoUrl`] explains the pattern in full; read
-//! that one first.
+//! Those three are `repo`, `ref` and `script`, and all three are
+//! *newtypes* -- a struct wrapping one private `String`,
+//! buildable only through a function that checks the value
+//! first. [`RepoUrl`] explains the pattern in full; read that
+//! one first. All three reach `git` and the guest's shell, so
+//! they carry the checks that cannot be expressed as "a
+//! non-empty string".
 //!
-//! All three values reach `git` and the guest's shell, so they
-//! carry the checks that cannot be expressed as "a non-empty
-//! string".
+//! Two more keys are optional, and each is a path rather than
+//! something the guest hands to `git`, so each has its own
+//! module and its own rules.
 //!
-//! The table has a fourth key, `deploy_key`, and its type lives
-//! in `super::deploy_key` rather than here. It is the one value
-//! in the table that is a path on the VM host instead of
-//! something the guest hands to `git`, and its rules are its
-//! own.
+//! `deploy_key` lives in `super::deploy_key`. It names a file on
+//! the VM host, which `vagrant` opens.
+//!
+//! `env_file` lives in `super::env_file`. It names a file on the
+//! workstation, which bombyx opens itself -- and that difference
+//! is what makes its rules unlike the other path's.
 
 use serde::Deserialize;
 

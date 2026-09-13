@@ -160,8 +160,25 @@ readonly ENV_FILE="${bombyx_home:-/nonexistent}/.bombyx-env"
 # which is what makes testing the status possible here at all.
 refuse() {
     if rm -f "$DEPLOY_KEY" "$ENV_FILE"; then
-        key_note="any uploaded deploy key and secrets file have"
-        key_note="$key_note been removed from this guest."
+        key_note="any uploaded deploy key has been removed from"
+        key_note="$key_note this guest"
+        # The secrets half is claimed only when the passwd
+        # lookup found a home. Otherwise `$ENV_FILE` is the
+        # placeholder, `rm -f` succeeded on a path that was never
+        # the file, and saying it is gone would reassure the
+        # operator in the same breath as telling them to go and
+        # look for it.
+        if [ -n "$bombyx_home" ]; then
+            key_note="$key_note, and so has any secrets file at"
+            key_note="$key_note $ENV_FILE."
+        else
+            key_note="$key_note. WHERE A SECRETS FILE WOULD BE is"
+            key_note="$key_note unknown, because bombyx could not"
+            key_note="$key_note read a home directory for this"
+            key_note="$key_note account, so nothing here could"
+            key_note="$key_note remove one. Run: getent passwd"
+            key_note="$key_note \"\$(id -un)\""
+        fi
     else
         key_note="AN UPLOADED CREDENTIAL IS STILL IN THIS GUEST,"
         key_note="$key_note at $DEPLOY_KEY or $ENV_FILE, because"
@@ -195,10 +212,11 @@ refuse() {
 # in a list, so adding another needs no count corrected
 # anywhere.
 #
-# They sit above the deploy-key block and every one refuses
-# through `refuse`, which removes the uploaded key -- so a guest
-# that stops here keeps no credential. The banner below the
-# block says why that matters and what the dangerous case is.
+# They sit above the two credential blocks and every one refuses
+# through `refuse`, which removes both uploads -- so a guest that
+# stops here keeps no credential. The banner between these
+# checks and those blocks says why that matters and what the
+# dangerous case is.
 
 # Set and not empty. `${HOME:-}` rather than `$HOME`
 # because `set -u` would otherwise abort with "unbound
@@ -279,19 +297,20 @@ readonly CLONE_DIR="$HOME/project"
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
 # distinction, and the two are easy to run together.
 #
-# Vagrant uploads the deploy key before this script starts, and
-# the deploy-key block below is what tightens or removes it. A
-# refusal before that block is harmless, because `refuse`
-# removes the key itself. An *abort* before it is not: the
-# script dies without running `refuse`, and the credential
-# stays in the agent's own directory for the life of a VM that
-# never finished provisioning.
+# Vagrant uploads two credentials before this script starts: the
+# deploy key, and the project's secrets file when the config
+# names one. Two blocks follow, one per credential, and each
+# tightens or removes its own. A refusal before either is
+# harmless, because `refuse` removes both itself. An *abort*
+# before them is not: the script dies without running `refuse`,
+# and the credentials stay in the agent's own directory for the
+# life of a VM that never finished provisioning.
 #
 # `set -u` on an undeclared variable is the way to get such an
 # abort, which is why the checks above read `${HOME:-}` before
 # anything expands `$HOME` bare. `set -e` on an untested
 # command is the other way, which is why every command acting
-# on the key below tests its own status.
+# on either credential tests its own status.
 #
 # The `git` check sits after this block rather than before it,
 # because a box without `git` has to reach a refusal rather
@@ -301,9 +320,10 @@ readonly CLONE_DIR="$HOME/project"
 # THE PROJECT'S SECRETS FILE, and what this script does and does
 # not do with it.
 #
-# It does two things: it checks the upload arrived, and it tells
-# the project's own script where the file is. It does not put
-# the file anywhere. bombyx does not know that a project keeps
+# It checks the upload arrived, tightens its mode, removes a
+# file an earlier run left when the config no longer names one,
+# and tells the project's own script where the file is. What it
+# never does is put the file anywhere. bombyx does not know that a project keeps
 # its secrets at the top of the clone, or that it calls them
 # `.env`, so the project's script does the copy:
 #
@@ -320,25 +340,48 @@ readonly CLONE_DIR="$HOME/project"
 # in a directory an older bombyx wrote leaves it unset, and
 # `set -u` would abort before `refuse` could say anything.
 if [ "${BOMBYX_ENV_FILE_PRESENT:-}" = 1 ]; then
-    # An empty passwd home means the lookup at the top of this
-    # file found nothing, so ENV_FILE names a placeholder and
-    # the real upload is somewhere this script cannot spell.
+    # AN EMPTY `bombyx_home` MEANS ENV_FILE NAMES A PLACEHOLDER,
+    # so every line below is about the wrong path. Both branches
+    # of this `if` have to answer for that, and they answer
+    # differently -- which is why the check is not hoisted above
+    # them both.
+    #
+    # Configured, and bombyx cannot say where the upload landed:
+    # refuse. Carrying on would leave the project's secrets at a
+    # path nothing here can name.
     if [ -z "$bombyx_home" ]; then
-        refuse "this account has no home directory in the" \
-            "passwd database, so bombyx cannot tell where the" \
-            "secrets file was uploaded."
+        refuse "bombyx could not read a home directory for this" \
+            "account, so it cannot tell where the uploaded" \
+            "secrets file is. Either getent is missing on this" \
+            "box or the passwd entry names no home -- run" \
+            "\"getent passwd \$(id -un)\" to see which. Look for" \
+            "the file by hand in this guest."
     fi
 
     if [ ! -f "$ENV_FILE" ]; then
+        # Not "check the file on your workstation": bombyx reads
+        # that file before it builds the plan, so on any
+        # bombyx-driven run it was there. What reaches this line
+        # is a provisioner nobody started through bombyx.
         refuse "an env_file is configured but nothing arrived at" \
-            "$ENV_FILE. Check the file is still on the" \
-            "workstation and re-run bombyx."
+            "$ENV_FILE. bombyx stages that file only for the" \
+            "length of its own vagrant run, so a vagrant" \
+            "provision started by hand on the VM host does not" \
+            "find it. Re-run the bombyx command instead."
     fi
 
-    # `scp` leaves the file at the mode the uploading side had,
-    # which is usually world-readable. The agent is not the only
-    # account in every guest, so tighten it before anything else
-    # can open it.
+    # The upload does not decide the mode on its own. bombyx
+    # writes the staged copy on the VM host at 0600, and `scp`
+    # carries that across for a file it creates -- but it leaves
+    # an EXISTING file's mode alone, and a re-provision writes
+    # over one. So a guest whose earlier run left this file
+    # world-readable keeps that mode until this line fixes it.
+    #
+    # `chmod` follows a symlink, and this path sits in a
+    # directory the agent owns, so the agent could point it at
+    # another of its own files. That reaches nothing the agent
+    # could not already reach. The deploy key's block below
+    # makes the same argument about the same directory.
     if ! chmod 600 "$ENV_FILE"; then
         refuse "could not tighten the mode on $ENV_FILE." \
             "The error above says why."
@@ -355,7 +398,22 @@ else
     # An earlier run may have left one, and the operator has
     # since removed `env_file` from the config. Leaving it would
     # keep a credential alive that the config no longer names.
-    if ! rm -f "$ENV_FILE"; then
+    #
+    # Not configured, and the lookup found nothing: say so and
+    # carry on. `bombyx_home` is read for this file and nothing
+    # else -- the clone uses `$HOME` -- so refusing here would
+    # stop a project that has never had an `env_file` from
+    # provisioning at all, on exactly the boxes the empty
+    # fallback exists for.
+    if [ -z "$bombyx_home" ]; then
+        echo "bombyx: could not read a home directory for this" \
+            "account -- either getent is missing on this box or" \
+            "the passwd entry names no home; run \"getent passwd" \
+            "\$(id -un)\" to see which. So bombyx cannot look" \
+            "for a secrets file an earlier run may have left. If" \
+            "this project ever used env_file, check for one by" \
+            "hand." >&2
+    elif ! rm -f "$ENV_FILE"; then
         refuse "no env_file is configured and the one at" \
             "$ENV_FILE could not be removed. The error above" \
             "says why."

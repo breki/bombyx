@@ -67,6 +67,39 @@ copy held the exact contents at mode 0600 owned by the SSH
 account, and the staged copy was gone from the VM host while the
 Vagrantfile and `bootstrap.sh` remained.
 
+**What three review stages found in the env-file work**
+
+Worth recording because the shape repeated. Five rounds ran --
+one artisan, three red-team, one fresh-reader -- and 47 findings
+came out of them. The four that mattered were all cases where a
+fix created the next defect.
+
+Reading the secrets file for every action made `bombyx destroy`
+refuse once the operator deleted that file, leaving a VM no
+bombyx command could remove. `Action::needs_secrets` now gates
+it, and the teardown verbs are the reason the function exists.
+
+The staged file's removal was conditional on a secrets file
+having been staged *this* run, so a run interrupted after the
+vagrant step left one on the VM host that nothing collected
+after `env_file` came out of the config. It is unconditional
+now.
+
+Hoisting the guest's passwd check above both branches fixed a
+placeholder bug and stopped every project provisioning on a box
+without `getent` -- including projects that never had an
+`env_file`. Each branch answers separately now: refuse when one
+is configured, warn and carry on when not.
+
+And the prose kept overclaiming in a way only a reader who
+checked could catch. "The VM host does not keep the file" was
+in four places and is true only of a run that finishes; the
+comment bombyx renders *into* the generated Vagrantfile said it
+too, which is the copy sitting next to the leftover file it
+denies can exist. `env-file-rules-stated-five-times` in
+`docs/todo.md` holds the general problem: one rule, five
+documents, nothing keeping them in step.
+
 **A generated file now travels on standard input, not in an
 argument**
 

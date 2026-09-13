@@ -4,6 +4,43 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-13-plan-secrets-can-disagree-with-the-config
+
+**Category:** Type Safety / API Design
+
+`crate::plan::plan` takes `Option<&Secrets>` alongside the
+`Config`, and nothing ties the two together. `plan` decides
+whether to stage `bombyx.env` from the argument, while
+`vagrantfile::render` decides whether to render the upload block
+and `BOMBYX_ENV_FILE_PRESENT=1` from `cfg.source.env_file`. Both
+mismatches compile and neither is reported.
+
+A caller holding a `Config` whose `env_file` is set and passing
+`None` gets a Vagrantfile claiming a secrets file was configured,
+no staged file on the VM host, a VM that boots, and a refusal
+minutes later inside the guest reading "an env_file is configured
+but nothing arrived at /home/vagrant/.bombyx-env". The reverse
+stages a file onto the VM host that no Vagrantfile uploads.
+
+`Config::read_secrets` was added in the same round and is the one
+supported way to build the argument: it reads `source.env_file`
+and the file together, so the two halves come from one place, and
+`main.rs` goes through it. That closes the path a caller in this
+repository can reach. It does not make the mismatch impossible,
+which is what the repo's newtype rule would ask for.
+
+The wanted shape is one argument that cannot disagree -- a value
+pairing the borrowed `Config` with the secrets read from it,
+built by a single constructor, so `plan` has nothing to pair by
+hand. `vagrantfile::render` would then take the same value rather
+than reading `cfg.source.env_file` on its own.
+
+Deferred by the operator on 2026-09-13 while working issue #78:
+the change is a design one and belongs in its own commit rather
+than folded into the feature that exposed it.
+
+---
+
 ### aq-2026-09-08-two-bootstrap-tests-carry-no-assertion-of-their-own
 
 **Category:** Module Size

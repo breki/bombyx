@@ -94,7 +94,7 @@ because the host runs the hypervisor.
 ssh vmhost "mkdir -p ~/vms/<project>"
 ssh vmhost "cat > ~/vms/<project>/Vagrantfile"   # file on stdin
 ssh vmhost "cat > ~/vms/<project>/bootstrap.sh"  # file on stdin
-ssh vmhost "cd ~/vms/<project> && vagrant up"
+ssh vmhost "cd ~/vms/<project> && vagrant up; rm -f .../bombyx.env"
 ssh vmhost "cd ~/vms/<project> && vagrant snapshot save ..."
 ```
 
@@ -133,8 +133,15 @@ and its contents reach the VM host on the same standard input
 the two generated files use, so they appear in no command line
 and in no generated file. The staged copy on the VM host is
 removed by the step that runs `vagrant`, whether `vagrant`
-succeeded or not, so the machine in the middle holds it only
-while the upload into the guest is happening. Issue #79 builds
+succeeded or not, so the machine in the middle holds it for the
+length of that run and no longer. An interrupted run is the
+exception: the removal never happens, and the file stays there
+until something else runs against that same directory. That
+means the *same* command, because a project's directory and a
+scratch VM's are different places -- `up`, `provision` and
+`destroy` reach `<root>/<project>`, while `scratch` and
+`discard` reach `<root>/scratch/<project>/<name>` and need the
+same name again. Issue #79 builds
 the git credential on top of it; #76 holds the design behind
 both.
 
@@ -272,8 +279,10 @@ different route, because bombyx opens the file rather than
 built, writes it beside the generated Vagrantfile on the VM host
 over standard input, and the Vagrantfile uploads it into the
 guest at `~/.bombyx-env`, where `bootstrap.sh` tightens it to
-`0600`. The staged copy on the VM host goes as soon as `vagrant`
-finishes. `bootstrap.sh` puts the file nowhere else in the
+`0600`. The staged copy on the VM host goes when `vagrant`
+finishes, with the one exception **Where project code lives
+today** above describes -- an interrupted run leaves it.
+`bootstrap.sh` puts the file nowhere else in the
 guest: it exports `BOMBYX_ENV_FILE` naming the path, and the
 project's own script is what copies it into place.
 
@@ -477,9 +486,15 @@ than reasoned about. A later `up` does not refresh the
 snapshot either, because it only takes one when the machine
 has none.
 
-The same holds for `env_file`. `bootstrap.sh` deletes the
-secrets file whenever the config names none, and the snapshot
-keeps whatever the disk held when it was taken.
+The same holds for `env_file`, with one gap the deploy key does
+not have. `bootstrap.sh` deletes the secrets file whenever the
+config names none *and it can work out where the file is*: that
+path comes from the account's passwd entry, and a box whose
+`getent` is missing, or whose entry names no home, leaves
+`bootstrap.sh` with nothing to delete. It says so on stderr and
+carries on. The deploy key has no such gap, because its path is
+a literal. Either way the snapshot keeps whatever the disk held
+when it was taken.
 
 So a revoked key comes back on every reset for the life of that
 VM. `bombyx destroy` is what certainly removes it, because it

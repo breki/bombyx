@@ -538,6 +538,9 @@ pub fn vagrant_in(
 /// Used for the project's secrets file, which the VM host holds
 /// only while `vagrant` is uploading it into the guest.
 ///
+/// Every verb that writes the generated files runs this, not
+/// only the ones that staged a secrets file. See below.
+///
 /// **The removal is inside this one command rather than a step
 /// after it**, and that is the whole reason the function exists.
 /// `run::Resolver::execute` stops a plan at the first command
@@ -549,12 +552,44 @@ pub fn vagrant_in(
 /// The shell reads this as `(cd && vagrant); rc=$?; rm; exit`,
 /// because `&&` binds tighter than `;`. So `rc` holds the status
 /// of the whole `cd`-and-`vagrant` list, and `exit $rc` hands it
-/// back: a failed boot is still reported as a failure, with the
-/// `rm` in between contributing nothing.
+/// back: a failed boot is still reported as a failure.
 ///
-/// The path is absolute rather than relative to the `cd`. A `cd`
-/// that failed leaves the shell in the login directory, where a
-/// bare `rm -f bombyx.env` would name a different file.
+/// **A removal that failed is a failure too.** `rm -f` gives up
+/// on a file in a directory it cannot write, which a full disk
+/// or a changed ownership produces, and bombyx tells the
+/// operator the VM host keeps no copy. So the `rm` prints what
+/// happened, and it sets `rc` to 1 only when `rc` is still 0 --
+/// a boot that already failed keeps its own status, which says
+/// more than a 1 does, and the printed line reports the removal
+/// either way.
+///
+/// **`name` is removed whether it was staged or not.** The
+/// caller writes the secrets file only when the config names
+/// one, and a run interrupted after this step began leaves a
+/// file the next run's config may no longer mention. So the
+/// removal is unconditional and the message says the file *may*
+/// hold secrets rather than that it does.
+///
+/// The path reaches `printf` as an argument rather than inside
+/// the format string. A `%` in there is read as a conversion
+/// specifier and eats the argument after it, and a `'` ends the
+/// format string early. `require_file` does the same, for the
+/// same reason.
+///
+/// **The message names the VM host on both routes**, and on the
+/// local route that host is the machine the operator is sitting
+/// at. The path it prints is the VM host's, so naming any other
+/// machine would describe a path that does not exist there.
+/// [`require_file`] makes the same choice for the opposite
+/// reason -- its text arrives in a terminal on the workstation
+/// after running on the far side of `ssh`.
+///
+/// The path is anchored rather than relative to the `cd`. With
+/// the default `remote_root` it renders as `~/'vms/…'`, which
+/// the remote shell expands against `$HOME`; either way it does
+/// not depend on where the shell is standing. A `cd` that failed
+/// leaves the shell in the login directory, where a bare
+/// `rm -f bombyx.env` would name a different file.
 #[must_use]
 pub fn vagrant_in_then_remove(
     cfg: &Config,
@@ -563,10 +598,18 @@ pub fn vagrant_in_then_remove(
     tty: Tty,
     name: &str,
 ) -> RemoteCommand {
+    let path = quote_remote_path(&format!("{dir}/{name}"));
+    // Split out so the script below stays readable. The braces
+    // are doubled because `format!` reads a single one as the
+    // start of a placeholder.
+    let remove = format!(
+        "rm -f {path} || {{ printf 'bombyx: could not remove %s from \
+         the VM host; it may hold secrets for this project\\n' {path} \
+         >&2; [ \"$rc\" = 0 ] && rc=1; }}"
+    );
     let script = format!(
-        "{run}; rc=$?; rm -f {path}; exit $rc",
+        "{run}; rc=$?; {remove}; exit $rc",
         run = vagrant_script(cfg, dir, args),
-        path = quote_remote_path(&format!("{dir}/{name}")),
     );
     transport(cfg, &script, tty)
 }
@@ -1018,7 +1061,7 @@ mod tests {
             ("guarded snapshot", |c| {
                 save_snapshot_if_absent(c, &c.remote_project_dir(), Tty::NoPty)
             }),
-            ("write", |c| write_file(c, "~/vms", "Vagrantfile", "x\n")),
+            ("write", |c| write_file(c, "~/vms", "Vagrantfile", b"x\n")),
             // A row because this builder reads `cfg.host`
             // outside `vagrant_command`, so a script made
             // conditional on the route here would go unnoticed.
@@ -1065,7 +1108,7 @@ mod tests {
                 save_snapshot(&route, "~/vms/p", Tty::NoPty),
                 save_snapshot_if_absent(&route, "~/vms/p", Tty::NoPty),
                 ensure_dir(&route, "~/vms"),
-                write_file(&route, "~/vms", "Vagrantfile", "x\n"),
+                write_file(&route, "~/vms", "Vagrantfile", b"x\n"),
                 vagrant_status_many(&route, &[]),
             ] {
                 // The prefix alone, not the whole script.
@@ -1648,13 +1691,53 @@ mod tests {
             "bombyx.env",
         );
         let env = vagrant_env();
+        let file = "'/srv/x/bombyx.env'";
         assert_eq!(
             remote_script(&c),
             format!(
                 "cd '/srv/x' && {env} vagrant 'up'; rc=$?; \
-                 rm -f '/srv/x/bombyx.env'; exit $rc"
+                 rm -f {file} || {{ printf 'bombyx: could not remove \
+                 %s from the VM host; it may hold secrets for this \
+                 project\\n' {file} >&2; \
+                 [ \"$rc\" = 0 ] && rc=1; }}; exit $rc"
             )
         );
+    }
+
+    #[test]
+    fn a_removal_that_failed_is_reported_and_fails_the_run() {
+        // bombyx tells the operator the VM host keeps no copy.
+        // An `rm` that quietly gave up -- a full disk, a
+        // directory whose ownership changed -- would leave that
+        // claim false with nothing said. The guest half of this
+        // design tests every `rm` it runs; so does this half.
+        let c = vagrant_in_then_remove(
+            &cfg(),
+            "/srv/x",
+            &["up"],
+            Tty::NoPty,
+            "bombyx.env",
+        );
+        let s = remote_script(&c);
+        assert!(
+            s.contains("bombyx: could not remove"),
+            "a failed removal must say so: {s}"
+        );
+        // And a boot that worked must stop reporting success.
+        assert!(
+            s.contains("rc=1"),
+            "a failed removal must fail the run: {s}"
+        );
+        // And only when the boot itself did not already fail:
+        // vagrant's own status says more than a bare 1.
+        assert!(
+            s.contains("[ \"$rc\" = 0 ] && rc=1"),
+            "a failed boot must keep its own status: {s}"
+        );
+        // The newline reaches `printf` as the two characters it
+        // converts, not as a real one. A raw newline inside the
+        // command breaks a printed plan across lines.
+        assert!(!s.contains('\n'), "the command must be one line: {s:?}");
     }
 
     #[test]

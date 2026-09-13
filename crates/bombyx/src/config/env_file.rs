@@ -59,8 +59,17 @@ pub struct EnvFilePath(String);
 /// `crate::remote::Stdin` carries, for the same reason -- a
 /// payload that reached the screen through a `{:?}` in an error
 /// message would undo the whole design.
+///
+/// A `Vec<u8>` rather than a `String`, and that is the second
+/// thing it shares with `crate::remote::Stdin`. A password may
+/// be latin-1, and a token need not be text at all. Nothing
+/// between this type and the guest reads the contents as
+/// characters: they go into a pipe and come out of a `cat` on
+/// the far side. A `String` would refuse such a file with a
+/// message about invalid UTF-8, and an operator reading that
+/// goes looking at permissions.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Secrets(String);
+pub struct Secrets(Vec<u8>);
 
 impl Secrets {
     /// The contents themselves, for whoever writes them into a
@@ -69,20 +78,8 @@ impl Secrets {
     /// Crate-private, so the "nothing renders them" rule above
     /// is something the compiler holds outside this crate.
     #[must_use]
-    pub(crate) fn as_str(&self) -> &str {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.0
-    }
-
-    /// How many bytes there are, which is all any render says.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Whether the file was empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 }
 
@@ -102,15 +99,40 @@ impl fmt::Debug for Secrets {
 pub enum EnvFileError {
     /// The value starts with `~/` and this machine's
     /// environment names no home directory.
+    ///
+    /// "names no directory" rather than "is not set", because an
+    /// exported-but-empty `HOME` takes this branch too. An
+    /// operator told the variable is unset runs `echo $HOME`,
+    /// sees an empty line, and cannot tell whether bombyx read a
+    /// different environment.
     #[error(
         "`{field}` is `{value}`, and neither HOME nor USERPROFILE \
-         is set, so `~` names nothing"
+         names a directory -- both are unset or empty -- so `~` \
+         names nothing"
     )]
     NoHome {
         /// Name of the offending field.
         field: &'static str,
         /// The value, as the operator wrote it.
         value: String,
+    },
+
+    /// The path names something that is not a regular file.
+    ///
+    /// A directory is the reachable case: `check` refuses every
+    /// spelling that reads as one, and a path spelled as a file
+    /// can still be a directory on disk.
+    ///
+    /// It also stands between bombyx and a character device or
+    /// a fifo. Reading `/dev/zero` returns bytes for as long as
+    /// bombyx is willing to hold them, and none of them is a
+    /// secret.
+    #[error("`{field}` names {path}, which is not a regular file")]
+    NotAFile {
+        /// Name of the offending field.
+        field: &'static str,
+        /// The path bombyx tried, after expanding `~`.
+        path: PathBuf,
     },
 
     /// The file could not be opened.
@@ -192,21 +214,38 @@ impl EnvFilePath {
     /// # Errors
     ///
     /// Returns [`EnvFileError::NoHome`] when `~` cannot be
-    /// expanded, and [`EnvFileError::Read`] when the file is
-    /// missing, is a directory, or cannot be opened.
+    /// expanded, [`EnvFileError::NotAFile`] when the path names
+    /// something other than a regular file, and
+    /// [`EnvFileError::Read`] when the file is missing or cannot
+    /// be opened.
     pub fn read<F>(&self, getenv: F) -> Result<Secrets, EnvFileError>
     where
         F: Fn(&str) -> Option<String>,
     {
         let path = self.resolve(getenv)?;
-        let text = std::fs::read_to_string(&path).map_err(|source| {
-            EnvFileError::Read {
+        let read_error = |source| EnvFileError::Read {
+            field: Self::FIELD,
+            path: path.clone(),
+            source,
+        };
+
+        // Asked before the read rather than after it. A read of
+        // a fifo or a character device does not return, so a
+        // check made afterwards is one that never runs.
+        //
+        // `metadata` follows a symlink, which is the right
+        // question here: what matters is what bombyx will end
+        // up reading, not how it was named.
+        let meta = std::fs::metadata(&path).map_err(read_error)?;
+        if !meta.is_file() {
+            return Err(EnvFileError::NotAFile {
                 field: Self::FIELD,
-                path: path.clone(),
-                source,
-            }
-        })?;
-        Ok(Secrets(text))
+                path,
+            });
+        }
+
+        let bytes = std::fs::read(&path).map_err(read_error)?;
+        Ok(Secrets(bytes))
     }
 }
 
@@ -231,26 +270,46 @@ impl TryFrom<String> for EnvFilePath {
 /// # Errors
 ///
 /// Returns [`FieldError::Empty`] when the value is blank, and
-/// [`FieldError::Invalid`] naming `env_file` when the value is
-/// a bare `~`, or is neither `~/`-anchored nor absolute on this
-/// machine.
+/// [`FieldError::Invalid`] naming `env_file` when the value
+/// names a directory -- a bare `~`, a trailing separator, or a
+/// final `.` or `..` segment -- or is neither `~/`-anchored nor
+/// absolute on this machine.
 fn check(value: &str) -> Result<(), FieldError> {
     guards::check_not_empty(EnvFilePath::FIELD, value)?;
 
     // No charset rule, unlike `deploy_key`. That path is pasted
     // into the generated Vagrantfile and quoted into a remote
     // shell, so a `"` or a `$` in it changes what runs. This one
-    // reaches neither: bombyx hands it to `std::fs::read_to_string`
-    // on this machine, and the file's contents travel on a pipe.
-    // A file name holding a space or a quote is legal here.
+    // reaches neither: bombyx hands it to `std::fs::read` on this
+    // machine, and the file's contents travel on a pipe. A file
+    // name holding a space or a quote is legal here.
 
-    // A bare `~` is the home directory, which is not a file.
-    // Reported on its own because the value does name something
-    // real, and the general message below would mislead.
-    if value == "~" {
+    // Every spelling that names a directory rather than a file,
+    // reported together and separately from the anchoring rule
+    // below. These values do name something real, so "must be
+    // absolute" would send the operator looking for the wrong
+    // mistake.
+    //
+    // The whole family, not only the case that prompted the
+    // rule: a bare `~`, a trailing separator, and a final `.` or
+    // `..` segment. `~/` is both the first and the second, and
+    // an absolute `/tmp/` is the second on its own.
+    //
+    // `std::path::is_separator` rather than `'/'`, because this
+    // value is resolved on the machine bombyx was compiled for
+    // and that machine may be Windows, where `\` separates too.
+    // The rule beneath this one asks `Path::is_absolute`, which
+    // already answers per platform; a `/`-only rule here would
+    // let `C:\secrets\` through on Windows and refuse it later
+    // with a message about a regular file.
+    let last = value.rsplit(std::path::is_separator).next();
+    let names_a_directory = value == "~"
+        || value.ends_with(std::path::is_separator)
+        || matches!(last, Some("." | ".."));
+    if names_a_directory {
         return Err(invalid(
-            "names the home directory, which is a directory rather \
-             than a file",
+            "names a directory rather than a file; `env_file` has \
+             to name the secrets file itself",
         ));
     }
 
@@ -290,6 +349,14 @@ mod tests {
     } else {
         "/home/i"
     };
+
+    /// The separator this platform writes its own paths with.
+    ///
+    /// Not always `/`. `check` asks `Path::is_absolute`, which
+    /// answers for the machine bombyx was compiled for, so every
+    /// other rule about the value has to answer for that machine
+    /// too.
+    const SEP: char = if cfg!(windows) { '\\' } else { '/' };
 
     /// An environment naming `HOME` and nothing else.
     fn home_only(key: &str) -> Option<String> {
@@ -339,15 +406,7 @@ mod tests {
         // guard covers what its message claims. A relative path
         // resolves against bombyx's own working directory, which
         // nobody chose.
-        for bad in [
-            "secrets/x.env",
-            "x.env",
-            "./x.env",
-            "../x.env",
-            ".",
-            "..",
-            "~",
-        ] {
+        for bad in ["secrets/x.env", "x.env", "./x.env", "../x.env"] {
             let err = EnvFilePath::parse(bad)
                 .expect_err("an unanchored value must be refused");
             assert!(
@@ -359,12 +418,45 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_tilde_says_it_is_a_directory() {
-        // Separate from the message above: `~` does name
-        // something real, and "must be absolute" would send the
+    fn the_whole_family_of_directory_spellings_is_refused() {
+        // Enumerated before the guard was written, because a
+        // guard fixed only for the case that prompted it claims
+        // more than it does. Three shapes name a directory: a
+        // bare `~`, a trailing slash, and a final `.` or `..`
+        // segment -- each in its `~/` form and its absolute one.
+        //
+        // These get their own message. They do name something
+        // real, so the anchoring message above would send the
         // operator looking for the wrong mistake.
-        let err = EnvFilePath::parse("~").expect_err("`~` must be refused");
-        assert!(err.to_string().contains("directory"), "{err}");
+        let abs = HOME;
+        let cases: Vec<String> = [
+            "~".to_owned(),
+            "~/".to_owned(),
+            "~/.".to_owned(),
+            "~/..".to_owned(),
+            "~/secrets/".to_owned(),
+            "~/secrets/.".to_owned(),
+            "~/secrets/..".to_owned(),
+            ".".to_owned(),
+            "..".to_owned(),
+            format!("{abs}/"),
+            format!("{abs}/."),
+            format!("{abs}/.."),
+            // The platform's own separator, which on Windows is
+            // not the one above. `check` asks
+            // `Path::is_absolute`, which answers for the machine
+            // bombyx was compiled for, so the directory rule has
+            // to answer for that machine too.
+            format!("{abs}{SEP}"),
+            format!("{abs}{SEP}."),
+            format!("{abs}{SEP}.."),
+        ]
+        .into();
+        for bad in cases {
+            let err = EnvFilePath::parse(&bad)
+                .expect_err("a directory spelling must be refused");
+            assert!(err.to_string().contains("directory"), "{bad}: {err}");
+        }
     }
 
     #[test]
@@ -436,6 +528,42 @@ mod tests {
     }
 
     #[test]
+    fn a_secrets_file_that_is_not_utf8_is_carried_all_the_same() {
+        // A password is bytes. A latin-1 one, or a token that
+        // is not text at all, has to reach the guest -- and the
+        // contents never pass through anything that reads them
+        // as characters, so nothing here needs them to be.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("x.env");
+        std::fs::write(&file, b"PASS=\xff\xfe\n").expect("write");
+
+        let p = EnvFilePath::parse(&file.display().to_string())
+            .expect("a temp path is absolute");
+        let secrets = p.read(nothing).expect("bytes are bytes");
+        assert_eq!(secrets.as_bytes(), b"PASS=\xff\xfe\n");
+    }
+
+    #[test]
+    fn a_path_that_is_not_a_regular_file_is_refused_before_the_read() {
+        // A directory is the reachable case: `check` refuses
+        // every spelling that looks like one, and a path
+        // spelled as a file can still be a directory on disk.
+        //
+        // The check also stands between bombyx and a character
+        // device or a fifo, where a read returns bytes for as
+        // long as bombyx is willing to hold them.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let inner = dir.path().join("notafile");
+        std::fs::create_dir(&inner).expect("mkdir");
+
+        let p = EnvFilePath::parse(&inner.display().to_string())
+            .expect("a temp path is absolute");
+        let err = p.read(nothing).expect_err("a directory is not a file");
+        assert!(matches!(err, EnvFileError::NotAFile { .. }), "{err}");
+        assert!(err.to_string().contains("env_file"), "{err}");
+    }
+
+    #[test]
     fn the_contents_reach_secrets_and_no_render_of_it_holds_them() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let file = dir.path().join("x.env");
@@ -444,9 +572,8 @@ mod tests {
         let p = EnvFilePath::parse(&file.display().to_string())
             .expect("a temp path is absolute");
         let secrets = p.read(nothing).expect("the file is there");
-        assert_eq!(secrets.as_str(), "TOKEN=hunter2\n");
-        assert_eq!(secrets.len(), 14);
-        assert!(!secrets.is_empty());
+        assert_eq!(secrets.as_bytes(), b"TOKEN=hunter2\n");
+        assert_eq!(secrets.as_bytes().len(), 14);
 
         // The whole reason for the type: a payload that reached
         // the screen through a `{:?}` would undo the pipe.

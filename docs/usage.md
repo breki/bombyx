@@ -413,9 +413,17 @@ $ bombyx --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
+
+The tail on the boot line removes the secrets file `env_file`
+stages on the VM host. It is there on every run, whether or not
+the project sets `env_file`, because a run you interrupt can
+leave one behind and a later config may no longer name it. A
+project that does set `env_file` gets one more line than this,
+a `cat > ~/'vms/myproject/bombyx.env'` beside the other two
+writes.
 
 Neither generated file appears in the plan, and there is
 nothing to elide: the file is not part of the command. It
@@ -561,6 +569,15 @@ Both files are written on every `up`, `provision` and
 `scratch`, so the host's copy cannot drift from what the
 configuration currently says.
 
+A project that sets `env_file` sends a third file the same way,
+and it is worth saying so here because that key's description
+points at this section. It goes through the same command, so it
+gets the same `umask 077` and the same `chmod 600`, and its
+contents travel on the same pipe rather than in an argument.
+The difference is what happens next: the step that runs
+`vagrant` removes it again, so the VM host holds it for the
+length of that run rather than for the life of the VM.
+
 ## What is checked, and what is not
 
 Your `config.toml` is normally your own file, and every field
@@ -610,11 +627,12 @@ The rules are shorter than `deploy_key`'s for a reason worth
 knowing: the path never reaches a shell on either machine.
 bombyx opens the file itself and the contents travel on the
 command's standard input, so there is nothing to quote. The
-value has to start with `~/` or be an absolute path, and a bare
-`~` is refused because the home directory is a directory rather
-than a file. A relative path is refused because it would
-resolve against whatever directory you happened to run bombyx
-from. A space or a quote in the file name is accepted.
+value has to start with `~/` or be an absolute path, and it has
+to name a file rather than a directory -- so a bare `~`, a
+trailing separator, and a final `.` or `..` segment are all
+refused. A relative path is refused because it would resolve
+against whatever directory you happened to run bombyx from. A
+space or a quote in the file name is accepted.
 
 A config you did not write can point `env_file` at any file
 your account can read, and bombyx will deliver it into a VM

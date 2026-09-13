@@ -21,11 +21,13 @@
 //! operator is editing.
 //!
 //! **Every field is checked by its *type*, so none can be built
-//! wrong at all.** Eight fields are newtypes of bombyx's own --
-//! `remote_root`, `host`, `repo`, `script`, `box`, `ref`,
-//! `deploy_key` and `project` -- and an `[env]` entry is two
-//! more, an [`EnvName`] keying an [`EnvValue`]. See [`RepoUrl`]
-//! for how the pattern works.
+//! wrong at all.** Each field named below is a newtype of
+//! bombyx's own -- `remote_root`, `host`, `repo`, `script`,
+//! `box`, `ref`, `deploy_key`, `env_file` and `project` -- and
+//! an `[env]` entry is two more, an [`EnvName`] keying an
+//! [`EnvValue`]. No count here: the list grows, and a figure in
+//! prose costs the next reader a recount. See [`RepoUrl`] for
+//! how the pattern works.
 //!
 //! `cpus` and `memory` are `std::num::NonZeroU32`, which is the
 //! whole rule either has. That standard type follows none of
@@ -66,12 +68,15 @@
 //!   the VM host must pass.
 //! - `env` -- the `[env]` table: a project's own variables, and
 //!   the two types holding a name and a value.
+//! - `env_file` -- every rule the path to a secrets file on the
+//!   workstation must pass, and the type holding what bombyx
+//!   reads out of it.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
 //! - `host` -- where the VM host name comes from, and its shape.
 //! - `root` -- every rule `remote_root` must pass.
-//! - `source` -- the `[source]` table and its three checked
-//!   types.
+//! - `source` -- the `[source]` table and the checked types
+//!   holding what the guest clones.
 //! - `transport` -- whether `host` names this very machine, and
 //!   what bombyx does when it does.
 //! - `vm` -- the `[vm]` table.
@@ -208,6 +213,7 @@ pub use deploy_key::DeployKeyPath;
 pub(crate) use env::RESERVED_PREFIX;
 pub use env::{EnvName, EnvValue};
 pub use env_file::{EnvFileError, EnvFilePath, Secrets};
+
 pub use error::{ConfigError, FieldError};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -322,6 +328,39 @@ pub struct Config {
 }
 
 impl Config {
+    /// Reads the file `source.env_file` names, if it names one.
+    ///
+    /// The one supported way to build the `secrets` argument
+    /// `crate::plan::plan` takes. Both halves come from here, so
+    /// a caller cannot pair a config that names a file with
+    /// contents read from somewhere else, or with none at all --
+    /// a mismatch the generated Vagrantfile and the plan would
+    /// disagree about, since the first reads `source.env_file`
+    /// and the second reads the contents.
+    ///
+    /// `getenv` reads this machine's environment, for the `~` in
+    /// the path. It is a parameter so a test can state a home
+    /// directory rather than depend on the one it is run with.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever [`EnvFilePath::read`] returns: the
+    /// environment names no home directory, the path is not a
+    /// regular file, or the file could not be opened.
+    pub fn read_secrets<F>(
+        &self,
+        getenv: F,
+    ) -> Result<Option<Secrets>, EnvFileError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        self.source
+            .env_file
+            .as_ref()
+            .map(|p| p.read(getenv))
+            .transpose()
+    }
+
     /// How bombyx reaches [`Config::host`].
     ///
     /// See the field for why it is read through a function.
@@ -1338,6 +1377,36 @@ mod load_project_tests {
         .expect_err("a relative env_file must be refused");
         let text = err.to_string();
         assert!(text.contains("env_file"), "{text}");
+    }
+
+    #[test]
+    fn read_secrets_pairs_the_path_and_the_contents_or_neither() {
+        // The whole reason the function exists: both halves come
+        // from one place, so a config naming a file cannot be
+        // paired with contents read from somewhere else.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("x.env");
+        std::fs::write(&file, b"TOKEN=hunter2\n").expect("write");
+
+        let (mut cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("a registry with no env_file must load");
+        assert!(
+            cfg.read_secrets(|_| None)
+                .expect("no env_file, nothing to read")
+                .is_none(),
+            "a config naming no file must yield no secrets"
+        );
+
+        cfg.source.env_file = Some(
+            EnvFilePath::parse(&file.display().to_string())
+                .expect("a temp path is absolute"),
+        );
+        let secrets = cfg
+            .read_secrets(|_| None)
+            .expect("the file is there")
+            .expect("a config naming a file must yield secrets");
+        assert_eq!(secrets.as_bytes().len(), 14);
     }
 
     /// [`load`], told what this machine is called.

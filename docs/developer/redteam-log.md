@@ -4,6 +4,38 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-13-env-file-read-has-no-size-cap-and-a-toctou-gap
+
+**Category:** Security (low)
+
+`EnvFilePath::read` in `crates/bombyx/src/config/env_file.rs`
+calls `std::fs::metadata` and then `std::fs::read`, and the
+guard is re-resolved from the path rather than held open. Two
+gaps follow.
+
+Whoever can write the containing directory can pass the
+regular-file check and be a fifo by the time `read` opens the
+path, and bombyx then blocks or grows without bound. It needs a
+directory the operator does not control -- `/tmp` on a
+multi-user workstation is the realistic one -- so it is narrow.
+
+There is also no upper bound on a regular file's size. A config
+naming a multi-gigabyte file is read whole into memory and
+copied again into a `Stdin`. `config::MAX_CONFIG_BYTES` is the
+precedent for a cap.
+
+Closing the first properly is platform-specific: `File::open`
+on a fifo blocks before the handle can be asked what it is, so a
+correct version needs `O_NONBLOCK` and `O_NOFOLLOW`. The size
+cap is cheap on its own and would bound the damage either way.
+
+Raised by red-team on 2026-09-13 while working issue #78 and
+deferred: the `metadata` check already closes the case the
+review was about -- a config naming `/dev/zero` outright -- and
+the rest is a separate piece of work.
+
+---
+
 ### rt-2026-09-11-exit-rule-has-no-single-home
 
 **Category:** Duplicated rule deferred for its own commit

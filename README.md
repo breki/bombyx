@@ -57,8 +57,10 @@ host is this machine -- so you can stay on your workstation.
 workstation                  vmhost (VM host)
   bombyx  ──── ssh ────►  vagrant ──► agent VM
      │                          ▲          │
-     └── writes Vagrantfile ────┘          │
-         and bootstrap.sh                  │
+     └── writes Vagrantfile, ───┘          │
+         bootstrap.sh and                  │
+         (with env_file) your              │
+         secrets file                      │
                                   clones the repo itself
 ```
 
@@ -67,7 +69,10 @@ Two rules shape the design:
 1. **Neither your workstation nor the VM host reads your
    project's files.** bombyx sends the VM host two files and
    generates both: a Vagrantfile from your `[vm]` settings, and
-   a bootstrap script. Vagrant needs the Vagrantfile before the
+   a bootstrap script. Setting `env_file` sends a third, which
+   bombyx does not generate -- it is a file on your own machine
+   that you named -- and the VM host holds that one only for the
+   length of the `vagrant` run. Vagrant needs the Vagrantfile before the
    VM exists, so it cannot come from inside the guest. Once the
    VM is up, the guest clones the project itself from
    `[source]`.
@@ -205,9 +210,14 @@ never reaches the guest's clone. bombyx reads it, sends it to
 the VM host on the connection it already has, and has `vagrant`
 put it inside the guest at `~/.bombyx-env`. The contents never
 appear in a command line on either machine and never appear in
-the generated Vagrantfile, and the VM host does not keep the
-file: bombyx removes it once `vagrant` has finished, whether the
-boot worked or not.
+the generated Vagrantfile. The VM host holds the file for the
+length of the `vagrant` run and no longer, because the same step
+removes it whether the boot worked or not. An interrupted run
+leaves it there until something else runs against that same
+directory -- which means the same command, since a project's
+directory and a scratch VM's are different places. `up`,
+`provision` and `destroy` reach one; `scratch` and `discard`
+reach the other and need the same scratch name again.
 
 bombyx puts the file nowhere else inside the guest. Your
 provisioning script is what copies it where the project expects
@@ -392,9 +402,9 @@ Two lifecycles, on purpose:
 
 Every command accepts `--dry-run`, which prints the exact `ssh`
 invocation instead of running it. Run `bombyx doctor` first on a
-new host: `up` creates a directory and writes two files before
-it runs `vagrant`, so without it a missing piece is reported
-half-way through.
+new host: `up` creates a directory and writes the generated
+files into it before it runs `vagrant`, so without it a missing
+piece is reported half-way through.
 
 [docs/usage.md](docs/usage.md) is the full reference. It covers
 why `provision` is a separate command, why `destroy` asks for

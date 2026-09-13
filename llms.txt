@@ -82,8 +82,11 @@ checked value. bombyx derives the route once, while the config
 loads, and never again, so an assignment to `host` can leave
 `transport` naming the other route.
 
-The VM host's own filesystem holds no project file; the guest
-clones the repository itself once it is running. The
+The VM host's own filesystem holds no file out of the project's
+repository; the guest clones that itself once it is running. A
+configured `env_file` is the one file from outside that reaches
+it, staged for the length of the `vagrant` run and removed by
+the step that runs it. The
 workstation reads nothing out of the project's directory
 either, which is why `--project` names the project rather than
 being worked out from where bombyx was run.

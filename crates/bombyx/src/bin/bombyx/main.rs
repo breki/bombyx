@@ -415,16 +415,24 @@ fn run() -> Result<Ran> {
     // nothing is created anywhere before the credential is known
     // to be there.
     //
-    // Every action reads it, `status` and `doctor` included,
-    // rather than only the three that boot. A `status` that
-    // succeeded while `up` refused would be reporting on a
-    // config bombyx cannot act on.
-    let secrets = cfg
-        .source
-        .env_file
-        .as_ref()
-        .map(|p| p.read(|k| std::env::var(k).ok()))
-        .transpose()?;
+    // A dry run reads it too, and that is deliberate rather than
+    // an oversight in the sentence above. `plan` renders the
+    // write step only when it is handed the contents, so a dry
+    // run given `None` would print a plan missing a step the
+    // real run performs -- and a plan that describes a different
+    // run is worse than one that refuses. The contents never
+    // reach the printed output either way: the line carries a
+    // byte count.
+    //
+    // Only for the actions that consume it, which
+    // `Action::needs_secrets` decides and explains. The verbs it
+    // excludes are the ones that must keep working after the
+    // operator has deleted the file.
+    let secrets = if action.needs_secrets() {
+        cfg.read_secrets(|k| std::env::var(k).ok())?
+    } else {
+        None
+    };
     let secrets = secrets.as_ref();
 
     // Every action renders its dry run the same way, through
