@@ -465,22 +465,34 @@ and `sh < plan.sh` both go wrong, and neither says so.
 
 The mechanism is the one the write lines depend on. A shell
 reading a script from its own standard input passes that same
-input on to the children it starts, so a child that reads
-standard input reads the rest of the script. On the `ssh` route
-the child that does so is `ssh` itself, on **every** line of the
-plan and not only the two writes: `ssh` forwards its standard
-input to the far side whether the remote command wants it or
-not. So the very first `ssh` consumes the whole remaining plan,
-nothing after line one runs, and the exit status is zero. On the
-local route, where each line is `sh -c`, it is the `cat` that
-reads it, and the damage lands in the generated file instead --
-under `bash` the Vagrantfile receives the remaining plan lines
-as its contents, and under `dash` both generated files are
-created empty.
+input to the children it starts, so a child that reads standard
+input reads the script. Two children here do: the `cat` on the
+local route, and `ssh` itself on the SSH route, which forwards
+its standard input to the far side on **every** line of the plan
+rather than only on the two writes.
 
-*(Checked on Linux with OpenSSH 9.6, `bash` 5.2 and `dash` as
-`/bin/sh`. The per-shell details are what varies; that feeding
-the plan to a shell is wrong does not.)*
+What that costs you depends on the shell, and the difference
+matters more than it sounds:
+
+- Under `bash`, the first child swallows the rest of the script
+  and the run stops there. On the SSH route nothing is written
+  at all; on the local route the Vagrantfile receives the
+  remaining plan lines as its contents.
+- Under `dash` -- which is `/bin/sh` on Debian and Ubuntu, so it
+  is what a plain `| sh` gets there -- the shell has already read
+  the whole script, so **every line still runs** while each
+  child sees an immediate end of file. Both generated files are
+  written empty, and `vagrant up` then runs against an empty
+  Vagrantfile. On the SSH route that truncates the files already
+  on the VM host.
+
+The `dash` case is the one to know about: the run looks like it
+worked, the exit status is zero, and the VM host is left holding
+two empty files where its Vagrantfile and bootstrap script were.
+
+*(Checked on Linux with OpenSSH 9.6, `bash` 5.2 and `dash` 0.5.12,
+on both routes. The per-shell details are what varies; that
+feeding the plan to a shell is wrong does not.)*
 
 The plan is for reading, and for pasting one line at a time. To
 run the commands, run bombyx without `--dry-run`.
@@ -521,7 +533,13 @@ text sits in the `ssh` command line there. Bytes on a pipe
 between two processes appear in no such listing.
 
 That matters for the Vagrantfile in particular, because it
-carries every value from the project's `[env]` table.
+carries every value from the project's `[env]` table. Note what
+it does not do: bombyx sets no mode on the file it writes, so
+the copy on the VM host is readable by every account there for
+as long as the VM exists. Moving the write to a pipe shortens
+the exposure to nothing in the process list; it does nothing
+about the file at rest. Do not put a secret in `[env]` on a
+shared VM host.
 
 The second benefit is that nothing has to be escaped. Bytes on
 a pipe are bytes: no shell looks inside them for a `$` to

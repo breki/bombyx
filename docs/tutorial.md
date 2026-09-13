@@ -743,11 +743,13 @@ receives the whole file either way.
 Do not feed this plan to a shell -- not `| sh`, not
 `sh < plan.sh`. A shell reading a script from its own standard
 input hands that same input to the children it starts, and `ssh`
-forwards its standard input to the far side on every line here.
-So the first `ssh` swallows the rest of the plan, nothing after
-it runs, and you are told nothing: the exit status is zero.
-**Seeing what would run** in [usage.md](usage.md) has the
-mechanism and what the local route does instead.
+forwards its standard input to the far side on every line here,
+so the plan is eaten by its own commands. What you are left with
+depends on the shell, and one of the cases is quiet: under
+`dash`, every line still runs, both generated files are written
+empty, and `vagrant up` boots against an empty Vagrantfile with
+a zero exit status. **Seeing what would run** in
+[usage.md](usage.md) has all four cases.
 
 Where the real output gives those sizes, the transcript above
 says `N`. The two files grow and shrink with almost every

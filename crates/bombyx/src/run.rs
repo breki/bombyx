@@ -172,7 +172,14 @@ impl Resolver {
         let mut child = self.prepared(cmd)?;
 
         let Some(payload) = &cmd.stdin else {
-            return child.status().map_err(|cause| Error::Start {
+            // Spawned and waited for separately, rather than
+            // through `status()`, so that a failure keeps the
+            // variant naming its stage. `status()` does both and
+            // returns one error for either, which would report a
+            // failed wait as "could not start" and send the
+            // operator looking at `PATH`.
+            let mut running = spawned(&cmd.program, &mut child)?;
+            return running.wait().map_err(|cause| Error::Wait {
                 program: cmd.program.clone(),
                 cause,
             });
@@ -206,7 +213,21 @@ impl Resolver {
         child.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let Some(payload) = &cmd.stdin else {
-            return child.output().map_err(|cause| Error::Start {
+            // Split for the reason `execute`'s no-payload branch
+            // gives. `output()` also reads the child's two
+            // pipes, so it has a third way to fail that is not a
+            // spawn either.
+            //
+            // **The `null` is not tidying.** `Command::output`
+            // supplies one itself; spawning by hand inherits
+            // bombyx's own standard input instead, and then
+            // `ssh` can read the operator's terminal and sit
+            // there waiting for a password. Measured: a child
+            // started this way without it receives whatever was
+            // piped into bombyx.
+            child.stdin(Stdio::null());
+            let running = spawned(&cmd.program, &mut child)?;
+            return running.wait_with_output().map_err(|cause| Error::Wait {
                 program: cmd.program.clone(),
                 cause,
             });
@@ -270,6 +291,17 @@ impl Resolver {
     }
 }
 
+/// Starts `child`, naming the program if it will not start.
+fn spawned(
+    program: &str,
+    child: &mut Command,
+) -> Result<std::process::Child, Error> {
+    child.spawn().map_err(|cause| Error::Start {
+        program: program.to_owned(),
+        cause,
+    })
+}
+
 /// Starts `child` and takes the writing end of its pipe.
 ///
 /// The `else` arm is unreachable after the caller asked for a
@@ -280,10 +312,7 @@ fn started(
     program: &str,
     mut child: Command,
 ) -> Result<(std::process::Child, std::process::ChildStdin), Error> {
-    let mut running = child.spawn().map_err(|cause| Error::Start {
-        program: program.to_owned(),
-        cause,
-    })?;
+    let mut running = spawned(program, &mut child)?;
     let Some(pipe) = running.stdin.take() else {
         let _ = running.wait();
         return Err(Error::Write {
@@ -510,6 +539,30 @@ mod payload_tests {
         let status = run(&exiting_with(7)).expect("the shell runs");
         assert_eq!(status.code(), Some(7), "{status}");
     }
+
+    #[test]
+    fn output_reports_a_partial_write_on_every_platform() {
+        // `output` has its own copy of the broken-pipe
+        // decision -- a writer thread, its own `answer` call --
+        // and `std`'s pipes are a separate implementation per
+        // platform, so the reading has to be checked on each.
+        // `execute`'s version of this is
+        // `a_child_ignoring_its_input_and_succeeding_is_an_error`.
+        let cmd = exiting_with(0).with_stdin(&oversized());
+        let (tx, rx) = mpsc::channel();
+        let owned = cmd.clone();
+        std::thread::spawn(move || {
+            let sent = Resolver::for_command(&owned)
+                .and_then(|r| r.output(&owned))
+                .map(|o| o.status);
+            let _ = tx.send(sent);
+        });
+        let e = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("output finished")
+            .expect_err("a partial write must not report success");
+        assert!(matches!(e, Error::Write { .. }), "{e:?}");
+    }
 }
 
 // These tests need a POSIX shell, for `cat` and a redirection.
@@ -626,6 +679,20 @@ mod tests {
             .expect("sh runs");
         assert!(got.status.success(), "{:?}", got.status);
         assert_eq!(got.stdout.len(), 200_000);
+    }
+
+    #[test]
+    fn a_collected_command_gets_no_standard_input() {
+        // `Resolver::output` spawns by hand, which inherits
+        // bombyx's own standard input unless it says otherwise.
+        // Without the `null`, `ssh` reads the operator's
+        // terminal and waits for a password. The child here
+        // reports what it managed to read.
+        let cmd = sh("cat; echo -n END");
+        let got = resolver(std::slice::from_ref(&cmd))
+            .output(&cmd)
+            .expect("sh runs");
+        assert_eq!(got.stdout, b"END", "the child was given an input");
     }
 
     #[test]

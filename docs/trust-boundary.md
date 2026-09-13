@@ -109,10 +109,20 @@ on a Unix machine can list the full command line of every
 running process, so a file passed as an argument is readable by
 every other account on the VM host while the write runs -- and
 on the workstation too, since the same text sits in the local
-`ssh` command line. The generated Vagrantfile carries every
-value from the project's `[env]` table, which is what makes
-this worth the mechanism. **How the generated files are
-written** in [usage.md](usage.md) describes it.
+`ssh` command line. **How the generated files are written** in
+[usage.md](usage.md) describes the mechanism.
+
+**That closes the command line and nothing else.** The generated
+Vagrantfile carries every value from the project's `[env]`
+table, and bombyx sets no mode when it writes the file, so it
+lands at the VM-host account's umask -- measured as `0664` on a
+stock Debian host -- and stays there for the life of the VM.
+Every account on a shared VM host can read it at rest. So what
+changed is the transient copy in the process list, not the
+permanent one on disk, and an `[env]` value is still not a
+secret you can keep from a co-user of that machine. Issue #76
+tracks the remaining route, and the work to carry a secrets file
+without putting it in `[env]` at all is issues #78 and #79.
 
 A configured `deploy_key` adds one more command, and it runs
 first:

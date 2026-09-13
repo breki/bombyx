@@ -12,18 +12,23 @@ and this project adheres to
 
 ### Added
 
-- A new bombyx::run module starts every command bombyx runs. Its Resolver looks
-  each program up before any of them runs, and its Error names which stage
+- A new bombyx::run module starts every RemoteCommand bombyx runs. Its Resolver
+  looks each program up before any of them runs, and its Error names which stage
   failed: the program is not on PATH, the child would not start, the payload
   could not be sent, or the wait failed. remote::Stdin, RemoteCommand::stdin and
-  RemoteCommand::with_stdin carry a payload for it.
+  RemoteCommand::with_stdin carry a payload for it. The one process bombyx still
+  starts outside it is doctor's local `--version` probe, which asks about this
+  workstation rather than the VM host.
 
 ### Changed
 
 - bombyx sends the generated Vagrantfile and bootstrap script on the write
   command's standard input rather than inside a command-line argument, so
   neither file is visible in a process listing on the VM host or on the
-  workstation. A dry run now ends each write line with the payload's size in
+  workstation. This closes the command line only: bombyx sets no mode on the
+  file it writes, so the copy on the VM host stays readable by every account
+  there, and an `[env]` value is still not a secret you can keep from a co-user
+  of that machine. A dry run now ends each write line with the payload's size in
   bytes instead of naming a heredoc and a line count.
 
 ### Fixed

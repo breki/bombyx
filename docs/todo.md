@@ -464,18 +464,37 @@ plan, decisions, and outcome.
 
 - **release-bump-ignores-pre-one-zero** -- a removal infers major even at 0.x
   `/release` step 3 infers a major bump from a bullet marked `**BREAKING:**` or
-  a non-empty `### Removed`, and `CLAUDE.md` under **Semantic Versioning** says
-  the same. Neither mentions that bombyx is on 0.x. SemVer 2.0.0 says major
-  version zero is for initial development and anything may change at any time,
-  so the usual reading of a breaking change at 0.5.0 is 0.6.0, not 1.0.0. The
-  rule as written proposes 1.0.0, which reaches the release without anyone
-  intending it. It came up on the stdin work: removing the public
-  `RemoteCommand::abbreviated` is breaking for a library caller, and the
-  operator chose a minor release. That was the right call and it had to be made
-  by hand. Decide whether the inference should read the current version first
-  and treat a breaking change below 1.0.0 as a minor bump, or whether the ask at
-  step 4 is judged to be enough. Whichever way, say it in both places so the two
-  cannot disagree.
+  a non-empty `### Removed`, and `CLAUDE.md` states the same rule under
+  **Commits and releases**. Neither reads the current version. SemVer 2.0.0 says
+  major version zero is for initial development and anything may change at any
+  time, so a breaking change at 0.5.0 is ordinarily 0.6.0, not 1.0.0.
+  **Two consecutive releases have now overridden this by hand.** Commit
+  `428d9ef` cut v0.5.0 as a minor with 21 breaking bullets, and wrote the
+  argument into its own message; the stdin work removed the public
+  `RemoteCommand::abbreviated` and the operator called that a minor too. A rule
+  nobody has followed twice running is a rule that should change, not a prompt
+  people keep answering. Decide whether the inference should read the version
+  first and treat a breaking change below 1.0.0 as a minor bump, or whether the
+  accept-or-override `AskUserQuestion` -- the last bullet of `/release` step 3,
+  not step 4 -- is judged enough on its own. Whichever way, say it in
+  `CLAUDE.md` and in `.claude/commands/release.md` both, so the two cannot
+  disagree.
+
+- **generated-files-world-readable** -- the Vagrantfile lands at mode 664
+  bombyx writes the Vagrantfile and `bootstrap.sh` with a bare `cat > path` and
+  sets no mode, so each lands at the VM-host account's umask and stays there for
+  the life of the VM. Measured on a real host: umask 0002, file mode 664. The
+  Vagrantfile carries every value from the project's `[env]` table, so on a
+  shared VM host -- the arrangement bombyx is designed for -- every other
+  account can read those values at rest. Moving the write onto standard input
+  closed the copy in the process list, which lasts as long as the write; it did
+  nothing about this one, which is permanent. The documents now say so rather
+  than implying both are closed. The cheap repair is a mode on the write: `umask
+  077` in front of the script, or a `chmod 600` after the redirection in the
+  same command. Decide it alongside #78, which carries a real secrets file into
+  the guest and raises the same question about what the VM host keeps and for
+  how long. Worth checking at the same time whether the project directory wants
+  a mode, since `mkdir -p` sets none either.
 
 ## Done
 

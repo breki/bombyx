@@ -781,7 +781,8 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// Deliberately thin. Every decision -- the probe list, reading a
 /// result, the skip cascade, rendering, the exit code -- lives in
 /// `bombyx::doctor`, for the reason its module doc gives. What is
-/// left here is process spawning.
+/// left here is assembling the report and asking the local
+/// programs for their versions.
 fn doctor_run(cfg: &Config) -> Ran {
     let mut report = Report::default();
     // One local program per route, and only the one this run
