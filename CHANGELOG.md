@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.6.0] - 2026-09-13
+
+### Added
+
 - A new bombyx::run module starts every RemoteCommand bombyx runs. Its Resolver
   looks each program up before any of them runs, and its Error names which stage
   failed: the program is not on PATH, the child would not start, the payload
