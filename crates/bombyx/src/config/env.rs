@@ -23,7 +23,9 @@ use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards;
-use crate::newtype::checked_str_newtype;
+use crate::newtype::{
+    checked_str_newtype, checked_str_parse, checked_str_try_from,
+};
 
 /// Field name the errors here quote back to the operator.
 ///
@@ -127,7 +129,7 @@ const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 14] = [
 #[serde(try_from = "String")]
 pub struct EnvName(String);
 
-impl EnvName {
+checked_str_parse!(
     /// Checks `raw` and wraps it.
     ///
     /// # Errors
@@ -135,22 +137,19 @@ impl EnvName {
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
     /// [`FieldError::Invalid`] when it is not spellable as a
     /// shell variable or when it starts with `BOMBYX_`.
-    pub fn parse(raw: &str) -> Result<Self, FieldError> {
-        check_name(raw)?;
-        Ok(Self(raw.to_owned()))
-    }
-}
+    EnvName,
+    FieldError,
+    check_name
+);
 
 checked_str_newtype!(EnvName, "The name, as the guest's shell sees it.");
 
-impl TryFrom<String> for EnvName {
-    type Error = FieldError;
-
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        check_name(&raw)?;
-        Ok(Self(raw))
-    }
-}
+checked_str_try_from!(
+    /// What serde calls while the config parses.
+    EnvName,
+    FieldError,
+    check_name
+);
 
 /// The value of a variable the guest's shell will carry.
 ///
@@ -159,7 +158,7 @@ impl TryFrom<String> for EnvName {
 #[serde(try_from = "String")]
 pub struct EnvValue(String);
 
-impl EnvValue {
+checked_str_parse!(
     /// Checks `raw` and wraps it.
     ///
     /// # Errors
@@ -167,25 +166,22 @@ impl EnvValue {
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
     /// [`FieldError::Invalid`] when it begins or ends with
     /// whitespace or would break the generated Vagrantfile.
-    pub fn parse(raw: &str) -> Result<Self, FieldError> {
-        check_value(raw)?;
-        Ok(Self(raw.to_owned()))
-    }
-}
+    EnvValue,
+    FieldError,
+    check_value
+);
 
 checked_str_newtype!(
     EnvValue,
     "The value, as the Vagrantfile and the guest see it."
 );
 
-impl TryFrom<String> for EnvValue {
-    type Error = FieldError;
-
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        check_value(&raw)?;
-        Ok(Self(raw))
-    }
-}
+checked_str_try_from!(
+    /// What serde calls while the config parses.
+    EnvValue,
+    FieldError,
+    check_value
+);
 
 /// Accepts a character that may appear after the first one in
 /// a shell variable name.

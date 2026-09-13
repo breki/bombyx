@@ -30,7 +30,9 @@ use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards::check_renderable;
-use crate::newtype::checked_str_newtype;
+use crate::newtype::{
+    checked_str_newtype, checked_str_parse, checked_str_try_from,
+};
 
 /// The virtualization backend the generated Vagrantfile targets.
 ///
@@ -232,7 +234,7 @@ fn named<E: serde::de::Error>(field: &'static str, reason: &str) -> E {
 #[serde(try_from = "String")]
 pub struct BoxName(String);
 
-impl BoxName {
+checked_str_parse!(
     /// Checks `raw` and wraps it.
     ///
     /// # Errors
@@ -240,25 +242,21 @@ impl BoxName {
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
     /// [`FieldError::Invalid`] when it begins or ends with
     /// whitespace or would break the generated Vagrantfile.
-    pub fn parse(raw: &str) -> Result<Self, FieldError> {
-        check_box(raw)?;
-        Ok(Self(raw.to_owned()))
-    }
-}
+    BoxName,
+    FieldError,
+    check_box
+);
 
 checked_str_newtype!(BoxName, "The value, as the Vagrantfile sees it.");
 
-impl TryFrom<String> for BoxName {
-    type Error = FieldError;
-
+checked_str_try_from!(
     /// What serde calls. It already owns the `String`, so the
     /// check runs against a borrow and the value moves into the
     /// newtype rather than being copied again.
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        check_box(&raw)?;
-        Ok(Self(raw))
-    }
-}
+    BoxName,
+    FieldError,
+    check_box
+);
 
 /// Every rule a `box` value must pass, in one place.
 ///

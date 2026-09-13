@@ -4,6 +4,84 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-13
 
+**`git` gets its credential before the clone, out of the same
+secrets file**
+
+Issue #79 is the third and last step of #76. Bitbucket's ssh
+access keys are read-only and always have been, so a key can
+clone and can never push. An agent that opens pull requests has
+to push, so it needs a token -- and once it holds one, the key
+has nothing left to do. `repo_token` in `[source]` names a
+variable **inside** the file `env_file` points at, and
+`repo_user` names the username `git` sends with it. The config
+holds neither secret, so there is one copy of the token and one
+file to edit when rotating it.
+
+The issue listed two unknowns and asked that a real clone and a
+real push settle them before any code was written. The operator
+ran both against a live Bitbucket repository with a repository
+access token scoped to one repository. `git ls-remote` over
+https authenticated through git's own credential store and
+returned the ref list, and `git push --dry-run` answered
+`[new branch]` rather than `403`. A real push was deliberately
+not run: the repository is in use and creating a branch there
+fires pipelines. **So pushing is verified by a dry run and not
+by a real one.**
+
+The `.netrc` unknown dissolved rather than being answered.
+git's `store` helper is a git mechanism and never goes near
+curl's `.netrc` handling, so choosing it removes the question.
+The Atlassian-API-token unknown does not apply either: that
+doubt was about a credential type this design does not target.
+
+Three decisions are worth recording.
+
+**The username is stated in the config rather than looked up in
+a table.** The test is what settled it: the literal is chosen by
+the token type, not by the host. On `bitbucket.org` a repository
+access token wants `x-token-auth` and an Atlassian API token
+wants the account's email address. A table keyed by host would
+be right for one and wrong for the other, so its override would
+be needed in half the cases rather than rarely.
+
+**The token is extracted on the workstation, in Rust.** bombyx
+already reads the `env_file` contents, so it parses those,
+percent-encodes the value into one `https://user:token@host`
+line, and stages that as a second file beside `bombyx.env`. The
+alternative -- sending the variable name and having
+`bootstrap.sh` grep the value out of the file already in the
+guest -- needs no new transport, but it puts the `.env` parsing
+rule into shell and discovers a missing variable only after the
+VM has booted. One parser, written where it can be tested, and
+a refusal that names both the variable and the file before
+anything is created.
+
+**The guest path is a literal, and the reason is stronger than
+expected.** The path ends up inside a `credential.helper`
+setting, and a helper string carrying a space is handed to a
+shell. Measured: with `HOME` pointed at a temporary directory, a
+helper spelled `--file=$HOME/real` found the file there while
+`--file=$NOPE/real` found nothing. So a space splits the path
+and a `$` is expanded -- and a project's `[env]` table can set
+`HOME`. This is the same trap `KNOWN_HOSTS` is a literal for.
+
+Three rules span more than one key, so no single newtype can
+hold them, and `Source`'s `TryFrom` runs them while the config
+parses: `repo_token` and `repo_user` are written together or not
+at all, `repo_token` requires `env_file`, and it requires `repo`
+to be an `https` URL.
+
+One thing the work forced along the way. Adding two more
+newtypes pushed `cargo xtask dupes` to 6.4%, over its 6%
+budget, because `parse` and `TryFrom<String>` were written out
+thirteen and ten times with identical bodies.
+`newtype.rs` gained `checked_str_parse!` and
+`checked_str_try_from!` beside the macro already there, and
+thirteen types now use them. Duplication came out at 4.7%.
+`RemoteRoot` keeps its hand-written pair, because it drops a
+trailing slash before storing the value and that difference is
+the part worth reading.
+
 **A secrets file now travels from the workstation into the
 guest**
 

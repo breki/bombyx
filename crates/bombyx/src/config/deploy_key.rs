@@ -26,7 +26,7 @@ use serde::Deserialize;
 use super::error::FieldError;
 use super::guards;
 use super::path_segments;
-use crate::newtype::checked_str_newtype;
+use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
 /// A private key file on the VM host, ready to be written into
 /// the generated Vagrantfile.
@@ -87,16 +87,13 @@ checked_str_newtype!(
     "The value, as the generated Vagrantfile and the VM host see it."
 );
 
-impl TryFrom<String> for DeployKeyPath {
-    type Error = FieldError;
-
+checked_str_try_from!(
     /// What serde calls. It already owns the `String`, so the
     /// rules run against a borrow of it rather than a copy.
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        check(&raw)?;
-        Ok(Self(raw))
-    }
-}
+    DeployKeyPath,
+    FieldError,
+    check
+);
 
 /// Checks a `deploy_key` value against every rule here.
 ///

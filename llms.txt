@@ -86,7 +86,9 @@ The VM host's own filesystem holds no file out of the project's
 repository; the guest clones that itself once it is running. A
 configured `env_file` is the one file from outside that reaches
 it, staged for the length of the `vagrant` run and removed by
-the step that runs it. The
+the step that runs it; a configured `repo_token` adds a second,
+which bombyx builds from one variable inside the first and
+stages the same way. The
 workstation reads nothing out of the project's directory
 either, which is why `--project` names the project rather than
 being worked out from where bombyx was run.
@@ -209,6 +211,30 @@ header above it:
   `BOMBYX_ENV_FILE_PRESENT`, always set, and the unconfigured
   branch removes a leftover and exports an empty
   `BOMBYX_ENV_FILE`.
+- `repo_token` and `repo_user` are optional and are stated
+  together or not at all. `repo_token` names a variable inside
+  the file `env_file` points at, and `repo_user` the username
+  `git` sends with it -- `x-token-auth` for a Bitbucket
+  repository access token, the account's email address for an
+  Atlassian API token, which is why there is no table of hosts
+  and the config states it. `Source`'s `TryFrom` runs the three
+  rules spanning more than one key: both or neither, `env_file`
+  required, and `repo` an `https` URL. bombyx reads the named
+  variable out of the file on the workstation
+  (`config::repo_token::lookup`), percent-encodes it into one
+  `https://user:token@host` line, and writes that beside the
+  Vagrantfile as `bombyx.git-credentials`; the removal in
+  `remote::vagrant_in_then_remove` collects it alongside
+  `bombyx.env`. The generated Vagrantfile uploads it to
+  `/home/vagrant/.bombyx-git-credentials`, spelled out rather
+  than written with a `~` because the path ends up inside a
+  `credential.helper` setting that `git` splits on whitespace
+  itself. Whether one was configured reaches the guest as
+  `BOMBYX_GIT_CRED_PRESENT`, always set. `bootstrap.sh` tightens
+  it to 0600, names the setting on the clone and the fetch
+  through its `git_net` wrapper, and records it on the clone so
+  the agent can push; the unconfigured branch removes a leftover
+  and unsets it
 - Host-key verification, which is **independent of
   `deploy_key`** -- it applies to a public repository cloned
   over ssh just as much. A repository reached over ssh carries
@@ -327,11 +353,12 @@ one directory below that anchor. bombyx creates, writes into and
 value, so a root that resolves to a top-level directory is
 refused when the config loads.
 
-Eleven config values are newtypes, and each constructor holds
+Thirteen config values are newtypes, and each constructor holds
 every rule its field has: `RemoteRoot` in `config/root.rs`,
 `HostName` in `config/host.rs`, `RepoUrl`, `ScriptPath` and
 `GitRef` in `config/source.rs`, `DeployKeyPath` in
 `config/deploy_key.rs`, `EnvFilePath` in `config/env_file.rs`,
+`RepoTokenVar` and `RepoUser` in `config/repo_token.rs`,
 `BoxName` in `config/vm.rs`, `EnvName`
 and `EnvValue` in `config/env.rs`, and `ProjectName` in
 `name.rs`. All of them but `HostName` carry

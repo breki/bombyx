@@ -94,7 +94,7 @@ because the host runs the hypervisor.
 ssh vmhost "mkdir -p ~/vms/<project>"
 ssh vmhost "cat > ~/vms/<project>/Vagrantfile"   # file on stdin
 ssh vmhost "cat > ~/vms/<project>/bootstrap.sh"  # file on stdin
-ssh vmhost "cd ~/vms/<project> && vagrant up; rm -f .../bombyx.env"
+ssh vmhost "cd ~/vms/<project> && vagrant up; rm -f .../bombyx.env .../bombyx.git-credentials"
 ssh vmhost "cd ~/vms/<project> && vagrant snapshot save ..."
 ```
 
@@ -282,6 +282,29 @@ guest at `~/.bombyx-env`, where `bootstrap.sh` tightens it to
 `0600`. The staged copy on the VM host goes when `vagrant`
 finishes, with the one exception **Where project code lives
 today** above describes -- an interrupted run leaves it.
+
+`repo_token` and `repo_user` put a git credential on that same
+route, and it is the third secret that reaches the guest.
+bombyx reads the variable `repo_token` names out of the
+`env_file` contents it already has, percent-encodes it into one
+`https://user:token@host` line, and stages that as a second
+file. It travels exactly as the secrets do and is removed with
+them. Inside the guest it lands at
+`/home/vagrant/.bombyx-git-credentials`, where `bootstrap.sh`
+tightens it to `0600`, names it on the clone and the fetch, and
+records it on the clone so the agent can push.
+
+**The token reaches the guest and code there can read it, the
+same as the deploy key.** What the design buys is the route: the
+token appears in no command line on either machine and in no
+generated file, and the VM host holds its copy for the length of
+the `vagrant` run. On Bitbucket a token is the only credential
+an agent can push with, since an ssh access key there is
+read-only. A repository access token reaches one repository; an
+Atlassian API token reaches every repository the account can
+see, and Jira and Confluence with it. Which of those is in the
+VM is the operator's choice, and it is the choice that decides
+what a compromised guest reaches.
 `bootstrap.sh` puts the file nowhere else in the
 guest: it exports `BOMBYX_ENV_FILE` naming the path, and the
 project's own script is what copies it into place.
@@ -486,15 +509,16 @@ than reasoned about. A later `up` does not refresh the
 snapshot either, because it only takes one when the machine
 has none.
 
-The same holds for `env_file`, with one gap the deploy key does
-not have. `bootstrap.sh` deletes the secrets file whenever the
-config names none *and it can work out where the file is*: that
-path comes from the account's passwd entry, and a box whose
-`getent` is missing, or whose entry names no home, leaves
-`bootstrap.sh` with nothing to delete. It says so on stderr and
-carries on. The deploy key has no such gap, because its path is
-a literal. Either way the snapshot keeps whatever the disk held
-when it was taken.
+The same holds for `env_file`, with one gap neither the deploy
+key nor the git credential has. `bootstrap.sh` deletes the
+secrets file whenever the config names none *and it can work out
+where the file is*: that path comes from the account's passwd
+entry, and a box whose `getent` is missing, or whose entry names
+no home, leaves `bootstrap.sh` with nothing to delete. It says
+so on stderr and carries on. The deploy key and the git
+credential both sit at literal paths, so a run that names
+neither removes both whatever `getent` says. Either way the
+snapshot keeps whatever the disk held when it was taken.
 
 So a revoked key comes back on every reset for the life of that
 VM. `bombyx destroy` is what certainly removes it, because it

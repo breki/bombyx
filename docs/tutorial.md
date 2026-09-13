@@ -402,6 +402,12 @@ usually the project's untracked `.env`, and bombyx carries it
 into the guest. Your provisioning script copies it into place
 from `$BOMBYX_ENV_FILE`. The sample config explains it in full.
 
+`repo_token` and `repo_user` beside it clone a private
+repository over `https` instead, authenticating with a token
+that lives in that same secrets file. On Bitbucket that is the
+only arrangement an agent can push with, because an ssh access
+key there is read-only. The sample config explains both.
+
 The layout, in two places:
 
 ```
@@ -526,7 +532,8 @@ parse as `projects.myproject.vm.remote_root` and the whole file
 would be refused.
 
 `[vm]` and `[source]` are required, and every key in them
-except `provider`, `deploy_key` and `env_file` is required too.
+except `provider`, `deploy_key`, `env_file`, `repo_token` and
+`repo_user` is required too.
 bombyx builds the VM from the first and the guest clones the
 second, so there is nothing sensible for bombyx to guess: a base
 image is a choice, and a repository bombyx invented would be
@@ -728,7 +735,7 @@ $ bombyx --project myproject --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; rm -f ~/'vms/myproject/bombyx.git-credentials' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.git-credentials' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
@@ -737,12 +744,14 @@ directory, write the two files bombyx generates, boot, then save
 the `fresh-install` snapshot if the VM does not already have
 one. bombyx runs nothing on your workstation.
 
-The tail on the boot line removes a secrets file, which is what
-`env_file` stages on the VM host. It runs on every boot even
-though this project sets no `env_file`, because a run somebody
-interrupted can leave one there and the config may have stopped
-naming it since. A project that does set `env_file` gets a
-sixth command, writing that file beside the other two.
+The tail on the boot line removes the two files bombyx can stage
+on the VM host: the secrets file `env_file` sends, and the git
+credential `repo_token` produces. Both removals run on every
+boot even though this project sets neither key, because a run
+somebody interrupted can leave a file there and the config may
+have stopped naming it since. A project that does set `env_file`
+gets a sixth command, writing that file beside the other two,
+and one that also sets `repo_token` gets a seventh.
 
 The two writes print as one line each, and neither line holds
 the file it writes. bombyx sends a generated file down a pipe

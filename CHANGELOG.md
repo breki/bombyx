@@ -28,6 +28,17 @@ and this project adheres to
   one -- so an interrupted run's leftover is collected by the next boot. The guest's
   provisioning script is told the path in `BOMBYX_ENV_FILE`, which is set on
   every run and empty when no `env_file` is configured.
+- `repo_token` and `repo_user` in `[source]` clone a private repository over
+  https. `repo_token` names a variable inside the file `env_file` points at,
+  never the token itself, and `repo_user` the username git sends with it --
+  `x-token-auth` for a Bitbucket repository access token, the account's email
+  address for an Atlassian API token. bombyx reads that variable on the
+  workstation, percent-encodes it into one credential line, and carries it to
+  the VM host on standard input the way the secrets file travels; vagrant
+  uploads it to /home/vagrant/.bombyx-git-credentials at mode 0600, and bombyx's
+  provisioning script points the clone at it so the agent can fetch and push
+  afterwards. The two keys are written together or not at all, `repo_token`
+  requires `env_file`, and it requires `repo` to be an https URL.
 
 ### Changed
 

@@ -632,7 +632,7 @@ fn a_fetch_or_checkout_that_cannot_finish_says_so() {
     // directory, and a symlink at the clone skips it.
     let flat = flat_bootstrap();
     for needle in [
-        "if ! GIT_SSH_COMMAND=\"$git_ssh\" git -C \"$CLONE_DIR\" fetch",
+        "if ! git_net -C \"$CLONE_DIR\" fetch",
         "if ! git -C \"$CLONE_DIR\" checkout",
     ] {
         assert!(flat.contains(needle), "unchecked: {needle}");
@@ -738,7 +738,7 @@ fn removing_the_key_unpins_the_clone_from_it() {
     // there is no config file to unset anything from
     // before that.
     let clone = flat
-        .find("git clone --depth 1")
+        .find("git_net clone --depth 1")
         .expect("the clone must be there");
     let unset = flat
         .find("config --unset-all core.sshCommand")

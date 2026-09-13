@@ -251,6 +251,88 @@ script = "vagrant/provision.sh"   # path inside the clone
 #
 # env_file = "~/.secrets/myproject.env"
 
+# Optional, and a pair: write both or neither. They are how the
+# guest clones a private repository over `https` instead of over
+# ssh with `deploy_key` above.
+#
+# `repo_token` names a variable INSIDE the file `env_file`
+# points at. Not the token itself -- this file stays free of
+# secrets, so it can still be pasted into a bug report. There is
+# one copy of the token, in one file, and rotating it means
+# editing that file and nothing else.
+#
+# bombyx reads that one variable, builds a credential from it,
+# and sends the credential to the guest before the clone runs.
+# It has to be a separate file from the secrets: `git` reads it
+# itself, and the format it reads is not the format a `.env`
+# file is written in. Your own provisioning script runs long
+# after the clone, so it cannot do the converting either.
+#
+# `repo_user` names the username sent with the token. bombyx
+# cannot work this out, because the answer depends on which kind
+# of token you made rather than on which host it lives on:
+#
+#   Bitbucket repository access token   x-token-auth
+#   Atlassian API token                 your account's email
+#
+# Both of those are bitbucket.org, which is why there is no
+# table of hosts here and why the config states it outright.
+#
+# Prefer the narrowest token the host offers. A Bitbucket
+# repository access token reaches one repository; an Atlassian
+# API token reaches every repository your account can see, and
+# Jira and Confluence with them. Tick the scopes the agent
+# actually needs -- `repository:write` covers cloning and
+# pushing.
+#
+# WHY A TOKEN RATHER THAN A KEY, on Bitbucket. An ssh access key
+# there is read-only and always has been, so a key can clone and
+# can never push. An agent that opens pull requests needs to
+# push, so it needs the token -- and once it has one, the key
+# has nothing left to do. On a host whose keys can push,
+# `deploy_key` is still the better answer: its secret never
+# passes through a command line at all.
+#
+# Three rules bombyx checks while it reads this file, each of
+# which stops the run with a message naming the key:
+#
+#   - Both keys or neither. A variable name with no username
+#     leaves bombyx guessing; a username with no variable name
+#     has no token to go with.
+#   - `env_file` has to be set, since that is the file the
+#     variable is read out of.
+#   - `repo` has to be an `https` URL. `git` sends the token on
+#     every request, so `http` would put it on the wire in plain
+#     text, and an ssh URL never asks for one.
+#
+# A fourth is checked when the file is read, before anything is
+# created: if the file holds no variable of that name, or holds
+# it empty, the run stops and the message names both the
+# variable and the file.
+#
+# The file bombyx reads is an ordinary `.env`. A line with no
+# `=` is ignored, which covers blank lines and comments. The
+# name is what comes before the first `=` and the value is
+# everything after it, so a token containing `=` needs no
+# escaping. An `export ` in front of the name is fine. Spaces
+# around either side are dropped, one matching pair of
+# surrounding quotes is dropped, and a file written on Windows
+# loses its trailing carriage return. If a name is assigned
+# twice, the last one wins, which is what a shell reading the
+# same file would do.
+#
+# Inside the guest the credential lands at
+# `/home/vagrant/.bombyx-git-credentials` at mode 0600, and
+# bombyx points the clone at it so the agent can fetch and push
+# there afterwards. Take these keys out of this file and the
+# next run removes it from the guest.
+#
+# What this does not do: the token still ends up inside the VM,
+# and code in the VM can read it. See docs/trust-boundary.md.
+#
+# repo_token = "BITBUCKET_TOKEN"
+# repo_user = "x-token-auth"
+
 # Optional. Variables the project's own provisioning script
 # reads.
 #

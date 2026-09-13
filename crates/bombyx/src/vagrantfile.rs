@@ -169,6 +169,48 @@ const ENV_FILE_GUEST_PATH: &str = "~/.bombyx-env";
 /// the two apart.
 const ENV_FILE_PRESENT_ENV: &str = "BOMBYX_ENV_FILE_PRESENT";
 
+/// The git credential file's name in the project directory on
+/// the VM host.
+///
+/// A second file travelling the same way as [`ENV_FILE_NAME`],
+/// for the same reason: its contents are a secret, so they
+/// reach the VM host on a pipe rather than in a command line.
+///
+/// It is a separate file rather than a second variable inside
+/// the first, because `git` reads it itself. The `store`
+/// credential helper opens a file of its own and expects one
+/// `https://user:token@host` line in it; a `.env` file is not
+/// that shape, and the project's own script runs long after the
+/// clone that needs it.
+pub(crate) const CREDENTIAL_FILE_NAME: &str = "bombyx.git-credentials";
+
+/// Where the git credential file lands inside the guest.
+///
+/// Spelled out rather than written with a `~`, unlike
+/// [`ENV_FILE_GUEST_PATH`] and like [`DEPLOY_KEY_GUEST_PATH`].
+/// The path ends up inside a `credential.helper` setting, and a
+/// helper string carrying a space is handed to a shell --
+/// measured, with `HOME` pointed at a temporary directory: a
+/// helper spelled `--file=$HOME/real` found the file there while
+/// `--file=$NOPE/real` found nothing. So a space in the path
+/// splits it in two and a `$` is expanded. A path bombyx chose
+/// has neither, and a project's `[env]` table can set `HOME`.
+///
+/// `BOOTSTRAP` carries the same literal, and
+/// `the_bootstrap_script_reads_the_credential_path_it_is_sent`
+/// is what catches a rename in one of the two.
+const CREDENTIAL_GUEST_PATH: &str = "/home/vagrant/.bombyx-git-credentials";
+
+/// Environment variable telling the guest that the operator's
+/// config named a `repo_token`.
+///
+/// Set on every render, `"1"` or `"0"`, for the reason
+/// [`DEPLOY_KEY_ENV`] gives at length: a name bombyx leaves out
+/// is left to `/etc/profile`, so the guest could answer the
+/// question on the operator's behalf and keep a credential
+/// alive that the config no longer names.
+const CREDENTIAL_PRESENT_ENV: &str = "BOMBYX_GIT_CRED_PRESENT";
+
 /// Environment variable naming the git host, lower-cased, when
 /// bombyx knows where that host publishes its ssh keys.
 ///
@@ -401,7 +443,7 @@ Vagrant.configure(\"2\") do |config|
     v.memory = {memory}
   end
 
-{deploy_key}{env_file}  config.vm.provision \"shell\",
+{deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
     path: {bootstrap},
     # Vagrant runs a shell provisioner as root without this.
     # `bootstrap.sh` acts only on the agent's own home, and a
@@ -414,6 +456,7 @@ Vagrant.configure(\"2\") do |config|
       \"{script_env}\" => {script},
       \"{deploy_key_env_name}\" => \"{deploy_key_env}\",
       \"{env_file_env_name}\" => \"{env_file_env}\",
+      \"{credential_env_name}\" => \"{credential_env}\",
       # Which git host the guest is about to clone from, and
       # where that host publishes its ssh keys. All three are
       # empty when bombyx does not know the host, and
@@ -433,6 +476,7 @@ end
         version = env!("CARGO_PKG_VERSION"),
         deploy_key = deploy_key_block(source.deploy_key.as_ref()),
         env_file = env_file_block(source.env_file.is_some()),
+        credential = credential_block(source.repo_token.is_some()),
         repo_env = REPO_ENV,
         ref_env = REF_ENV,
         script_env = SCRIPT_ENV,
@@ -440,6 +484,9 @@ end
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
         env_file_env_name = ENV_FILE_PRESENT_ENV,
         env_file_env = if source.env_file.is_some() { "1" } else { "0" },
+        credential_env_name = CREDENTIAL_PRESENT_ENV,
+        credential_env =
+            if source.repo_token.is_some() { "1" } else { "0" },
         git_host_env = GIT_HOST_ENV,
         git_host = ruby_string(host_keys.map_or("", |k| k.host())),
         host_keys_url_env = HOST_KEYS_URL_ENV,
@@ -572,6 +619,41 @@ fn env_file_block(configured: bool) -> String {
     )
 }
 
+/// The Ruby that uploads the git credential file, or nothing at
+/// all.
+///
+/// The same shape as [`env_file_block`], and conditional for
+/// the same reason: `vagrant destroy` loads this file too, and
+/// by then `crate::plan` has removed the staged copy from the
+/// VM host, so a `raise` would strand a directory no bombyx
+/// command could clear.
+///
+/// [`render`] places this ahead of the shell provisioner, so
+/// [`BOOTSTRAP`] finds the file already there -- which it must,
+/// because the clone that needs it is the first thing that
+/// script does with the network.
+fn credential_block(configured: bool) -> String {
+    if !configured {
+        return String::new();
+    }
+    format!(
+        "  # The credential git clones with, carried from the
+  # workstation. bombyx built it from one variable inside the
+  # secrets file and removes the staged copy again when vagrant
+  # finishes.
+  bombyx_git_cred = File.expand_path({name}, __dir__)
+  if File.exist?(bombyx_git_cred)
+    config.vm.provision \"file\",
+      source: bombyx_git_cred,
+      destination: {dest}
+  end
+
+",
+        name = ruby_string(CREDENTIAL_FILE_NAME),
+        dest = ruby_string(CREDENTIAL_GUEST_PATH),
+    )
+}
+
 /// Every file bombyx *generates* for the project directory on
 /// the VM host, as `(name, contents)` pairs.
 ///
@@ -643,6 +725,8 @@ mod tests {
                 .expect("a valid fixture path"),
             deploy_key: None,
             env_file: None,
+            repo_token: None,
+            repo_user: None,
         };
         cfg
     }
@@ -1081,6 +1165,71 @@ mod tests {
         assert!(
             BOOTSTRAP.contains(DEPLOY_KEY_GUEST_PATH),
             "{DEPLOY_KEY_GUEST_PATH} is not in the bootstrap script"
+        );
+    }
+
+    #[test]
+    fn the_bootstrap_script_reads_the_credential_path_it_is_sent() {
+        // The same trap as the deploy key's path above: the
+        // Vagrantfile uploads to this path and `bootstrap.sh`
+        // holds it as a literal, and neither file can see the
+        // other.
+        assert!(
+            BOOTSTRAP.contains(CREDENTIAL_GUEST_PATH),
+            "{CREDENTIAL_GUEST_PATH} is not in the bootstrap script"
+        );
+    }
+
+    /// [`cfg_with_env_file`], carrying a `repo_token` too.
+    fn cfg_with_credential() -> Config {
+        use crate::config::{RepoTokenVar, RepoUser};
+
+        let mut cfg = cfg_with_env_file();
+        cfg.source.repo_token =
+            Some(RepoTokenVar::parse("TOKEN").expect("a plain name"));
+        cfg.source.repo_user =
+            Some(RepoUser::parse("x-token-auth").expect("a plain username"));
+        cfg
+    }
+
+    #[test]
+    fn a_repo_token_adds_an_upload_and_no_repo_token_adds_none() {
+        let with = render(&cfg_with_credential());
+        assert!(
+            with.contains("bombyx_git_cred = File.expand_path"),
+            "the upload block is missing:\n{with}"
+        );
+        assert!(
+            with.contains(&format!("destination: {CREDENTIAL_GUEST_PATH:?}")),
+            "the destination is not the guest path:\n{with}"
+        );
+        assert!(
+            with.contains(&format!(
+                "File.expand_path({CREDENTIAL_FILE_NAME:?}"
+            )),
+            "the source is not the staged file:\n{with}"
+        );
+
+        let without = render(&cfg_with_env_file());
+        assert!(
+            !without.contains("bombyx_git_cred"),
+            "a project with no repo_token gets no upload block:\n{without}"
+        );
+    }
+
+    #[test]
+    fn the_credential_flag_is_rendered_either_way() {
+        // The forgeable direction is the *absent* one: a name
+        // bombyx leaves out is left to /etc/profile, so a guest
+        // could claim a token was configured and keep a stale
+        // credential alive.
+        assert_eq!(
+            rendered(&render(&cfg_with_credential()), CREDENTIAL_PRESENT_ENV),
+            "\"1\""
+        );
+        assert_eq!(
+            rendered(&render(&cfg_with_env_file()), CREDENTIAL_PRESENT_ENV),
+            "\"0\""
         );
     }
 

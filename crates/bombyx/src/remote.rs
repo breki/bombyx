@@ -563,12 +563,17 @@ pub fn vagrant_in(
 /// more than a 1 does, and the printed line reports the removal
 /// either way.
 ///
-/// **`name` is removed whether it was staged or not.** The
-/// caller writes the secrets file only when the config names
-/// one, and a run interrupted after this step began leaves a
-/// file the next run's config may no longer mention. So the
-/// removal is unconditional and the message says the file *may*
-/// hold secrets rather than that it does.
+/// **Every name is removed whether it was staged or not.** The
+/// caller writes the secrets file and the git credential only
+/// when the config names them, and a run interrupted after this
+/// step began leaves a file the next run's config may no longer
+/// mention. So the removals are unconditional and the message
+/// says the file *may* hold secrets rather than that it does.
+///
+/// The names arrive as a slice because two files travel this
+/// way. Both are removed even when the boot failed, and each
+/// reports its own failure, so one file that cannot be removed
+/// does not hide the other.
 ///
 /// The path reaches `printf` as an argument rather than inside
 /// the format string. A `%` in there is read as a conversion
@@ -596,19 +601,25 @@ pub fn vagrant_in_then_remove(
     dir: &str,
     args: &[&str],
     tty: Tty,
-    name: &str,
+    names: &[&str],
 ) -> RemoteCommand {
-    let path = quote_remote_path(&format!("{dir}/{name}"));
     // Split out so the script below stays readable. The braces
     // are doubled because `format!` reads a single one as the
     // start of a placeholder.
-    let remove = format!(
-        "rm -f {path} || {{ printf 'bombyx: could not remove %s from \
-         the VM host; it may hold secrets for this project\\n' {path} \
-         >&2; [ \"$rc\" = 0 ] && rc=1; }}"
-    );
+    let removes = names
+        .iter()
+        .map(|name| {
+            let path = quote_remote_path(&format!("{dir}/{name}"));
+            format!(
+                "rm -f {path} || {{ printf 'bombyx: could not remove %s \
+                 from the VM host; it may hold secrets for this \
+                 project\\n' {path} >&2; [ \"$rc\" = 0 ] && rc=1; }}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
     let script = format!(
-        "{run}; rc=$?; {remove}; exit $rc",
+        "{run}; rc=$?; {removes}; exit $rc",
         run = vagrant_script(cfg, dir, args),
     );
     transport(cfg, &script, tty)
@@ -1688,7 +1699,7 @@ mod tests {
             "/srv/x",
             &["up"],
             Tty::NoPty,
-            "bombyx.env",
+            &["bombyx.env"],
         );
         let env = vagrant_env();
         let file = "'/srv/x/bombyx.env'";
@@ -1716,7 +1727,7 @@ mod tests {
             "/srv/x",
             &["up"],
             Tty::NoPty,
-            "bombyx.env",
+            &["bombyx.env"],
         );
         let s = remote_script(&c);
         assert!(
@@ -1751,7 +1762,7 @@ mod tests {
             "/srv/x",
             &["up"],
             Tty::NoPty,
-            "bombyx.env",
+            &["bombyx.env"],
         );
         let s = remote_script(&c);
         assert!(

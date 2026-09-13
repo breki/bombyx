@@ -150,7 +150,7 @@ What a project's table holds:
 | Key | |
 |-----|---|
 | `[vm]` | required; `box` (needs `git`, and two more programs for an ssh clone -- see below), `cpus`, `memory`. `provider` is optional, `libvirt` |
-| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host. `env_file` is optional -- a secrets file on your workstation |
+| `[source]` | required; `repo`, `ref`, `script` -- what the guest clones. `deploy_key` is optional -- a key file on the VM host. `env_file` is optional -- a secrets file on your workstation. `repo_token` and `repo_user` are optional and go together -- an https clone authenticated from a variable inside that secrets file |
 | `remote_root` | optional, `~/vms`; must sit above the two tables |
 | `host` | optional; only for a project that runs elsewhere |
 
@@ -231,6 +231,35 @@ Use `env_file` for a secret and the `[env]` table for anything
 that is not one. A table of plain settings is easier to read
 than a file, and its values are written into the generated
 Vagrantfile in plain text.
+
+**`repo_token` and `repo_user` clone a private repository over
+`https` instead of over ssh.** They are written together or not
+at all. `repo_token` names a variable **inside** the file
+`env_file` points at, never the token itself, so your config
+stays free of secrets and there is one copy of the token to
+rotate. bombyx reads that variable, builds a credential from it,
+and sends the credential to the guest before the clone runs --
+as a second file, because `git` reads it itself and the format
+it reads is not the format a `.env` file is written in.
+
+`repo_user` is the username sent with the token, and bombyx
+cannot work it out. The answer depends on which kind of token
+you made rather than on which host it lives on: a Bitbucket
+repository access token wants the literal `x-token-auth`, an
+Atlassian API token wants your account's email address, and
+both of those are `bitbucket.org`. So the config states it.
+
+**On Bitbucket this is the only way an agent can push.** An ssh
+access key there is read-only and always has been, so a key can
+clone and can never push. An agent that opens pull requests
+needs to push, so it needs the token. On a host whose keys can
+push, `deploy_key` is still the better answer, because its
+secret never passes through a command line at all.
+
+Prefer the narrowest token the host offers. A Bitbucket
+repository access token reaches one repository; an Atlassian API
+token reaches every repository your account can see, and Jira
+and Confluence with them.
 
 **Read-only or not is a decision, and it decides whether work
 can leave the VM.** A commit made in the guest sits on no branch
