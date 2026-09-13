@@ -460,6 +460,31 @@ trailing comment on each is what marks it: pasting one runs
 `cat` against your own terminal, because the file bombyx would
 have sent is not in the line to be pasted.
 
+**Do not feed the plan to a shell.** `bombyx --dry-run up | sh`
+and `sh < plan.sh` both go wrong, and neither says so.
+
+The mechanism is the one the write lines depend on. A shell
+reading a script from its own standard input passes that same
+input on to the children it starts, so a child that reads
+standard input reads the rest of the script. On the `ssh` route
+the child that does so is `ssh` itself, on **every** line of the
+plan and not only the two writes: `ssh` forwards its standard
+input to the far side whether the remote command wants it or
+not. So the very first `ssh` consumes the whole remaining plan,
+nothing after line one runs, and the exit status is zero. On the
+local route, where each line is `sh -c`, it is the `cat` that
+reads it, and the damage lands in the generated file instead --
+under `bash` the Vagrantfile receives the remaining plan lines
+as its contents, and under `dash` both generated files are
+created empty.
+
+*(Checked on Linux with OpenSSH 9.6, `bash` 5.2 and `dash` as
+`/bin/sh`. The per-shell details are what varies; that feeding
+the plan to a shell is wrong does not.)*
+
+The plan is for reading, and for pasting one line at a time. To
+run the commands, run bombyx without `--dry-run`.
+
 The `\$` in the last line is the escaping doing its job rather
 than a stray backslash. `BOMBYX_VM_HOSTNAME` has to be filled in
 by the *host's* shell -- it is the host's name the guest wants

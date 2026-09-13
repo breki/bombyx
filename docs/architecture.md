@@ -205,10 +205,14 @@ one with the same three fields.
 | `name` | scratch-VM names, and path segments |
 | `term` | text reaching the terminal: endings, sanitizing, clipping |
 | `tool` | resolving a program, never via the cwd |
-| `run` | starting one built command, and feeding it input |
+| `run` | looking a program up, starting a command, feeding it input |
 
-`main` parses arguments, drives `run::spawn` and prints.
-Nothing else.
+`main` parses arguments, drives `run` and prints. Nothing else.
+
+One exception sits in `main` rather than in `run`, and it is
+about the workstation instead of the VM host: `local_tool` asks
+a program on this machine for its version, which is a question
+about this filesystem rather than a `RemoteCommand`.
 
 ## Domain entities
 
@@ -389,9 +393,24 @@ classDiagram
 ```
 
 `plan()` turns one `Action` and a `Config` into an ordered
-`Vec<RemoteCommand>`. Only `run::spawn` starts a process, and
-`plan` and `remote` never call it. That is what makes
-`--dry-run` honest and the ordering testable.
+`Vec<RemoteCommand>`. `run` is the only module that starts a
+`RemoteCommand`, and `plan` and `remote` never call it -- they
+build commands and run none. That is what makes `--dry-run`
+honest and the ordering testable.
+
+`run::Resolver` holds the resolved path of every program a
+command list names, and runs the commands itself, so no caller
+ever pairs a path with a command and has to keep the two in
+step. It looks all of them up **before any of them runs**:
+resolving inside the loop would let a plan change something on
+the VM host and only then find that its next program is missing.
+
+It has two ways to run one, and which a command gets decides
+what the operator sees. `execute` leaves the child bombyx's own
+streams, so a provisioning run scrolls past as it happens.
+`output` collects what the child printed, which is what a
+`doctor` probe and a `list` status call need, because bombyx
+parses those replies rather than showing them.
 
 `Stdin` holds the bytes a command feeds its child instead of
 putting them in an argument, and it keeps them private. It has

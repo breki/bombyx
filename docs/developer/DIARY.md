@@ -21,14 +21,16 @@ the project's `[env]` table. Issue #76 has the table of where a
 secret ends up today, and this is the first of its two bold
 rows.
 
-`RemoteCommand` gained a `stdin` field holding a `Stdin`, and
-`run::spawn` writes that payload into a pipe rather than passing
-it as text. `write_file` builds `cat > path` and hands over the
-bytes, so `HEREDOC`, `delimiter_for` and the heredoc-scanning
-half of `abbreviated` all went -- about 90 lines with their
-tests. Nothing has to be escaped any more either: bytes on a
-pipe are bytes, and no shell looks inside them for a `$` to
-substitute or an end-word to stop at.
+`RemoteCommand` gained a `stdin` field holding a `Stdin`, and a
+new `run` module writes that payload into a pipe rather than
+passing it as text. `write_file` builds `cat > path` and hands
+over the bytes, so `HEREDOC`, `delimiter_for` and the public
+`RemoteCommand::abbreviated` all went -- about 90 lines with
+their tests. `abbreviated` went entirely rather than in part: it
+existed to shorten a command carrying a whole file, and no
+command carries one any more. Nothing has to be escaped any more
+either: bytes on a pipe are bytes, and no shell looks inside
+them for a `$` to substitute or an end-word to stop at.
 
 Three things were worth the trouble they caused.
 
@@ -44,15 +46,35 @@ nothing else, so holding the write handle open hangs both
 processes. Proven rather than assumed: with the `drop` removed,
 the test did not finish inside 90 seconds.
 
-**A broken pipe is not the answer to report.** A child that
-stops reading breaks the pipe, and `write_all` then fails. With
-that error propagated, `sh -c 'exit 3'` reported a write failure
-instead of the 3. `spawn` waits and reports the status, keeping
-the write error only when it is something else.
+**A broken pipe is usually not the answer to report.** A child
+that stops reading breaks the pipe, and `write_all` then fails.
+With that error propagated, `sh -c 'exit 3'` reported a write
+failure instead of the 3. So the write error is dropped in
+favour of the child's status -- but **only when that status is
+itself a failure**. A child that stops reading and then exits 0
+has taken part of the file and reported success, and the next
+command reads that file, so a broken pipe over a success stays
+an error. The review caught that second half; the first cut
+swallowed every broken pipe.
 
-`spawn` sits in the library rather than in `main` so it can have
-tests at all; `main`'s `execute` keeps the program resolution,
-the dry run and the failure message around it.
+The review reshaped the module twice more. `Stdin::bytes` became
+crate-private, so the type's "nothing renders these" rule is
+something the compiler holds rather than something a caller is
+asked to respect. And `run::Resolver` replaced a pair of loose
+arguments: it looks every program up through `tool` before any
+command runs, then runs the commands itself, so no call site
+holds a resolved path beside a command and has to keep the two
+in step. That moved the up-front lookup out of `main`, which is
+outside the coverage gate, and it closed a real gap -- the
+binary had a second runner for `doctor` and `list` that built
+its own child and read neither `dir` nor `stdin`. Both now go
+through `Resolver`.
+
+The errors are a `thiserror` enum naming the stage that failed:
+the program is not on `PATH`, the child would not start, the
+payload could not be sent, the wait failed. One `io::Error`
+behind an "running ssh" context left the operator to guess
+which, and those have different fixes.
 
 Both routes were checked with the exact command bombyx emits,
 `unset` prefix and tilde-outside-quotes path included, against a

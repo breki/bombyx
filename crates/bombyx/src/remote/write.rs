@@ -12,12 +12,17 @@
 //! cat > somefile
 //! ```
 //!
-//! The file itself is not in that command. It goes down the
-//! pipe bombyx opens to the child process, which is what
-//! `RemoteCommand::with_stdin` asks for and `run::spawn`
-//! supplies. `ssh` passes whatever it reads on its own input
-//! through to the remote `cat`, so one mechanism serves both
-//! routes: the same command works when `sh -c` runs it here.
+//! The file itself is not in that command. It goes down the pipe
+//! bombyx opens to the child process, which is what
+//! `RemoteCommand::with_stdin` asks for and
+//! `run::Resolver::execute` supplies.
+//!
+//! One mechanism serves both routes, and each route reaches the
+//! `cat` differently. Running here, `sh -c` is the child, so the
+//! pipe goes straight to the shell that runs the `cat`. Over
+//! SSH, `ssh` is the child; it forwards whatever it reads on its
+//! own standard input to the far side, and the remote `cat`
+//! receives it there. Neither route needs a second builder.
 //!
 //! **Why the file is not an argument.** `ps` shows every account
 //! on a machine the full command line of every running process.
@@ -38,7 +43,7 @@ use super::{Config, RemoteCommand, quote_remote_path};
 /// `name`, in the directory `dir`, on the VM host.
 ///
 /// Nothing runs here. Like everything in `remote`, this only
-/// builds the command; `run::spawn` is what starts it. That
+/// builds the command; `run::Resolver` is what starts it. That
 /// split is what lets the interesting part be unit-tested
 /// without a VM host anywhere near it.
 ///

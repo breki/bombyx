@@ -12,6 +12,12 @@ and this project adheres to
 
 ### Added
 
+- A new bombyx::run module starts every command bombyx runs. Its Resolver looks
+  each program up before any of them runs, and its Error names which stage
+  failed: the program is not on PATH, the child would not start, the payload
+  could not be sent, or the wait failed. remote::Stdin, RemoteCommand::stdin and
+  RemoteCommand::with_stdin carry a payload for it.
+
 ### Changed
 
 - bombyx sends the generated Vagrantfile and bootstrap script on the write
@@ -23,6 +29,13 @@ and this project adheres to
 ### Fixed
 
 ### Removed
+
+- **BREAKING:** RemoteCommand::abbreviated, which shortened a command that
+  carried a whole file inside a shell heredoc. No file rides in a command line
+  any more, so it had nothing left to shorten; Display now renders every command
+  in full. This is a library API only: nothing about the `bombyx` command line
+  changed incompatibly, and bombyx is on 0.x, so release this as a minor bump
+  (`/release minor`) rather than the major one the CHANGELOG headings infer.
 
 ## [0.5.0] - 2026-09-12
 

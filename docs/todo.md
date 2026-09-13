@@ -462,6 +462,21 @@ plan, decisions, and outcome.
   refuse, which needs refuse() and DEPLOY_KEY declared above them and both
   currently sit below, or accepting the gap and saying so where the checks are.
 
+- **release-bump-ignores-pre-one-zero** -- a removal infers major even at 0.x
+  `/release` step 3 infers a major bump from a bullet marked `**BREAKING:**` or
+  a non-empty `### Removed`, and `CLAUDE.md` under **Semantic Versioning** says
+  the same. Neither mentions that bombyx is on 0.x. SemVer 2.0.0 says major
+  version zero is for initial development and anything may change at any time,
+  so the usual reading of a breaking change at 0.5.0 is 0.6.0, not 1.0.0. The
+  rule as written proposes 1.0.0, which reaches the release without anyone
+  intending it. It came up on the stdin work: removing the public
+  `RemoteCommand::abbreviated` is breaking for a library caller, and the
+  operator chose a minor release. That was the right call and it had to be made
+  by hand. Decide whether the inference should read the current version first
+  and treat a breaking change below 1.0.0 as a minor bump, or whether the ask at
+  step 4 is judged to be enough. Whichever way, say it in both places so the two
+  cannot disagree.
+
 ## Done
 
 - **list-registered-vms** -- list the registered projects and their VM state

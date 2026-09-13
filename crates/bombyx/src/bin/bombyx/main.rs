@@ -5,9 +5,10 @@
 //! lives in `bombyx::plan`, where it is covered by tests.
 //!
 //! Four things live here and nowhere else: argument parsing, the
-//! config-precedence reporting on stderr, spawning processes, and
-//! the ordering of the `self-update` sequence. `self_update` is the
-//! largest of them.
+//! config-precedence reporting on stderr, printing a plan or a
+//! failure, and the ordering of the `self-update` sequence.
+//! `self_update` is the largest of them. Starting a process is
+//! `run`'s job.
 //!
 //! It sits outside the coverage gate (`src/bin/`), so anything that
 //! stays here ships untested. That is the standing reason to put
@@ -16,8 +17,6 @@
 //! post-extraction re-check in `update::asset::confirm_unchanged`,
 //! because both are decisions and neither needs a process.
 
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
@@ -609,12 +608,9 @@ fn ran_ok(cmd: &RemoteCommand) -> Result<bool> {
 /// every other program does -- see that module; the working
 /// directory is never searched.
 fn capture(cmd: &RemoteCommand) -> Result<String> {
-    let program = bombyx::tool::resolve(&cmd.program)
-        .ok_or_else(|| anyhow!("{}", doctor::not_on_path(&cmd.program)))?;
-    let out = std::process::Command::new(program)
-        .args(&cmd.args)
-        .output()
-        .with_context(|| format!("running {}", cmd.program))?;
+    let resolver = bombyx::run::Resolver::for_command(cmd)
+        .map_err(|e| anyhow!("{}", doctor::not_on_path(e.program())))?;
+    let out = resolver.output(cmd)?;
     if !out.status.success() {
         // The program's own stderr is the useful part -- for
         // `git ls-remote` it distinguishes "no network" from
@@ -757,38 +753,23 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
         return Ok(Ran::Ok);
     }
 
-    // Resolve every program before running any of them, through
-    // `tool` -- never the working directory; see that module.
-    //
-    // Up front, because resolving inside the loop would let a
-    // plan change something and only then discover that its next
-    // program is missing: the change-state-then-fail behaviour
-    // the whole `doctor` command exists to prevent.
-    //
-    // A VM plan runs one program throughout -- `ssh`, or `sh`
-    // when the VM host is this machine -- so the map holds one
-    // entry and a missing one stops the plan before the
-    // `mkdir`. The loop keeps that property if a plan ever gains
-    // a second program. It does not cover `self-update`, which
-    // reaches `execute` one command at a time through `ran_ok`
-    // and so resolves `tar` only after `curl` has already
-    // downloaded the archive.
-    let mut resolved: HashMap<&str, PathBuf> = HashMap::new();
-    for cmd in commands {
-        if let Entry::Vacant(slot) = resolved.entry(&cmd.program) {
-            let found =
-                bombyx::tool::resolve(&cmd.program).ok_or_else(|| {
-                    anyhow!("{}", doctor::not_on_path(&cmd.program))
-                })?;
-            slot.insert(found);
-        }
-    }
+    // `Resolver` looks every program up before any of them runs,
+    // and `run`'s module doc says why that order matters. It
+    // does not cover `self-update`, which reaches `execute` one
+    // command at a time through `ran_ok` and so resolves `tar`
+    // only after `curl` has already downloaded the archive.
+    let resolver = bombyx::run::Resolver::for_commands(commands)
+        .map_err(|e| anyhow!("{}", doctor::not_on_path(e.program())))?;
 
     for cmd in commands {
-        let status = bombyx::run::spawn(&resolved[cmd.program.as_str()], cmd)
-            .with_context(|| format!("running {}", cmd.program))?;
+        let status = resolver.execute(cmd)?;
         if !status.success() {
-            eprint_lines(&format!("bombyx: {cmd} failed: {status}\n"));
+            // Without the payload: `Display` would otherwise end
+            // the command in a `#` comment, and the status --
+            // the only new thing on the line -- would land
+            // inside it.
+            let shown = cmd.without_payload();
+            eprint_lines(&format!("bombyx: {shown} failed: {status}\n"));
             return Ok(Ran::Failed(exit_status_byte(status)));
         }
     }
@@ -891,18 +872,40 @@ fn list_run(
 /// machine is asleep, are each worse than an answer with a gap
 /// in it.
 fn run_command(cmd: &RemoteCommand) -> Result<ProbeResult, String> {
-    // No bare-name fallback. Spawning the unresolved name goes
-    // straight back through the OS search that `tool` exists to
-    // avoid -- and doctor is the command run first in a fresh
-    // clone, so it is the worst place to reintroduce it.
-    let Some(program) = bombyx::tool::resolve(&cmd.program) else {
-        return Err(doctor::not_on_path(&cmd.program));
-    };
-    std::process::Command::new(&program)
-        .args(&cmd.args)
-        .output()
+    // Through `run` rather than a child built here, so both
+    // callers read every field of a `RemoteCommand`. A second
+    // runner built by hand is how `dir` and `stdin` come to be
+    // honoured on one path and dropped on the other.
+    //
+    // `Resolver` also keeps the no-bare-name rule: spawning an
+    // unresolved name goes straight back through the OS search
+    // that `tool` exists to avoid, and `doctor` is the command
+    // run first in a fresh clone, so it is the worst place to
+    // reintroduce it.
+    let resolver = bombyx::run::Resolver::for_command(cmd)
+        .map_err(|e| doctor::not_on_path(e.program()))?;
+    resolver
+        .output(cmd)
         .map(|o| ProbeResult::from_output(&o))
-        .map_err(|e| doctor::cannot_run(&cmd.program, &e.to_string()))
+        .map_err(|e| doctor::cannot_run(&cmd.program, &because(&e)))
+}
+
+/// An error and every cause behind it, joined with `: `.
+///
+/// `Display` on a `thiserror` enum prints that variant's message
+/// and stops, so `run::Error`'s `#[source]` never reaches the
+/// screen on its own. For a `doctor` row the operating system's
+/// own words are the content: "could not start ssh" says nothing
+/// a reader can act on, and "could not start ssh: Permission
+/// denied (os error 13)" says what to go and fix.
+fn because(e: &dyn std::error::Error) -> String {
+    let mut parts = vec![e.to_string()];
+    let mut cause = e.source();
+    while let Some(c) = cause {
+        parts.push(c.to_string());
+        cause = c.source();
+    }
+    parts.join(": ")
 }
 
 /// Runs one host probe and reads its result as a finding.

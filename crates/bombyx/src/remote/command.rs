@@ -1,8 +1,13 @@
 //! What a command *is*.
 //!
 //! [`RemoteCommand`] is plain data: it carries a program, its
-//! arguments and optionally a directory, and renders itself for a
-//! dry run. Nothing here spawns anything.
+//! arguments, optionally a directory to run in, and optionally
+//! bytes for the child's standard input. It renders itself for a
+//! dry run. Nothing here starts anything.
+//!
+//! That last field is the one a reader misses. A command is not
+//! described by its argv alone, so anything consuming a
+//! `RemoteCommand` has four fields to honour rather than three.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -47,8 +52,13 @@ pub struct Stdin(Vec<u8>);
 
 impl Stdin {
     /// The bytes themselves, for whoever writes them into a pipe.
+    ///
+    /// Crate-private, so the "nothing renders them" rule above is
+    /// something the compiler holds outside this crate rather
+    /// than something a caller is asked to respect. `run` is the
+    /// one place that needs them.
     #[must_use]
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.0
     }
 
@@ -88,6 +98,20 @@ impl RemoteCommand {
     pub fn in_dir(mut self, dir: &Path) -> Self {
         self.dir = Some(dir.to_path_buf());
         self
+    }
+
+    /// This command with any payload dropped.
+    ///
+    /// For a rendering that must not end in the `#` comment
+    /// [`Display`](std::fmt::Display) appends: a message that
+    /// continues after the command, or a test pinning the shell
+    /// rather than the size.
+    #[must_use]
+    pub fn without_payload(&self) -> Self {
+        Self {
+            stdin: None,
+            ..self.clone()
+        }
     }
 
     /// Sets the bytes the child reads on standard input.

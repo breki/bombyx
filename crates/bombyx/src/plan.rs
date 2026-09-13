@@ -418,7 +418,7 @@ mod tests {
     }
 
     /// Like [`scripts`], with the two file writes' payloads
-    /// dropped before rendering.
+    /// cleared before rendering.
     ///
     /// A write carries a whole Vagrantfile or a whole
     /// `bootstrap.sh`, and [`Display`](std::fmt::Display) ends
@@ -430,16 +430,13 @@ mod tests {
     /// `remote::write::tests` for what reaches the pipe. What
     /// these tests own is the shell shape and the order.
     ///
-    /// Clearing the field beats cutting the rendered string,
-    /// which would need a parser for the note it is removing.
-    fn scripts_head(action: &Action) -> Vec<String> {
+    /// [`RemoteCommand::without_payload`] beats cutting the
+    /// rendered string, which would need a parser for the note
+    /// it is removing.
+    fn scripts_without_payloads(action: &Action) -> Vec<String> {
         run(action)
             .iter()
-            .map(|c| {
-                let mut c = c.clone();
-                c.stdin = None;
-                remote::rendered_without_disarm(&c)
-            })
+            .map(|c| remote::rendered_without_disarm(&c.without_payload()))
             .collect()
     }
 
@@ -468,7 +465,7 @@ mod tests {
         // being reviewed, wrongly on each of them. The length
         // assertion below is what still catches a step that goes
         // missing.
-        let s = scripts_head(&Action::Up);
+        let s = scripts_without_payloads(&Action::Up);
         assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
         assert_eq!(
             s[..4],
@@ -649,7 +646,7 @@ mod tests {
         // Pins the literal shell, so the command's whole effect
         // on the host is readable in one place.
         assert_eq!(
-            scripts_head(&Action::Provision),
+            scripts_without_payloads(&Action::Provision),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile'\"",
