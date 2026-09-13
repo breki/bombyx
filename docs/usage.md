@@ -411,8 +411,8 @@ invocation instead of running it:
 ```console
 $ bombyx --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cat > ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
@@ -533,13 +533,17 @@ text sits in the `ssh` command line there. Bytes on a pipe
 between two processes appear in no such listing.
 
 That matters for the Vagrantfile in particular, because it
-carries every value from the project's `[env]` table. Note what
-it does not do: bombyx sets no mode on the file it writes, so
-the copy on the VM host is readable by every account there for
-as long as the VM exists. Moving the write to a pipe shortens
-the exposure to nothing in the process list; it does nothing
-about the file at rest. Do not put a secret in `[env]` on a
-shared VM host.
+carries every value from the project's `[env]` table.
+
+The file on disk is the other half, which is why the command
+carries `umask 077` and a `chmod 600`. The umask decides the
+mode of a file being created, so the contents never exist at a
+readable mode even for an instant; the `chmod` corrects a file
+an earlier run left at `0664`, because writing over a file
+truncates it without touching its mode. Both generated files
+therefore end up readable and writable by you and by nobody
+else on the VM host. Its administrator is a different question:
+a mode stops other accounts, not root.
 
 The second benefit is that nothing has to be escaped. Bytes on
 a pipe are bytes: no shell looks inside them for a `$` to

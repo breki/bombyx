@@ -102,10 +102,12 @@ impl RemoteCommand {
 
     /// This command with any payload dropped.
     ///
-    /// For a rendering that must not end in the `#` comment
-    /// [`Display`](std::fmt::Display) appends: a message that
-    /// continues after the command, or a test pinning the shell
-    /// rather than the size.
+    /// [`Display`](std::fmt::Display) ends a command carrying a
+    /// payload with a `#` comment, so anything printed after the
+    /// command sits inside that comment. This drops the payload
+    /// for those cases: a failure message that continues with an
+    /// exit status, and a test pinning the shell rather than the
+    /// size.
     #[must_use]
     pub fn without_payload(&self) -> Self {
         Self {
@@ -209,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn a_command_without_a_payload_renders_as_before() {
+    fn a_command_with_no_payload_renders_just_its_argv() {
         let c = RemoteCommand::new("ssh", &["h", "uptime"]);
         assert_eq!(c.to_string(), "ssh h uptime");
     }

@@ -471,8 +471,12 @@ mod tests {
             s[..4],
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
-                "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile'\"",
-                "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/Vagrantfile' && \
+                 chmod 600 ~/'vms/myproject/Vagrantfile'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/bootstrap.sh' && \
+                 chmod 600 ~/'vms/myproject/bootstrap.sh'\"",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
@@ -649,8 +653,12 @@ mod tests {
             scripts_without_payloads(&Action::Provision),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
-                "ssh vmhost \"cat > ~/'vms/myproject/Vagrantfile'\"",
-                "ssh vmhost \"cat > ~/'vms/myproject/bootstrap.sh'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/Vagrantfile' && \
+                 chmod 600 ~/'vms/myproject/Vagrantfile'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/bootstrap.sh' && \
+                 chmod 600 ~/'vms/myproject/bootstrap.sh'\"",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \

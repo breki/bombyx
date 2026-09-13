@@ -24,8 +24,9 @@
 //! own standard input to the far side, and the remote `cat`
 //! receives it there. Neither route needs a second builder.
 //!
-//! **Why the file is not an argument.** `ps` shows every account
-//! on a machine the full command line of every running process.
+//! **Why the file is not an argument.** On any Unix machine,
+//! every logged-in account can list the commands other accounts
+//! are running, arguments included -- that is what `ps` prints.
 //! A file passed as an argument is therefore readable by anyone
 //! with a login on the VM host while the write runs, and on the
 //! workstation too when the host is remote. A pipe between two
@@ -38,6 +39,14 @@
 //! them for a `$` to substitute or an end-word to stop at.
 
 use super::{Config, RemoteCommand, quote_remote_path};
+
+/// The mode the generated files are left at: readable and
+/// writable by their owner, and by nobody else.
+///
+/// The Vagrantfile carries every value from the project's
+/// `[env]` table, and a VM host is a machine other people have
+/// accounts on. `077` is the matching umask.
+const FILE_MODE: &str = "600";
 
 /// Builds the command that writes `contents` into the file
 /// `name`, in the directory `dir`, on the VM host.
@@ -61,7 +70,15 @@ pub fn write_file(
     contents: &str,
 ) -> RemoteCommand {
     let path = quote_remote_path(&format!("{dir}/{name}"));
-    super::transport(cfg, &format!("cat > {path}"), super::Tty::NoPty)
+    // `umask` sets the mode a *newly created* file gets, so the
+    // contents never exist at a readable mode even briefly. It
+    // leaves an existing file alone, and a re-provision writes
+    // over one -- `cat >` truncates and does not touch the mode
+    // -- so `chmod` is what corrects a file an earlier run left
+    // readable. The `&&` keeps the `chmod` from running on a
+    // write that failed.
+    let script = format!("umask 077; cat > {path} && chmod {FILE_MODE} {path}");
+    super::transport(cfg, &script, super::Tty::NoPty)
         .with_stdin(contents.as_bytes())
 }
 
@@ -94,6 +111,28 @@ mod tests {
             assert!(!arg.contains("hunter2"), "{arg}");
         }
         assert!(!c.to_string().contains("hunter2"), "{c}");
+    }
+
+    #[test]
+    fn the_file_is_created_private_and_an_existing_one_is_fixed() {
+        // Two halves, and each covers what the other cannot.
+        // `umask` decides the mode of a file being created, so
+        // the contents never exist at a readable mode even for
+        // an instant. It does nothing to a file that is already
+        // there, and a re-provision writes over one -- `cat >`
+        // truncates without touching the mode -- so the `chmod`
+        // is what corrects a file an older bombyx left at 0664.
+        let c = write_file(&cfg(), "/srv/x", "Vagrantfile", "x\n");
+        let script = c.args.last().expect("a script argument");
+        assert!(script.contains("umask 077"), "{script}");
+        assert!(
+            script.contains("chmod 600 '/srv/x/Vagrantfile'"),
+            "{script}"
+        );
+        // The chmod must not run when the write failed: a
+        // half-written file left readable is the case being
+        // closed.
+        assert!(script.contains("&& chmod"), "{script}");
     }
 
     #[test]

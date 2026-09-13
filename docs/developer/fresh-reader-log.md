@@ -19,6 +19,27 @@ noticing. Those are finished work and are not counted.
 
 ---
 
+### fr-2026-09-13-trust-boundary-opening-qualifies-early
+
+**Category:** Structure
+
+The blockquote at the top of `docs/trust-boundary.md` qualifies
+"Statement one", "The boundary" and "Where project code lives
+today" -- a numbered statement and two headings that appear 20 to
+60 lines further down. A reader meets the caveat before the thing
+being caveated, cannot tell which two statements are meant, and
+has to scroll down and back. The note also restates claims the
+body then makes again.
+
+The repair is to move the caveat below **The boundary**, keeping
+at the top only what a reader needs first: that neither statement
+has been confirmed against a remote VM host, and that statement
+one is a property of a machine rather than of bombyx.
+
+Deferred rather than applied: this is pre-existing prose, and
+restructuring a document's opening is out of scope for a change
+that only added one paragraph to it.
+
 ### fr-2026-09-11-named-rather-than-linked-is-explained-everywhere
 
 **Category:** Duplicated explanation deferred for its own commit

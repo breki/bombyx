@@ -370,8 +370,9 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
   which is what keeps it testable without a VM host; `run.rs`
   is the one module that starts one
 - a generated file travels on the command's standard input, not
-  in an argument, because `ps` shows every account on either
-  machine the arguments of a running command. `Stdin` has no
+  in an argument, because every logged-in account on a machine
+  can list what other accounts are running, arguments included --
+  that is what `ps` prints. `Stdin` has no
   `Display` and a `Debug` reporting only a length, so a payload
   cannot reach the terminal by accident
 - the registry is the operator's own file rather than a

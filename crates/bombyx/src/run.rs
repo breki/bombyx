@@ -8,11 +8,10 @@
 //! it happens. [`Resolver::output`] collects what the child
 //! printed, for a reply bombyx parses rather than shows.
 //!
-//! It sits in the library rather than in `main` so that the
-//! program lookup and the standard-input path can have tests;
-//! `src/bin/` is outside the coverage gate. What is left in the
-//! binary is the dry run and the message printed when a command
-//! fails.
+//! Starting a process lives here rather than in `main` so that
+//! the program lookup and the standard-input path can have
+//! tests; `src/bin/` is outside the coverage gate. `main.rs`'s
+//! own header says what remains there.
 //!
 //! # A caller never handles a program path
 //!
@@ -169,7 +168,7 @@ impl Resolver {
     /// A command this resolver was not built from reports
     /// [`Error::NotOnPath`].
     pub fn execute(&self, cmd: &RemoteCommand) -> Result<ExitStatus, Error> {
-        let mut child = self.prepared(cmd)?;
+        let mut child = self.child_for(cmd)?;
 
         let Some(payload) = &cmd.stdin else {
             // Spawned and waited for separately, rather than
@@ -178,7 +177,7 @@ impl Resolver {
             // returns one error for either, which would report a
             // failed wait as "could not start" and send the
             // operator looking at `PATH`.
-            let mut running = spawned(&cmd.program, &mut child)?;
+            let mut running = start_child(&cmd.program, &mut child)?;
             return running.wait().map_err(|cause| Error::Wait {
                 program: cmd.program.clone(),
                 cause,
@@ -186,14 +185,18 @@ impl Resolver {
         };
 
         child.stdin(Stdio::piped());
-        let (mut running, mut pipe) = started(&cmd.program, child)?;
+        let (mut running, mut pipe) = start_with_pipe(&cmd.program, child)?;
         let written = pipe.write_all(payload.bytes());
         // Closing the pipe is what produces the end-of-file that
         // a program reading its input waits for. Held open,
         // `cat` never returns and neither does the `wait` below.
         drop(pipe);
         let waited = running.wait();
-        answer(&cmd.program, written, waited.as_ref().ok().copied())?;
+        reject_failed_write(
+            &cmd.program,
+            written,
+            waited.as_ref().ok().copied(),
+        )?;
         waited.map_err(|cause| Error::Wait {
             program: cmd.program.clone(),
             cause,
@@ -209,7 +212,7 @@ impl Resolver {
     ///
     /// As [`Resolver::execute`].
     pub fn output(&self, cmd: &RemoteCommand) -> Result<Output, Error> {
-        let mut child = self.prepared(cmd)?;
+        let mut child = self.child_for(cmd)?;
         child.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let Some(payload) = &cmd.stdin else {
@@ -226,7 +229,7 @@ impl Resolver {
             // started this way without it receives whatever was
             // piped into bombyx.
             child.stdin(Stdio::null());
-            let running = spawned(&cmd.program, &mut child)?;
+            let running = start_child(&cmd.program, &mut child)?;
             return running.wait_with_output().map_err(|cause| Error::Wait {
                 program: cmd.program.clone(),
                 cause,
@@ -234,7 +237,7 @@ impl Resolver {
         };
 
         child.stdin(Stdio::piped());
-        let (running, mut pipe) = started(&cmd.program, child)?;
+        let (running, mut pipe) = start_with_pipe(&cmd.program, child)?;
 
         // The write goes on its own thread, and this one waits.
         // Both directions have to move at once: the child's
@@ -254,13 +257,14 @@ impl Resolver {
         // A panicking writer dropped the pipe part-way, so the
         // child saw a clean end-of-file and may well have
         // exited 0 over half a file. Reporting that as a
-        // successful write is the one outcome `answer` exists to
-        // prevent, so the panic becomes a write error instead.
+        // successful write is the outcome
+        // `reject_failed_write` exists to prevent, so the panic
+        // becomes a write error instead.
         let written = writer.join().unwrap_or_else(|_| {
             Err(std::io::Error::other("the writing thread panicked"))
         });
         let status = collected.as_ref().ok().map(|o| o.status);
-        answer(&cmd.program, written, status)?;
+        reject_failed_write(&cmd.program, written, status)?;
         collected.map_err(|cause| Error::Wait {
             program: cmd.program.clone(),
             cause,
@@ -277,7 +281,7 @@ impl Resolver {
     ///
     /// [`Error::NotOnPath`] when this resolver was not built
     /// from a command naming that program.
-    fn prepared(&self, cmd: &RemoteCommand) -> Result<Command, Error> {
+    fn child_for(&self, cmd: &RemoteCommand) -> Result<Command, Error> {
         let path =
             self.0.get(&cmd.program).ok_or_else(|| Error::NotOnPath {
                 program: cmd.program.clone(),
@@ -292,7 +296,7 @@ impl Resolver {
 }
 
 /// Starts `child`, naming the program if it will not start.
-fn spawned(
+fn start_child(
     program: &str,
     child: &mut Command,
 ) -> Result<std::process::Child, Error> {
@@ -304,15 +308,18 @@ fn spawned(
 
 /// Starts `child` and takes the writing end of its pipe.
 ///
+/// [`start_child`] plus the handle, which is the only
+/// difference between the two.
+///
 /// The `else` arm is unreachable after the caller asked for a
 /// pipe. It is an error rather than a panic because the
 /// signature promises one, and the child is waited on so it is
 /// not left running.
-fn started(
+fn start_with_pipe(
     program: &str,
     mut child: Command,
 ) -> Result<(std::process::Child, std::process::ChildStdin), Error> {
-    let mut running = spawned(program, &mut child)?;
+    let mut running = start_child(program, &mut child)?;
     let Some(pipe) = running.stdin.take() else {
         let _ = running.wait();
         return Err(Error::Write {
@@ -323,7 +330,8 @@ fn started(
     Ok((running, pipe))
 }
 
-/// Decides whether a write failure is the answer to report.
+/// Fails the run when the write failed and the child's own
+/// status does not account for it.
 ///
 /// `status` is how the child ended, and `None` means the wait
 /// itself failed.
@@ -342,7 +350,7 @@ fn started(
 ///
 /// [`Error::Write`] when the write failure is the one worth
 /// reporting.
-fn answer(
+fn reject_failed_write(
     program: &str,
     written: std::io::Result<()>,
     status: Option<ExitStatus>,
@@ -464,8 +472,9 @@ mod lookup_tests {
 /// Windows too -- `ssh vmhost "cat > file"` is what a Windows
 /// workstation uses -- and `std`'s pipe, child and
 /// `ChildStdin::write_all` are separate implementations per
-/// platform rather than one shared one. So `answer`'s reading of
-/// a broken pipe is a claim about each platform separately.
+/// platform rather than one shared one. So the broken-pipe
+/// reading in `reject_failed_write` is a claim about each
+/// platform separately.
 ///
 /// Each test therefore needs a child that reads standard input
 /// and exits with a chosen code, and nothing more shell-shaped
@@ -516,8 +525,9 @@ mod payload_tests {
 
     #[test]
     fn a_child_ignoring_its_input_still_reports_its_status() {
-        // Without the broken-pipe arm in `answer`, this reports a
-        // write error and loses the 3.
+        // Without the broken-pipe arm in
+        // `reject_failed_write`, this reports a write error and
+        // loses the 3.
         let status = finished(&exiting_with(3).with_stdin(&oversized()))
             .expect("the shell runs");
         assert_eq!(status.code(), Some(3), "{status}");
@@ -535,7 +545,7 @@ mod payload_tests {
     }
 
     #[test]
-    fn a_command_without_a_payload_runs_unchanged() {
+    fn a_command_with_no_payload_keeps_bombyxs_own_streams() {
         let status = run(&exiting_with(7)).expect("the shell runs");
         assert_eq!(status.code(), Some(7), "{status}");
     }
@@ -543,7 +553,7 @@ mod payload_tests {
     #[test]
     fn output_reports_a_partial_write_on_every_platform() {
         // `output` has its own copy of the broken-pipe
-        // decision -- a writer thread, its own `answer` call --
+        // decision -- a writer thread, its own `reject_failed_write` call --
         // and `std`'s pipes are a separate implementation per
         // platform, so the reading has to be checked on each.
         // `execute`'s version of this is
@@ -697,9 +707,9 @@ mod tests {
 
     #[test]
     fn output_runs_in_the_commands_directory() {
-        // `run_command` in the binary used to build its own
-        // child and pass neither `dir` nor `stdin`. Both are
-        // read here, so the two runners cannot drift apart.
+        // One runner reads every field of a `RemoteCommand`,
+        // and this pins `dir` so a hand-built child cannot
+        // reappear beside it.
         let dir = TempDir::new().expect("a temporary directory");
         std::fs::write(dir.path().join("marker"), "here\n").expect("write");
         let cmd = sh("cat marker").in_dir(dir.path());

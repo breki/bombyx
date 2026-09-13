@@ -25,11 +25,12 @@ and this project adheres to
 - bombyx sends the generated Vagrantfile and bootstrap script on the write
   command's standard input rather than inside a command-line argument, so
   neither file is visible in a process listing on the VM host or on the
-  workstation. This closes the command line only: bombyx sets no mode on the
-  file it writes, so the copy on the VM host stays readable by every account
-  there, and an `[env]` value is still not a secret you can keep from a co-user
-  of that machine. A dry run now ends each write line with the payload's size in
-  bytes instead of naming a heredoc and a line count.
+  workstation. The copy on the VM host is covered too: the write carries `umask
+  077` so the file is created private, and a `chmod 600` after it corrects a
+  file an earlier bombyx left at 0664. Both generated files end up readable by
+  their owner alone, which matters because the Vagrantfile carries every value
+  from the project's `[env]` table. A dry run now ends each write line with the
+  payload's size in bytes instead of naming a heredoc and a line count.
 
 ### Fixed
 

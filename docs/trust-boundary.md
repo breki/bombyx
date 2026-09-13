@@ -112,17 +112,23 @@ on the workstation too, since the same text sits in the local
 `ssh` command line. **How the generated files are written** in
 [usage.md](usage.md) describes the mechanism.
 
-**That closes the command line and nothing else.** The generated
-Vagrantfile carries every value from the project's `[env]`
-table, and bombyx sets no mode when it writes the file, so it
-lands at the VM-host account's umask -- measured as `0664` on a
-stock Debian host -- and stays there for the life of the VM.
-Every account on a shared VM host can read it at rest. So what
-changed is the transient copy in the process list, not the
-permanent one on disk, and an `[env]` value is still not a
-secret you can keep from a co-user of that machine. Issue #76
-tracks the remaining route, and the work to carry a secrets file
-without putting it in `[env]` at all is issues #78 and #79.
+**The copy at rest is the other half, and it needs its own
+answer.** The generated Vagrantfile carries every value from the
+project's `[env]` table, and it stays on the VM host for the
+life of the VM. Left at the account's umask it would arrive at
+`0664` on a stock Debian host, readable by every account there.
+So the write sets the mode itself: `umask 077` decides the mode
+of a file being created, and a `chmod 600` after it corrects a
+file an earlier run already left readable, since writing over a
+file does not change its mode.
+
+Both halves are needed and neither replaces the other. What is
+still true is that the VM host's owner, and root on it, can read
+anything there -- a mode stops other accounts, not the machine's
+administrator. Issue #78 proposes carrying a secrets
+file from the workstation into the guest without putting its
+values in `[env]` at all, and #79 builds the git credential on
+top of it; #76 holds the design behind both.
 
 A configured `deploy_key` adds one more command, and it runs
 first:

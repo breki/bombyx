@@ -480,23 +480,10 @@ plan, decisions, and outcome.
   `CLAUDE.md` and in `.claude/commands/release.md` both, so the two cannot
   disagree.
 
-- **generated-files-world-readable** -- the Vagrantfile lands at mode 664
-  bombyx writes the Vagrantfile and `bootstrap.sh` with a bare `cat > path` and
-  sets no mode, so each lands at the VM-host account's umask and stays there for
-  the life of the VM. Measured on a real host: umask 0002, file mode 664. The
-  Vagrantfile carries every value from the project's `[env]` table, so on a
-  shared VM host -- the arrangement bombyx is designed for -- every other
-  account can read those values at rest. Moving the write onto standard input
-  closed the copy in the process list, which lasts as long as the write; it did
-  nothing about this one, which is permanent. The documents now say so rather
-  than implying both are closed. The cheap repair is a mode on the write: `umask
-  077` in front of the script, or a `chmod 600` after the redirection in the
-  same command. Decide it alongside #78, which carries a real secrets file into
-  the guest and raises the same question about what the VM host keeps and for
-  how long. Worth checking at the same time whether the project directory wants
-  a mode, since `mkdir -p` sets none either.
-
 ## Done
+
+- **generated-files-world-readable** -- the Vagrantfile lands at mode 664
+  (2026-09-13)
 
 - **list-registered-vms** -- list the registered projects and their VM state
   (2026-09-12)

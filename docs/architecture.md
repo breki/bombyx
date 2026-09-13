@@ -122,8 +122,9 @@ workstation.
 
 The diagram shows no box for the project's repository, and that
 is the point: neither the workstation nor the VM host reads any
-file from it. The VM host reads none because the push that sent
-it `vagrant/` is gone. The workstation reads none because every
+file from it. The VM host reads none because the only two files
+bombyx puts there are ones it generates itself. The workstation
+reads none because every
 setting comes out of `config.toml`, which lives in the
 operator's config directory, and `--project` names the project
 rather than the working directory implying it. The workstation
@@ -207,12 +208,11 @@ one with the same three fields.
 | `tool` | resolving a program, never via the cwd |
 | `run` | looking a program up, starting a command, feeding it input |
 
-`main` parses arguments, drives `run` and prints. Nothing else.
-
-One exception sits in `main` rather than in `run`, and it is
-about the workstation instead of the VM host: `local_tool` asks
-a program on this machine for its version, which is a question
-about this filesystem rather than a `RemoteCommand`.
+`main` parses arguments, drives `run` and prints. It starts no
+process against the VM host itself. The one process it does
+start is `local_tool`'s `--version` call, which asks a program
+on this workstation about itself rather than running a
+`RemoteCommand`.
 
 ## Domain entities
 
@@ -1033,20 +1033,18 @@ flowchart TD
 ```
 
 Each stage is safe on its own rather than trusting the one
-before it. `render` escapes every `"`, `\` and `#` even though
-`BoxName`, `RepoUrl`, `GitRef`, `ScriptPath` and
-`DeployKeyPath` already refused them. `write_file` puts the
-payload on the command's standard input, where no shell reads
-it, rather than assuming the payload came from `render`.
+before it.
 
-That last stage needs no escaping rule of its own, and that is
-the point of it: bytes travelling down a pipe are bytes, so a
-payload no renderer produced is carried as faithfully as one
-that came straight from `render`. A library caller can no
-longer hand `render` a quote at all either -- every value it
-writes into the Ruby is a newtype whose inner value is
-private -- but `write_file` does not depend on that having
-happened.
+`render` escapes every `"`, `\` and `#` in whatever it is
+handed. That escaping is a precaution rather than a
+requirement: `BoxName`, `RepoUrl`, `GitRef`, `ScriptPath` and
+`DeployKeyPath` are newtypes whose inner value is private, so a
+caller cannot hand `render` a quote in the first place.
+
+`write_file` needs no escaping rule at all. Bytes travelling
+down a pipe reach the far side unread by any shell, so it
+carries a payload no renderer produced exactly as faithfully as
+one that came straight from `render`.
 
 ## Quality gates
 
