@@ -162,10 +162,15 @@ script = "vagrant/provision.sh"   # path inside the clone
 # For a private one, name a private key file on the VM host.
 # vagrant reads it there and uploads it into the guest before
 # provisioning, so the key never touches your workstation and
-# never sits in any repository. Make it a read-only deploy key
-# for this one repository: code inside the VM can read it, and
-# scoping it is what limits what stealing it is worth. See
-# docs/trust-boundary.md.
+# never sits in any repository. Scope it to this one repository:
+# code inside the VM can read it, and scoping is what limits
+# what stealing it is worth.
+#
+# Whether it may push is a decision rather than a default. A
+# commit made in the guest sits on no branch after the next
+# `provision`, so pushing is how work leaves the VM, and it uses
+# this key. Read-only is tighter and means the agent cannot push
+# at all. See docs/trust-boundary.md.
 #
 # vagrant runs on the VM host, so `~` is that machine's home
 # directory and not yours. bombyx checks the file is there

@@ -42,8 +42,8 @@ and the distinction matters. A VM that fetches a private
 repository by itself needs a credential of its own to do it,
 and code inside the VM can read it. bombyx has a field for
 that credential, `deploy_key`, which names a key file on the VM
-host -- make it a read-only deploy key, because nothing but
-your own choice of file keeps it to one. See
+host. Scope it to the one repository, because nothing but your
+own choice of file keeps it to one. See
 [trust-boundary.md](docs/trust-boundary.md) for what having it
 inside the guest costs and why that is accepted.
 
@@ -191,12 +191,24 @@ guest. `deploy_key` is the optional fourth key in that table,
 and it names a private key file **on the VM host** -- not on
 your workstation. `vagrant` reads it there and uploads it into
 the guest before provisioning, so the key never touches the
-machine you are typing on. Make it a read-only deploy key for
-that one repository: code inside the VM can read it, and
-scoping it is what limits what stealing it is worth. bombyx
-checks the file is on the VM host before it creates anything,
-so naming a path that is not there stops the run with a
-message rather than booting a VM whose clone then fails.
+machine you are typing on. Scope it to that one repository:
+code inside the VM can read it, and scoping is what limits what
+stealing it is worth. bombyx checks the file is on the VM host
+before it creates anything, so naming a path that is not there
+stops the run with a message rather than booting a VM whose
+clone then fails.
+
+**Read-only or not is a decision, and it decides whether work
+can leave the VM.** A commit made in the guest sits on no branch
+after the next `provision`, so pushing is how the agent's work
+survives -- and pushing uses this key. `bootstrap.sh` records it
+on the clone as `core.sshCommand` for exactly that reason. A
+read-only key is the tighter choice and makes the VM a place
+work goes to die; a key that can push is a key worth stealing.
+Pick deliberately. Not every git host offers a
+repository-scoped key that may push; where one does not, a
+machine account with write on that single repository keeps the
+blast radius the same size.
 
 That exposure is accepted rather than solved, and
 [trust-boundary.md](docs/trust-boundary.md) under
