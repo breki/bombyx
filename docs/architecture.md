@@ -15,7 +15,7 @@ flowchart LR
   end
 
   subgraph host["VM host"]
-    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh"]
+    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh<br/>bombyx.env (staged, with env_file)"]
     vg["vagrant"]
   end
 
@@ -122,9 +122,12 @@ workstation.
 
 The diagram shows no box for the project's repository, and that
 is the point: neither the workstation nor the VM host reads any
-file from it. The VM host reads none because the only two files
-bombyx puts there are ones it generates itself. The workstation
-reads none because every
+file from it. The VM host reads none because the files bombyx
+puts there are two it generates itself and, when the config
+names an `env_file`, a third that comes off the operator's own
+machine rather than out of the repository. That third one is
+staged for the length of the `vagrant` run and removed by the
+step that runs it. The workstation reads none because every
 setting comes out of `config.toml`, which lives in the
 operator's config directory, and `--project` names the project
 rather than the working directory implying it. The workstation
@@ -193,6 +196,7 @@ one with the same three fields.
 | `config::registry` | the operator's `config.toml` and its project tables |
 | `config::root` | what `remote_root` may be, and why it is strict |
 | `config::deploy_key` | what `deploy_key` may be, and why |
+| `config::env_file` | what `env_file` may be, and the file it names |
 | `config::source` | `[source]`, and the three checked types it holds |
 | `config::transport` | whether `host` names this very machine |
 | `config::vm` | `[vm]`, and the checks a type cannot express |
@@ -237,6 +241,7 @@ classDiagram
     +GitRef git_ref
     +ScriptPath script
     +Option~DeployKeyPath~ deploy_key
+    +Option~EnvFilePath~ env_file
   }
   class RepoUrl {
     +String value
@@ -257,6 +262,9 @@ classDiagram
     +String value
   }
   class DeployKeyPath {
+    +String value
+  }
+  class EnvFilePath {
     +String value
   }
   class HostName {
@@ -303,6 +311,7 @@ classDiagram
   Source *-- ScriptPath : script
   Source *-- GitRef : ref
   Source *-- DeployKeyPath : deploy_key
+  Source *-- EnvFilePath : env_file
   Vm *-- BoxName : box
   Config *-- ProjectName : project
   Config *-- EnvName : env keys
@@ -690,6 +699,21 @@ rules check the path's *shape*, never what it names, which is
 why "do not pass `--config` a path inside a repository you did
 not write" is what carries this one.
 
+`env_file` answers the same question as `deploy_key` and gets
+a different answer, because bombyx is what opens it. The path
+never reaches a shell on either machine: bombyx reads the file
+on the workstation with `std::fs`, and the contents travel on
+the command's standard input. So none of `deploy_key`'s quoting
+rules applies, and a file name holding a space or a quote is
+accepted. What `EnvFilePath` checks is that the value is
+anchored — `~/` or absolute on this machine — because a relative
+path would resolve against whatever directory bombyx was started
+in. It constrains what the value *names* no more than
+`DeployKeyPath` does: a config naming `env_file = "~/.ssh/id_ed25519"`
+sends that file into the guest, and the same "do not pass
+`--config` a path inside a repository you did not write" is what
+carries it.
+
 `provider` is the one value that answers the question the other
 way, so it carries no guard. It reaches as far as any of them --
 into the generated Vagrantfile, and onto the command line
@@ -711,29 +735,38 @@ opens the one `--config` names without asking where it came
 from. `docs/usage.md` under **What is checked, and what is not**
 is the operator-facing half of this.
 
-Eight fields are enforced by a newtype of bombyx's own:
+Nine fields are enforced by a newtype of bombyx's own:
 `remote_root` is a `RemoteRoot`, `repo` a `RepoUrl`, `script` a
 `ScriptPath`, `box` a `BoxName`, `ref` a `GitRef`, `deploy_key`
-a `DeployKeyPath`, `project` a `ProjectName` and `host` a
-`HostName`. An `[env]` entry adds two more, because both halves
-are checked: an `EnvName` keying an `EnvValue`. Each constructor
-holds the rules, so an invalid one cannot be built -- by a
-config file or by a library caller. All of them but `host` run
-their constructor as serde deserializes, so a bad value is
-refused before a `Config` exists and the error identifies the
-line.
+a `DeployKeyPath`, `env_file` an `EnvFilePath`, `project` a
+`ProjectName` and `host` a `HostName`. An `[env]` entry adds two
+more, because both halves are checked: an `EnvName` keying an
+`EnvValue`. Each constructor holds the rules, so an invalid one
+cannot be built -- by a config file or by a library caller. All
+of them but `host` run their constructor as serde deserializes,
+so a bad value is refused before a `Config` exists and the error
+identifies the line.
 
 `EnvName` is the second newtype in bombyx that arrives as a map
 key rather than as a field, `ProjectName` being the first. That
 is the reason it is a type: nothing calls a checking function
 on a key while serde is building the map.
 
-`deploy_key` is the only optional one. It is an
-`Option<DeployKeyPath>`, so a project cloning a public
-repository leaves the key out, the generated Vagrantfile
-carries no upload block, and the plan carries no check step.
+`deploy_key` and `env_file` are the two optional ones. Each is
+an `Option`, so a project cloning a public repository leaves the
+key out and a project with no secrets leaves the file out: the
+generated Vagrantfile then carries no upload block for the
+absent one, and no write step is planned for it.
 
-The value reaches two places and neither is an argv slot. One
+The *removal* of the staged secrets file is planned either way,
+which is the one place these two optional keys behave
+differently. A run interrupted after the `vagrant` step began
+leaves `bombyx.env` on the VM host, and taking `env_file` out of
+the config afterwards would stop a conditional removal from ever
+collecting it. `plan::write_then` holds that argument.
+
+`deploy_key`'s value reaches two places and neither is an argv
+slot. One
 is a double-quoted Ruby literal in the generated Vagrantfile,
 which `vagrant` expands with `File.expand_path`. The other is a
 quoted shell assignment in the script `remote::require_file`
@@ -961,6 +994,9 @@ because no config can reach it.
 | `script` | leading `/`, a `..` segment | root makes it executable, and it is then run inside the clone |
 | `deploy_key` | anything but a `/` or `~/` anchor | `vagrant` runs in the project's directory on the VM host, so a relative path would look for the key under a directory bombyx creates, writes and deletes |
 | `deploy_key` | a `.` or `..` segment, `//`, a `~` past the first character, a trailing `/`, no file below the anchor, any character outside letters, digits, `.` `_` `-` `/` `~` | the VM host expands the path and the operator never sees the result, so a value that resolves somewhere other than where it reads is refused rather than reported |
+| `env_file` | empty or blank | no meaning when blank |
+| `env_file` | anything but a `~/` anchor or an absolute path on this machine | bombyx opens the file itself, so a relative value would resolve against whatever directory bombyx was started in |
+| `env_file` | a bare `~`, a trailing separator, or a final `.` or `..` segment | each names a directory rather than a file, and the general message would send the operator looking for the wrong mistake. The separator is the one this machine writes paths with, so `\` counts on Windows |
 | `[env]` names | anything but a leading letter or `_` followed by letters, digits and `_` | the guest exports each one as a shell variable, and `9LIVES=1` is a syntax error while `WITH-DASH=1` is read as a command to run |
 | `[env]` names | a leading `BOMBYX_` | the generated Vagrantfile writes bombyx's own variables and the project's into one Ruby hash literal, and a repeated key there takes its last value, so a project could otherwise choose which script bombyx runs |
 | `cpus` `memory` | zero | vagrant would refuse it on the VM host, after bombyx had already created a directory there |

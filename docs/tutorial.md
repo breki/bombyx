@@ -396,6 +396,12 @@ the guest before provisioning. Code in the VM can read that
 key -- see [trust-boundary.md](trust-boundary.md) for what
 that costs.
 
+A project's own secrets go the other way. `env_file` in
+`[source]` names a file on the machine you are typing on,
+usually the project's untracked `.env`, and bombyx carries it
+into the guest. Your provisioning script copies it into place
+from `$BOMBYX_ENV_FILE`. The sample config explains it in full.
+
 The layout, in two places:
 
 ```
@@ -520,11 +526,11 @@ parse as `projects.myproject.vm.remote_root` and the whole file
 would be refused.
 
 `[vm]` and `[source]` are required, and every key in them
-except `provider` and `deploy_key` is required too. bombyx
-builds the VM from the first and the guest clones the second,
-so there is nothing sensible for bombyx to guess: a base image
-is a choice, and a repository bombyx invented would be cloned
-into the guest and have its script run there.
+except `provider`, `deploy_key` and `env_file` is required too.
+bombyx builds the VM from the first and the guest clones the
+second, so there is nothing sensible for bombyx to guess: a base
+image is a choice, and a repository bombyx invented would be
+cloned into the guest and have its script run there.
 
 `remote_root` is optional, shown with its default.
 
@@ -722,7 +728,7 @@ $ bombyx --project myproject --dry-run up
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'"
+ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
 ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
@@ -730,6 +736,13 @@ Five commands, and every one of them is an `ssh`: make the
 directory, write the two files bombyx generates, boot, then save
 the `fresh-install` snapshot if the VM does not already have
 one. bombyx runs nothing on your workstation.
+
+The tail on the boot line removes a secrets file, which is what
+`env_file` stages on the VM host. It runs on every boot even
+though this project sets no `env_file`, because a run somebody
+interrupted can leave one there and the config may have stopped
+naming it since. A project that does set `env_file` gets a
+sixth command, writing that file beside the other two.
 
 The two writes print as one line each, and neither line holds
 the file it writes. bombyx sends a generated file down a pipe

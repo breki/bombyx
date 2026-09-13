@@ -480,6 +480,48 @@ plan, decisions, and outcome.
   `CLAUDE.md` and in `.claude/commands/release.md` both, so the two cannot
   disagree.
 
+- **deploy-key-path-names-vagrant** -- the guest path hard-codes the account
+  The deploy key's guest path is hard-coded as
+  /home/vagrant/.ssh/bombyx-deploy-key, which assumes the box's SSH account is
+  called `vagrant`. Vagrant's default for config.ssh.username is `vagrant`, but
+  a box is free to set another, and some do; on such a box the upload fails
+  inside Vagrant, a long way from `box` in the config. DEPLOY_KEY_GUEST_PATH in
+  crates/bombyx/src/vagrantfile.rs and the matching literal in
+  crates/bombyx/templates/bootstrap.sh both carry the assumption. The env_file
+  work on branch feat/env-file-delivery shows the way out: Vagrant expands an
+  upload's `destination:` by running `printf <destination>` through a shell
+  inside the guest as the SSH account (verified in vagrant 2.4.9,
+  plugins/provisioners/file/provisioner.rb expand_guest_path and
+  plugins/guests/linux/cap/shell_expand_guest_path.rb), so a destination written
+  `~/.ssh/bombyx-deploy-key` lands in the real home whatever the account is
+  called. bootstrap.sh cannot then use $HOME, because a project's [env] table
+  may set it; it reads the passwd entry instead, which is what ENV_FILE already
+  does. Found while working issue #78, deliberately left out of that change.
+
+- **env-file-rules-stated-five-times** -- one rule, five documents, drifting
+  Two facts about `env_file` are each written out in four or five documents, and
+  nothing keeps them in step. What the value refuses -- a bare `~`, a trailing
+  separator, a final `.` or `..` segment, and anything neither `~/`-anchored nor
+  absolute -- is stated in `config.toml.sample`, `docs/usage.md`,
+  `docs/architecture.md`'s refused-values table and the `# Errors` block on
+  `config::env_file::check`. How long the VM host holds the staged copy is
+  stated in `config.toml.sample`, `README.md`, `docs/trust-boundary.md` twice,
+  and in the comment `vagrantfile::env_file_block` renders into the generated
+  Vagrantfile -- which is the copy that sits on the VM host beside the leftover
+  file it denies can exist. Both
+  drifted twice inside one review of #78: one round reconciled four copies of
+  the path rule and the next round found a fifth saying "slash" where the others
+  said "separator", and a separate round found all three copies of the retention
+  claim promising the VM host holds the file "only while the upload is
+  happening" when it holds it for the whole vagrant run and an interrupted run
+  leaves it behind. `/review` names this shape under **When it stops
+  converging** as "the rule has no single home", and forbids the repair inside a
+  review round, because the N-1 pointers that replace the copies become the next
+  round's findings. The repair wanted is one authoritative statement per fact
+  with the other documents pointing at it. `deploy_key` has the same shape and
+  the same number of copies, so whatever is decided here should cover both.
+  Raised on 2026-09-13 while working issue #78 and deliberately kept out of it.
+
 ## Done
 
 - **generated-files-world-readable** -- the Vagrantfile lands at mode 664

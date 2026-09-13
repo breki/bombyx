@@ -121,6 +121,54 @@ const REF_ENV: &str = "BOMBYX_REF";
 /// Provisioning script the guest runs out of the clone.
 const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
 
+/// The secrets file's name in the project directory on the VM
+/// host.
+///
+/// `pub(crate)` rather than `pub`, unlike [`VAGRANTFILE_NAME`]
+/// and [`BOOTSTRAP_NAME`], which the integration suite opens by
+/// name. Only `crate::plan` needs this one, to write the file
+/// and to remove it again, and a `pub` constant would make the
+/// name on the VM host something a release has to keep.
+///
+/// This file is not generated, so it is absent from [`files`].
+/// Its contents come from the workstation and reach the VM host
+/// on a pipe.
+pub(crate) const ENV_FILE_NAME: &str = "bombyx.env";
+
+/// Where the secrets file lands inside the guest.
+///
+/// Written with a `~` rather than spelled out, unlike
+/// [`DEPLOY_KEY_GUEST_PATH`]. Vagrant expands an upload's
+/// `destination:` by running `printf <destination>` through a
+/// shell **inside the guest** before it sends anything -- read
+/// in vagrant 2.4.9, `plugins/provisioners/file/provisioner.rb`
+/// and `plugins/guests/linux/cap/shell_expand_guest_path.rb`.
+/// That shell runs as the account vagrant logs in as, because
+/// the communicator's `execute` defaults to `sudo: false`. So
+/// the file lands in that account's real home whatever the box
+/// calls the account.
+///
+/// [`BOOTSTRAP`] cannot spell the same path with `$HOME`. A
+/// project's `[env]` table may set `HOME`, and the shell
+/// provisioner carries that value while the upload above used
+/// the account's real home. The script reads the passwd entry
+/// instead, which is what the two agree on.
+const ENV_FILE_GUEST_PATH: &str = "~/.bombyx-env";
+
+/// Environment variable telling the guest that the operator's
+/// config named an `env_file`.
+///
+/// Set on every render, `"1"` or `"0"`, for the reason
+/// [`DEPLOY_KEY_ENV`] gives at length: a name bombyx leaves out
+/// is left to `/etc/profile`, so the guest could answer the
+/// question on the operator's behalf.
+///
+/// `BOMBYX_ENV_FILE`, which [`BOOTSTRAP`] exports for the
+/// project's own script, is a different variable holding the
+/// guest path. The `PRESENT` in both names here is what keeps
+/// the two apart.
+const ENV_FILE_PRESENT_ENV: &str = "BOMBYX_ENV_FILE_PRESENT";
+
 /// Environment variable naming the git host, lower-cased, when
 /// bombyx knows where that host publishes its ssh keys.
 ///
@@ -170,9 +218,10 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// Every variable bombyx sets in the provisioner itself.
 ///
 /// Test-only, because nothing in the rendering reads it: the
-/// nine names are written into the template one by one, in
-/// shapes that differ. What this array buys is a list to walk,
-/// and the test below is the only walker.
+/// names are written into the template one by one, in shapes
+/// that differ. What this array buys is a list to walk. No count
+/// here on purpose -- the array grows, and a figure in prose
+/// costs the next reader a recount.
 ///
 /// The `[env]` table refuses a name carrying the prefix
 /// `RESERVED_PREFIX` names, and `config::env` holds why. This
@@ -183,11 +232,12 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// without it would fall outside the reservation with every
 /// test still green.
 #[cfg(test)]
-const BOMBYX_ENV_NAMES: [&str; 9] = [
+const BOMBYX_ENV_NAMES: [&str; 10] = [
     REPO_ENV,
     REF_ENV,
     SCRIPT_ENV,
     DEPLOY_KEY_ENV,
+    ENV_FILE_PRESENT_ENV,
     GIT_HOST_ENV,
     HOST_KEYS_URL_ENV,
     HOST_KEYS_FORMAT_ENV,
@@ -351,7 +401,7 @@ Vagrant.configure(\"2\") do |config|
     v.memory = {memory}
   end
 
-{deploy_key}  config.vm.provision \"shell\",
+{deploy_key}{env_file}  config.vm.provision \"shell\",
     path: {bootstrap},
     # Vagrant runs a shell provisioner as root without this.
     # `bootstrap.sh` acts only on the agent's own home, and a
@@ -363,6 +413,7 @@ Vagrant.configure(\"2\") do |config|
       \"{ref_env}\" => {git_ref},
       \"{script_env}\" => {script},
       \"{deploy_key_env_name}\" => \"{deploy_key_env}\",
+      \"{env_file_env_name}\" => \"{env_file_env}\",
       # Which git host the guest is about to clone from, and
       # where that host publishes its ssh keys. All three are
       # empty when bombyx does not know the host, and
@@ -381,11 +432,14 @@ end
 ",
         version = env!("CARGO_PKG_VERSION"),
         deploy_key = deploy_key_block(source.deploy_key.as_ref()),
+        env_file = env_file_block(source.env_file.is_some()),
         repo_env = REPO_ENV,
         ref_env = REF_ENV,
         script_env = SCRIPT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
+        env_file_env_name = ENV_FILE_PRESENT_ENV,
+        env_file_env = if source.env_file.is_some() { "1" } else { "0" },
         git_host_env = GIT_HOST_ENV,
         git_host = ruby_string(host_keys.map_or("", |k| k.host())),
         host_keys_url_env = HOST_KEYS_URL_ENV,
@@ -473,8 +527,60 @@ fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
     )
 }
 
-/// Every file bombyx writes into the project directory on the
-/// VM host, as `(name, contents)` pairs.
+/// The Ruby that uploads the project's secrets file, or nothing
+/// at all.
+///
+/// An empty string when the config names no `env_file`, so a
+/// project without one gets a Vagrantfile with no upload block.
+///
+/// [`render`] places this ahead of the shell provisioner, so
+/// [`BOOTSTRAP`] finds the file already there.
+///
+/// The upload is conditional for the reason
+/// [`deploy_key_block`] gives: `vagrant destroy` loads this file
+/// too, and by then `crate::plan` has removed the secrets file
+/// from the VM host, so a `raise` would strand a directory no
+/// bombyx command could clear.
+///
+/// The `source:` is resolved against the Vagrantfile's own
+/// directory rather than the process's. Vagrant runs the file
+/// through `Kernel.load`, so `__dir__` names that directory.
+fn env_file_block(configured: bool) -> String {
+    if !configured {
+        return String::new();
+    }
+    format!(
+        "  # The project's secrets, carried from the workstation.
+  # bombyx wrote this file beside the Vagrantfile a moment ago
+  # and removes it again when vagrant finishes. A run somebody
+  # interrupted does not get that far, so finding the file here
+  # means the last run stopped early. docs/trust-boundary.md
+  # says what keeping a copy inside the guest costs.
+  #
+  # The destination is expanded by a shell inside the guest, so
+  # it lands in the real home of the account vagrant logs in as.
+  bombyx_env_file = File.expand_path({name}, __dir__)
+  if File.exist?(bombyx_env_file)
+    config.vm.provision \"file\",
+      source: bombyx_env_file,
+      destination: {dest}
+  end
+
+",
+        name = ruby_string(ENV_FILE_NAME),
+        dest = ruby_string(ENV_FILE_GUEST_PATH),
+    )
+}
+
+/// Every file bombyx *generates* for the project directory on
+/// the VM host, as `(name, contents)` pairs.
+///
+/// Not every file that lands there. A configured `env_file`
+/// sends a third, and its contents come off the operator's
+/// workstation rather than from here, so `ENV_FILE_NAME` in this
+/// module holds its name and `crate::plan` writes it. Not a
+/// rustdoc link: that constant is crate-private, and a public
+/// page may not link to one.
 ///
 /// The list exists once, here, and everything else reads it:
 /// `plan` to build the write commands, and the tests to check
@@ -507,13 +613,18 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::config::{
-        BoxName, DeployKeyPath, EnvName, EnvValue, GitRef, Provider,
-        RESERVED_PREFIX, RepoUrl, ScriptPath, Source, Vm,
+        BoxName, DeployKeyPath, EnvFilePath, EnvName, EnvValue, GitRef,
+        Provider, RESERVED_PREFIX, RepoUrl, ScriptPath, Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
     /// the tests below and the expected Ruby agree.
     const KEY: &str = "~/.secrets/myproject-deploy-key";
+
+    /// An `env_file` value every rule accepts, distinctive
+    /// enough that a test can assert it reaches no rendered
+    /// file.
+    const ENV_FILE: &str = "~/.secrets/myproject-unrendered.env";
 
     fn cfg_with(provider: Provider) -> Config {
         let mut cfg = Config::for_tests();
@@ -531,6 +642,7 @@ mod tests {
             script: ScriptPath::parse("vagrant/provision.sh")
                 .expect("a valid fixture path"),
             deploy_key: None,
+            env_file: None,
         };
         cfg
     }
@@ -567,6 +679,14 @@ mod tests {
         let mut cfg = cfg_with(Provider::Libvirt);
         cfg.source.deploy_key =
             Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
+        cfg
+    }
+
+    /// [`cfg_with`] on libvirt, carrying an `env_file`.
+    fn cfg_with_env_file() -> Config {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.source.env_file =
+            Some(EnvFilePath::parse(ENV_FILE).expect("a valid fixture path"));
         cfg
     }
 
@@ -962,6 +1082,90 @@ mod tests {
             BOOTSTRAP.contains(DEPLOY_KEY_GUEST_PATH),
             "{DEPLOY_KEY_GUEST_PATH} is not in the bootstrap script"
         );
+    }
+
+    #[test]
+    fn an_env_file_adds_an_upload_and_no_env_file_adds_none() {
+        let with = render(&cfg_with_env_file());
+        assert!(
+            with.contains("bombyx_env_file = File.expand_path"),
+            "the upload block is missing:\n{with}"
+        );
+        assert!(
+            with.contains(&format!("destination: {ENV_FILE_GUEST_PATH:?}")),
+            "the destination is not the guest path:\n{with}"
+        );
+        assert!(
+            with.contains(&format!("File.expand_path({ENV_FILE_NAME:?}")),
+            "the source is not the staged file:\n{with}"
+        );
+
+        let without = render(&cfg_with(Provider::Libvirt));
+        assert!(
+            !without.contains("bombyx_env_file"),
+            "a project with no env_file gets no upload block:\n{without}"
+        );
+    }
+
+    #[test]
+    fn the_upload_is_conditional_so_a_destroy_can_still_load_the_file() {
+        // `crate::plan` removes the staged file as soon as
+        // vagrant finishes, and `vagrant destroy` loads this
+        // Vagrantfile afterwards. A `raise` on a missing file
+        // would strand a directory no bombyx command could clear
+        // -- the same argument the deploy key's block carries.
+        let out = render(&cfg_with_env_file());
+        assert!(
+            out.contains("if File.exist?(bombyx_env_file)"),
+            "the upload must be guarded by an existence test:\n{out}"
+        );
+        assert!(
+            !out.contains("raise"),
+            "nothing here may raise on a missing file:\n{out}"
+        );
+    }
+
+    #[test]
+    fn the_env_file_flag_is_rendered_either_way() {
+        // The reason `DEPLOY_KEY_ENV` gives: a login shell
+        // sources /etc/profile first, so a name bombyx leaves
+        // out is one the guest can set for itself -- and the
+        // guest would then be answering a question about the
+        // operator's config.
+        assert_eq!(
+            rendered(&render(&cfg_with_env_file()), ENV_FILE_PRESENT_ENV),
+            "\"1\""
+        );
+        assert_eq!(
+            rendered(
+                &render(&cfg_with(Provider::Libvirt)),
+                ENV_FILE_PRESENT_ENV
+            ),
+            "\"0\""
+        );
+    }
+
+    #[test]
+    fn the_env_file_path_reaches_neither_generated_file() {
+        // The opposite of `deploy_key`, whose path *is* written
+        // into the Vagrantfile because vagrant is what opens it.
+        // This file is opened on the workstation, so the VM host
+        // has no use for the path -- and the path is a location
+        // on the operator's own machine, which the generated
+        // files have no business recording.
+        //
+        // The contents are covered separately, in `plan`: they
+        // travel on a pipe and reach no command line at all.
+        for (name, contents) in files(&cfg_with_env_file()) {
+            assert!(
+                !contents.contains(ENV_FILE),
+                "{name} holds the workstation path"
+            );
+            assert!(
+                !contents.contains("myproject-unrendered"),
+                "{name} holds part of the workstation path"
+            );
+        }
     }
 
     #[test]

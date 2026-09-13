@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::{Config, DeployKeyPath};
+use crate::config::{Config, DeployKeyPath, Secrets};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -70,6 +70,45 @@ pub enum Action {
     Discard(ScratchName),
 }
 
+impl Action {
+    /// Whether this action needs the file `source.env_file`
+    /// names.
+    ///
+    /// The caller reads that file, and reading it can fail --
+    /// the operator rotated it, or moved it, or the config names
+    /// a path this machine never had. So this decides which
+    /// actions a missing file is allowed to stop.
+    ///
+    /// **The teardown verbs are the reason it exists.** A
+    /// `destroy` refused because the secrets file has gone would
+    /// leave the VM and the directory it was asked to remove,
+    /// with no bombyx command able to clear either. `write_then`
+    /// states the same rule for the deploy key, aimed at the VM
+    /// host instead of the workstation.
+    ///
+    /// `doctor` is on the same side of the line, and for a
+    /// sharper reason: its job is to report what is wrong with a
+    /// configuration, so failing before it starts would answer
+    /// the question by refusing to look.
+    ///
+    /// Written as an exhaustive match rather than a `matches!`,
+    /// so a new variant is a decision somebody makes here.
+    #[must_use]
+    pub fn needs_secrets(&self) -> bool {
+        match self {
+            Self::Up | Self::Provision | Self::Scratch(_) => true,
+            Self::Down
+            | Self::Shell
+            | Self::Status
+            | Self::Reset
+            | Self::Snapshot
+            | Self::Doctor
+            | Self::Destroy
+            | Self::Discard(_) => false,
+        }
+    }
+}
+
 /// Returns the ordered commands that carry out `action`.
 ///
 /// `tty` is threaded through to every vagrant invocation this
@@ -87,30 +126,68 @@ pub enum Action {
 /// invocation -- but it does mean a captured plan is not a script
 /// you can paste and expect byte-identical behaviour from.
 ///
-/// **The two file writes are the exception, and cannot be
+/// **The file writes are the exception, and cannot be
 /// otherwise.** Each carries a whole file -- the generated
-/// Vagrantfile and the bootstrap script -- and neither file is
-/// in the command at all: it travels on the command's standard
-/// input, which is a pipe and not text a printed line can hold.
-/// The line says how many bytes bombyx will send; see
-/// [`RemoteCommand::with_stdin`].
+/// Vagrantfile, the bootstrap script, and the project's secrets
+/// when the config names an `env_file` -- and no file is in the
+/// command at all: it travels on the command's standard input,
+/// which is a pipe and not text a printed line can hold. The
+/// line says how many bytes bombyx will send; see
+/// [`RemoteCommand::with_stdin`]. That is also what keeps a
+/// secret out of a printed plan.
+///
+/// `secrets` is the contents of the file `source.env_file`
+/// names, already read from the workstation by the caller, and
+/// `None` when the config names no such file. Reading it here
+/// would put a file open in the one module whose job is to
+/// decide which commands run, and would make every test of that
+/// decision need a file on disk.
 #[must_use]
-pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
+pub fn plan(
+    action: &Action,
+    cfg: &Config,
+    tty: Tty,
+    secrets: Option<&Secrets>,
+) -> Vec<RemoteCommand> {
     match action {
         // The snapshot save is here rather than inside
         // `write_then` because `provision` and `scratch` share
         // that helper and neither wants one: `provision` runs on
         // a machine already in arbitrary use, and a scratch VM is
         // discarded rather than reset.
+        //
+        // **The save can be skipped, and that is the chosen
+        // answer rather than an oversight.** The step before it
+        // removes the staged secrets file and reports a removal
+        // it could not make by failing, which
+        // `remote::vagrant_in_then_remove` argues for. `execute`
+        // stops at the first failure, so a VM that booted on a
+        // host bombyx cannot write to ends up with no
+        // `fresh-install` snapshot and `Action::Reset` has
+        // nothing to return to. The operator chose that over a
+        // cleanup failure the exit status does not report: a
+        // secrets file left on a shared machine is the worse of
+        // the two.
+        //
+        // A later `up` does take a snapshot, and it is not the
+        // one that was missed. `remote::save_snapshot_if_absent`
+        // names whatever is on the disk at that moment
+        // `fresh-install`, and the guest has been usable since
+        // the failed run -- so a baseline taken a day later is a
+        // day-old working tree under a name that says otherwise.
         Action::Up => {
             let dir = cfg.remote_project_dir();
-            let mut cmds = write_then(cfg, &dir, &["up"], tty);
+            let mut cmds = write_then(cfg, &dir, &["up"], tty, secrets);
             cmds.push(remote::save_snapshot_if_absent(cfg, &dir, tty));
             cmds
         }
-        Action::Provision => {
-            write_then(cfg, &cfg.remote_project_dir(), &["provision"], tty)
-        }
+        Action::Provision => write_then(
+            cfg,
+            &cfg.remote_project_dir(),
+            &["provision"],
+            tty,
+            secrets,
+        ),
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
         Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
@@ -128,9 +205,13 @@ pub fn plan(action: &Action, cfg: &Config, tty: Tty) -> Vec<RemoteCommand> {
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir(), tty),
-        Action::Scratch(name) => {
-            write_then(cfg, &cfg.remote_scratch_dir(name), &["up"], tty)
-        }
+        Action::Scratch(name) => write_then(
+            cfg,
+            &cfg.remote_scratch_dir(name),
+            &["up"],
+            tty,
+            secrets,
+        ),
         Action::Discard(name) => {
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
@@ -183,6 +264,7 @@ fn write_then(
     dir: &str,
     args: &[&str],
     tty: Tty,
+    secrets: Option<&Secrets>,
 ) -> Vec<RemoteCommand> {
     // Before the `mkdir`, so a config naming a key the VM host
     // does not have leaves no directory and no Vagrantfile
@@ -198,9 +280,40 @@ fn write_then(
     }
     cmds.push(remote::ensure_dir(cfg, dir));
     for (name, contents) in vagrantfile::files(cfg) {
-        cmds.push(remote::write_file(cfg, dir, name, &contents));
+        cmds.push(remote::write_file(cfg, dir, name, contents.as_bytes()));
     }
-    cmds.push(remote::vagrant_in(cfg, dir, args, tty));
+
+    // The secrets file is written last of the three, so the
+    // window in which the VM host holds it is the `vagrant` run
+    // and nothing more.
+    if let Some(secrets) = secrets {
+        cmds.push(remote::write_file(
+            cfg,
+            dir,
+            vagrantfile::ENV_FILE_NAME,
+            secrets.as_bytes(),
+        ));
+    }
+
+    // The removal runs whether one was staged or not, and that
+    // is not tidiness. A run interrupted after the vagrant step
+    // began leaves the file on the VM host; take `env_file` out
+    // of the config afterwards and the write above stops
+    // happening, so a removal conditional on it would never
+    // collect what the earlier run left. `bootstrap.sh` does the
+    // matching cleanup inside the guest, and this is its
+    // sibling. `rm -f` on a file that was never there costs
+    // nothing.
+    //
+    // `remote::vagrant_in_then_remove` holds why the removal is
+    // inside the vagrant step rather than after it.
+    cmds.push(remote::vagrant_in_then_remove(
+        cfg,
+        dir,
+        args,
+        tty,
+        vagrantfile::ENV_FILE_NAME,
+    ));
     cmds
 }
 
@@ -220,7 +333,7 @@ mod tests {
     }
 
     fn plan_for(action: &Action, tty: Tty) -> Vec<RemoteCommand> {
-        plan(action, &cfg(), tty)
+        plan(action, &cfg(), tty, None)
     }
 
     fn local_cfg() -> Config {
@@ -303,7 +416,7 @@ mod tests {
             for c in &plan_for(&action, Tty::Allocate) {
                 assert_eq!(c.program, "ssh", "{action:?} over ssh");
             }
-            let here = plan(&action, &local_cfg(), Tty::Allocate);
+            let here = plan(&action, &local_cfg(), Tty::Allocate, None);
             for c in &here {
                 assert_eq!(c.program, "sh", "{action:?} here");
                 assert!(
@@ -392,7 +505,7 @@ mod tests {
     }
 
     fn run(action: &Action) -> Vec<RemoteCommand> {
-        plan(action, &cfg(), Tty::NoPty)
+        plan(action, &cfg(), Tty::NoPty, None)
     }
 
     /// Each command of `action`'s plan as `--dry-run` prints
@@ -480,7 +593,13 @@ mod tests {
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
-                 VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'\"",
+                 VAGRANT_DEFAULT_PROVIDER='libvirt' \
+                 vagrant 'up'; rc=\\$?; \
+                 rm -f ~/'vms/myproject/bombyx.env' || \
+                 { printf 'bombyx: could not remove %s from the VM \
+                 host; it may hold secrets for this project\\\\n' \
+                 ~/'vms/myproject/bombyx.env' >&2; \
+                 [ \\\"\\$rc\\\" = 0 ] && rc=1; }; exit \\$rc\"",
             ]
         );
     }
@@ -555,7 +674,7 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
+            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty, None);
             assert!(
                 script(&cmds[0]).contains("'deploy_key'"),
                 "{action:?}: the key check is not the first step"
@@ -575,7 +694,7 @@ mod tests {
         // writes that file, so the bare name would match the
         // write step.
         for action in all_actions() {
-            let cmds = plan(&action, &cfg(), Tty::NoPty);
+            let cmds = plan(&action, &cfg(), Tty::NoPty, None);
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: a check was built with no key configured"
@@ -603,7 +722,7 @@ mod tests {
             Action::Down,
             Action::Status,
         ] {
-            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty);
+            let cmds = plan(&action, &cfg_with_key(), Tty::NoPty, None);
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
                 "{action:?}: teardown must not check the key"
@@ -642,7 +761,7 @@ mod tests {
         // runs no program on the workstation.
         assert_eq!(programs, vec!["ssh", "ssh", "ssh", "ssh"]);
         assert!(script(&cmds[0]).contains("mkdir -p"));
-        assert!(script(cmds.last().unwrap()).ends_with("vagrant 'up'"));
+        assert!(script(cmds.last().unwrap()).contains("vagrant 'up';"));
     }
 
     #[test]
@@ -663,7 +782,12 @@ mod tests {
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
                  VAGRANT_DEFAULT_PROVIDER='libvirt' \
-                 vagrant 'provision'\"",
+                 vagrant 'provision'; rc=\\$?; \
+                 rm -f ~/'vms/myproject/bombyx.env' || \
+                 { printf 'bombyx: could not remove %s from the VM \
+                 host; it may hold secrets for this project\\\\n' \
+                 ~/'vms/myproject/bombyx.env' >&2; \
+                 [ \\\"\\$rc\\\" = 0 ] && rc=1; }; exit \\$rc\"",
             ]
         );
     }
@@ -688,17 +812,31 @@ mod tests {
         // `every_other_project_vagrant_call_names_the_provider`
         // states as a rule across every action but the
         // teardown.
-        assert_eq!(
-            script(&up[writes]),
-            format!("cd ~/'vms/myproject' && {} vagrant 'up'", vagrant_env())
-        );
-        assert_eq!(
-            script(pr.last().unwrap()),
-            format!(
-                "cd ~/'vms/myproject' && {} vagrant 'provision'",
-                vagrant_env()
-            )
-        );
+        //
+        // The removal of the staged secrets file rides on the
+        // same step, so the two scripts do not end at the verb.
+        // What this test owns is that the two verbs differ and
+        // nothing else does; `remote`'s own tests pin the
+        // removal's spelling, and
+        // `provision_writes_the_files_then_reprovisions` above
+        // pins the whole line.
+        for (script, verb) in [
+            (script(&up[writes]), "vagrant 'up'"),
+            (script(pr.last().unwrap()), "vagrant 'provision'"),
+        ] {
+            assert_eq!(
+                script.split_once("; rc=$?; ").map(|(head, _)| head),
+                Some(
+                    format!("cd ~/'vms/myproject' && {} {verb}", vagrant_env())
+                        .as_str()
+                ),
+                "{verb}"
+            );
+            assert!(
+                script.contains("rm -f ~/'vms/myproject/bombyx.env'"),
+                "{verb}: the staged file is not collected"
+            );
+        }
     }
 
     #[test]
@@ -770,7 +908,7 @@ mod tests {
             )
         );
         assert!(
-            script(&cmds[cmds.len() - 2]).ends_with("vagrant 'up'"),
+            script(&cmds[cmds.len() - 2]).contains("vagrant 'up';"),
             "the boot should come directly before the save: {:?}",
             cmds[cmds.len() - 2].args
         );
@@ -1085,6 +1223,155 @@ mod tests {
                 !script.contains(remote::VM_HOST_ENV),
                 "doctor probe should not carry the identity: {script}"
             );
+        }
+    }
+
+    /// Contents standing in for a project's secrets file, with a
+    /// value distinctive enough that a test can look for it.
+    fn secrets() -> Secrets {
+        use crate::config::EnvFilePath;
+
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("x.env");
+        std::fs::write(&file, "TOKEN=hunter2\n").expect("write");
+        EnvFilePath::parse(&file.display().to_string())
+            .expect("a temp path is absolute")
+            .read(|_| None)
+            .expect("the file is there")
+    }
+
+    #[test]
+    fn only_the_verbs_that_boot_need_the_secrets_file() {
+        // Classifying every action is what makes a new one a
+        // decision rather than an omission.
+        //
+        // The teardown verbs are the ones that matter. `destroy`
+        // must work after the operator has rotated or deleted
+        // the secrets file on the workstation, or the VM and its
+        // directory become unremovable by bombyx. That is the
+        // rule `plan::write_then` already states for the deploy
+        // key, aimed at the other machine.
+        for action in all_actions() {
+            let want = matches!(
+                action,
+                Action::Up | Action::Provision | Action::Scratch(_)
+            );
+            assert_eq!(action.needs_secrets(), want, "{action:?}");
+        }
+    }
+
+    #[test]
+    fn a_configured_env_file_is_written_and_then_removed() {
+        // Three properties, and the order between them is the
+        // whole design: the file is written before vagrant runs,
+        // vagrant is what reads it, and the removal is inside
+        // that same step rather than after it.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            let cmds = plan(&action, &cfg(), Tty::NoPty, Some(&secrets()));
+            let write = cmds
+                .iter()
+                .position(|c| script(c).contains("bombyx.env"))
+                .unwrap_or_else(|| panic!("{action:?}: nothing writes it"));
+            let vagrant = cmds
+                .iter()
+                .position(|c| script(c).contains("rm -f"))
+                .unwrap_or_else(|| panic!("{action:?}: nothing removes it"));
+            assert!(
+                write < vagrant,
+                "{action:?}: the write must come before the removal"
+            );
+            let removing = script(&cmds[vagrant]);
+            assert!(
+                removing.contains(" vagrant '"),
+                "{action:?}: the removal must be in the vagrant step, so a \
+                 failed boot still clears the file: {removing}"
+            );
+            assert!(
+                removing.contains("exit $rc"),
+                "{action:?}: the vagrant step must hand back its own \
+                 status: {removing}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_staged_file_is_removed_even_when_none_was_configured() {
+        // The leftover case, and it is reachable without
+        // anything unusual: a connection dropped after the
+        // vagrant step started leaves `bombyx.env` on the VM
+        // host, and the operator then takes `env_file` out of
+        // the config. Nothing would collect it, while `README.md`
+        // and `docs/trust-boundary.md` both say the VM host does
+        // not keep the file.
+        //
+        // `bootstrap.sh` already does the matching cleanup on the
+        // guest side. This is its sibling.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            let cmds = plan(&action, &cfg(), Tty::NoPty, None);
+            assert!(
+                cmds.iter().any(|c| script(c).contains("rm -f")
+                    && script(c).contains("bombyx.env")),
+                "{action:?}: nothing collects a leftover staged file"
+            );
+        }
+    }
+
+    #[test]
+    fn no_env_file_stages_nothing() {
+        // The removal above is not a write. A project with no
+        // `env_file` must still send nothing.
+        for action in all_actions() {
+            for c in plan(&action, &cfg(), Tty::NoPty, None) {
+                assert!(
+                    c.stdin.is_none() || !script(&c).contains("bombyx.env"),
+                    "{action:?}: a file nobody configured was written"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_secrets_reach_no_command_line_and_no_printed_plan() {
+        // The reason the contents travel on a pipe at all. Every
+        // account on the VM host can read another's arguments,
+        // and a dry run prints the plan to a terminal.
+        for action in [
+            Action::Up,
+            Action::Provision,
+            Action::Scratch(scratch("pr-1234")),
+        ] {
+            for c in plan(&action, &cfg(), Tty::NoPty, Some(&secrets())) {
+                for arg in &c.args {
+                    assert!(!arg.contains("hunter2"), "{action:?}: {arg}");
+                }
+                assert!(
+                    !c.to_string().contains("hunter2"),
+                    "{action:?}: a printed plan holds the secret: {c}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_teardown_verbs_write_no_secrets_file() {
+        // They take the whole directory with `rm -rf`, so the
+        // staged file goes with it and there is nothing for
+        // these plans to write or remove on their own.
+        for action in [Action::Destroy, Action::Discard(scratch("pr-1234"))] {
+            for c in plan(&action, &cfg(), Tty::NoPty, Some(&secrets())) {
+                assert!(
+                    !script(&c).contains("bombyx.env"),
+                    "{action:?}: teardown must not stage anything"
+                );
+            }
         }
     }
 }

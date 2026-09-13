@@ -232,8 +232,8 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     assert!(lines[1].contains("bytes on stdin"), "{}", lines[1]);
     assert!(lines[2].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
     assert!(
-        lines[3].ends_with(&format!(
-            "cd ~/'vms/myproject' && {} vagrant 'up'\"",
+        lines[3].contains(&format!(
+            "cd ~/'vms/myproject' && {} vagrant 'up';",
             vagrant_env()
         )),
         "{}",
@@ -366,8 +366,8 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
     assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
-        lines[3].ends_with(&format!(
-            "cd ~/'vms/myproject' && {} vagrant 'provision'\"",
+        lines[3].contains(&format!(
+            "cd ~/'vms/myproject' && {} vagrant 'provision';",
             vagrant_env()
         )),
         "{}",
@@ -382,8 +382,8 @@ fn scratch_writes_into_a_project_scoped_dir() {
     assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
     assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
-        lines[3].ends_with(&format!(
-            "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up'\"",
+        lines[3].contains(&format!(
+            "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up';",
             vagrant_env()
         )),
         "{}",
@@ -1046,7 +1046,7 @@ mod snapshot_guard_states {
             .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
         let (cfg, _) =
             Config::load_project("myproject", Some(&cfg_path)).unwrap();
-        let cmds = plan(&Action::Up, &cfg, Tty::NoPty);
+        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, None);
         let script = cmds.last().unwrap().args.last().unwrap().clone();
 
         let out = StdCommand::new("sh")
