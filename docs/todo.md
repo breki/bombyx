@@ -526,6 +526,26 @@ plan, decisions, and outcome.
   the same number of copies, so whatever is decided here should cover both.
   Raised on 2026-09-13 while working issue #78 and deliberately kept out of it.
 
+- **tutorial-debian-box-warning** -- keep, reword, or cut Debian digression
+  docs/tutorial.md, ~line 444 (PE-28). The debian/bookworm64 warning reads
+  awkwardly ("the box two later passages ... are written around"), but the real
+  question is whether it over-explains. It steers the reader off a box with no
+  git, which breaks the first up at clone time, and admits two later passages
+  still assume that box: the chsh line in the sample provision.sh, and the
+  arrow-key troubleshooting entry. Decide: keep and reword (split it, e.g. "two
+  later passages were written assuming you picked it"), or cut/trim the whole
+  Debian digression. Surfaced in a four-round blue-pencil prose pass.
+
+- **tutorial-provision-git-warning** -- reword the subject-held-open sentence
+  docs/tutorial.md, ~line 474 (PE-29), the 'your own provision.sh cannot save
+  you here' paragraph. The sentence 'the apt-get install ... you are about to
+  write ... never runs' holds the subject open before the verb. Substance is
+  sound: the guest clones the repo that holds provision.sh, so the
+  version-control tool must pre-exist in the box. Decide: keep and reword (make
+  the line the subject, then explain that the tool has to be present before that
+  file exists on the guest), or leave as is. Surfaced in a four-round
+  blue-pencil prose pass.
+
 ## Done
 
 - **generated-files-world-readable** -- the Vagrantfile lands at mode 664
