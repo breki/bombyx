@@ -49,6 +49,14 @@ and **Documentation style**. That is the standard. You are not
 inventing a house style; you are enforcing the one already
 written down.
 
+Then read `docs/developer/prose-style.md`. Those two sources
+divide the work: `CLAUDE.md` lists the faults to remove, and
+`prose-style.md` describes the shape of good prose to aim for.
+Every rewrite you propose should read like the examples there --
+a named subject, a concrete verb, defined terms, the mechanism
+before the conclusion, an explicit relationship, and a short
+core sentence.
+
 ## What you are looking for
 
 The **Voice** section names the shapes. These are the ones that

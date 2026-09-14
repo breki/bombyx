@@ -112,9 +112,10 @@ an agent that misbehaves, runs a hostile `postinstall`, or acts
 on a prompt injection is still contained. The part you lose is
 the one that needed two machines: an escaped guest is already
 on your workstation, and there is no separate network to
-isolate it from. It is a real trade, not a pointless one, and
-it needs no special mode -- `host` is an SSH alias, so it can
-point at your own machine (see **Running bombyx against your
+isolate it from. This is a real trade: you give up network
+isolation, and in exchange you avoid running a second machine at
+all. It needs no special mode -- `host` is an SSH alias, so it
+can point at your own machine (see **Running bombyx against your
 own machine** below).
 
 ## Part 1: the workstation
@@ -181,8 +182,9 @@ continue until it is silent.
 
 ### Name your VM host, once
 
-bombyx reads no file out of a project's repository at all, and
-the host is the clearest reason why. A project is shared and a
+Because a VM host is never shared the way a project's
+repository is, bombyx reads no file out of that repository at
+all. A project is shared and a
 VM host is not: everyone has their own hardware on their own
 network, so a committed value would be wrong for everyone but
 its author -- and `bombyx destroy` runs `vagrant destroy` and
@@ -290,9 +292,10 @@ it prints. A domain counts: on a machine answering
 That strictness is on purpose. A bare label is easy to share --
 plenty of machines are called `ubuntu`, `vagrant` or `build01`
 -- and the domain is the part that says which one you mean.
-Matching on the label alone would let bombyx start a guest on
-your workstation while you believed it was on the isolated
-host, and then delete the workstation's directory on teardown.
+Matching on the label alone risks two things: bombyx starts a
+guest on your workstation while you believe it is on the
+isolated host, and teardown later deletes the workstation's
+directory.
 Getting it wrong the other way just gives you the SSH route,
 which you will notice immediately.
 
@@ -354,9 +357,10 @@ exists. Once vagrant creates a machine, it records the provider
 and reads that record back later, so switching providers
 afterward requires a `bombyx destroy` first. `bombyx destroy` does not pass a
 provider at all, so it can remove the directory even after a
-boot failed on a provider mismatch. That refusal was run on a Linux host
-and it works. Whether a Windows VM host then boots the machine
-is *(unverified)*: nobody has run bombyx against one.
+boot failed on a provider mismatch. That refusal was tested on a Linux
+host and works there. But whether a Windows VM host then boots
+the machine is *(unverified)*: nobody has run bombyx against
+one.
 
 ### Optional: keep the VM from reaching your home network
 
@@ -612,9 +616,8 @@ why every privileged line in the example below has it.
 
 Its working directory is the clone, at `~/project` in that
 user's home. `bombyx shell` leaves you one directory above it,
-in that home; this was confirmed against a real VM rather than
-inferred. It is
-the only copy of your code in the VM.
+in that home -- confirmed against a real VM rather than
+inferred. The clone is the only copy of your code in the VM.
 
 Write the script to be **re-runnable**. `bombyx provision` runs
 it again on an existing VM, so every step should either be
@@ -748,9 +751,10 @@ ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_D
 ```
 
 Five commands, and every one of them is an `ssh`: make the
-directory, write the two files bombyx generates, boot, then save
-the `fresh-install` snapshot if the VM does not already have
-one. bombyx runs nothing on your workstation.
+directory, write the two files bombyx generates, boot, then take
+a snapshot called `fresh-install` so `bombyx reset` has a state
+to return to later, unless the VM already has one. bombyx runs
+nothing on your workstation.
 
 Look at the end of the fourth line, the one that runs
 `vagrant up`. After the boot finishes, it deletes the two files
