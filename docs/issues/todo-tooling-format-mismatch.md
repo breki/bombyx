@@ -16,7 +16,7 @@ bullet as `- **slug** -- summary`. The four entries originally
 typed by hand use backticks instead: `` - `slug` -- summary ``.
 `parse_slug` only recognised the bold form, so:
 
-- `todo list` silently omitted `wire-frosti`, `packer-box` and
+- `todo list` silently omitted `wire-vm-host`, `packer-box` and
   `agent-vlan` from the moment they were written.
 - `todo done first-real-run` failed with "no pending todo with
   slug", for an item that was plainly sitting in the file.

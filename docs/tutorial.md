@@ -24,16 +24,14 @@ three steps later.
 > your own first `bombyx up` as the real test.
 >
 > **One route has since been exercised end to end.** On
-> 2026-09-05, the whole sequence was run on frosti with `host`
-> naming frosti itself -- `doctor`, `up`, `status`, `shell`,
-> `down`, `provision`, `scratch`, `discard` and `destroy` --
-> against a guest that booted and provisioned to completion.
-> So the local route is verified, guest included.
+> 2026-09-05, the whole sequence was run on a Linux workstation
+> with `host` naming that machine itself -- `doctor`, `up`,
+> `status`, `shell`, `down`, `provision`, `scratch`, `discard`
+> and `destroy` -- against a guest that booted and provisioned
+> to completion. So the local route is verified, guest included.
 > **Running bombyx against your own machine** carries the
-> detail, and
-> [the run record](issues/registry-run-against-frosti.md) holds
-> what it found. The `ssh`-route transcripts below are still
-> written from the code.
+> detail. The `ssh`-route transcripts below are still written
+> from the code.
 >
 > The VM host steps are a summary of
 > [vm-host-setup.md](vm-host-setup.md), which records what it
@@ -247,12 +245,10 @@ the fix under **Why the non-interactive PATH causes trouble**.
 
 ### Running bombyx against your own machine
 
-*Verified on frosti (Ubuntu, vagrant 2.4.9, vagrant-libvirt
-0.12.2) on 2026-09-05: every VM command ran through `sh -c`,
-the two generated files arrived intact, and a guest booted on
-this route and provisioned to completion.
-[The run record](issues/registry-run-against-frosti.md) lists
-what ran and what it did not cover.*
+*Verified on a Linux workstation (Ubuntu, vagrant 2.4.9,
+vagrant-libvirt 0.12.2) on 2026-09-05: every VM command ran
+through `sh -c`, the two generated files arrived intact, and a
+guest booted on this route and provisioned to completion.*
 
 **Read this before you do Part 2, or come back and redo it.**
 This section replaces the SSH alias you wrote in Part 1 and the
@@ -280,14 +276,14 @@ no SSH server to install, no key to authorize to your own
 account and no loopback alias to write.
 
 ```toml
-host = "frosti"     # this machine, so no ssh hop
+host = "nimbus"     # this machine, so no ssh hop
 ```
 
 **Write the name exactly.** The comparison ignores case and
 nothing else, so `host` has to be what your machine calls
 itself, character for character. Run `hostname` and copy what
 it prints. A domain counts: on a machine answering
-`frosti.lan`, `host = "frosti"` gets you the SSH route.
+`nimbus.lan`, `host = "nimbus"` gets you the SSH route.
 
 That strictness is on purpose. A bare label is easy to share --
 plenty of machines are called `ubuntu`, `vagrant` or `build01`
@@ -449,9 +445,9 @@ Then change these:
 **Do not reach for `debian/bookworm64` here**, which is the
 obvious Debian choice and the box two later passages of this
 tutorial are written around. It has no `git`, so a first `up`
-on it cannot finish. Booting it on frosti on 2026-09-05
-confirmed that: the VM comes up, and then the provisioning
-refuses and exits 1.
+on it cannot finish. Booting it on a Linux workstation on
+2026-09-05 confirmed that: the VM comes up, and then the
+provisioning refuses and exits 1.
 
 **Every refusal prints two `bombyx:` lines**, and it is worth
 seeing the shape once. The first says what went wrong; the

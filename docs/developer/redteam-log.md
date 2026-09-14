@@ -165,7 +165,7 @@ skips a machine that already carries the name, so a later `up`
 does not refresh it either. The revoked key therefore comes
 back on every reset for the life of the VM.
 
-Verified on frosti, 2026-09-07: with the key removed from the
+Verified on the VM host, 2026-09-07: with the key removed from the
 config and deleted from the guest, `bombyx reset` restored the
 key with its original timestamp. It sat at
 `/root/.ssh/bombyx-deploy-key` when that was measured.

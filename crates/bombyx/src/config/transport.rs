@@ -40,8 +40,8 @@ pub enum Transport {
 /// system what it is called. [`this_machine`] is the impure half.
 ///
 /// **The two names must be the same name**, ignoring case and
-/// nothing else. `frosti` matches `frosti`; it does not match
-/// `frosti.lan`, and `build01.corp.example` does not match
+/// nothing else. `vmhost` matches `vmhost`; it does not match
+/// `vmhost.lan`, and `build01.corp.example` does not match
 /// `build01.dmz.example`.
 ///
 /// Comparing less than the whole name errs towards the local
@@ -57,8 +57,8 @@ pub enum Transport {
 /// local route and wrote the name differently gets `ssh`,
 /// notices the handshake, and writes what `hostname` prints.
 ///
-/// It is also what makes `you@frosti` force `ssh` from a
-/// machine called `frosti`, which `docs/tutorial.md` documents
+/// It is also what makes `you@vmhost` force `ssh` from a
+/// machine called `vmhost`, which `docs/tutorial.md` documents
 /// as the escape hatch for an alias that collides with this
 /// machine's own name.
 ///
@@ -135,16 +135,16 @@ mod tests {
         // whatever `config.toml` said; the second column is what
         // this machine answers to.
         let cases = [
-            ("frosti", Some("frosti"), Transport::Local),
+            ("vmhost", Some("vmhost"), Transport::Local),
             // Neither spelling is authoritative, so case is
             // ignored in both directions.
-            ("Frosti", Some("frosti"), Transport::Local),
-            ("frosti", Some("FROSTI"), Transport::Local),
-            ("frosti.lan", Some("FROSTI.lan"), Transport::Local),
+            ("Vmhost", Some("vmhost"), Transport::Local),
+            ("vmhost", Some("VMHOST"), Transport::Local),
+            ("vmhost.lan", Some("VMHOST.lan"), Transport::Local),
             // A domain is part of the name. Dropping it, on
             // either side, is a match bombyx cannot demonstrate.
-            ("frosti", Some("frosti.lan"), Transport::Ssh),
-            ("frosti.lan", Some("frosti"), Transport::Ssh),
+            ("vmhost", Some("vmhost.lan"), Transport::Ssh),
+            ("vmhost.lan", Some("vmhost"), Transport::Ssh),
             // Two machines sharing a bare label. This is the
             // case exact matching exists for: they are in
             // different networks and are not the same machine.
@@ -159,20 +159,20 @@ mod tests {
             ("build01", Some("build01"), Transport::Local),
             // `you@name` is the escape hatch from that, pinned
             // here so a later tidy-up cannot delete it silently.
-            ("igor@frosti", Some("frosti"), Transport::Ssh),
-            ("igor@frosti.lan", Some("frosti.lan"), Transport::Ssh),
+            ("igor@vmhost", Some("vmhost"), Transport::Ssh),
+            ("igor@vmhost.lan", Some("vmhost.lan"), Transport::Ssh),
             // A different machine.
-            ("vmhost", Some("frosti"), Transport::Ssh),
+            ("otherbox", Some("vmhost"), Transport::Ssh),
             // A prefix, a suffix and a substring are not matches.
-            ("frost", Some("frosti"), Transport::Ssh),
-            ("frostier", Some("frosti"), Transport::Ssh),
-            ("frosti-local", Some("frosti"), Transport::Ssh),
+            ("vmhos", Some("vmhost"), Transport::Ssh),
+            ("vmhoster", Some("vmhost"), Transport::Ssh),
+            ("vmhost-local", Some("vmhost"), Transport::Ssh),
             // Nothing to compare against.
-            ("frosti", None, Transport::Ssh),
+            ("vmhost", None, Transport::Ssh),
             // Blank on either side, and on both. Two unreadable
             // names must not look like one machine.
-            ("", Some("frosti"), Transport::Ssh),
-            ("frosti", Some(""), Transport::Ssh),
+            ("", Some("vmhost"), Transport::Ssh),
+            ("vmhost", Some(""), Transport::Ssh),
             ("", Some(""), Transport::Ssh),
             // Degenerate spellings that are equal as strings.
             // `config::host` accepts both, so they can reach
@@ -182,14 +182,14 @@ mod tests {
             // the second half of the comparison never supplies
             // them.
             (".", Some("."), Transport::Local),
-            ("frosti.", Some("frosti."), Transport::Local),
+            ("vmhost.", Some("vmhost."), Transport::Local),
             // A trailing dot is a different string, so the
             // absolute and relative spellings do not match.
-            ("frosti.lan.", Some("frosti.lan"), Transport::Ssh),
+            ("vmhost.lan.", Some("vmhost.lan"), Transport::Ssh),
             // Non-ASCII cannot reach `host` at all
             // (`config::host` restricts the charset), and an
             // ASCII-only fold can only fail to match it.
-            ("fr\u{f6}sti", Some("FR\u{d6}STI"), Transport::Ssh),
+            ("vmh\u{f6}st", Some("VMH\u{d6}ST"), Transport::Ssh),
         ];
         for (host, here, want) in cases {
             assert_eq!(
@@ -206,9 +206,9 @@ mod tests {
         // cannot run libvirt, so the local route there is only
         // ever a mistake -- and a quiet one, because Git for
         // Windows supplies the `sh` it would spawn.
-        assert_eq!(resolve_on("frosti", Some("frosti"), true), Transport::Ssh);
+        assert_eq!(resolve_on("vmhost", Some("vmhost"), true), Transport::Ssh);
         assert_eq!(
-            resolve_on("frosti", Some("frosti"), false),
+            resolve_on("vmhost", Some("vmhost"), false),
             Transport::Local
         );
     }

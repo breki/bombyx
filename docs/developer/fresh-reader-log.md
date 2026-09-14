@@ -222,7 +222,7 @@ the `/review2` on the backlog sweep, 2026-09-06.
 `remote::PROVIDER_ENV`'s doc comment holds the whole case for
 how bombyx selects a provider: what rendering a provider block
 does, why the environment variable rather than
-`vagrant up --provider`, three facts measured on frosti, why
+`vagrant up --provider`, three facts measured on the VM host, why
 every project call but the teardown carries it, why the
 teardown is exempt, how a WSL2 host inverts that, and the known
 limit with its backlog ID. Four other places defer to it --

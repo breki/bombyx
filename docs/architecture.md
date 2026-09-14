@@ -53,7 +53,7 @@ and nothing else. A domain is written to say *which* machine,
 and a bare label is shared easily -- `ubuntu`, `vagrant`,
 `build01` -- so `build01.dmz.example` and
 `build01.corp.example` are two machines, and so are
-`frosti.lan` and a machine calling itself plain `frosti`.
+`vmhost.lan` and a machine calling itself plain `vmhost`.
 The two rules err in opposite directions, and only one of them
 is affordable. Matching on less than the whole name errs
 towards the local route, which is the dangerous answer: a guest

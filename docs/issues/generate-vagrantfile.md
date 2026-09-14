@@ -229,7 +229,7 @@ Verified here, not inferred:
 
 - `vagrant validate` accepts the generated Vagrantfile. Vagrant
   2.4.9 with vagrant-libvirt 0.12.2 -- the versions
-  `README.md` records for frosti -- is installed on this
+  `README.md` records for the VM host -- is installed on this
   workstation. Kept as an `#[ignore]`-tagged test in
   `tests/integration_test.rs`; run it with `cargo xtask test
   --ignored`. This proves the file parses and its config
@@ -241,7 +241,7 @@ Verified here, not inferred:
   commands, one line each.
 
 **Definition of Done item 3 is not met.** Nothing has been run
-against frosti. A dry run proves the argv and local validation
+against the VM host. A dry run proves the argv and local validation
 proves the syntax; neither proves the VM host accepts the
 heredoc write, that the guest can reach the git host, or that
 the clone and the project's script run.

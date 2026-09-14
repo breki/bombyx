@@ -941,7 +941,7 @@ mod tests {
     fn a_good_host_in_every_place_is_accepted() {
         // The other side of the guard: the shapes an operator
         // actually writes must survive it.
-        for good in ["vmhost", "frosti", "user@10.0.0.4", "vm-host_1.lan"] {
+        for good in ["vmhost", "homelab", "user@10.0.0.4", "vm-host_1.lan"] {
             let source = registry_toml().replace(
                 "[projects.myproject]\n",
                 &format!("[projects.myproject]\nhost = {good:?}\n"),

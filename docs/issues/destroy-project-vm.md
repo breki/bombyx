@@ -55,7 +55,7 @@ This is the reason the work is not trivial.
 nothing rejects a `..` segment. Verified live:
 
 ```
-remote_root = "~/.."   ->   ssh frosti "mkdir -p ~/'../phren'"
+remote_root = "~/.."   ->   ssh vmhost "mkdir -p ~/'../phren'"
 ```
 
 Today that only misplaces a directory. With `rm -rf` in the
@@ -132,7 +132,7 @@ is a CLI-only project.
   names the project; with the wrong name fails; with the right
   name emits both commands. `--dry-run` throughout.
 - **Real host**: the emitted commands change, so per Definition
-  of Done item 3 this needs a real run against frosti before
+  of Done item 3 this needs a real run against the VM host before
   it can be called done. `--dry-run` proves the argv only. I
   will boot a throwaway VM, destroy it, and confirm both the
   domain and the directory are gone.
@@ -186,7 +186,7 @@ is a CLI-only project.
   two-segment floor, `Action::Destroy`, the shared `tear_down`
   helper, and `Cmd::Destroy` with the name confirmation.
   `plan` became fallible to carry the floor's error.
-- **2026-08-10** -- Verified against frosti: real `destroy`
+- **2026-08-10** -- Verified against the VM host: real `destroy`
   removed both the domain and `~/vms/vmtest`.
 
 ## Outcome
@@ -247,7 +247,7 @@ just its contents.
 
 ### Verified against a real host
 
-Not inferred from a green suite. On frosti:
+Not inferred from a green suite. On the VM host:
 
 | Command | Result |
 |---------|--------|

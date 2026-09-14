@@ -95,7 +95,7 @@ first.
 
 **A dry run is not a real run.** The change alters the commands
 bombyx emits, so Definition of Done item 3 applies: it must be
-exercised against frosti before this is called done. That is
+exercised against the VM host before this is called done. That is
 practical here -- the jutro VM is running and has a
 provisioning edit (the `chsh` to bash) that has not been
 applied, so a real `bombyx provision` has an observable effect
@@ -113,7 +113,7 @@ to verify.
   `crates/bombyx/README.md` and `llms.txt`.
 - **2026-08-10** -- `cargo xtask validate` passes all eight
   gates; coverage 99.4%.
-- **2026-08-10** -- Exercised against frosti twice, against
+- **2026-08-10** -- Exercised against the VM host twice, against
   the real jutro VM. See Outcome.
 
 ## Decisions
@@ -177,7 +177,7 @@ Shipped:
 
 ### Verified against a real host
 
-Run against frosti, targeting the jutro agent VM. The first
+Run against the VM host, targeting the jutro agent VM. The first
 run **failed on the host**, which turned out to be the more
 useful result: a bug in jutro's own `provision.sh` made
 `vagrant provision` exit 1, and bombyx surfaced the vagrant

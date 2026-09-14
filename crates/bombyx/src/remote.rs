@@ -39,7 +39,7 @@ use crate::config::{Config, Transport};
 /// Environment variable carrying the VM host's SSH alias into
 /// the `vagrant` process on the host.
 ///
-/// The alias as bombyx knows it -- `frosti`, `my-vmhost` -- which
+/// The alias as bombyx knows it -- `homelab`, `my-vmhost` -- which
 /// is the name the operator recognises, since they chose it.
 ///
 /// # Why this exists

@@ -25,7 +25,7 @@ the first failure, and change nothing.
 ### What the first real run taught
 
 The probe list in the captured item was a guess. Running the
-diagnosis by hand on frosti (see
+diagnosis by hand on the VM host (see
 [first-real-run](../developer/DIARY.md)) changed it in two
 ways worth recording:
 
@@ -135,7 +135,7 @@ description of what shipped.
 ## Test strategy
 
 Unit tests for the pure logic, integration tests for the CLI
-surface, and a real run against frosti. Cheapest level that
+surface, and a real run against the VM host. Cheapest level that
 proves each thing:
 
 - **`doctor.rs`** (the bulk): `classify` maps a zero exit to
@@ -156,7 +156,7 @@ proves each thing:
   non-zero and names the SSH failure.
 - **Real host**: required. The whole point is behaviour against
   a real remote shell, and `--dry-run` proves only the argv. I
-  will run it against frosti in the healthy case, and then
+  will run it against the VM host in the healthy case, and then
   against a deliberately broken one (a `host` alias that does
   not resolve) to see the cascade.
 
@@ -189,7 +189,7 @@ proves each thing:
 - **2026-08-10** -- `doctor.rs` with the pure report model;
   probe builders in `remote.rs`; `host_probes` and
   `Action::Doctor` in `plan.rs`; `doctor_run` in `main.rs`.
-- **2026-08-10** -- Verified against frosti in the healthy case
+- **2026-08-10** -- Verified against the VM host in the healthy case
   and against an unresolvable host, which exercised the skip
   cascade.
 
@@ -290,7 +290,7 @@ independent bugs.**
 - **A guard that fails on one spelling of its input.**
   `probe_dir_writable`'s walk tested `-e`, which is false for a
   dangling symlink, so it stepped *past* one to a writable
-  parent and passed. Verified on frosti: the probe now fails
+  parent and passed. Verified on the VM host: the probe now fails
   with `exists but is not a directory` where `mkdir -p` fails
   with `File exists`; before the fix the same host state
   reported `ok`. This is the third time this feature has shipped
@@ -304,7 +304,7 @@ Other fixes:
   run first in a fresh clone. Removed.
 - `execute` resolved each program inside its loop, so `up` could
   create the remote directory and *then* discover `tar` was
-  missing. Resolution is now up front. Verified against frosti
+  missing. Resolution is now up front. Verified against the VM host
   with a `PATH` holding only `ssh` and `scp`: `bombyx up` exits
   with `tar not found on PATH` and `~/vms/<project>` is not
   created.
@@ -402,7 +402,7 @@ was in the module written to close a security hole.
   exists to prevent.
 - **`project dir` passed on a directory `mkdir -p` cannot write
   to.** It tested `-w` but not `-x`, and creating an entry needs
-  write *and* search permission. Verified on frosti with a
+  write *and* search permission. Verified on the VM host with a
   `drw-------` directory: `-w` passes, and `mkdir -p` fails with
   `Permission denied`. The probe now names the missing search bit
   as its own failure. Also recorded, rather than fixed: `test -w`
