@@ -58,7 +58,7 @@ use super::{
     ConfigError, EnvName, EnvValue, RemoteRoot, Source, Vm,
     default_remote_root, from_toml, read_optional,
 };
-use crate::name::{ProjectName, check_segment};
+use crate::name::ProjectName;
 
 /// File name of the per-developer configuration, inside the
 /// directory [`super::user_config_dir`] returns.
@@ -288,16 +288,16 @@ impl Registry {
     ///
     /// The key comes back because a caller reporting where the
     /// host came from wants the table heading as this file
-    /// spells it, and re-parsing `name` into a [`ProjectName`]
-    /// would be checking a value the lookup has already proved
-    /// legal.
+    /// spells it, and the argument alone does not carry that
+    /// spelling.
     ///
     /// **Absence is `None`, never an error.** A name with no
-    /// table, and a name no table key could hold, both answer
-    /// `None`, because asking which host a project prefers is
-    /// not asking for its entry. [`Registry::project`] is what
-    /// reports a missing entry, once, with a message saying
-    /// which table to write.
+    /// table answers `None`, because asking which host a project
+    /// prefers is not asking for its entry. [`Registry::project`]
+    /// is what reports a missing entry, once, with a message
+    /// saying which table to write. A name no table key could
+    /// hold cannot arrive here at all: building the
+    /// [`ProjectName`] this takes is what refuses one.
     ///
     /// **The host it returns has passed the host rule**, applied
     /// by [`parse`] to every key in the file. So the guarantee
@@ -315,9 +315,9 @@ impl Registry {
     /// for that.
     pub(crate) fn project_host(
         &self,
-        name: &str,
+        name: &ProjectName,
     ) -> Option<(&ProjectName, &str)> {
-        let (key, project) = self.projects.get_key_value(name)?;
+        let (key, project) = self.projects.get_key_value(name.as_str())?;
         Some((key, project.host.as_deref()?))
     }
 
@@ -366,25 +366,22 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Invalid`] when `name` is not a
-    /// legal project name, and [`ConfigError::ProjectNotFound`]
-    /// when the file has no table for it.
+    /// Returns [`ConfigError::ProjectNotFound`] when the file
+    /// has no table for `name`.
+    ///
+    /// No name check runs here. `ProjectNotFound` tells the
+    /// operator to add `[projects.<name>]`, and for a name no
+    /// key can hold that table is refused by the parser, so
+    /// following the advice would break the whole file. A
+    /// [`ProjectName`] is the proof the parser will accept it,
+    /// which is why this asks for one.
     pub fn project(
         &self,
-        name: &str,
+        name: &ProjectName,
     ) -> Result<(&ProjectName, &Project), ConfigError> {
-        // Checked before the map is consulted, because
-        // `ProjectNotFound` tells the operator to add
-        // `[projects.<name>]` -- and for a name no key can hold,
-        // that table is refused by the parser, so following the
-        // advice would break the whole file.
-        check_segment(name).map_err(|e| ConfigError::Invalid {
-            field: "project",
-            reason: e.to_string(),
-        })?;
-        self.projects.get_key_value(name).ok_or_else(|| {
+        self.projects.get_key_value(name.as_str()).ok_or_else(|| {
             ConfigError::ProjectNotFound {
-                name: name.to_owned(),
+                name: name.as_str().to_owned(),
                 path: self.path.clone(),
             }
         })
@@ -527,9 +524,14 @@ mod tests {
         parse_at(source, "/home/dev/config.toml").unwrap()
     }
 
+    /// `name` as a checked project name, for a lookup.
+    fn named(name: &str) -> ProjectName {
+        ProjectName::parse(name).expect("the fixture name is legal")
+    }
+
     /// The host `name`'s entry names, without the key beside it.
     fn host_of<'a>(registry: &'a Registry, name: &str) -> Option<&'a str> {
-        registry.project_host(name).map(|(_key, host)| host)
+        registry.project_host(&named(name)).map(|(_key, host)| host)
     }
 
     /// Writes `source` as a registry file in a fresh directory,
@@ -548,7 +550,7 @@ mod tests {
     #[test]
     fn an_entry_carries_the_settings_that_describe_one_vm() {
         let registry = parsed(&registry_toml());
-        let (key, project) = registry.project("myproject").unwrap();
+        let (key, project) = registry.project(&named("myproject")).unwrap();
         // The key comes back so a caller need not re-parse the
         // name it asked with.
         assert_eq!(key.as_str(), "myproject");
@@ -565,7 +567,7 @@ mod tests {
         // A name nobody wrote a table for must not find the
         // one table that is there.
         let registry = parsed(&registry_toml());
-        let err = registry.project("other").unwrap_err();
+        let err = registry.project(&named("other")).unwrap_err();
         assert!(matches!(err, ConfigError::ProjectNotFound { .. }));
     }
 
@@ -574,7 +576,10 @@ mod tests {
         // The operator has to type the entry themselves, so the
         // message has to say what to type and where.
         let registry = parsed("host = \"vmhost\"\n");
-        let err = registry.project("myproject").unwrap_err().to_string();
+        let err = registry
+            .project(&named("myproject"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("/home/dev/config.toml"), "{err}");
         assert!(err.contains("[projects.\"myproject\"]"), "{err}");
         assert!(err.contains("[projects.\"myproject\".vm]"), "{err}");
@@ -655,11 +660,18 @@ mod tests {
 
     #[test]
     fn a_name_with_no_entry_supplies_no_host() {
-        // Including a name no table key could hold. Asking for
-        // a host is not asking for the entry, so this reports
-        // absence rather than the error `project` raises.
+        // Asking for a host is not asking for the entry, so this
+        // reports absence rather than the error `project`
+        // raises.
+        //
+        // Only names a table key could hold. The other half of
+        // the old rule -- that `""`, `../../etc` and `-x` also
+        // answer `None` -- is now the argument type's, since
+        // `ProjectName::parse` refuses all three, and
+        // `an_illegal_name_cannot_be_built_into_the_argument`
+        // in `config.rs` is where that family is listed.
         let registry = parsed(&registry_toml());
-        for name in ["other", "", "../../etc", "-x"] {
+        for name in ["other", "myprojekt"] {
             assert_eq!(host_of(&registry, name), None, "{name:?}");
         }
     }
@@ -668,7 +680,7 @@ mod tests {
     fn remote_root_falls_back_to_the_default() {
         let source = registry_toml().replace("remote_root = \"~/vms\"\n", "");
         let registry = parsed(&source);
-        let (_key, project) = registry.project("myproject").unwrap();
+        let (_key, project) = registry.project(&named("myproject")).unwrap();
         assert_eq!(project.remote_root, default_remote_root());
     }
 
@@ -735,29 +747,14 @@ mod tests {
     }
 
     #[test]
-    fn a_name_no_table_could_carry_is_refused_not_reported_absent() {
-        // "not found -- add `[projects.../etc]`" is advice the
-        // operator cannot take: that table is refused by the
-        // parser, so typing it breaks the whole file. The
-        // requested name gets the same rule the key does.
+    fn a_name_of_a_legal_shape_that_is_absent_reports_absence() {
+        // Which is the case `ProjectNotFound`'s message is for.
+        // A name no table key could hold cannot reach this
+        // lookup: `ProjectName` refuses it first, and
+        // `crate::name` enumerates that family.
         let registry = parsed(&registry_toml());
-        for bad in ["", "..", "../../etc", "-x", "a/b"] {
-            let err = registry.project(bad).unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    ConfigError::Invalid {
-                        field: "project",
-                        ..
-                    }
-                ),
-                "{bad:?} reported as {err}"
-            );
-        }
-        // A name of a legal shape that is simply absent still
-        // reports absence, which is the case the message is for.
         assert!(matches!(
-            registry.project("myprojekt").unwrap_err(),
+            registry.project(&named("myprojekt")).unwrap_err(),
             ConfigError::ProjectNotFound { .. }
         ));
     }
@@ -782,7 +779,7 @@ mod tests {
     fn read_parses_the_file_it_is_pointed_at() {
         let (_dir, path) = registry_file(&registry_toml());
         let registry = Registry::read(&path).unwrap().unwrap();
-        assert!(registry.project("myproject").is_ok());
+        assert!(registry.project(&named("myproject")).is_ok());
     }
 
     #[test]
@@ -791,7 +788,7 @@ mod tests {
         // hand the error a different one.
         let (_dir, path) = registry_file(&registry_toml());
         let registry = Registry::read(&path).unwrap().unwrap();
-        let err = registry.project("other").unwrap_err().to_string();
+        let err = registry.project(&named("other")).unwrap_err().to_string();
         assert!(err.contains(&path.display().to_string()), "{err}");
     }
 

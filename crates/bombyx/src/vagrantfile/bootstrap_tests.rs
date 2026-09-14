@@ -709,6 +709,10 @@ fn the_clone_is_pinned_from_the_config_not_the_environment() {
     // the key already has two -- measured -- which `set -e`
     // would turn into an aborted provision after the clone
     // and fetch had already run.
+    //
+    // Recording the command on the clone is also what makes
+    // a plain `git push` in the guest work, without the
+    // project's own script arranging anything.
     let flat = flat_bootstrap();
     assert!(
         flat.contains("config --replace-all core.sshCommand"),
@@ -854,25 +858,30 @@ fn nothing_in_the_bootstrap_script_asks_for_root() {
 }
 
 #[test]
-fn the_clone_is_told_which_key_to_push_with() {
-    // Otherwise the agent has a key it may read and no
-    // reason to know where it is. Recording it on the
-    // clone means a plain `git push` in the guest works
-    // without the project's script arranging anything.
-    assert!(
-        flat_bootstrap().contains("config --replace-all core.sshCommand"),
-        "the clone must record the ssh command"
-    );
-}
-
-#[test]
 fn the_bootstrap_script_deletes_a_key_no_upload_replaced() {
-    // Removing `deploy_key` from the config has to remove
-    // the credential from the guest, not leave one behind
-    // that nothing points at.
+    // The operator took `deploy_key` out of the config and
+    // re-provisioned. The upload no longer happens, so a key
+    // from the earlier run would stay in the guest with
+    // nothing pointing at it.
+    //
+    // One needle spanning the removal and the refusal beneath
+    // it, rather than two offsets compared. Two weaker shapes
+    // both pass on a script that is wrong: `refuse` removes the
+    // same three files on its way out, so the whole of
+    // `rm -f \"$DEPLOY_KEY\"` sits on its line too and a bare
+    // needle matches that instead; and an offset ordering is
+    // satisfied by an unconditional removal placed after the
+    // `fi`, which would delete a key the config *does* name.
+    //
+    // `flat_bootstrap` joins each continuation and collapses
+    // the runs of whitespace, so a command and the first line
+    // of its refusal sit next to each other in one string.
+    let needle = "if ! rm -f \"$DEPLOY_KEY\"; then \
+                  refuse \"the config names no deploy key, but the one at\"";
     assert!(
-        BOOTSTRAP.contains("rm -f \"$DEPLOY_KEY\""),
-        "the stale-key removal is gone"
+        flat_bootstrap().contains(needle),
+        "the removal for a config naming no key is gone, or no \
+         longer refuses when it fails"
     );
 }
 

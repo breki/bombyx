@@ -95,8 +95,11 @@ fn registry(preamble: &str, keys: &str) -> String {
 fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     let path = dir.join(USER_CONFIG_FILE);
     std::fs::write(&path, registry("host = \"vmhost.invalid\"\n", "")).unwrap();
-    let (cfg, _) =
-        bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
+    let (cfg, _) = bombyx::config::Config::load_project(
+        &bombyx::name::ProjectName::parse("myproject").unwrap(),
+        Some(&path),
+    )
+    .unwrap();
     cfg
 }
 
@@ -212,9 +215,16 @@ fn no_value_from_the_config_reaches_the_printed_plan() {
     // assertion above is about the printing rather than about a
     // fixture that never carried it.
     let path = dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE);
-    let (cfg, _) =
-        bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
-    assert!(bombyx::vagrantfile::render(&cfg).contains("hunter2"));
+    let (cfg, _) = bombyx::config::Config::load_project(
+        &bombyx::name::ProjectName::parse("myproject").unwrap(),
+        Some(&path),
+    )
+    .unwrap();
+    // No `env_file` in this fixture, so nothing is staged and
+    // the value under test is an `[env]` entry, which the
+    // Vagrantfile carries itself.
+    let staged = bombyx::config::Staged::default();
+    assert!(bombyx::vagrantfile::render(&cfg, &staged).contains("hunter2"));
 }
 
 #[test]
@@ -763,7 +773,10 @@ fn a_malformed_project_name_does_not_blame_the_registry() {
     // The name came from `--project`, and the registry cannot
     // carry a bad one: a table key is a `ProjectName`, refused
     // while the file parses. So naming the file here would send
-    // the operator to edit the one place the value is not.
+    // the operator to edit the one place the value is not. The
+    // context line names the argument and the `NameError` under
+    // it quotes the value, so between them the operator learns
+    // what to retype without the name appearing twice.
     // Its own command, not `bombyx_in`: that helper appends
     // `--project myproject`, so this would be asserting about a
     // second occurrence and clap's last-one-wins.
@@ -776,7 +789,8 @@ fn a_malformed_project_name_does_not_blame_the_registry() {
         .assert()
         .failure();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(stderr.contains("invalid `project`"), "{stderr}");
+    assert!(stderr.contains("invalid --project value"), "{stderr}");
+    assert!(stderr.contains("got \"../etc\""), "{stderr}");
     assert!(!stderr.contains(USER_CONFIG_FILE), "{stderr}");
 }
 
@@ -899,11 +913,14 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
         ),
     )
     .unwrap();
-    let (cfg, _) =
-        bombyx::config::Config::load_project("myproject", Some(&path)).unwrap();
+    let (cfg, _) = bombyx::config::Config::load_project(
+        &bombyx::name::ProjectName::parse("myproject").unwrap(),
+        Some(&path),
+    )
+    .unwrap();
     std::fs::write(
         dir.path().join(bombyx::vagrantfile::VAGRANTFILE_NAME),
-        bombyx::vagrantfile::render(&cfg),
+        bombyx::vagrantfile::render(&cfg, &bombyx::config::Staged::default()),
     )
     .unwrap();
     std::fs::write(
@@ -1045,8 +1062,11 @@ mod snapshot_guard_states {
             .path()
             .join(CONFIG_HOME)
             .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
-        let (cfg, _) =
-            Config::load_project("myproject", Some(&cfg_path)).unwrap();
+        let (cfg, _) = Config::load_project(
+            &bombyx::name::ProjectName::parse("myproject").unwrap(),
+            Some(&cfg_path),
+        )
+        .unwrap();
         let cmds = plan(&Action::Up, &cfg, Tty::NoPty, &Staged::default());
         let script = cmds.last().unwrap().args.last().unwrap().clone();
 

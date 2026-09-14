@@ -19,6 +19,64 @@ noticing. Those are finished work and are not counted.
 
 ---
 
+### fr-2026-09-14-one-comment-block-has-three-names
+
+**Category:** Comprehension
+
+`crates/bombyx/templates/bootstrap.sh` calls the same
+uppercase-led comment a header, a banner and a block, and
+"header" is already the file's own top. `fresh-reader` followed
+a "see the deploy-key banner above" and read two candidates
+before deciding which was meant. The cross-references sit at
+roughly seven places in that file plus one in
+`bootstrap_tests.rs`.
+
+One word for one thing: reserve "header" for the top of the
+file and call every uppercase-led comment a block, or name the
+target by its opening words.
+
+Deferred by the operator on 2026-09-14: a naming sweep across
+a file the diff barely touched. Found as FR-2.
+
+---
+
+### fr-2026-09-14-four-copies-of-the-heading-advice-argument
+
+**Category:** Comprehension
+
+The argument for why a project name gets checked -- every "no
+such project" message advises `[projects.<name>]`, and a name
+no key could hold makes that heading refuse the whole file --
+is stated in four places: `name.rs` on `ProjectName`,
+`config/registry.rs` on `project`, `config.rs`'s module header
+and `main.rs` at the argument. Nothing says which is the owner.
+
+`CLAUDE.md` under **Code comments** would put the reasoning in
+one place and have the rest name it.
+
+Deferred by the operator on 2026-09-14: a consolidation of
+three or more copies. Found as FR-13.
+
+---
+
+### fr-2026-09-14-two-comments-narrate-a-past-nobody-can-see
+
+**Category:** Comprehension
+
+Two comments outside this diff describe an arrangement the tree
+no longer holds, which `CLAUDE.md` under **Code comments**
+rules out. `config/registry.rs`'s
+`reading_the_file_refuses_a_bad_value_anywhere_in_an_entry`
+opens "Every value in an entry is now a checked type"; the
+`--help` note in `main.rs` says the listing "does change:
+`self-update` now heads it instead of sitting between `destroy`
+and `scratch`", against no arrangement a reader can compare to.
+
+Both want the standing fact in the present tense.
+
+Deferred by the operator on 2026-09-14: both are outside the
+change under review. Found as FR-10 and FR-11.
+
 ### fr-2026-09-13-comparatives-without-their-comparison
 
 **Category:** Comprehension

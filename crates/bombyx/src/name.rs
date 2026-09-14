@@ -104,6 +104,15 @@ pub fn check_segment(value: &str) -> Result<(), NameError> {
 /// to build the directory it creates on the VM host with
 /// `mkdir` and deletes with `rm -rf`.
 ///
+/// The `--project` argument becomes one of these before it
+/// reaches `crate::config`, and that is why the rule matters
+/// for a name that was merely asked for. Every "no such
+/// project" message tells the operator to add
+/// `[projects.<name>]`. A name no table key could hold cannot
+/// be written in that heading: the TOML parser refuses the
+/// whole file. So an operator who followed the advice would
+/// break every project in it.
+///
 /// A type rather than a checking function because the value
 /// arrives as a map key. Nothing calls a checker on a key while
 /// serde is building the map, so a checker would have to run
@@ -192,7 +201,13 @@ mod tests {
             ProjectName::parse("my.proj_1-x").unwrap().to_string(),
             "my.proj_1-x"
         );
-        for bad in ["", ".", "..", "-x", "a/b", "a\\b", "a b"] {
+        // The whole family, in the one place that enumerates
+        // it. `Config::load_project` and `Registry::project`
+        // both take a `ProjectName`, so they inherit the rule
+        // through the type and need no table of their own.
+        for bad in
+            ["", ".", "..", "../../etc", "-x", "a/", "a/b", "a\\b", "a b"]
+        {
             assert!(ProjectName::parse(bad).is_err(), "{bad:?} was accepted");
         }
         assert!(matches!(

@@ -41,14 +41,13 @@
 //! file. `host` runs its own as the two `host` keys are ranked,
 //! and `config::host` says why it differs.
 //!
-//! **`project` is checked twice**, because two different values
-//! carry it. The table key in the registry is a
-//! [`ProjectName`], checked as serde builds the map. The
+//! **`project` is checked in two places**, because two
+//! different values carry it. The table key in the registry is
+//! a [`ProjectName`], checked as serde builds the map. The
 //! `--project` argument is a plain string the operator typed,
-//! and [`Config::load_project`] runs `crate::name::check_segment`
-//! on it before it opens any file -- so a name no table key
-//! could hold is refused before a message can advise writing
-//! one.
+//! and the binary turns it into a [`ProjectName`] before it
+//! calls anything here -- so a name no table key could hold is
+//! refused before a message can advise writing one.
 //!
 //! So there is no separate function to call. `Config` has
 //! public fields, and a caller assigning to one gets the same
@@ -93,7 +92,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::name::{ScratchName, check_segment};
+use crate::name::ScratchName;
 
 mod deploy_key;
 mod env;
@@ -185,9 +184,22 @@ fn required_tables(name: &str, omitted: Option<(&str, &str)>) -> String {
 /// against it must not come from the same code.
 #[cfg(test)]
 fn test_entry(name: &str, project_host: Option<&str>) -> String {
-    let keys =
-        project_host.map_or_else(String::new, |h| format!("host = {h:?}\n"));
-    test_entry_with(name, &keys)
+    test_entry_with(name, &entry_host_key(project_host))
+}
+
+/// `name` as a checked project name, for a test.
+///
+/// Every caller passes a literal the rule accepts, so a panic
+/// here means the fixture is wrong rather than the code.
+#[cfg(test)]
+fn named(name: &str) -> ProjectName {
+    ProjectName::parse(name).expect("the fixture name is legal")
+}
+
+/// The entry's own `host` line, or nothing when it has none.
+#[cfg(test)]
+fn entry_host_key(project_host: Option<&str>) -> String {
+    project_host.map_or_else(String::new, |h| format!("host = {h:?}\n"))
 }
 
 /// One `[projects.<name>]` table carrying `keys`, for a test.
@@ -211,7 +223,16 @@ fn test_entry_with(name: &str, keys: &str) -> String {
 /// key is written here and not there: a file may carry only one.
 #[cfg(test)]
 fn test_registry(name: &str, host: &str, project_host: Option<&str>) -> String {
-    format!("host = {host:?}\n\n{}", test_entry(name, project_host))
+    test_registry_with(name, host, &entry_host_key(project_host))
+}
+
+/// A registry naming one project whose entry carries `keys`.
+///
+/// The file-wide `host` line lives here, so [`test_registry`]
+/// and the tests' own `registry_with` do not each spell it.
+#[cfg(test)]
+fn test_registry_with(name: &str, host: &str, keys: &str) -> String {
+    format!("host = {host:?}\n\n{}", test_entry_with(name, keys))
 }
 
 pub use crate::name::ProjectName;
@@ -409,10 +430,11 @@ impl Config {
     /// The one supported way to build the [`Staged`] argument
     /// `crate::plan::plan` takes. Every part comes from here, so
     /// a caller cannot pair a config that names a file with
-    /// contents read from somewhere else, or with none at all --
-    /// a mismatch the generated Vagrantfile and the plan would
-    /// disagree about, since the first reads `source.env_file`
-    /// and the second reads the contents.
+    /// contents read from somewhere else. What the guest is told
+    /// follows from the same value: `crate::vagrantfile::render`
+    /// reads the [`Staged`] rather than `source.env_file`, so
+    /// the Vagrantfile cannot announce a file the plan does not
+    /// stage.
     ///
     /// `getenv` reads this machine's environment, for the `~` in
     /// the path. It is a parameter so a test can state a home
@@ -483,6 +505,51 @@ impl Config {
         repo_token::credential(host, token, secrets.as_bytes(), path).map(Some)
     }
 
+    /// The [`Staged`] this config would produce, without going
+    /// near a file.
+    ///
+    /// [`Config::read_staged`] is what a run uses, and it opens
+    /// the path `source.env_file` names. A test wanting the
+    /// pair asks for this instead: both halves are still
+    /// derived from one config, so a fixture cannot hand
+    /// `crate::plan::plan` a `Staged` belonging to a different
+    /// `Config`, and no test has to write a file to get one.
+    ///
+    /// The secrets name the variable `repo_token` asks for, so
+    /// the credential comes out of the real
+    /// [`Config::credential`] rather than out of a literal
+    /// beside it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn staged_for_tests(&self) -> Staged {
+        let Some(path) = self.source.env_file.as_ref() else {
+            // The same refusal [`Config::read_staged`] makes, so
+            // a fixture cannot build a pair no run can produce.
+            assert!(
+                self.source.repo_token.is_none(),
+                "a repo_token with no env_file is a config \
+                 read_staged refuses"
+            );
+            return Staged::default();
+        };
+        let body = self.source.repo_token.as_ref().map_or_else(
+            || "PLAIN=value\n".to_owned(),
+            |token| format!("{}=hunter2\n", token.var.as_str()),
+        );
+        let secrets = Secrets::for_tests(body.as_bytes());
+        // The variable is always there -- the body above is
+        // built from the name the token asks for. What can fail
+        // is a fixture whose `repo` reaches the server by ssh,
+        // since a token needs an https host to be sent to.
+        let credential = self
+            .credential(&secrets, path.as_str())
+            .expect("the fixture's repo must have an https host");
+        Staged {
+            secrets: Some(secrets),
+            credential,
+        }
+    }
+
     /// How bombyx reaches [`Config::host`].
     ///
     /// See the field for why it is read through a function.
@@ -512,7 +579,7 @@ impl Config {
     pub(crate) fn parse_registry(
         source: &str,
         path: &Path,
-        name: &str,
+        name: &ProjectName,
     ) -> Result<Self, ConfigError> {
         let registry = registry::parse_for_tests(source, path)?;
         // `None`, so a test never depends on what the machine
@@ -561,7 +628,7 @@ impl Config {
         Self::parse_registry(
             &test_registry("myproject", "vmhost", None),
             Path::new(USER_CONFIG_FILE),
-            "myproject",
+            &named("myproject"),
         )
         .expect("the shared test config must be valid")
     }
@@ -600,11 +667,8 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Invalid`] with `field: "project"`
-    /// if `name` is not a single path segment -- checked before
-    /// anything else, including before the registry is looked
-    /// for, so no message can advise a table heading that the
-    /// parser refuses. Then
+    /// The name arrives checked, so no message here can advise
+    /// a table heading the parser refuses. Returns
     /// [`ConfigError::RegistryNotFound`] if there is no
     /// registry file, [`ConfigError::ProjectNotFound`] if it has
     /// no table for `name`, [`ConfigError::Read`],
@@ -615,19 +679,11 @@ impl Config {
     /// and [`ConfigError::HostMissing`] if neither `host` key
     /// names one.
     pub fn load_project(
-        name: &str,
+        name: &ProjectName,
         registry: Option<&Path>,
     ) -> Result<(Self, HostOrigin), ConfigError> {
-        // Before the file is opened, because the errors below
-        // quote `name` back as a table heading and must not
-        // advise an impossible one.
-        check_segment(name).map_err(|e| ConfigError::Invalid {
-            field: "project",
-            reason: e.to_string(),
-        })?;
-
         let missing = || ConfigError::RegistryNotFound {
-            name: name.to_owned(),
+            name: name.as_str().to_owned(),
             place: registry_place(registry),
         };
         let path = registry.ok_or_else(missing)?;
@@ -700,7 +756,7 @@ impl Config {
         registry
             .names()
             .map(|name| {
-                Self::from_registry(registry, name.as_str(), this_machine)
+                Self::from_registry(registry, name, this_machine)
                     .map(|(cfg, _origin)| cfg)
             })
             .collect()
@@ -720,7 +776,7 @@ impl Config {
     /// ones about reading the file.
     fn from_registry(
         registry: &Registry,
-        name: &str,
+        name: &ProjectName,
         this_machine: Option<&str>,
     ) -> Result<(Self, HostOrigin), ConfigError> {
         let (key, project) = registry.project(name)?;
@@ -778,10 +834,7 @@ mod tests {
     /// `host` keys and the ranking between them belong to
     /// `load_project_tests` below.
     fn registry_with(keys: &str) -> String {
-        format!(
-            "host = \"vmhost\"\n\n{}",
-            test_entry_with("myproject", keys)
-        )
+        test_registry_with("myproject", "vmhost", keys)
     }
 
     /// Loads `myproject` out of a registry carrying `keys`.
@@ -795,7 +848,11 @@ mod tests {
     /// TOML at all, has to write the file itself: [`parse`]
     /// would append the tables the test means to omit.
     fn parse_whole(source: &str) -> Result<Config, ConfigError> {
-        Config::parse_registry(source, Path::new(USER_CONFIG_FILE), "myproject")
+        Config::parse_registry(
+            source,
+            Path::new(USER_CONFIG_FILE),
+            &named("myproject"),
+        )
     }
 
     fn good() -> Config {
@@ -923,7 +980,7 @@ mod tests {
         let b = Config::parse_registry(
             &test_registry("ledgerstone", "vmhost", None),
             Path::new(USER_CONFIG_FILE),
-            "ledgerstone",
+            &named("ledgerstone"),
         )
         .unwrap();
         let name = scratch("pr-1");
@@ -1041,7 +1098,8 @@ mod tests {
         // 32-bit target.
         let over = usize::try_from(MAX_CONFIG_BYTES).unwrap() + 1;
         let (_dir, path) = registry_file_in_a_dir(&"#".repeat(over));
-        let err = Config::load_project("myproject", Some(&path)).unwrap_err();
+        let err =
+            Config::load_project(&named("myproject"), Some(&path)).unwrap_err();
         assert!(matches!(err, ConfigError::TooLarge(_)), "{err:?}");
     }
 
@@ -1053,8 +1111,8 @@ mod tests {
         // denied" on Windows -- and neither says what is
         // actually wrong.
         let dir = tempfile::tempdir().unwrap();
-        let err =
-            Config::load_project("myproject", Some(dir.path())).unwrap_err();
+        let err = Config::load_project(&named("myproject"), Some(dir.path()))
+            .unwrap_err();
         assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
     }
 
@@ -1075,7 +1133,7 @@ mod tests {
         }
 
         let (cfg, _origin) =
-            Config::load_project("myproject", Some(&link)).unwrap();
+            Config::load_project(&named("myproject"), Some(&link)).unwrap();
         assert_eq!(cfg.host.as_str(), "vmhost");
     }
 
@@ -1570,7 +1628,7 @@ mod load_project_tests {
     ) -> Result<(Config, HostOrigin), ConfigError> {
         let registry =
             registry::parse_for_tests(source, Path::new(USER_CONFIG_FILE))?;
-        Config::from_registry(&registry, name, this_machine)
+        Config::from_registry(&registry, &named(name), this_machine)
     }
 
     /// A registry naming one project and nothing unusual.
@@ -1795,7 +1853,7 @@ mod load_project_tests {
         let path = dir.path().join("elsewhere.toml");
         std::fs::write(&path, plain()).unwrap();
         let (cfg, origin) =
-            Config::load_project("myproject", Some(&path)).unwrap();
+            Config::load_project(&named("myproject"), Some(&path)).unwrap();
         assert_eq!(cfg.project.as_str(), "myproject");
         assert_eq!(cfg.host.as_str(), "vmhost");
         assert_eq!(origin, HostOrigin::UserFile);
@@ -1807,7 +1865,8 @@ mod load_project_tests {
         // every machine bombyx has never run on.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(USER_CONFIG_FILE);
-        let err = Config::load_project("myproject", Some(&path)).unwrap_err();
+        let err =
+            Config::load_project(&named("myproject"), Some(&path)).unwrap_err();
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         // The path to create, and what goes in it. A message
@@ -1823,7 +1882,7 @@ mod load_project_tests {
         // so `registry_file` produced no path, and the message
         // describes the file rather than naming one.
         // `registry_place` decides both wordings.
-        let err = Config::load_project("myproject", None).unwrap_err();
+        let err = Config::load_project(&named("myproject"), None).unwrap_err();
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         assert!(text.contains("config directory"), "{text}");
@@ -1847,7 +1906,7 @@ mod load_project_tests {
         // name `check_segment` accepts.
         for name in ["a.b", "a-b.c", "myproject"] {
             for err in [
-                Config::load_project(name, None).unwrap_err(),
+                Config::load_project(&named(name), None).unwrap_err(),
                 load("host = \"vmhost\"\n", name).unwrap_err(),
             ] {
                 let text = err.to_string();
@@ -1856,38 +1915,6 @@ mod load_project_tests {
                     "{name:?} must be advised quoted, got {text}"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn an_illegal_name_is_refused_before_the_registry_is_looked_for() {
-        // The name rule runs first, so no message ever advises a
-        // table heading the parser would refuse. `[projects...]`
-        // with a `/` or a `..` in it cannot be written down: the
-        // whole file fails to parse, so an operator following
-        // the advice breaks every project rather than fixing
-        // this one.
-        //
-        // The whole family, not the case that prompted it. Each
-        // one is refused for its own reason inside
-        // `name::check_segment`, and the point here is that
-        // `load_project` consults that function at all.
-        for name in ["", ".", "..", "../../etc", "-x", "a/b", "a/"] {
-            // No registry path, which is the route that had no
-            // check: with one, `Registry::project` runs the rule
-            // before the map lookup.
-            let err = Config::load_project(name, None).unwrap_err();
-            let text = err.to_string();
-            assert!(
-                matches!(
-                    err,
-                    ConfigError::Invalid {
-                        field: "project",
-                        ..
-                    }
-                ),
-                "{name:?} must be refused as a project name, got {text}"
-            );
         }
     }
 }

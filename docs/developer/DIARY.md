@@ -4,6 +4,77 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-14
 
+**The review round on the backlog clearance, and the script
+that lied about applying an edit**
+
+Three stages, 34 findings, 20 fixed. Two are worth the record.
+
+`red-team` found the half of the pairing bug we had not: a
+config naming `env_file` rendered against `Staged::default()`
+announces `0`, and the guest then takes the branch that deletes
+the file an earlier provision left and provisions on reporting
+success. Our own fix had closed the loud direction and opened
+the quiet one. `render` now asserts the pair came from one
+config. That keeps two sources of truth reconciled by a panic,
+which `rt-2026-09-14-the-present-pair-keeps-two-sources-of-truth`
+records: the pair has been rewritten five times in two days,
+and making the mismatch unrepresentable is its own commit.
+
+The other is a process failure rather than a code one. A
+`python3` heredoc applied two edits, asserted each match, and
+wrote the file once at the end. The second assertion failed, so
+the script raised, the write never ran -- and the shell's `echo
+ok` on the next line printed anyway. The first edit was
+reported applied and was not. `fresh-reader` found the
+unchanged text two stages later as FR-5, which is the same
+finding `red-team` had already made as RT-7. Cost: one stage of
+review spent re-finding a fix that was never written. The habit
+that follows is to write the file after each successful
+replacement, and to read the artifact back rather than trust
+the script's own report -- which `/review` already asks for
+under **Read the artifact back before claiming a fix landed**,
+and which we did not do.
+
+Stage 2 stopped at two rounds rather than three, because four
+of round 2's six findings landed on round 1's own fixes. All
+four were prose, which is the documented shape: sharpening a
+comment is how the next round's findings get made.
+
+**Clearing the artisan backlog found a test that could not
+fail**
+
+Twelve deferred findings, eleven of them closed. Two were
+already stale before we started -- `remote_root` had gained its
+newtype, and `build-recipes.md` had lost the wrap seam the
+entry described. Re-wrapping that file to 80 columns, which the
+entry still asked for, would have put a fresh seam in a
+document that now wraps evenly at 66.
+
+The one worth writing down is
+`the_bootstrap_script_deletes_a_key_no_upload_replaced`. Its
+two siblings check that the credential removal sits in the
+branch for a config that names no key; this one asserted only
+that `bootstrap.sh` contains `rm -f "$DEPLOY_KEY"`. The
+`refuse` helper removes all three uploaded credentials on its
+way out, and its line begins with those same nine characters,
+so the test passed with the else-branch removal deleted. The
+artisan entry had asked us to delete the test as redundant. It
+was redundant, and it was also the weakest of the three: the
+right answer was the sibling shape, and a mutation run to prove
+the new one fails.
+
+The other half of the round is the pairing between a `Config`
+and what bombyx stages for it. `plan` wrote the secrets file
+from `Staged` while `vagrantfile::render` decided whether to
+announce one from `cfg.source.env_file`, so the two could
+disagree and the guest would refuse minutes after boot.
+`render` now reads the same `Staged`. Against the real
+`marketplace-v2` config, which names both an `env_file` and a
+`repo_token`, the rendered Vagrantfile is byte-identical before
+and after -- 3087 bytes -- so the production path never
+exercised the disagreement. The change removes the way to reach
+it rather than fixing a live bug.
+
 **The review hit its three-round ceiling, and the last round
 was worth running**
 

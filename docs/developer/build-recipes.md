@@ -1,7 +1,7 @@
 # Build and toolchain recipes
 
-These three recipes configure the build. You need each one
-rarely, and none applies on a normal commit. `CLAUDE.md`
+Three sections: two recipes and one appendix. You need each
+one rarely, and none applies on a normal commit. `CLAUDE.md`
 carries the always-on standards; these are here so they do not
 sit in every session's context.
 
@@ -11,19 +11,20 @@ sit in every session's context.
   path cannot run under `cargo llvm-cov` and the 90% gate has to
   stay honest anyway.
 - **Edition-2024 migration** -- the mechanical fixes a project
-  inheriting an older snapshot hits once.
+  inheriting an older snapshot hits once. bombyx is past this
+  one, so it sits in an appendix at the end.
 
 ## Workspace lints and xtask overrides
 
 The workspace forbids `unsafe_code` via
 `[workspace.lints.rust]` so production crates inherit
-the policy by default. If a derived project needs OS-
-specific code in `xtask/` (for example, calling Win32
-APIs for process management on Windows -- the canonical
-case being `OpenProcess` / `TerminateProcess` /
+the policy by default. When `xtask` needs OS-specific
+code (for example, calling Win32 APIs for process
+management on Windows -- the canonical case being
+`OpenProcess` / `TerminateProcess` /
 `CreateToolhelp32Snapshot` for stale-server cleanup),
-the recipe is to redefine the lints block locally for
-`xtask` only rather than weakening the workspace policy:
+redefine the lints block locally for `xtask` alone
+rather than weakening the workspace policy:
 
 ```toml
 # xtask/Cargo.toml
@@ -40,6 +41,12 @@ Production crates keep `[lints] workspace = true` and
 remain `unsafe`-forbidden. Document the scoped
 exception with a comment near the use site so reviewers
 can verify the unsafe block is genuinely necessary.
+
+**Where bombyx stands: `xtask` holds no `unsafe` block
+today, so nothing here has taken this exception.** The
+Win32 example above comes from the template, whose
+downstream projects run a local server that can go
+stale. bombyx has no runtime services.
 
 ## Coverage exceptions for hardware-bound code
 
@@ -87,15 +94,24 @@ the gate honest without weakening it.
    short-circuits the real native call and returns a
    fixed `Ok`/`Err` shape. This keeps the parent
    module's post-call success and error branches
-   testable -- they're the parts that actually carry
-   business logic, and they remain inside the 90% gate.
+   testable, and those branches are the ones carrying
+   business logic. They remain inside the 90% gate.
 
 What this gets you: the orchestrator is fully covered
 (including both branches of its `match
 play_audio_native() { Ok => ..., Err => ... }`), the
-leaf is honestly acknowledged as untested in CI, and
-there's no `#[cfg(test)]` test-only branch leaking into
-production code paths.
+leaf is honestly acknowledged as untested in CI, and no
+`#[cfg(test)]` branch leaks into production code.
+
+**Where bombyx stands: the root `Cargo.toml` names no
+coverage exclusion, and the section sits there
+commented out.** The audio and GPIO examples above come
+from the template. A bombyx-specific escape hatch would
+be spelled `BOMBYX_TEST_*` rather than `RUSTBASE_TEST_*`
+-- though note that `config::env` reserves the
+`BOMBYX_` prefix for the variables the generated
+Vagrantfile sets, so a test hatch reaching the guest
+would need a name outside it.
 
 When NOT to use this recipe: if the I/O can be faked
 with a trait + dependency injection at the call site
@@ -104,13 +120,18 @@ plus-ignore-regex pattern is for cases where the
 indirection itself would obscure the code more than it
 reveals.
 
-## Edition-2024 migration notes
+## Appendix: edition-2024 migration notes
 
-The template ships on Rust edition 2024. Projects
-inheriting from an older snapshot of the template (or
-upgrading from edition 2021) routinely hit a small set
-of mechanical fixes that `cargo fix --edition` either
-applies automatically or flags:
+The two recipes above scope an exception to a quality
+gate without weakening it for production code. This one
+is a different thing, which is why it sits under an
+appendix heading: a one-time migration checklist, done
+for bombyx already, kept because a project inheriting an
+older snapshot of the template still walks it.
+
+Moving from edition 2021 hits a small set of mechanical
+fixes that `cargo fix --edition` either applies
+automatically or flags:
 
 - **Unsafe extern blocks**: `extern "C" { fn foo(); }`
   must become `unsafe extern "C" { fn foo(); }`. Each

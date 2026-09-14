@@ -4,6 +4,36 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-14-the-present-pair-keeps-two-sources-of-truth
+
+**Category:** Design (an invariant asserted rather than made
+unrepresentable)
+
+`crates/bombyx/src/vagrantfile.rs` renders
+`BOMBYX_ENV_FILE_PRESENT` and `BOMBYX_GIT_CRED_PRESENT` from
+the `Staged` it is handed, and then asserts that the two halves
+match `cfg.source.env_file` and `cfg.source.repo_token`. So the
+config keys and the staged value are both still sources of
+truth, the mismatch is still representable, and the failure is
+a panic inside a `pub fn`.
+
+The pair had been rewritten in five commits over two days when
+this was raised: config key, then config key with a second copy
+answered inside the guest, then `Staged`, then `Staged` plus
+the assert. Each round was a correct fix for the case that
+prompted it.
+
+`Staged`'s fields are private, so the pairing could be made
+unrepresentable instead: a value carrying the borrowed `Config`
+and the `Staged` read from it, built by one constructor, with
+`render` and `plan` taking that. The assert and both `# Panics`
+sections would go with it.
+
+Deferred by the operator on 2026-09-14: the change reaches
+`plan`, `vagrantfile` and `main`, and belongs in its own commit
+rather than folded into a branch that had already had three
+review stages. Found as RT-12.
+
 ### rt-2026-09-13-bootstrap-guards-enumerated-by-hand
 
 **Category:** Correctness (escalated consolidation)
@@ -233,6 +263,12 @@ Deferred by the operator during the review on #18: it is a
 public-signature change proposed at the end of a review that had
 already stopped on non-convergence, and it has no user-visible
 effect. Found as RT-5 in round 2.
+
+**Swept 2026-09-14.** `Invalid { field: "project" }` is gone:
+`--project` is parsed into a `ProjectName` in `main.rs`, the
+variant had no construction site left and was removed. So the
+`main.rs` arm this entry names no longer exists either, and what
+remains of the finding is the `Option<&Path>` signature itself.
 
 **Swept 2026-09-11.** Half of it is stale and half has grown.
 The `"the registry"` fallback is gone from `main.rs`; the

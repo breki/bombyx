@@ -158,31 +158,22 @@ pub enum ConfigError {
         summary: String,
     },
 
-    /// A field held a value outside its allowed shape.
-    ///
-    /// Only `project` reaches this variant. Every other value
-    /// is checked by its type while serde reads the file, so a
-    /// bad one arrives as [`ConfigError::Parse`]. `project` is
-    /// different because it comes from the command line, and
-    /// `crate::name::check_segment` runs on it before the
-    /// registry is opened.
-    #[error("invalid `{field}`: {reason}")]
-    Invalid {
-        /// Name of the offending field.
-        field: &'static str,
-        /// What rule the value broke.
-        reason: String,
-    },
-
     /// Neither `host` key supplied a VM host.
     ///
     /// The message asks for the file-wide key rather than the
     /// project's own: one machine name written once covers every
     /// project.
-    #[error("no VM host configured -- add a `host` line to {place}")]
+    ///
+    /// `place` is a `PathBuf` here and a `String` in
+    /// [`ConfigError::RegistryNotFound`]: bombyx raises this one
+    /// only after reading a registry, so a path always exists.
+    #[error(
+        "no VM host configured -- add a `host` line to {}",
+        .place.display()
+    )]
     HostMissing {
         /// The file that would supply one.
-        place: String,
+        place: PathBuf,
     },
 
     /// The registry has no table for the named project.
@@ -259,12 +250,10 @@ pub enum ConfigError {
 
     /// A `host` key in the registry named an unusable host.
     ///
-    /// Separate from [`ConfigError::Invalid`] so the message can
-    /// name *which line carried the value*. A plain field error
-    /// carries the field name `host`, and the registry has one
-    /// of those per project plus a file-wide one, so the
-    /// operator would be told to fix a key without being told
-    /// which.
+    /// The message names *which line carried the value*. Saying
+    /// only `host` would not: the registry has one of those per
+    /// project plus a file-wide one, so the operator would be
+    /// told to fix a key without being told which.
     #[error("invalid VM host from {origin}: {reason}")]
     InvalidHost {
         /// Which source supplied it.

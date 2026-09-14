@@ -372,7 +372,7 @@ impl HostOrigin {
 /// no `config.toml` and no test can reach that arm.
 pub(crate) fn rank(
     registry: &registry::Registry,
-    name: &str,
+    name: &ProjectName,
 ) -> Result<(HostName, HostOrigin), ConfigError> {
     let path = Some(registry.path());
     if let Some((key, host)) = registry.project_host(name) {
@@ -384,7 +384,7 @@ pub(crate) fn rank(
         return Ok((checked(host, &origin, path)?, origin));
     }
     Err(ConfigError::HostMissing {
-        place: super::read::path_display(registry.path()),
+        place: registry.path().to_path_buf(),
     })
 }
 
