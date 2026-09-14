@@ -234,6 +234,12 @@ public-signature change proposed at the end of a review that had
 already stopped on non-convergence, and it has no user-visible
 effect. Found as RT-5 in round 2.
 
+**Swept 2026-09-14.** `Invalid { field: "project" }` is gone:
+`--project` is parsed into a `ProjectName` in `main.rs`, the
+variant had no construction site left and was removed. So the
+`main.rs` arm this entry names no longer exists either, and what
+remains of the finding is the `Option<&Path>` signature itself.
+
 **Swept 2026-09-11.** Half of it is stale and half has grown.
 The `"the registry"` fallback is gone from `main.rs`; the
 `describe` path is still there

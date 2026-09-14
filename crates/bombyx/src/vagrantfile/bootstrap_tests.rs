@@ -709,6 +709,10 @@ fn the_clone_is_pinned_from_the_config_not_the_environment() {
     // the key already has two -- measured -- which `set -e`
     // would turn into an aborted provision after the clone
     // and fetch had already run.
+    //
+    // Recording the command on the clone is also what makes
+    // a plain `git push` in the guest work, without the
+    // project's own script arranging anything.
     let flat = flat_bootstrap();
     assert!(
         flat.contains("config --replace-all core.sshCommand"),
@@ -854,25 +858,27 @@ fn nothing_in_the_bootstrap_script_asks_for_root() {
 }
 
 #[test]
-fn the_clone_is_told_which_key_to_push_with() {
-    // Otherwise the agent has a key it may read and no
-    // reason to know where it is. Recording it on the
-    // clone means a plain `git push` in the guest works
-    // without the project's script arranging anything.
-    assert!(
-        flat_bootstrap().contains("config --replace-all core.sshCommand"),
-        "the clone must record the ssh command"
-    );
-}
-
-#[test]
 fn the_bootstrap_script_deletes_a_key_no_upload_replaced() {
-    // Removing `deploy_key` from the config has to remove
-    // the credential from the guest, not leave one behind
-    // that nothing points at.
+    // The operator took `deploy_key` out of the config and
+    // re-provisioned. The upload no longer happens, so a key
+    // from the earlier run would stay in the guest with
+    // nothing pointing at it.
+    //
+    // The needle carries the `!` because `refuse` removes the
+    // same three files on its way out, and its line starts
+    // with the same nine characters -- a `contains` without
+    // the `!` reports success for a script whose else branch
+    // removes nothing.
+    let flat = flat_bootstrap();
+    let branch = flat
+        .find("if [ \"${BOMBYX_DEPLOY_KEY:-}\" = 1 ]; then")
+        .expect("the branch must be there");
+    let removal = flat
+        .find("! rm -f \"$DEPLOY_KEY\"")
+        .expect("the else branch must remove a leftover");
     assert!(
-        BOOTSTRAP.contains("rm -f \"$DEPLOY_KEY\""),
-        "the stale-key removal is gone"
+        branch < removal,
+        "the removal must sit in the branch for no configured key"
     );
 }
 

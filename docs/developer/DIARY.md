@@ -4,6 +4,41 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-14
 
+**Clearing the artisan backlog found a test that could not
+fail**
+
+Twelve deferred findings, eleven of them closed. Two were
+already stale before we started -- `remote_root` had gained its
+newtype, and `build-recipes.md` had lost the wrap seam the
+entry described. Re-wrapping that file to 80 columns, which the
+entry still asked for, would have put a fresh seam in a
+document that now wraps evenly at 66.
+
+The one worth writing down is
+`the_bootstrap_script_deletes_a_key_no_upload_replaced`. Its
+two siblings check that the credential removal sits in the
+branch for a config that names no key; this one asserted only
+that `bootstrap.sh` contains `rm -f "$DEPLOY_KEY"`. The
+`refuse` helper removes all three uploaded credentials on its
+way out, and its line begins with those same nine characters,
+so the test passed with the else-branch removal deleted. The
+artisan entry had asked us to delete the test as redundant. It
+was redundant, and it was also the weakest of the three: the
+right answer was the sibling shape, and a mutation run to prove
+the new one fails.
+
+The other half of the round is the pairing between a `Config`
+and what bombyx stages for it. `plan` wrote the secrets file
+from `Staged` while `vagrantfile::render` decided whether to
+announce one from `cfg.source.env_file`, so the two could
+disagree and the guest would refuse minutes after boot.
+`render` now reads the same `Staged`. Against the real
+`marketplace-v2` config, which names both an `env_file` and a
+`repo_token`, the rendered Vagrantfile is byte-identical before
+and after -- 3087 bytes -- so the production path never
+exercised the disagreement. The change removes the way to reach
+it rather than fixing a live bug.
+
 **The review hit its three-round ceiling, and the last round
 was worth running**
 

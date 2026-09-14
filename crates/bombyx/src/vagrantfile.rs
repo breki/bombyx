@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::config::{Config, DeployKeyPath, EnvName, EnvValue};
+use crate::config::{Config, DeployKeyPath, EnvName, EnvValue, Staged};
 use crate::hostkeys;
 
 /// The provisioning script, shipped to the host unchanged.
@@ -155,8 +155,8 @@ pub(crate) const ENV_FILE_NAME: &str = "bombyx.env";
 /// instead, which is what the two agree on.
 const ENV_FILE_GUEST_PATH: &str = "~/.bombyx-env";
 
-/// Environment variable telling the guest that the operator's
-/// config named an `env_file`.
+/// Environment variable telling the guest that a secrets file
+/// is being staged for it.
 ///
 /// Set on every render, `"1"` or `"0"`, for the reason
 /// [`DEPLOY_KEY_ENV`] gives at length: a name bombyx leaves out
@@ -201,8 +201,8 @@ pub(crate) const CREDENTIAL_FILE_NAME: &str = "bombyx.git-credentials";
 /// is what catches a rename in one of the two.
 const CREDENTIAL_GUEST_PATH: &str = "/home/vagrant/.bombyx-git-credentials";
 
-/// Environment variable telling the guest that the operator's
-/// config named a `repo_token`.
+/// Environment variable telling the guest that a git credential
+/// is being staged for it.
 ///
 /// Set on every render, `"1"` or `"0"`, for the reason
 /// [`DEPLOY_KEY_ENV`] gives at length: a name bombyx leaves out
@@ -416,8 +416,15 @@ fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
 /// a real machine**. If you are the first person to try it,
 /// expect to fix something. See
 /// [`Provider`](crate::config::Provider).
+///
+/// `staged` decides whether the guest is told a secrets file and
+/// a git credential are coming, and it is the same value
+/// `crate::plan` writes those two files from. Reading
+/// `cfg.source.env_file` here instead would let the rendered
+/// Vagrantfile announce a file the plan never stages, and the
+/// guest would refuse minutes after booting.
 #[must_use]
-pub fn render(cfg: &Config) -> String {
+pub fn render(cfg: &Config, staged: &Staged) -> String {
     let vm = &cfg.vm;
     let source = &cfg.source;
     // `None` when `repo` reaches the server by something other
@@ -476,18 +483,18 @@ end
 ",
         version = env!("CARGO_PKG_VERSION"),
         deploy_key = deploy_key_block(source.deploy_key.as_ref()),
-        env_file = env_file_block(source.env_file.is_some()),
-        credential = credential_block(source.repo_token.is_some()),
+        env_file = env_file_block(staged.secrets().is_some()),
+        credential = credential_block(staged.credential().is_some()),
         repo_env = REPO_ENV,
         ref_env = REF_ENV,
         script_env = SCRIPT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
         env_file_env_name = ENV_FILE_PRESENT_ENV,
-        env_file_env = if source.env_file.is_some() { "1" } else { "0" },
+        env_file_env = if staged.secrets().is_some() { "1" } else { "0" },
         credential_env_name = CREDENTIAL_PRESENT_ENV,
         credential_env =
-            if source.repo_token.is_some() { "1" } else { "0" },
+            if staged.credential().is_some() { "1" } else { "0" },
         git_host_env = GIT_HOST_ENV,
         git_host = ruby_string(host_keys.map_or("", |k| k.host())),
         host_keys_url_env = HOST_KEYS_URL_ENV,
@@ -679,9 +686,9 @@ fn credential_block(configured: bool) -> String {
 /// people forget is the test, so the new file would be written
 /// to the host without ever being checked.
 #[must_use]
-pub fn files(cfg: &Config) -> [(&'static str, String); 2] {
+pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 2] {
     [
-        (VAGRANTFILE_NAME, render(cfg)),
+        (VAGRANTFILE_NAME, render(cfg, staged)),
         (BOOTSTRAP_NAME, BOOTSTRAP.to_owned()),
     ]
 }
@@ -778,6 +785,15 @@ mod tests {
         cfg
     }
 
+    /// [`render`] against the [`Staged`] this config implies.
+    ///
+    /// Every test here renders a config the operator could have
+    /// written, so the pair always comes from one place --
+    /// `Config::staged_for_tests` builds it.
+    fn rendered_for(cfg: &Config) -> String {
+        render(cfg, &cfg.staged_for_tests())
+    }
+
     /// What one provisioner variable renders as in `out`,
     /// quotes included.
     ///
@@ -823,7 +839,7 @@ mod tests {
 
     #[test]
     fn a_github_clone_over_ssh_is_told_where_the_keys_are() {
-        let out = render(&cfg_cloning("git@github.com:you/private.git"));
+        let out = rendered_for(&cfg_cloning("git@github.com:you/private.git"));
         assert_host_keys(
             &out,
             "\"github.com\"",
@@ -834,7 +850,8 @@ mod tests {
 
     #[test]
     fn a_bitbucket_clone_needs_no_json_parsing() {
-        let out = render(&cfg_cloning("ssh://git@bitbucket.org/you/p.git"));
+        let out =
+            rendered_for(&cfg_cloning("ssh://git@bitbucket.org/you/p.git"));
         assert_host_keys(
             &out,
             "\"bitbucket.org\"",
@@ -850,7 +867,7 @@ mod tests {
         // not break the clone -- OpenSSH folds case -- but it
         // would put a spelling in `known_hosts` that came from
         // the config rather than from bombyx.
-        let out = render(&cfg_cloning("git@GitHub.COM:you/p.git"));
+        let out = rendered_for(&cfg_cloning("git@GitHub.COM:you/p.git"));
         assert_eq!(rendered(&out, GIT_HOST_ENV), "\"github.com\"");
     }
 
@@ -871,7 +888,7 @@ mod tests {
             // entry.
             "git@github.com.example.invalid:you/p.git",
         ] {
-            let out = render(&cfg_cloning(repo));
+            let out = rendered_for(&cfg_cloning(repo));
             assert_host_keys(&out, "\"\"", "\"\"", "\"\"");
         }
     }
@@ -904,7 +921,7 @@ mod tests {
         // still there. So the whole tail is one literal, which
         // pins the separator, the indentation, the order and
         // the closing brace together.
-        let out = render(&cfg_with_env());
+        let out = rendered_for(&cfg_with_env());
         let tail = concat!(
             "\"BOMBYX_VM_HOSTNAME\" => ",
             "ENV.fetch(\"BOMBYX_VM_HOSTNAME\", \"unknown\"),\n",
@@ -919,7 +936,7 @@ mod tests {
     fn carries_the_projects_own_variables() {
         // Whole rendered lines, for the reason
         // `carries_every_configured_value` gives below.
-        let out = render(&cfg_with_env());
+        let out = rendered_for(&cfg_with_env());
         for needle in [
             "\"GIT_USER_NAME\" => \"Igor Brejc (agent VM)\"",
             "\"NODE_MAJOR\" => \"22\"",
@@ -933,7 +950,7 @@ mod tests {
         // Vagrant does not care about the order. A reader
         // diffing two generated files does, and so does anyone
         // asking whether a re-run changed anything.
-        let out = render(&cfg_with_env());
+        let out = rendered_for(&cfg_with_env());
         let git = out.find("GIT_USER_NAME").expect("the first name");
         let node = out.find("NODE_MAJOR").expect("the second name");
         assert!(git < node, "not in name order:\n{out}");
@@ -943,7 +960,7 @@ mod tests {
     fn a_project_with_no_variables_renders_bombyxs_own_set() {
         // The absent table must not leave a stray comma or an
         // empty line behind in the hash literal.
-        let out = render(&cfg_with(Provider::Libvirt));
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
         assert!(
             out.contains(
                 "\"BOMBYX_VM_HOSTNAME\" => ENV.fetch(\"BOMBYX_VM_HOSTNAME\", \"unknown\")\n    }"
@@ -961,7 +978,7 @@ mod tests {
         // stay green even with `v.cpus` deleted from the
         // template. A test that cannot fail is worse than none,
         // because it looks like cover.
-        let out = render(&cfg_with(Provider::Libvirt));
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
         for needle in [
             "config.vm.box = \"generic/ubuntu2204\"",
             "v.cpus = 4",
@@ -983,7 +1000,7 @@ mod tests {
         // refuses NFS from the guest bridge, which
         // docs/vm-host-setup.md warns about.
         for provider in [Provider::Libvirt, Provider::Hyperv] {
-            let out = render(&cfg_with(provider));
+            let out = rendered_for(&cfg_with(provider));
             assert!(
                 out.contains(
                     "config.vm.synced_folder \".\", \"/vagrant\", \
@@ -1002,7 +1019,7 @@ mod tests {
         // pass its own environment into a VM, so the
         // Vagrantfile has to hand them over deliberately. Since
         // bombyx writes that file, this is where it happens.
-        let out = render(&cfg_with(Provider::Libvirt));
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
         for var in [crate::remote::VM_HOST_ENV, crate::remote::VM_HOSTNAME_ENV]
         {
             assert!(
@@ -1016,8 +1033,10 @@ mod tests {
 
     #[test]
     fn names_the_provider_it_was_given() {
-        assert!(render(&cfg_with(Provider::Libvirt)).contains(":libvirt"));
-        assert!(render(&cfg_with(Provider::Hyperv)).contains(":hyperv"));
+        assert!(
+            rendered_for(&cfg_with(Provider::Libvirt)).contains(":libvirt")
+        );
+        assert!(rendered_for(&cfg_with(Provider::Hyperv)).contains(":hyperv"));
     }
 
     #[test]
@@ -1034,7 +1053,7 @@ mod tests {
         // the two sides cannot disagree -- there is no
         // cross-file agreement to check here, which is why this
         // is a plain rendering test.
-        let out = render(&cfg_with(Provider::Libvirt));
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
         assert!(out.contains("path: \"bootstrap.sh\""), "{out}");
         assert!(out.contains("config.vm.provision"), "{out}");
     }
@@ -1062,8 +1081,7 @@ mod tests {
         // Vagrantfile declares them, so the upload has to come
         // first or the bootstrap looks for a key that is not
         // there yet.
-        let out = cfg_with_key();
-        let out = render(&out);
+        let out = rendered_for(&cfg_with_key());
         let upload = out
             .find("config.vm.provision \"file\"")
             .expect("the file provisioner must be rendered");
@@ -1091,7 +1109,7 @@ mod tests {
         //
         // The loud failure lives in the plan instead:
         // `plan::tests::a_deploy_key_is_checked_before_anything_is_created`.
-        let out = render(&cfg_with_key());
+        let out = rendered_for(&cfg_with_key());
         assert!(out.contains("if File.exist?"), "{out}");
         assert!(!out.contains("raise"), "a raise breaks destroy:\n{out}");
     }
@@ -1101,7 +1119,7 @@ mod tests {
         // A public repository needs no credential, and an
         // upload block with an empty path would fail every
         // `up`.
-        let out = render(&cfg_with(Provider::Libvirt));
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
         for absent in [
             "config.vm.provision \"file\"",
             "File.expand_path",
@@ -1118,7 +1136,7 @@ mod tests {
         // the upload lands in a directory the agent's user
         // owns, so a leftover or a `touch` would answer for the
         // operator's config.
-        let out = render(&cfg_with_key());
+        let out = rendered_for(&cfg_with_key());
         assert!(
             out.contains(&format!("\"{DEPLOY_KEY_ENV}\" => \"1\"")),
             "{out}"
@@ -1129,7 +1147,7 @@ mod tests {
     fn no_key_announces_a_zero_rather_than_nothing() {
         // Rendering nothing would leave the guest's own
         // environment to answer. [`DEPLOY_KEY_ENV`] says why.
-        let out = render(&cfg_with(Provider::Libvirt));
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
         assert!(
             out.contains(&format!("\"{DEPLOY_KEY_ENV}\" => \"0\"")),
             "{out}"
@@ -1198,7 +1216,7 @@ mod tests {
 
     #[test]
     fn a_repo_token_adds_an_upload_and_no_repo_token_adds_none() {
-        let with = render(&cfg_with_credential());
+        let with = rendered_for(&cfg_with_credential());
         assert!(
             with.contains("bombyx_git_cred = File.expand_path"),
             "the upload block is missing:\n{with}"
@@ -1214,7 +1232,7 @@ mod tests {
             "the source is not the staged file:\n{with}"
         );
 
-        let without = render(&cfg_with_env_file());
+        let without = rendered_for(&cfg_with_env_file());
         assert!(
             !without.contains("bombyx_git_cred"),
             "a project with no repo_token gets no upload block:\n{without}"
@@ -1228,18 +1246,24 @@ mod tests {
         // could claim a token was configured and keep a stale
         // credential alive.
         assert_eq!(
-            rendered(&render(&cfg_with_credential()), CREDENTIAL_PRESENT_ENV),
+            rendered(
+                &rendered_for(&cfg_with_credential()),
+                CREDENTIAL_PRESENT_ENV
+            ),
             "\"1\""
         );
         assert_eq!(
-            rendered(&render(&cfg_with_env_file()), CREDENTIAL_PRESENT_ENV),
+            rendered(
+                &rendered_for(&cfg_with_env_file()),
+                CREDENTIAL_PRESENT_ENV
+            ),
             "\"0\""
         );
     }
 
     #[test]
     fn an_env_file_adds_an_upload_and_no_env_file_adds_none() {
-        let with = render(&cfg_with_env_file());
+        let with = rendered_for(&cfg_with_env_file());
         assert!(
             with.contains("bombyx_env_file = File.expand_path"),
             "the upload block is missing:\n{with}"
@@ -1253,7 +1277,7 @@ mod tests {
             "the source is not the staged file:\n{with}"
         );
 
-        let without = render(&cfg_with(Provider::Libvirt));
+        let without = rendered_for(&cfg_with(Provider::Libvirt));
         assert!(
             !without.contains("bombyx_env_file"),
             "a project with no env_file gets no upload block:\n{without}"
@@ -1267,7 +1291,7 @@ mod tests {
         // Vagrantfile afterwards. A `raise` on a missing file
         // would strand a directory no bombyx command could clear
         // -- the same argument the deploy key's block carries.
-        let out = render(&cfg_with_env_file());
+        let out = rendered_for(&cfg_with_env_file());
         assert!(
             out.contains("if File.exist?(bombyx_env_file)"),
             "the upload must be guarded by an existence test:\n{out}"
@@ -1286,15 +1310,39 @@ mod tests {
         // guest would then be answering a question about the
         // operator's config.
         assert_eq!(
-            rendered(&render(&cfg_with_env_file()), ENV_FILE_PRESENT_ENV),
+            rendered(&rendered_for(&cfg_with_env_file()), ENV_FILE_PRESENT_ENV),
             "\"1\""
         );
         assert_eq!(
             rendered(
-                &render(&cfg_with(Provider::Libvirt)),
+                &rendered_for(&cfg_with(Provider::Libvirt)),
                 ENV_FILE_PRESENT_ENV
             ),
             "\"0\""
+        );
+    }
+
+    #[test]
+    fn what_the_guest_is_told_follows_what_was_staged() {
+        // The render and the write step read one value. A
+        // Vagrantfile announcing a secrets file that `plan`
+        // never stages boots a VM that refuses minutes later,
+        // reading "an env_file is configured but nothing
+        // arrived" -- so the config's `env_file` key does not
+        // decide this on its own.
+        let cfg = cfg_with_env_file();
+        let announced = render(&cfg, &cfg.staged_for_tests());
+        assert_eq!(rendered(&announced, ENV_FILE_PRESENT_ENV), "\"1\"");
+        assert!(
+            announced.contains("bombyx_env_file = File.expand_path"),
+            "the upload block is missing:\n{announced}"
+        );
+
+        let unstaged = render(&cfg, &Staged::default());
+        assert_eq!(rendered(&unstaged, ENV_FILE_PRESENT_ENV), "\"0\"");
+        assert!(
+            !unstaged.contains("bombyx_env_file = File.expand_path"),
+            "an upload block for a file nothing stages:\n{unstaged}"
         );
     }
 
@@ -1309,7 +1357,10 @@ mod tests {
         //
         // The contents are covered separately, in `plan`: they
         // travel on a pipe and reach no command line at all.
-        for (name, contents) in files(&cfg_with_env_file()) {
+        for (name, contents) in files(
+            &cfg_with_env_file(),
+            &cfg_with_env_file().staged_for_tests(),
+        ) {
             assert!(
                 !contents.contains(ENV_FILE),
                 "{name} holds the workstation path"
@@ -1356,7 +1407,7 @@ mod tests {
         for provider in [Provider::Libvirt, Provider::Hyperv] {
             let mut cfg = cfg_with_key();
             cfg.vm.provider = provider;
-            let out = render(&cfg);
+            let out = rendered_for(&cfg);
             assert!(!out.contains("privileged: true"), "{out}");
             // Per shell provisioner, not per file. `privileged:`
             // is legal on a `file` provisioner as well, so

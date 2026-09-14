@@ -102,10 +102,11 @@ mkdir -p target
 git ls-files --others --exclude-standard  # untracked: check first
 git add -N <the untracked paths of this work>
 EXCL=':(exclude)docs/developer/*-log.md'
+DIARY=':(exclude)docs/developer/DIARY.md'
 OUT=target/review-1
-git diff "$BASE" -- . "$EXCL" > "$OUT.diff"
+git diff "$BASE" -- . "$EXCL" "$DIARY" > "$OUT.diff"
 git diff --name-only --diff-filter=d "$BASE" -- . "$EXCL" \
-  > "$OUT.files"
+  "$DIARY" > "$OUT.files"
 ```
 
 That pair is stage 1's snapshot, so stage 1 does not take
@@ -123,8 +124,10 @@ land in their next `git commit -a`.
 from the paths before it, which is why `.` comes first. The
 backlogs are subtracted because the stages write to them, and
 left in they would hand each round the previous round's own
-report to find defects in. `--diff-filter=d` drops deleted
-paths, which `fresh-reader` can only fail to open.
+report to find defects in. The diary is subtracted because
+`code-reviewers.md` exempts it and nothing else was dropping
+it. `--diff-filter=d` drops deleted paths, which `fresh-reader`
+can only fail to open.
 
 The index keeps the intent-to-add entries. Report that, and
 report the undo with it: `git reset -- <the paths added with
@@ -178,9 +181,12 @@ A failure recorded here is normally left for the stage that
 owns it. Some failures cannot be recorded without a fix first
 -- a sample config that will not load, a quoted command with a
 typo in it. **If you fix anything while running the artifacts,
-write the snapshot again before spawning anyone.** Overwrite
-the same name: a fix made here is the one edit no reviewer has
-seen, so it is exactly the one they must be shown.
+re-run both of the commands under Snapshot before spawning
+anyone.** Overwrite the same name: a fix made here is the one
+edit no reviewer has seen, so it is exactly the one they must
+be shown. Both commands, because a fix that adds a file changes
+the `.files` list as well as the diff, and `fresh-reader` reads
+the list.
 
 ### Re-snapshot before each stage and each round
 

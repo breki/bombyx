@@ -384,7 +384,7 @@ pub(crate) fn rank(
         return Ok((checked(host, &origin, path)?, origin));
     }
     Err(ConfigError::HostMissing {
-        place: super::read::path_display(registry.path()),
+        place: registry.path().to_path_buf(),
     })
 }
 

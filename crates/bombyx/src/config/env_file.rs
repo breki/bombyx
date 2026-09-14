@@ -81,6 +81,17 @@ impl Secrets {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.0
     }
+
+    /// Secrets holding `bytes`, for a test.
+    ///
+    /// Production code gets these out of the operator's file
+    /// through [`EnvFilePath::read`], and a test wanting a
+    /// [`super::Staged`] goes through `Config::staged_for_tests`
+    /// rather than calling this directly.
+    #[cfg(test)]
+    pub(crate) fn for_tests(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
 }
 
 impl fmt::Debug for Secrets {
