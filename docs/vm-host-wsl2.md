@@ -384,6 +384,17 @@ your home network" in [vm-host-setup.md](vm-host-setup.md) turns
 out to be **smaller** on a WSL host than on a dedicated one, and
 the reason is worth knowing rather than assuming either way.
 
+**Read both measurements in this section as suspect**
+*(unverified)*. The probe `docs/vm-host-setup.md` published at
+the time read from the socket after connecting, and that times
+out on any port which waits for the client to speak first, so it
+reported a blocked path for a port that had answered. The diary
+does not say which probe either run used. If they used that one,
+the error runs toward more exposure than this section describes
+rather than less. Both results below are therefore open
+questions, and the corrected helper is under "Checking that it
+worked" in that document.
+
 Measured on this setup: a guest could reach the internet and
 resolve names, and could not open TCP to the router, to the
 workstation's own LAN address, or to a Tailscale peer. Neither
@@ -404,15 +415,6 @@ guest keeps internet and DNS, and the LAN and host-gateway paths
 stay closed. Treat it as defence in depth here rather than the
 primary barrier — which is a better position to be in than
 relying on a NAT behaviour that a settings change would remove.
-
-**Re-check the "stay closed" half before relying on it**
-*(unverified)*. The probe `docs/vm-host-setup.md` published when
-this was written read from the socket after connecting, which
-times out on any port that waits for the client to speak first,
-so it reported a blocked path for a port that had answered. The
-diary does not say which probe this run used. The corrected
-helper is under "Checking that it worked" in that document, and
-it distinguishes a refused port from a silent one.
 
 One caveat carried over unchanged: `conntrack` is not installed
 by default, so the script warns that connections opened before

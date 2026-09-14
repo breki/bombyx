@@ -23,6 +23,11 @@ and this project adheres to
   80, and sshd after its banner -- so the non-zero exit status was the timeout
   rather than a refusal. They now open the socket with exec 3<> and stop, and
   the documented helper separates a refused port from a silent one.
+- The chk helper documented in docs/vm-host-setup.md passed its arguments to
+  bash -c as text, so an address containing shell syntax was executed. It now
+  passes them as positional arguments. Also in that section: the host-side
+  agent-vm-firewall status is named as the check that confirms the rules are
+  loaded, and the guest probes are described as a sanity check on top of it.
 
 ### Removed
 

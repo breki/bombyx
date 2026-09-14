@@ -20,22 +20,26 @@ plan, decisions, and outcome.
 - `agent-vlan` -- isolate VMs on a VLAN with an egress allowlist.
   Enforced at the router.
 
-- **host-network-isolation** -- apply and verify the nftables rules on frosti
-  docs/vm-host-setup.md now documents an nftables ruleset that keeps agent VMs
-  off the home LAN, the tailnet, Docker and the VM host's own services, while
-  leaving outbound internet working. It is marked unverified: the rules were
-  derived from frosti's actual network layout (virbr1 on 192.168.121.0/24, host
-  on 192.168.50.10 via wlp4s0, plus tailscale0 and docker0) but have not been
-  applied, because sudo on frosti needs a password and cannot run from a bombyx
-  session. Run `agent-vm-firewall apply`, then the in-VM verification snippet
-  including the IPv6 check, then `persist` -- and reboot and run `status`, since
-  persistence is the one part that cannot be confirmed any other way and fails
-  silently. Only then drop the unverified marker from the heading. Watch for two
-  things the review flagged as untested in both directions: whether the input
-  drop breaks anything the guest starts against the host, and whether `nft -c`
-  accepts the generated ruleset on this nft version. This is a host-level
-  stopgap for agent-vlan, not a replacement: enforcement sits on the machine
-  being protected.
+- **host-network-isolation** -- confirm the nftables rules survive a reboot
+  `apply` and `persist` have run on frosti, and the in-VM checks pass: the
+  guest keeps its outbound internet access, the router is rejected by the
+  forward chain, and frosti's own addresses are dropped by the input chain.
+  `nft -c` accepts the generated ruleset on nftables 1.0.9, and a fresh
+  host-into-guest connection still works, so the input drop does not break
+  bombyx. The 2026-09-14 diary entry holds the detail.
+  What is left is the reboot. Persistence is the one part that cannot be
+  confirmed any other way and it fails silently, so run
+  `sudo agent-vm-firewall status` after a restart and only then drop the
+  *(unverified)* marker from the heading in docs/vm-host-setup.md.
+  Three things stay unexercised whatever the reboot says. The IPv6 rule,
+  because the guest has no IPv6 route at all. The WSL host, which nobody has
+  re-checked since the probe was corrected. And the pinned DHCP and DNS
+  accepts: issue #92 records that the guest resolves through public resolvers
+  baked into the box image, so the `dns: ok` line answered through those and
+  never asked the gateway. Deleting those accepts would leave every check we
+  ran still passing. This is a host-level stopgap for
+  agent-vlan, not a replacement: enforcement sits on the machine being
+  protected.
 
 - **suspend-resume-commands** -- save and restore VM RAM state mid-task
   Add `bombyx suspend` / `bombyx resume` subcommands wrapping `vagrant suspend`

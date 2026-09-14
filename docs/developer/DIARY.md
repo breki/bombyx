@@ -4,6 +4,59 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-14
 
+**The review found the replacement probe was injectable, and
+that we had rewritten one rule into falsehood three times**
+
+Three stages, four rounds, twenty-five findings. Two are worth
+recording beyond the log files.
+
+The `chk` helper we published to replace the broken probe
+spliced its arguments into a string that `bash -c` then parsed,
+so anything in the address argument ran as code. A crafted
+first argument executed `id` and wrote it to a file while the
+helper printed `REACHABLE`. This is a snippet the document tells
+operators to paste and adapt with addresses copied out of a
+router page. Passing the values as arguments --
+`bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$1" "$2"` -- closes it,
+and the fix was verified by re-running the exploit against the
+text extracted from the document.
+
+The second is the one to learn from. The document tried to
+teach the operator how to read a probe's exit status as
+evidence about the firewall, and we wrote that rule three
+times. Each version was checkable, and each was false for a
+case the previous one had not considered: first "the same word
+on both lines means something else is blocking", then "a
+destination the host routes to meets the forward chain", which
+ignores that the forward chain rejects only the denylisted
+ranges. What the mapping actually depends on is four
+independent facts -- whether the address is one the host holds
+or routes to, whether it falls in the denylist, whether
+anything listens there, and whether the guest's resolver
+bypasses the path at all. Every compact statement drops one.
+
+The operator stopped it by choosing to claim less. The
+interpretive rules are gone. `agent-vm-firewall status` on the
+host is named as the check that settles whether the rules are
+loaded, the guest block is described as a sanity check on top
+of that, and a table gives the expected result per line scoped
+to a host set up like the example. The two recurring surprises
+are named rather than derived.
+
+Two findings landed on our own prose habits. A comment in the
+script explained itself in terms of a placeholder that the
+review had just removed, which is the "do not narrate the past"
+rule. And the section still opened "The rules below have not
+yet been applied to a running host" after we had applied them
+and said so in two other files -- we edited that heading's
+neighbours twice without reading the paragraph beneath it.
+
+One reviewer suggestion was measured and rejected. `fresh-reader`
+proposed `msg=$(...) || true` for running the helper under
+`set -e`; that yields a status of 0 on a failing probe, which is
+the same defect the whole change removes. The document carries
+`msg=$(...) && status=0 || status=$?` instead.
+
 **The firewall verification snippet reported success whether or
 not the rules were loaded**
 

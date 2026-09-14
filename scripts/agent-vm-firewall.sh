@@ -324,15 +324,30 @@ cmd_apply() {
   fi
 
   echo
+  echo "What confirms the rules are loaded: sudo $0 status"
+  echo "The checks below show what they do to a running guest."
+  echo
   echo "Verify from inside a VM (bombyx shell):"
   echo "  curl -sS -m 5 https://example.com >/dev/null && echo internet ok"
   echo "  getent hosts github.com >/dev/null && echo dns ok"
-  # `exec 3<>` opens the socket and stops. Reading from it with
-  # `cat` instead hangs on a port that waits for the client to
-  # speak -- port 80, and sshd after its banner -- so `timeout`
-  # kills it and "blocked" gets printed for a port that answered.
-  echo "  timeout 3 bash -c 'exec 3<>/dev/tcp/<router>/80' || echo LAN blocked"
-  echo "  timeout 3 bash -c 'exec 3<>/dev/tcp/$GATEWAY/22' || echo host blocked"
+  # Every probe printed here has its address filled in already.
+  # An unsubstituted address exits 1, and 1 is also what a
+  # refusal gives, so a placeholder left in place would read as
+  # a pass.
+  # `exec 3<>` opens the socket and stops; `cat` would go on to
+  # read, and hang on a port that waits for the client to speak
+  # -- port 80, and sshd after its banner.
+  echo "  timeout 3 bash -c 'exec 3<>/dev/tcp/$GATEWAY/22'; echo \$?"
+  echo "      124 is right: the input chain drops it, so nothing"
+  echo "      answers. 0 means the guest connected. 1 means"
+  echo "      something refused it, so the packet still reached"
+  echo "      this host. Only 124 says the drop is in force."
+  echo
+  echo "That probe needs no editing. Checking the LAN and any second"
+  echo "resolver does, and a wrong or unresolvable address exits 1 --"
+  echo "the same status a refusal gives, so the two cannot be told"
+  echo "apart here. The helper under 'Checking that it worked' in"
+  echo "docs/vm-host-setup.md reads stderr and separates them."
   echo
   echo "Lasts until reboot. Make it permanent: sudo $0 persist"
   echo "Undo it now:                           sudo $0 revert"
