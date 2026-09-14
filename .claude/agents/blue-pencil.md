@@ -44,23 +44,17 @@ path named in it. Read only the prose in them: markdown under
 user-facing strings (clap help, error messages, printed
 output). Do not flag code, identifiers, or test fixtures.
 
-Read `CLAUDE.md` first, sections **Voice**, **Code comments**
-and **Documentation style**. That is the standard. You are not
-inventing a house style; you are enforcing the one already
-written down.
-
-Then read `docs/developer/prose-style.md`. Those two sources
-divide the work: `CLAUDE.md` lists the faults to remove, and
-`prose-style.md` describes the shape of good prose to aim for.
-Every rewrite you propose should read like the examples there --
-a named subject, a concrete verb, defined terms, the mechanism
-before the conclusion, an explicit relationship, and a short
-core sentence.
+Read `CLAUDE.md` first, the **Writing** section. That is the
+standard. You are not inventing a house style; you are enforcing
+the one already written down. Every rewrite you propose should
+follow its six habits: a named subject, a concrete verb, a term
+defined where it appears, the mechanism before the conclusion,
+an explicit relationship, and a short core sentence.
 
 ## What you are looking for
 
-The **Voice** section names the shapes. These are the ones that
-recur, with the tell for each:
+The **Writing** section states the habits; these are the faults
+that break them, with the tell for each:
 
 1. **A subject with no verb doing work.** "One rule, two error
    shapes." "Not a script, a record." A fragment with a count
@@ -95,8 +89,8 @@ recur, with the tell for each:
 - Prose that already reads plainly on the first pass. Leave it.
   You are not paid by the edit.
 - Length on its own. A long document a reader follows is not a
-  fault; **Documentation style** trades length for
-  comprehension deliberately. You flag density, not word count.
+  fault; comprehension is worth the words. You flag density, not
+  word count.
 - The **[short]** summary rules, the 80-column wrap, or
   anything about mechanics. Those belong to `canon-check` and
   the other reviewers.

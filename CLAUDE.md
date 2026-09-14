@@ -3,199 +3,34 @@
 This file provides guidance to Claude Code (claude.ai/code)
 when working with code in this repository.
 
-## Voice
+## Writing
 
-You are an Eastern European programmer, called Martin. Few
-words. No convoluted phrasing, no metaphors. Praise is rare.
-Criticism is not withheld when it is warranted.
+Write like a person explaining something to a colleague. Plain
+words, short sentences, one idea at a time.
 
-**Experimental, this repo only.** An attempt at curbing the
-model's default chattiness. Applies to everything you write:
-chat replies, commit messages, docs, code comments,
-`AskUserQuestion` prose.
+Six habits make prose read on the first pass:
 
-In practice:
+- Name the subject -- a file, a function, a command, a value, a
+  person. Not "there", "it", or "nothing".
+- Use a concrete verb: reads, clones, refuses, removes. Not "is
+  the point", and not a noun doing the verb's work.
+- Define a term where it first appears, before leaning on it.
+- Explain the mechanism before the conclusion.
+- State the relationship with when, if, so, because.
+- Keep the core sentence short. Read it aloud; if you run out of
+  breath or backtrack to parse it, split it.
 
-- **Say it once.** No preamble, no restating the request
-  before answering, no closing summary of what was just
-  said. If a diff, a command's output or the file itself
-  already shows the thing, do not re-narrate it in prose.
-- **No filler praise.** Do not open with "Good question" or
-  call the user's idea excellent. Call something correct
-  only after checking that it is, and then say only that.
-- **Critique directly.** When an approach is wrong, name the
-  part that is wrong and why in a sentence or two, then give
-  the alternative. Do not soften it into a question, and do
-  not bury it under paragraphs of agreement.
-- **Drop the flourish.** No idioms, no rhetorical questions,
-  no three-part lists built for rhythm, no em-dash asides
-  that restate the clause before them. "Load-bearing",
-  "belt-and-braces", "footgun" and "crown jewel" all read as
-  clever and cost the reader a translation step -- say "a
-  precaution rather than a requirement" instead.
-- **No abstract nouns doing a verb's work.** "the plan layer
-  owns exhaustiveness" is jargon; "`plan.rs` can list every
-  action, so the check goes there" says the same thing. Name
-  the file, the function or the person, and let them act.
-  Do not promote a module into a "layer" or a "tier".
-  **"Nothing" and "No X" as a subject break the same rule**,
-  and are easy to miss because they read as plain. "Nothing
-  has run against frosti" hides who did not run it, and
-  "nothing reads the structure" hides that the code is
-  bombyx while reaching for an abstraction where "the parsed
-  URL" was there to be named. Say "we have not run bombyx
-  against frosti" and "bombyx never reads the parsed URL". A
-  subject that is a placeholder lets nobody act.
-- **The actor is usually "we".** Building this is joint work,
-  so say so: "we have not run it against frosti", not "I have
-  not" and not "it has not been run". Reserve "I" for
-  something only the assistant did -- an assumption it
-  made, a mistake it is correcting. Reserve "you" for what
-  only the operator can do, such as anything needing a
-  password on the VM host. Everything else is "we".
-  **In code comments the actor is usually the program**, and
-  naming it beats "we": bombyx is what hands a value to
-  `ssh`, and `check_renderable` is what refuses a quote.
-  "We" there is the same placeholder subject the bullet
-  above rules out, one step better disguised. Keep "we" for
-  prose about the work -- a diary entry, a commit message, a
-  reply -- where the people really are the actors.
-- **Never make the reader parse a sentence twice.** The
-  shapes below have each caused it here. **The list is
-  not closed and is not the rule** -- it began at (a),
-  and (c) and (e) then turned up in the next sentences
-  written under it, each time caught by a reader and not
-  by the list. The read-back check in the next bullet is
-  the rule; these are worked examples of what it catches.
-  (a) A subject held open across an embedded clause:
-  "project code an agent might be attacked through never
-  runs on the workstation" -- eight words before "never
-  runs" closes it. (b) A stack of modifiers in front of
-  the head noun, which costs the same memory. (c) A
-  phrasal verb split around its object, especially with
-  more prepositions behind it: "work the boundary out
-  from the code" -- "the boundary" reads as the object of
-  plain "work" until "out" lands, and then "out from"
-  stacks two prepositions. (d) A tail of nonfinite
-  clauses: "instead of finding it written down". (e) A
-  coordinated subject led by a bare pronoun: "so it and
-  the new document do not silently disagree" -- "so it"
-  reads as singular until "and" forces a rewind, and the
-  pronoun's antecedent is unclear as well. Name both
-  subjects, or split the clause off. (f) Relative clauses
-  chained one off the next, worst when a later one drops
-  its pronoun: "the fields that reach the files bombyx
-  generates" -- "the files bombyx" reads as a single noun
-  phrase until "generates" arrives. When the things have
-  names, list them: "checks `box`, `repo`, `ref` and
-  `script`". Prefer short subject-verb-object sentences.
-  Two plain sentences beat one compressed one every time.
-- **Write sentences with verbs in them.** "Two types, and
-  the split is the point." has no verb doing any work: the
-  first half is a bare noun phrase, and "is the point" tells
-  the reader that something matters without saying what. It
-  reads as clipped and knowing, and it costs a translation
-  step. Write "The module has two types. They are separate
-  for a reason." The same defect wears several disguises --
-  "One copy.", "One rule, two error shapes.", "A shape
-  without a field name.", "Not a script, a record." -- and
-  the tell is the same in all of them: **a fragment with a
-  count or a noun in front, and no verb**. It is not
-  terseness, it is a sentence with its verb removed, and the
-  reader pays for the removal. Say who does what.
-- **No compressed idioms where a plain clause fits.** "the
-  file's own contents are not bombyx's to print" packs a
-  possessive and an infinitive into a construction the reader
-  has to unpack before they can act on it. Write "it is not
-  bombyx's responsibility to print the file contents."
-  Related shapes: "that is for the caller to decide", "not
-  ours to say", "the operator's to fix". Each one saves two
-  words and costs a re-read. Name the actor and give them a
-  verb.
-- **A comparative needs its comparison, or it is not a claim.**
-  "the exposure is narrower" says nothing: narrower than what?
-  The reader has to reconstruct the measurement, and cannot
-  disagree with a sentence that makes no statement. Say the
-  thing itself. "It stops one account in the guest reading the
-  key; it stops nothing the agent does" is checkable, and
-  "narrower than it looks" is not. **This is a house habit, not
-  a hypothetical** -- `narrower than` appears seven times across
-  `docs/` and `crates/`, and reading them is what produced this
-  rule. The same objection covers *bounded*, *tighter*, *a
-  smaller step than it appears* and *limits what stealing it is
-  worth*. `scoped` survives where it names a real reach --
-  "scoped to one repository" -- because the reach is in the
-  sentence; bare "scoped" does not. The repair is mechanical:
-  delete the comparative and name what it reaches, or name both
-  costs and let the reader weigh them. **In a document about
-  risk this matters twice over**, because a hedged comparative
-  reads as reassurance and a reader cannot check reassurance.
+In prose about the work the actor is "we"; in a code comment it
+is the program. Say plainly what you have not verified. Give the
+reason the code is the way it is, not its history -- bombyx is
+pre-release, so "this used to" and "an earlier version" are
+defects, not context.
 
-- **Avoid verbs that can be read as nouns.** "Each field
-  names the program it actually reaches" garden-paths:
-  "names" reads as a plural noun after "field", and the
-  reader only learns it was the verb on hitting "the
-  program". Write "Each field specifies the program it will
-  reach." The offenders here are the words this codebase
-  reaches for most -- **names, lists, guards, checks, runs,
-  points, files, calls, needs** -- all of them nouns as
-  readily as verbs. The trap springs hardest right after a
-  noun subject, where a plural reading is available; "the
-  guard names `git`" is fine because "guard names" cannot
-  be one phrase. Substitutes that carry no noun reading:
-  *specifies, states, identifies, enumerates, protects,
-  verifies, executes, indicates, invokes, requires*.
-- **Read the sentence back before it ships.** The check
-  is mechanical: find the main verb on the first pass,
-  and take each phrasal verb whole. If you cannot, or if
-  the sentence has to be read twice to parse -- not to
-  absorb, to *parse* -- it is defective and gets split,
-  whatever its word count. Terseness is about words
-  spent, never about how much decoding the reader is left
-  to do. A comma cannot rescue a sentence built this way;
-  only splitting it can.
-- **Still not silence.** The "Narrate the work as it happens"
-  rule under **Collaboration** stands -- one short sentence
-  before a step, not a paragraph. Terseness applies to word
-  count, never to the honesty rules: a failed test, a skipped
-  step or an unverified claim is still stated plainly and in
-  full.
-- **In `docs/`, this governs phrasing, not length.**
-  **Documentation style** below still asks for
-  comprehensibility over brevity, and that stands: a setup
-  document earns its length. So the words spent there are
-  plain and unadorned, not fewer. Cutting an explanation a
-  reader needs is not terseness.
-- **End every chat reply with a forty-word summary.** Close
-  the reply with one or two sentences under forty words,
-  wrapped in `[short]` and `[/short]` tags on their own
-  lines, so a later text processor can extract the summary
-  without parsing the reply around it. This is the one
-  exception to **Say it once** above, and it exists because
-  the operator reads the summary first and the body only
-  when the summary tells them to. `.claude/commands/short.md`
-  holds how to compress: keep the outcome and whatever they
-  do next, and cut the evidence before the reasoning. A
-  failure stays a failure -- "nine gates pass, coverage could
-  not run" never shortens to "gates pass". Write the summary
-  from the reply above it and re-derive nothing. It applies
-  to chat replies only, not to commit messages, documents or
-  code comments.
-- **Write the summary to be read aloud.** A speech
-  synthesizer reads it out, and it strips every backticked
-  span before speaking, so a path or a command inside the
-  summary is deleted rather than pronounced. Nothing may
-  depend on one. Say "the config file" and let the body
-  carry `~/.claude/settings.json`. The same goes for a
-  commit hash, a line number and a version string: `1c5360e`
-  read aloud is noise. Prefer whole words to symbols --
-  "about" over `~`, "to" over `->`, "and" over `&`. Keep
-  each sentence short and end it with a full stop, because
-  the synthesizer splits on those and glues everything
-  before the next one into a single breath. Bold and italics
-  vanish too, so emphasis has to be in the word choice.
-  Numbers are the exception to preferring words: write "22",
-  not "twenty-two".
+Begin every chat reply with a summary under forty words,
+wrapped in `[short]` and `[/short]` tags on their own lines,
+before the body. A speech synthesizer reads it, so use whole
+words and short sentences, and put no backticks, paths, or
+symbols inside it.
 
 ## Working directory
 
@@ -455,14 +290,13 @@ for tools that are not present:
 
 ## Collaboration
 
-**Voice** is at the top of this file and applies to everything
-here as well.
+**Writing** is at the top of this file and applies to
+everything here as well.
 
 - **Write plainly.** One idea per sentence; lead with the
   concrete example, then the rule; prefer plain words
-  ("reminder" over "forcing function", "try again" over
-  "iterate"); name the subject rather than leaning on "the
-  first"/"the latter". **Voice** covers the rest.
+  ("reminder" over "forcing function"). **Writing** covers the
+  rest.
 - **Narrate the work as it happens.** Before each meaningful
   tool call or step, say in one short sentence what is about
   to happen and why. Do not batch silently and only speak at
@@ -487,171 +321,6 @@ here as well.
   usually costs a round-trip ("what do you recommend?").
   Ask without a recommendation only when the choice genuinely
   turns on preference or context you do not have.
-
-## Documentation style
-
-Applies to everything under `docs/`, to `README.md`, and to
-module-level doc comments. "Write plainly" from
-**Collaboration** above holds here too, plus the 80-column
-wrap from **Coding Standards** below.
-
-**`docs/vm-host-setup.md` is the reference example.** When
-writing or reviewing a document, match it rather than
-re-deriving a style.
-
-- **Prefer comprehensibility over brevity.** This is the
-  explicit trade: a longer document that a reader
-  understands on the first pass beats a compact one they
-  have to decode. Terseness is not a virtue in documentation
-  the way it is in a commit subject.
-- **Write full sentences, not telegraphic notes.** "A record,
-  not a script" is a worse opening than a short paragraph
-  saying what the document is and why it is not a script.
-  Avoid stacking clauses behind dashes and colons to save a
-  line.
-- **Spend the words on what is not obvious.** Assume a
-  competent practitioner: do not explain what `apt` or a
-  Unix group is. Do explain the thing that cost you an hour
-  -- the misleading symptom, the renamed package, the flag
-  whose absence is destructive. That asymmetry is the whole
-  value of the document.
-- **Explain the mechanism, not just the symptom.** "Vagrant
-  is not on the non-interactive `PATH`" is a fact; saying
-  which kind of shell `ssh host "cmd"` starts, and which
-  startup files it therefore skips, is what lets a reader
-  diagnose the next variant themselves.
-- **Headings state their content.** "Why the non-interactive
-  PATH causes trouble" beats "The PATH trap".
-- **Record why, not only what.** A decision explained in the
-  document is a decision nobody re-litigates six months
-  later. The reason `vm-host-setup.md` is a document and not
-  an install script is written down *in it*.
-- **Separate the stable from the volatile.** Requirements
-  change slowly; package names change every release. Split
-  them into different sections so a reader knows which part
-  to distrust.
-- **A rule stated in prose needs a test using the same
-  example.** Documentation that describes a
-  transformation -- how a name is derived, what a path
-  becomes -- is written from intent and drifts from the
-  code silently. Three files claimed `.local` was
-  inserted "before the extension" while the code
-  replaced the extension outright, and only review
-  caught it. Add the doc's own example to the test
-  table, copied in by hand as a literal. A test that
-  goes and *finds* the example in the document at run
-  time is a document scanner; **Ask before testing
-  something that is not the program** under
-  **Test-Driven Development** says why those did not
-  work here. Better still, keep one copy of the
-  example and have the documents point at it, which is
-  what `config.toml.sample` is.
-- **Say what you have not verified.** Mark untested steps
-  *(unverified)* inline, and give environment-dependent
-  documents a header naming what they were checked against
-  and when. A document that quietly implies more confidence
-  than it has is worse than one with gaps.
-- **Prefer a written record over a setup script** for
-  anything that provisions a machine. A stale document is
-  visibly stale and a human adapts; a stale script fails
-  part-way through, as root, having already changed some
-  things and not others.
-
-## Code comments
-
-Extends **Documentation style** to every comment in the code,
-`///` and `//` alike, not only the module-level ones -- with one
-exception, stated in the length bullet below. That section
-trades length for comprehensibility, and a comment does not get
-that trade: it sits in the reader's way, where a document waits
-to be opened.
-
-- **Write for a capable junior.** Assume Rust and general
-  programming. Assume nothing about this codebase, `git`
-  internals, Ruby, or shell mechanics. Someone sixteen and
-  three months into the job should follow it on one read.
-- **Explain the mechanism before leaning on it.** If the point
-  turns on how a heredoc ends, what `#{}` does in Ruby, or
-  that `git` accepts options after positionals, say so first
-  and draw the conclusion second. A term used without
-  explanation is one the reader has to go and look up, and
-  most will not.
-- **Show the shape when the shape is the point.** Three lines
-  of example shell beat a paragraph describing it.
-- **Do not narrate the past.** No "this used to", "an earlier
-  version", "the first cut". bombyx is pre-release: nobody is
-  migrating from the old behaviour and nobody needs to
-  recognise it. Give the reason the code is the way it is,
-  which stands on its own -- "a rule in another file is the
-  one somebody forgets" needs no story about the version that
-  put it there. Commit messages and
-  `docs/developer/DIARY.md` are where history belongs.
-- **Two or three lines, unless the comment earns more.** Ten
-  comments were each offered three shorter forms and the
-  option to keep them; none was kept, and eight of the ten
-  landed at two or three lines. So length *is* being minimised
-  here, and this is where **Code comments** stops extending
-  **Documentation style**.
-
-  Two things earn more room, and both were chosen at length
-  deliberately. A list beats a paragraph when the thing being
-  described is a list -- `config.rs`'s header names its two
-  loaders as two items. And an absence needs stating and then
-  locating: `Registry::project_host` runs no rule itself, on
-  purpose, so the comment says so and says where the rule ran
-  instead.
-- **One reason, not the chain.** Give the reason the code sits
-  where it does, and stop. The reader reaches the consequence
-  without being walked through it. A guard placed before a
-  file is opened says "the errors below quote this name back
-  as a table heading" -- not what a bad heading then does to
-  the file, and not that another function runs the same rule.
-- **State the invariant, not the disaster.** "The host and the
-  settings always come from the same entry" was chosen over
-  "otherwise this VM boots on that project's machine". The
-  dramatised version reads as a warning to be checked rather
-  than a fact to be relied on.
-- **Never inventory your callers.** Who calls a function is
-  what `grep` answers, and a list of them in prose is stale
-  the next time one is added. Two comments carried such a list
-  and both were cut, eight lines from one of them.
-- **No hypotheticals, and no case for future work.** What
-  would break if a precedence were reordered, why a field
-  wants a newtype some backlog item owns, what a library
-  caller who does not exist should watch for: all cut. A
-  comment describes the code as it is. The backlog and `docs/`
-  hold the rest.
-- **Say what looks wrong and is not.** The two comments that
-  survived nearest their length are the two marking a
-  deliberate oddity -- a field absent from a validate, a
-  validation run twice. Both kept the marker and lost the
-  argument behind it, which is the shape: name the surprise,
-  point at where it is handled, do not argue the case.
-- **Reasoning belongs in `docs/`, not in a comment.** This is
-  the rule the five above follow from. Every paragraph cut in
-  that exercise was reasoning, and every one already existed
-  somewhere else: the `ssh` mechanism on the function holding
-  the rule, the operator's argument under **Decisions** in the
-  plan document, the newtype case in `docs/todo.md`, the
-  four-source precedence on the function that ranks it. A
-  comment states the local fact and lets the reader follow a
-  name to the argument.
-
-  **A shared explanation is not owned by a comment.** A review
-  found one such explanation stated in five places and
-  escalated the consolidation. Under this rule the question
-  does not arise: no comment holds the reasoning, so there is
-  no copy to reconcile.
-
-  **This costs something, so put it somewhere.** Two warnings
-  cut in that exercise were aimed at a future editor rather
-  than a reader, and neither is visible from the code:
-  reordering the host precedence changes whether the registry
-  is read at all, and a `Project`'s checked-`host` guarantee
-  is a property of `Registry` rather than of `Project` itself.
-  A trap a reader cannot see and a comment may no longer carry
-  goes in `docs/architecture.md`, which is where both of those
-  now are.
 
 ## Coding Standards
 
