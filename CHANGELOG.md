@@ -28,6 +28,11 @@ and this project adheres to
   passes them as positional arguments. Also in that section: the host-side
   agent-vm-firewall status is named as the check that confirms the rules are
   loaded, and the guest probes are described as a sanity check on top of it.
+- docs/vm-host-setup.md no longer implies that agent-vm-firewall status verifies
+  the loaded rules are the ones the script would generate; it does not, and a
+  stale table passes it (issue #94). The section also records what revert
+  removes, what has actually been verified on which host, and that installing
+  the script as root narrows the tampering window rather than closing it.
 
 ### Removed
 

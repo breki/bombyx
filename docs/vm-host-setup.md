@@ -355,13 +355,16 @@ By default an agent VM can reach far more of your network than
 its purpose suggests, and nothing warns you about it. This
 section explains what it can reach and how to cut that down.
 
-The rules have been applied and persisted on a Linux host and
-on a WSL host, and the guest checks below pass on both. What
-nobody has confirmed is that they come back after a reboot,
-which is what the *(unverified)* in the heading means and the
-only reason it is still there. Persistence is also the one part
-that fails silently, so read "Making it survive a reboot" below
-before you rely on this.
+What has actually been done, since the *(unverified)* in the
+heading is doing real work. The rules have been applied and
+persisted on a Linux host and on a WSL host. The guest checks
+below have been run in their corrected form on the Linux host
+only; the WSL results predate the correction and
+[vm-host-wsl2.md](vm-host-wsl2.md) marks them suspect. Nobody
+has confirmed the rules come back after a reboot on either
+host, and persistence is the part that fails silently, so read
+"Making it survive a reboot" below before relying on this.
+Three further gaps are listed at the end of the section.
 
 ### What a VM can reach by default
 
@@ -425,9 +428,14 @@ it needs no `-t` either.
 **Run the guest checks before `apply`, not only after.** They
 are under "Checking that it worked" below, and several of them
 mean nothing unless you have seen them report the unrestricted
-answer first. Applying and then reading that section leaves you
-without the baseline; `sudo agent-vm-firewall revert` is how you
-get it back.
+answer first. So the order is: boot a guest, run that block,
+then come back here for `apply` and `persist`.
+
+If you have already applied and persisted, `revert` gets you
+back to an unrestricted guest -- but it removes the systemd
+unit and the rules file as well as the loaded table, so you are
+then back before `apply`, not before `persist`. Getting where
+you were takes both commands again, in order.
 
 The VM host can also be the machine you are sitting at; bombyx
 works that way whenever `host` names this machine. Then there
@@ -453,6 +461,18 @@ as root the next time you type that `sudo` line, and whoever
 made the write does not have to win a race against you. They
 only have to wait. The `/tmp` warning names the worst case
 rather than the only one.
+
+Installing narrows that window to one moment rather than
+closing it: `install` runs as root and copies whatever the file
+holds right then, and the copy in `/usr/local/sbin` is what
+runs as root at every later `apply`, `persist` and `status`. So
+look at the file before you install it, and install from a
+clean tree:
+
+```bash
+git status --porcelain scripts/agent-vm-firewall.sh   # expect no output
+git diff scripts/agent-vm-firewall.sh
+```
 
 `show` is the default action and is read-only. `status` reports
 whether the rules are loaded *and* still match the network they
@@ -521,9 +541,12 @@ separates the two cases, and `exec 3<>` does that.
 
 Paste the whole block below into an interactive shell in the
 guest, substituting your own router and gateway addresses. It
-defines `chk` and then calls it twice, so the first eleven
-lines are a definition rather than something to run on their
-own. It needs bash: `/dev/tcp/host/port` is a pseudo-path bash
+defines `chk` and then calls it twice, so everything from
+`chk() {` to its matching `}` is a definition rather than
+something to run on its own -- paste it whole, because stopping
+part-way leaves bash at a continuation prompt rather than
+giving you an error. It needs bash: `/dev/tcp/host/port` is a
+pseudo-path bash
 invents, not a real device, so `sh` or `dash` will not do. Do
 not put it in a script with `set -e` without changing it --
 there the `msg=$(...)` assignment carries the probe's non-zero
@@ -585,19 +608,30 @@ drops everything up to the last `": "`, leaving the part worth
 reading. A mistyped address then prints `probe broken` rather
 than quietly counting as a success.
 
-**The check that settles it runs on the host, not in the
-guest.** `sudo agent-vm-firewall status` reads the table that
-is actually loaded and re-checks that the bridge it names is
-still the one libvirt uses. What follows is a sanity check on
-top of that: it shows you what the rules do to a real guest,
-and it is not the thing that tells you they are loaded.
+**Start on the host, not in the guest.** `sudo agent-vm-firewall
+status` prints the table that is actually loaded and confirms
+the bridge it names is still the one libvirt uses. What follows
+is a sanity check on top of that: it shows you what the rules
+do to a real guest, and it is not the thing that tells you they
+are loaded.
 
-Run the block before `apply` as well as after. Two of its lines
-are supposed to change and two are supposed to stay put, and
-**a line that is supposed to change and does not is telling you
-about your probe rather than about your firewall**. That is the
-failure this whole subsection exists to prevent, and it
-survives any amount of rewriting the probe itself.
+`status` does not compare the loaded rules against the ones
+this script would generate now, so a table left over from an
+older version passes it. That has happened here: a host ran a
+predecessor ruleset for weeks whose DNS accept was not pinned
+to the gateway, reporting green throughout. Until `status`
+checks this itself, **read the table it prints against `show`**
+whenever you have changed the script or cannot say when the
+rules were last applied. Running `apply` again costs nothing
+and settles it.
+
+Run the block before `apply` as well as after, and compare the
+two runs against the table below rather than against a rule of
+thumb. Earlier versions of this section tried to give you one
+sentence for reading a result, and each of them was wrong for a
+host somebody had not thought of. The table is scoped instead,
+and a result it does not cover is a question rather than an
+answer.
 
 On a host set up like the example above -- guest bridge
 `virbr1`, gateway `192.168.121.1`, a LAN inside the private
@@ -610,12 +644,21 @@ ranges -- expect this:
 | `internet: ok` | printed | printed |
 | the IPv6 line | either | `refused, as intended` |
 
-The first two are the measurement. `internet: ok` is a control:
-it is meant to be identical, and a change there means the rules
-took away something they should have left alone. `dns: ok` is
-absent from the table on purpose and is dealt with below, as is
-the IPv6 line, whose value depends on whether the guest has an
-IPv6 route at all.
+The router and gateway lines are the measurement, and they are
+the two whose value is supposed to change. `internet: ok` is a
+control: it is meant to be identical, and a change there means
+the rules took away something they should have left alone.
+`dns: ok` is absent from the table on purpose and is dealt with
+below, as is the IPv6 line, whose value depends on whether the
+guest has an IPv6 route at all.
+
+A router line reading REACHABLE both times is the case to be
+careful with, because it has two causes that look alike. Either
+the probe is not measuring anything, or your LAN is outside the
+ranges the rules cover -- a LAN on public IPv4 space is not
+covered, which the limits at the end of this section explain.
+Confirm which by checking the loaded table for the range your
+router falls in, rather than by assuming the probe is at fault.
 
 Read anything else against the loaded table itself rather than
 against this page. `status` prints that table at the end of its

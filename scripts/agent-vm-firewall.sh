@@ -330,10 +330,11 @@ cmd_apply() {
   echo "Verify from inside a VM (bombyx shell):"
   echo "  curl -sS -m 5 https://example.com >/dev/null && echo internet ok"
   echo "  getent hosts github.com >/dev/null && echo dns ok"
-  # Every probe printed here has its address filled in already.
-  # An unsubstituted address exits 1, and 1 is also what a
-  # refusal gives, so a placeholder left in place would read as
-  # a pass.
+  # Only probes whose address is already filled in get printed
+  # here. An unsubstituted address exits 1, and a refusal gives
+  # 1 as well, so the two cannot be told apart from the status
+  # alone; the document's helper reads stderr and separates
+  # them.
   # `exec 3<>` opens the socket and stops; `cat` would go on to
   # read, and hang on a port that waits for the client to speak
   # -- port 80, and sshd after its banner.

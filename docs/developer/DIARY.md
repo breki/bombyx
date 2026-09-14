@@ -4,6 +4,45 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-14
 
+**The review hit its three-round ceiling, and the last round
+was worth running**
+
+A third red-team round ran because the reviewer had last read
+the branch before the "claim less" decision. The rewrite, the
+four findings held from round 2 and sixteen prose fixes -- some
+270 lines -- had never had a correctness reviewer on them.
+`fresh-reader` had said as much, handing one finding to a stage
+that had already closed.
+
+It found seven, three of them on the previous rounds' fixes.
+That is the ceiling, and the ceiling means the stop rule
+failed, so it goes in the record that way rather than as a
+finished run.
+
+Two are worth keeping. The rewrite moved the operator's trust
+onto `agent-vm-firewall status`, and `status` does not check
+what the new text implied: it confirms a table called `agentvm`
+exists and that its bridge still matches libvirt, and never
+compares the loaded rules against the ones the script would
+generate. The predecessor ruleset on frosti passed it for
+weeks. The prose is now written down to what the command does,
+and closing the gap in code is issue #94.
+
+The other is `revert`. We had recommended it for recovering the
+before-`apply` baseline, having read only the sentence that
+says it removes the rules. It also disables and deletes the
+systemd unit and removes the rules file, so a reader who
+follows the page in order reverts *after* persisting and
+quietly loses the persistence this branch exists to verify --
+visible only at the next reboot.
+
+The pattern across all four rounds: every fix was correct about
+the case that prompted it, and the trouble was always a rule
+stated wider than the evidence. The one interpretive sentence
+in "Checking that it worked" was written four times and was
+false four times. It is now deleted rather than rewritten, and
+the scoped table stands on its own.
+
 **The review found the replacement probe was injectable, and
 that we had rewritten one rule into falsehood three times**
 
