@@ -208,9 +208,9 @@ are doing, and prints one row per project:
 $ bombyx list
 NAME        HOST             BOX                 CPUS    MEM  STATE
 faraway     offsite.invalid  generic/ubuntu2204     4   8192  unknown
-jutro       frosti           generic/ubuntu2404     8  16384  not created
-neverbuilt  frosti           generic/ubuntu2204     4   8192  not created
-vmtest      frosti           generic/ubuntu2204     2   4096  running
+jutro       vmhost           generic/ubuntu2404     8  16384  not created
+neverbuilt  vmhost           generic/ubuntu2204     4   8192  not created
+vmtest      vmhost           generic/ubuntu2204     2   4096  running
 ```
 
 That is the whole of stdout. Rows are sorted by project name,

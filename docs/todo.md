@@ -14,16 +14,17 @@ plan, decisions, and outcome.
 
 ## Pending
 
-- `wire-frosti` -- frosti is on WiFi, and VLAN tagging needs it wired.
-  Prerequisite for the agent VLAN.
+- `wire-vm-host` -- the VM host is on WiFi, and VLAN tagging needs it
+  wired. Prerequisite for the agent VLAN.
 - `packer-box` -- bake a base box so `scratch` boots fast enough to use.
 - `agent-vlan` -- isolate VMs on a VLAN with an egress allowlist.
   Enforced at the router.
 
 - **host-network-isolation** -- confirm the nftables rules survive a reboot
-  `apply` and `persist` have run on frosti, and the in-VM checks pass: the
+  `apply` and `persist` have run on the VM host, and the in-VM checks pass: the
   guest keeps its outbound internet access, the router is rejected by the
-  forward chain, and frosti's own addresses are dropped by the input chain.
+  forward chain, and the VM host's own addresses are dropped by the input
+  chain.
   `nft -c` accepts the generated ruleset on nftables 1.0.9, and a fresh
   host-into-guest connection still works, so the input drop does not break
   bombyx. The 2026-09-14 diary entry holds the detail.
@@ -199,7 +200,8 @@ plan, decisions, and outcome.
   provisioning script and a project table.
 
 - **vm-disk-size-unset** -- no disk key, so the guest gets the box's own size
-  Found by registry-run-against-frosti (#37), driving the CLI against frosti.
+  Found by the local-route verification run (#37), driving the CLI against the
+  VM host.
   The generated Vagrantfile's provider block carries cpus and memory only, and
   no disk setting appears anywhere in the template
   (crates/bombyx/src/vagrantfile.rs, render). There is no disk key in
@@ -216,13 +218,14 @@ plan, decisions, and outcome.
   the box is how you choose the size.
 
 - **scratch-domain-name-collides** -- one libvirt domain for two scratches
-  Found by registry-run-against-frosti (#37). config.toml.sample claims that
+  Found by the local-route verification run (#37). config.toml.sample claims
+  that
   scratch VMs land in remote_root/scratch/project/name, so the same scratch name
   in two projects cannot collide. The directories indeed cannot. The libvirt
   domain names can. vagrant-libvirt builds the domain name as the basename of
   the directory holding the Vagrantfile, an underscore, and the Vagrant machine
   name -- which bombyx never sets, so it is Vagrant's default, `default`. Three
-  domains on frosti follow that rule: ~/vms/jutro gave jutro_default,
+  domains on the VM host follow that rule: ~/vms/jutro gave jutro_default,
   ~/vms/vmtest gave vmtest_default, and
   ~/vms/scratch/vmtest/probe gave probe_default. The project name is nowhere in
   the last one, so a probe scratch in a second project would ask libvirt for
@@ -233,8 +236,8 @@ plan, decisions, and outcome.
   delivers.
 
 - **tutorial-box-lacks-git** -- two passages still assume the Debian box
-  Found while working box-must-carry-git, and verified by booting it on frosti
-  on 2026-09-05: debian/bookworm64, which docs/tutorial.md used to tell the
+  Found while working box-must-carry-git, and verified by booting it on the VM
+  host on 2026-09-05: debian/bookworm64, which docs/tutorial.md used to tell the
   reader to use, has no git, so bootstrap.sh refuses and the first up exits 1
   after the download and the boot. The table in Part 3 now names
   generic/ubuntu2204, whose guest booted and provisioned to completion the same
@@ -265,9 +268,9 @@ plan, decisions, and outcome.
   Found by red-team in round 3 of the review on issue #45. bombyx sets
   VAGRANT_DEFAULT_PROVIDER on every project call but the teardown, which makes
   vagrant refuse rather than substitute -- but only for a machine that does not
-  exist yet. Measured on
-  frosti: with a machine already created, vagrant reads the provider it recorded
-  and ignores the variable, so `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status`
+  exist yet. Measured on the VM host: with a machine already created, vagrant
+  reads the provider it recorded and ignores the variable, so
+  `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status`
   on a running libvirt machine exits 0 and reports libvirt. So an operator who
   edits `provider` and re-runs `bombyx up` on an existing project keeps the old
   provider, the new settings block is never applied, and nothing says so. That
@@ -512,6 +515,26 @@ plan, decisions, and outcome.
   the same number of copies, so whatever is decided here should cover both.
   Raised on 2026-09-13 while working issue #78 and deliberately kept out of it.
 
+- **tutorial-debian-box-warning** -- keep, reword, or cut Debian digression
+  docs/tutorial.md, ~line 444 (PE-28). The debian/bookworm64 warning reads
+  awkwardly ("the box two later passages ... are written around"), but the real
+  question is whether it over-explains. It steers the reader off a box with no
+  git, which breaks the first up at clone time, and admits two later passages
+  still assume that box: the chsh line in the sample provision.sh, and the
+  arrow-key troubleshooting entry. Decide: keep and reword (split it, e.g. "two
+  later passages were written assuming you picked it"), or cut/trim the whole
+  Debian digression. Surfaced in a four-round blue-pencil prose pass.
+
+- **tutorial-provision-git-warning** -- reword the subject-held-open sentence
+  docs/tutorial.md, ~line 474 (PE-29), the 'your own provision.sh cannot save
+  you here' paragraph. The sentence 'the apt-get install ... you are about to
+  write ... never runs' holds the subject open before the verb. Substance is
+  sound: the guest clones the repo that holds provision.sh, so the
+  version-control tool must pre-exist in the box. Decide: keep and reword (make
+  the line the subject, then explain that the tool has to be present before that
+  file exists on the guest), or leave as is. Surfaced in a four-round
+  blue-pencil prose pass.
+
 ## Done
 
 - **project-parsed-at-cli-edge** -- the project name is checked twice
@@ -536,19 +559,19 @@ plan, decisions, and outcome.
 - **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
   (2026-09-05)
 
-- [**reset-needs-snapshot**](issues/registry-run-against-frosti.md)
+- **reset-needs-snapshot**
   -- reset depends on a snapshot nothing creates
   (2026-09-05)
 
-- [**box-must-carry-git**](issues/registry-run-against-frosti.md)
+- **box-must-carry-git**
   -- the git requirement surfaces after the boot
   (2026-09-05)
 
-- [**tutorial-local-route-now-booted**](issues/registry-run-against-frosti.md)
+- **tutorial-local-route-now-booted**
   -- a guest has booted on the local route
   (2026-09-05)
 
-- [**registry-run-against-frosti**](issues/registry-run-against-frosti.md)
+- **local-route-verification-run**
   -- drive the new CLI against a real VM host
   (2026-09-05)
 
@@ -629,7 +652,7 @@ plan, decisions, and outcome.
   (2026-08-10)
 
 - **first-real-run** -- drove bombyx against a real libvirt host
-  (frosti, Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt 0.12.2).
+  (Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt 0.12.2).
   Full sequence exercised: `up`, `status`, `shell`, `down`,
   `scratch`, `discard`, `reset`, plus a second `up` for
   idempotency and a live traversal rejection. Confirmed the

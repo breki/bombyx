@@ -29,20 +29,15 @@ reference goes somewhere that does not answer the question.
 
 ## The standard you are reading against
 
-`CLAUDE.md` in the repo root, sections **Voice**, **Code
-comments** and **Documentation style**. Read them first. The
-short version:
+`CLAUDE.md` in the repo root, the **Writing** section -- its six
+habits are what clear prose here looks like. Read it first. Two
+things that section leaves to you, because they are your lane:
 
-- Written for a capable junior: assume Rust, assume nothing
-  about this codebase, `git` internals, Ruby, or shell
-  mechanics. Someone sixteen and three months into the job
-  should follow it on one read.
-- Explain the mechanism before leaning on it.
-- Show the shape when the shape is the point.
-- Do not narrate the code's own past. bombyx is pre-release;
-  nobody is migrating from old behaviour. "This used to", "an
-  earlier version", "the first cut" are all defects.
-- Length is not what is minimised. A comment that is short and
+- You are the capable junior. Assume Rust, assume nothing about
+  this codebase, `git` internals, Ruby, or shell mechanics.
+  Someone sixteen and three months into the job should follow it
+  on one read.
+- Length is not what you minimise. A comment that is short and
   leaves the reader stuck has failed.
 
 ## What to report

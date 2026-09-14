@@ -246,8 +246,8 @@ the output for an `scp` line and unwraps, so it panics rather
 than fails once no such line is emitted.
 
 Definition of Done item 3 applies to chunk 1: it changes the
-commands bombyx emits, so it needs a real run against frosti,
-the libvirt VM host this project is developed against. Chunk
+commands bombyx emits, so it needs a real run against the
+libvirt VM host this project is developed against. Chunk
 2 changes only where values are read from, and the emitted
 commands stay identical, which a dry run can show.
 
@@ -540,7 +540,7 @@ direct unit tests.
 
 **Not verified against a real VM host.** This chunk changes
 what executes there, so Definition of Done item 3 applies and is
-not met. frosti was unreachable from this session.
+not met. The VM host was unreachable from this session.
 
 ### 2026-09-04 -- step 1 landed
 

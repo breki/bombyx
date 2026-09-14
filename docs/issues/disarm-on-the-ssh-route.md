@@ -242,8 +242,8 @@ the same prefix was run and the file landed with `$(...)`
 unexpanded.
 
 **Definition of Done item 3, on the local route.** This
-workstation is `frosti`, which is the host the operator's own
-registry names, so bombyx takes the local route against it and
+workstation is the host the operator's own registry names, so
+bombyx takes the local route against it and
 a real vagrant 2.4.9 with `vagrant-libvirt` 0.12.2 is
 installed. `bombyx --project vmtest doctor` reports six rows,
 all `ok` or `skip`. `bombyx --project vmtest status` reports
@@ -265,7 +265,8 @@ for each.
 
 **Not verified: the `ssh` route.** It was not exercised against
 a remote VM host: the only host in the registry is this machine,
-and `ssh frosti` fails host key verification here. Both routes
+and an `ssh` to its own name fails host key verification here.
+Both routes
 emit one script, pinned by
 `the_local_route_runs_the_same_script_through_sh`, so what
 remains unproven is only that a remote sshd's shell accepts the
