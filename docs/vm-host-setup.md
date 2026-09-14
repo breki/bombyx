@@ -413,6 +413,21 @@ ssh -t <host> 'sudo agent-vm-firewall apply'
 ssh -t <host> 'sudo agent-vm-firewall persist'
 ```
 
+The VM host can also be the machine you are sitting at; bombyx
+works that way whenever `host` names this machine. Then there
+is nothing to copy. Run the script from the repository working
+tree and give `sudo` the absolute path:
+
+```bash
+scripts/agent-vm-firewall.sh show               # changes nothing
+sudo /path/to/bombyx/scripts/agent-vm-firewall.sh apply
+sudo /path/to/bombyx/scripts/agent-vm-firewall.sh persist
+```
+
+A checkout in your home directory already meets the
+requirement: only you and root can write there. The `/tmp`
+warning is about the directory, not about copying.
+
 `show` is the default action and is read-only. `status` reports
 whether the rules are loaded *and* still match the network they
 were written for. `revert` removes the rules, the file and the
@@ -466,21 +481,63 @@ To undo everything: `sudo agent-vm-firewall revert`.
 Run these inside the VM, with `bombyx shell`. Substitute your
 own router and gateway addresses.
 
+How the probe is written decides whether its answer means
+anything. The obvious test opens a connection and then reads
+from it, as `cat </dev/tcp/host/port` does. Plenty of ports
+accept a connection and send nothing until the client speaks
+first: a web server waits for a request, and `sshd` sends one
+line of banner and then waits as well. So `cat` sits there,
+`timeout` kills it after three seconds, and the non-zero exit
+status reports "blocked" for a port that answered. A probe
+written that way prints the reassuring result whether or not
+the rules are loaded. Opening the socket and stopping there
+separates the two cases, and `exec 3<>` does that.
+
 ```bash
+chk() {
+  timeout 3 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null
+  case $? in
+    0)   echo "$3 ($1:$2): REACHABLE" ;;
+    124) echo "$3 ($1:$2): no answer" ;;
+    *)   echo "$3 ($1:$2): refused" ;;
+  esac
+}
+
 curl -sS -m 5 https://example.com >/dev/null && echo "internet: ok"
 getent hosts github.com >/dev/null && echo "dns: ok"
-timeout 3 bash -c 'cat </dev/tcp/192.168.1.1/80'  || echo "LAN blocked: good"
-timeout 3 bash -c 'cat </dev/tcp/192.168.121.1/22' || echo "host blocked: good"
+chk 192.168.1.1   80 "router"
+chk 192.168.121.1 22 "host gateway sshd"
 curl -6 -sS -m 5 https://example.com >/dev/null \
   && echo "ipv6: REACHABLE, unexpected" || echo "ipv6: refused, as intended"
 ```
 
-The last three are the point of the exercise: a VM that can
-still open a connection to the router, or to the host's SSH
-port, has not been contained. The IPv6 check matters because an
-IPv4-only test suite passes happily while an IPv6 route to the
-same LAN devices stays open -- which is why these rules refuse
-IPv6 outright rather than listing private ranges.
+The two `chk` lines are the point of the exercise: a VM that
+can still open a connection to the router, or to the host's SSH
+port, has not been contained.
+
+The two refusal words are not interchangeable: each one
+identifies the chain that stopped the packet, so read them
+rather than skimming for the absence of REACHABLE. The forward
+chain rejects, so a destination out on your LAN answers
+immediately and the line says `refused`. The input chain drops,
+so an address belonging to the VM host itself stays silent and
+the line says `no answer` after the full three seconds. If both
+lines come back with the same word, something other than these
+rules is doing the blocking, and you have not tested what you
+think you have.
+
+If the host runs another resolver -- a second libvirt network,
+or a container publishing port 53 -- probe that address on port
+53 as well. The DHCP and DNS accepts are pinned to the gateway
+address, so that one must stay silent while `dns: ok` above
+still passes through the gateway.
+
+The IPv6 check matters because an IPv4-only test suite passes
+happily while an IPv6 route to the same LAN devices stays open
+-- which is why these rules refuse IPv6 outright rather than
+listing private ranges. A guest with no IPv6 route at all
+prints the same reassuring line, so it confirms the rules only
+on a host where IPv6 reaches the guest bridge.
 
 ### Making it survive a reboot
 

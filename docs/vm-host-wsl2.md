@@ -405,6 +405,15 @@ stay closed. Treat it as defence in depth here rather than the
 primary barrier — which is a better position to be in than
 relying on a NAT behaviour that a settings change would remove.
 
+**Re-check the "stay closed" half before relying on it**
+*(unverified)*. The probe `docs/vm-host-setup.md` published when
+this was written read from the socket after connecting, which
+times out on any port that waits for the client to speak first,
+so it reported a blocked path for a port that had answered. The
+diary does not say which probe this run used. The corrected
+helper is under "Checking that it worked" in that document, and
+it distinguishes a refused port from a silent one.
+
 One caveat carried over unchanged: `conntrack` is not installed
 by default, so the script warns that connections opened before
 the rules loaded are still allowed. Restarting the guests

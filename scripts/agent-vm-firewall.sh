@@ -327,8 +327,12 @@ cmd_apply() {
   echo "Verify from inside a VM (bombyx shell):"
   echo "  curl -sS -m 5 https://example.com >/dev/null && echo internet ok"
   echo "  getent hosts github.com >/dev/null && echo dns ok"
-  echo "  timeout 3 bash -c 'cat </dev/tcp/<your-router>/80' || echo LAN blocked"
-  echo "  timeout 3 bash -c 'cat </dev/tcp/$GATEWAY/22' || echo host blocked"
+  # `exec 3<>` opens the socket and stops. Reading from it with
+  # `cat` instead hangs on a port that waits for the client to
+  # speak -- port 80, and sshd after its banner -- so `timeout`
+  # kills it and "blocked" gets printed for a port that answered.
+  echo "  timeout 3 bash -c 'exec 3<>/dev/tcp/<router>/80' || echo LAN blocked"
+  echo "  timeout 3 bash -c 'exec 3<>/dev/tcp/$GATEWAY/22' || echo host blocked"
   echo
   echo "Lasts until reboot. Make it permanent: sudo $0 persist"
   echo "Undo it now:                           sudo $0 revert"

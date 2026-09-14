@@ -2,6 +2,61 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-14
+
+**The firewall verification snippet reported success whether or
+not the rules were loaded**
+
+Issue #8 asked us to apply `scripts/agent-vm-firewall.sh` on
+frosti, run the in-VM checks, persist, reboot, and only then
+drop the *(unverified)* marker from the section in
+`docs/vm-host-setup.md`. Two of its premises were wrong, and the
+second is why this entry runs long.
+
+frosti is the machine bombyx runs on in this session rather than
+a remote host: `getent hosts frosti` resolves to 127.0.1.1. The
+`scp` and the `install` into `/usr/local/sbin` the document
+describes therefore did not apply, and the document now says
+what to do when the VM host is the machine you are sitting at.
+
+The published check could not fail. It ran
+`timeout 3 bash -c 'cat </dev/tcp/<addr>/<port>'` and read a
+non-zero exit as "blocked". `cat` connects and then reads, and
+plenty of ports accept a connection and send nothing until the
+client speaks first -- port 80 does, and `sshd` sends one line
+of banner and then waits. So `timeout` killed it every time and
+the snippet printed `blocked: good` for a port that had
+answered. We proved that against a port known to be open:
+frosti's own sshd on 127.0.0.1:22 gave exit 124, while
+`exec 3<>` on the same port gave 0, and gave 1 on a closed port.
+`cmd_apply` printed the same broken hint, so both were fixed.
+
+That mattered at once, because frosti was running a predecessor
+ruleset installed on 10 August, four differences away from what
+the script generates. Its unpinned `tcp dport 53 accept` let a
+guest reach any service on any of the host's addresses on port
+53, and it rejected only unique-local and link-local IPv6 rather
+than all of it. Its systemd unit was ordered
+`After=libvirtd.service` and loaded from `/etc/nftables.d`, the
+directory the script deliberately avoids. The wipe that ordering
+fails to prevent is latent on frosti rather than live:
+`/etc/nftables.conf` carries no include for that directory, and
+`nftables.service` is disabled.
+
+`apply` and `persist` have now run. `nft -c` accepts the
+generated ruleset on nftables 1.0.9. From the guest, internet
+and DNS still work; the router answers `refused` from the
+forward chain's reject; and frosti's LAN address, its gateway
+and its tailnet address all go silent from the input chain's
+drop, as does the second dnsmasq on 192.168.122.1:53 that the
+pinning closed. A fresh host-into-guest TCP connect still
+succeeds, so the `established,related` rule holds.
+
+**The reboot is still outstanding.** Persistence is the one part
+that cannot be confirmed any other way, so the *(unverified)*
+marker stays on the heading until `status` passes after a
+restart.
+
 ### 2026-09-13
 
 **`git` gets its credential before the clone, out of the same

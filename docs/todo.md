@@ -25,7 +25,7 @@ plan, decisions, and outcome.
   off the home LAN, the tailnet, Docker and the VM host's own services, while
   leaving outbound internet working. It is marked unverified: the rules were
   derived from frosti's actual network layout (virbr1 on 192.168.121.0/24, host
-  on 192.168.1.10 via wlp4s0, plus tailscale0 and docker0) but have not been
+  on 192.168.50.10 via wlp4s0, plus tailscale0 and docker0) but have not been
   applied, because sudo on frosti needs a password and cannot run from a bombyx
   session. Run `agent-vm-firewall apply`, then the in-VM verification snippet
   including the IPv6 check, then `persist` -- and reboot and run `status`, since

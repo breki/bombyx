@@ -16,6 +16,14 @@ and this project adheres to
 
 ### Fixed
 
+- The in-VM check that agent-vm-firewall.sh prints after apply, and the matching
+  one in docs/vm-host-setup.md, reported a destination as blocked whether or not
+  the rules were loaded. Both read from the socket with cat after connecting,
+  which times out on any port that waits for the client to speak first -- port
+  80, and sshd after its banner -- so the non-zero exit status was the timeout
+  rather than a refusal. They now open the socket with exec 3<> and stop, and
+  the documented helper separates a refused port from a silent one.
+
 ### Removed
 
 ## [0.6.0] - 2026-09-13
