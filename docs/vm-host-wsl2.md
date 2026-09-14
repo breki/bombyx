@@ -384,6 +384,17 @@ your home network" in [vm-host-setup.md](vm-host-setup.md) turns
 out to be **smaller** on a WSL host than on a dedicated one, and
 the reason is worth knowing rather than assuming either way.
 
+**Read both measurements in this section as suspect**
+*(unverified)*. The probe `docs/vm-host-setup.md` published at
+the time read from the socket after connecting, and that times
+out on any port which waits for the client to speak first, so it
+reported a blocked path for a port that had answered. The diary
+does not say which probe either run used. If they used that one,
+the error runs toward more exposure than this section describes
+rather than less. Both results below are therefore open
+questions, and the corrected helper is under "Checking that it
+worked" in that document.
+
 Measured on this setup: a guest could reach the internet and
 resolve names, and could not open TCP to the router, to the
 workstation's own LAN address, or to a Tailscale peer. Neither

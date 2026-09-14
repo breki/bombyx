@@ -27,7 +27,7 @@ end, which explains what changes.
 If the host you have in mind is a WSL2 distribution on your own
 Windows workstation, read this page first and then
 [vm-host-wsl2.md](vm-host-wsl2.md). Everything here still
-applies; that page covers four failures particular to WSL, and
+applies; that page covers five failures particular to WSL, and
 is honest about the isolation such a host gives up.
 
 ## What has to be true
@@ -353,10 +353,18 @@ symlink into `/usr/local/bin`.
 
 By default an agent VM can reach far more of your network than
 its purpose suggests, and nothing warns you about it. This
-section explains what it can reach and how to cut that down. The
-rules below have not yet been applied to a running host, so
-treat them as a starting point rather than a recipe that is
-known to work.
+section explains what it can reach and how to cut that down.
+
+What has actually been done, since the *(unverified)* in the
+heading is doing real work. The rules have been applied and
+persisted on a Linux host and on a WSL host. The guest checks
+below have been run in their corrected form on the Linux host
+only; the WSL results predate the correction and
+[vm-host-wsl2.md](vm-host-wsl2.md) marks them suspect. Nobody
+has confirmed the rules come back after a reboot on either
+host, and persistence is the part that fails silently, so read
+"Making it survive a reboot" below before relying on this.
+Three further gaps are listed at the end of the section.
 
 ### What a VM can reach by default
 
@@ -413,6 +421,59 @@ ssh -t <host> 'sudo agent-vm-firewall apply'
 ssh -t <host> 'sudo agent-vm-firewall persist'
 ```
 
+`-t` gives the remote command a terminal, which `sudo` needs in
+order to ask you for your password. `show` needs no `sudo`, so
+it needs no `-t` either.
+
+**Run the guest checks before `apply`, not only after.** They
+are under "Checking that it worked" below, and several of them
+mean nothing unless you have seen them report the unrestricted
+answer first. So the order is: boot a guest, run that block,
+then come back here for `apply` and `persist`.
+
+If you have already applied and persisted, `revert` gets you
+back to an unrestricted guest -- but it removes the systemd
+unit and the rules file as well as the loaded table, so you are
+then back before `apply`, not before `persist`. Getting where
+you were takes both commands again, in order.
+
+The VM host can also be the machine you are sitting at; bombyx
+works that way whenever `host` names this machine. Then there
+is nothing to copy, but the `install` step still applies:
+
+```bash
+scripts/agent-vm-firewall.sh show          # changes nothing
+sudo install -o root -g root -m 0755 \
+    scripts/agent-vm-firewall.sh /usr/local/sbin/agent-vm-firewall
+sudo agent-vm-firewall apply
+sudo agent-vm-firewall persist
+```
+
+The `show` line runs as you and changes nothing, so running
+that one from the checkout is fine. The warning is about the
+`sudo` lines, and running *those* straight out of the checkout
+is not the same thing as installing first.
+The requirement above is that only root can write the file, and
+a working tree is writable by every process running as you --
+in this repository that includes the agents that edit it. An
+unprivileged write to `scripts/agent-vm-firewall.sh` then runs
+as root the next time you type that `sudo` line, and whoever
+made the write does not have to win a race against you. They
+only have to wait. The `/tmp` warning names the worst case
+rather than the only one.
+
+Installing narrows that window to one moment rather than
+closing it: `install` runs as root and copies whatever the file
+holds right then, and the copy in `/usr/local/sbin` is what
+runs as root at every later `apply`, `persist` and `status`. So
+look at the file before you install it, and install from a
+clean tree:
+
+```bash
+git status --porcelain scripts/agent-vm-firewall.sh   # expect no output
+git diff scripts/agent-vm-firewall.sh
+```
+
 `show` is the default action and is read-only. `status` reports
 whether the rules are loaded *and* still match the network they
 were written for. `revert` removes the rules, the file and the
@@ -463,24 +524,185 @@ To undo everything: `sudo agent-vm-firewall revert`.
 
 ### Checking that it worked
 
-Run these inside the VM, with `bombyx shell`. Substitute your
-own router and gateway addresses.
+These run inside the VM, with `bombyx shell`. Read the next two
+paragraphs first; the block itself comes after them.
+
+How the probe is written decides whether its answer means
+anything. The obvious test opens a connection and then reads
+from it, as `cat </dev/tcp/host/port` does. Plenty of ports
+accept a connection and send nothing until the client speaks
+first: a web server waits for a request, and `sshd` sends one
+line of banner and then waits as well. So `cat` sits there,
+`timeout` kills it after three seconds, and the non-zero exit
+status reports "blocked" for a port that answered. A probe
+written that way prints the reassuring result whether or not
+the rules are loaded. Opening the socket and stopping there
+separates the two cases, and `exec 3<>` does that.
+
+Paste the whole block below into an interactive shell in the
+guest, substituting your own router and gateway addresses. It
+defines `chk` and then calls it twice, so everything from
+`chk() {` to its matching `}` is a definition rather than
+something to run on its own -- paste it whole, because stopping
+part-way leaves bash at a continuation prompt rather than
+giving you an error. It needs bash: `/dev/tcp/host/port` is a
+pseudo-path bash
+invents, not a real device, so `sh` or `dash` will not do. Do
+not put it in a script with `set -e` without changing it --
+there the `msg=$(...)` assignment carries the probe's non-zero
+status and ends the script before the `case` sees it. Replace
+those two lines with one that keeps the status:
+
+    msg=$(...) && status=0 || status=$?
+
+Appending `|| true` instead does not work. It swallows the
+status, so `status=$?` reads `true`'s zero and every probe
+reports REACHABLE.
 
 ```bash
+chk() {
+  local msg status first
+  msg=$(timeout 3 bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$1" "$2" 2>&1)
+  status=$?
+  first=${msg%%$'\n'*}
+  case $status in
+    0)   echo "$3 ($1:$2): REACHABLE" ;;
+    124) echo "$3 ($1:$2): no answer" ;;
+    *)   case $msg in
+           *"Connection refused"*) echo "$3 ($1:$2): refused" ;;
+           *) echo "$3 ($1:$2): probe broken -- ${first##*: }" ;;
+         esac ;;
+  esac
+}
+
 curl -sS -m 5 https://example.com >/dev/null && echo "internet: ok"
 getent hosts github.com >/dev/null && echo "dns: ok"
-timeout 3 bash -c 'cat </dev/tcp/192.168.1.1/80'  || echo "LAN blocked: good"
-timeout 3 bash -c 'cat </dev/tcp/192.168.121.1/22' || echo "host blocked: good"
+chk 192.168.1.1   80 "router"
+chk 192.168.121.1 22 "host gateway sshd"
 curl -6 -sS -m 5 https://example.com >/dev/null \
   && echo "ipv6: REACHABLE, unexpected" || echo "ipv6: refused, as intended"
 ```
 
-The last three are the point of the exercise: a VM that can
-still open a connection to the router, or to the host's SSH
-port, has not been contained. The IPv6 check matters because an
-IPv4-only test suite passes happily while an IPv6 route to the
-same LAN devices stays open -- which is why these rules refuse
-IPv6 outright rather than listing private ranges.
+Four things in that helper are worth a word each.
+
+`exec 3<>` opens file descriptor 3 on the socket for reading
+and writing, and then stops. Nothing reads from it, which is
+the whole point.
+
+The arguments after `bash -c '...'` become `$0`, `$1` and `$2`
+inside it, so the `_` is a throwaway name for `$0` and the two
+addresses arrive as arguments. Writing them into the quoted
+string instead would hand bash text to re-parse, and an address
+copied from a router page or a ticket would then be executed.
+
+`status=$?` comes immediately after the probe, because any
+command in between replaces the value. That includes an
+innocent-looking assignment, which is why `first=` is set
+afterwards rather than before.
+
+Bash reports a refusal, a failed name lookup and an unreachable
+network all with exit status 1, distinguishing them only in the
+message it writes to stderr. So the helper keeps that message:
+`${msg%%$'\n'*}` takes its first line, and `${first##*: }`
+drops everything up to the last `": "`, leaving the part worth
+reading. A mistyped address then prints `probe broken` rather
+than quietly counting as a success.
+
+**Start on the host, not in the guest.** `sudo agent-vm-firewall
+status` prints the table that is actually loaded and confirms
+the bridge it names is still the one libvirt uses. What follows
+is a sanity check on top of that: it shows you what the rules
+do to a real guest, and it is not the thing that tells you they
+are loaded.
+
+`status` does not compare the loaded rules against the ones
+this script would generate now, so a table left over from an
+older version passes it. That has happened here: a host ran a
+predecessor ruleset for weeks whose DNS accept was not pinned
+to the gateway, reporting green throughout. Until `status`
+checks this itself, **read the table it prints against `show`**
+whenever you have changed the script or cannot say when the
+rules were last applied. Running `apply` again costs nothing
+and settles it.
+
+Run the block before `apply` as well as after, and compare the
+two runs against the table below rather than against a rule of
+thumb. Earlier versions of this section tried to give you one
+sentence for reading a result, and each of them was wrong for a
+host somebody had not thought of. The table is scoped instead,
+and a result it does not cover is a question rather than an
+answer.
+
+On a host set up like the example above -- guest bridge
+`virbr1`, gateway `192.168.121.1`, a LAN inside the private
+ranges -- expect this:
+
+| line | before `apply` | after `apply` |
+|-|-|-|
+| `router` | REACHABLE, or the router's own refusal | `refused` |
+| `host gateway sshd` | REACHABLE | `no answer` |
+| `internet: ok` | printed | printed |
+| the IPv6 line | either | `refused, as intended` |
+
+The router and gateway lines are the measurement, and they are
+the two whose value is supposed to change. `internet: ok` is a
+control: it is meant to be identical, and a change there means
+the rules took away something they should have left alone.
+`dns: ok` is absent from the table on purpose and is dealt with
+below, as is the IPv6 line, whose value depends on whether the
+guest has an IPv6 route at all.
+
+A router line reading REACHABLE both times is the case to be
+careful with, because it has two causes that look alike. Either
+the probe is not measuring anything, or your LAN is outside the
+ranges the rules cover -- a LAN on public IPv4 space is not
+covered, which the limits at the end of this section explain.
+Confirm which by checking the loaded table for the range your
+router falls in, rather than by assuming the probe is at fault.
+
+Read anything else against the loaded table itself rather than
+against this page. `status` prints that table at the end of its
+own output, so you have it already; `sudo nft list table inet
+agentvm` is the same thing on a host where the script is not
+installed. Two results come up often enough to name here. `refused` on the
+gateway line means something answered, so the guest's packet
+reached the host and the input chain's drop is not in force.
+And `REACHABLE` on the router line after `apply` is what a LAN
+numbered out of public IPv4 space gives, because the denylist
+does not cover it -- see the limits at the end of this section.
+
+`dns: ok` proves less than it appears to. It passes whenever
+the guest resolves a name by any route at all, and a box image
+that pins its own public resolvers answers without ever asking
+the gateway. Run `resolvectl status` in the guest to see which
+resolver it uses before reading that line as evidence about the
+pinned DNS accept.
+
+If the host runs another resolver -- a second libvirt network,
+or a container publishing port 53 -- check that one too, since
+the accepts are pinned to the gateway address and no other
+resolver on the host should answer. Do not use `chk` for it:
+`chk` opens a TCP connection, and a resolver published on UDP
+alone is silent over TCP whether or not any rules are loaded.
+Ask over UDP instead, before `apply` as well as after. The
+address below is the gateway of libvirt's own `default`
+network, which is the second resolver most hosts have;
+`ip -4 -o addr show scope global`, from the start of this
+section, lists the others yours might run.
+
+```bash
+dig +timeout=3 +tries=1 @192.168.122.1 example.com
+```
+
+Expect an answer before, and `no servers could be reached`
+after.
+
+The IPv6 check matters because an IPv4-only test suite passes
+happily while an IPv6 route to the same LAN devices stays open
+-- which is why these rules refuse IPv6 outright rather than
+listing private ranges. A guest with no IPv6 route at all
+prints the same reassuring line, so it confirms the rules only
+on a host where IPv6 reaches the guest bridge.
 
 ### Making it survive a reboot
 

@@ -2,6 +2,153 @@
 
 Development diary for bombyx. Newest entries first.
 
+### 2026-09-14
+
+**The review hit its three-round ceiling, and the last round
+was worth running**
+
+A third red-team round ran because the reviewer had last read
+the branch before the "claim less" decision. The rewrite, the
+four findings held from round 2 and sixteen prose fixes -- some
+270 lines -- had never had a correctness reviewer on them.
+`fresh-reader` had said as much, handing one finding to a stage
+that had already closed.
+
+It found seven, three of them on the previous rounds' fixes.
+That is the ceiling, and the ceiling means the stop rule
+failed, so it goes in the record that way rather than as a
+finished run.
+
+Two are worth keeping. The rewrite moved the operator's trust
+onto `agent-vm-firewall status`, and `status` does not check
+what the new text implied: it confirms a table called `agentvm`
+exists and that its bridge still matches libvirt, and never
+compares the loaded rules against the ones the script would
+generate. The predecessor ruleset on frosti passed it for
+weeks. The prose is now written down to what the command does,
+and closing the gap in code is issue #94.
+
+The other is `revert`. We had recommended it for recovering the
+before-`apply` baseline, having read only the sentence that
+says it removes the rules. It also disables and deletes the
+systemd unit and removes the rules file, so a reader who
+follows the page in order reverts *after* persisting and
+quietly loses the persistence this branch exists to verify --
+visible only at the next reboot.
+
+The pattern across all four rounds: every fix was correct about
+the case that prompted it, and the trouble was always a rule
+stated wider than the evidence. The one interpretive sentence
+in "Checking that it worked" was written four times and was
+false four times. It is now deleted rather than rewritten, and
+the scoped table stands on its own.
+
+**The review found the replacement probe was injectable, and
+that we had rewritten one rule into falsehood three times**
+
+Three stages, four rounds, twenty-five findings. Two are worth
+recording beyond the log files.
+
+The `chk` helper we published to replace the broken probe
+spliced its arguments into a string that `bash -c` then parsed,
+so anything in the address argument ran as code. A crafted
+first argument executed `id` and wrote it to a file while the
+helper printed `REACHABLE`. This is a snippet the document tells
+operators to paste and adapt with addresses copied out of a
+router page. Passing the values as arguments --
+`bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$1" "$2"` -- closes it,
+and the fix was verified by re-running the exploit against the
+text extracted from the document.
+
+The second is the one to learn from. The document tried to
+teach the operator how to read a probe's exit status as
+evidence about the firewall, and we wrote that rule three
+times. Each version was checkable, and each was false for a
+case the previous one had not considered: first "the same word
+on both lines means something else is blocking", then "a
+destination the host routes to meets the forward chain", which
+ignores that the forward chain rejects only the denylisted
+ranges. What the mapping actually depends on is four
+independent facts -- whether the address is one the host holds
+or routes to, whether it falls in the denylist, whether
+anything listens there, and whether the guest's resolver
+bypasses the path at all. Every compact statement drops one.
+
+The operator stopped it by choosing to claim less. The
+interpretive rules are gone. `agent-vm-firewall status` on the
+host is named as the check that settles whether the rules are
+loaded, the guest block is described as a sanity check on top
+of that, and a table gives the expected result per line scoped
+to a host set up like the example. The two recurring surprises
+are named rather than derived.
+
+Two findings landed on our own prose habits. A comment in the
+script explained itself in terms of a placeholder that the
+review had just removed, which is the "do not narrate the past"
+rule. And the section still opened "The rules below have not
+yet been applied to a running host" after we had applied them
+and said so in two other files -- we edited that heading's
+neighbours twice without reading the paragraph beneath it.
+
+One reviewer suggestion was measured and rejected. `fresh-reader`
+proposed `msg=$(...) || true` for running the helper under
+`set -e`; that yields a status of 0 on a failing probe, which is
+the same defect the whole change removes. The document carries
+`msg=$(...) && status=0 || status=$?` instead.
+
+**The firewall verification snippet reported success whether or
+not the rules were loaded**
+
+Issue #8 asked us to apply `scripts/agent-vm-firewall.sh` on
+frosti, run the in-VM checks, persist, reboot, and only then
+drop the *(unverified)* marker from the section in
+`docs/vm-host-setup.md`. Two of its premises were wrong, and the
+second is why this entry runs long.
+
+frosti is the machine bombyx runs on in this session rather than
+a remote host: `getent hosts frosti` resolves to 127.0.1.1. The
+`scp` and the `install` into `/usr/local/sbin` the document
+describes therefore did not apply, and the document now says
+what to do when the VM host is the machine you are sitting at.
+
+The published check could not fail. It ran
+`timeout 3 bash -c 'cat </dev/tcp/<addr>/<port>'` and read a
+non-zero exit as "blocked". `cat` connects and then reads, and
+plenty of ports accept a connection and send nothing until the
+client speaks first -- port 80 does, and `sshd` sends one line
+of banner and then waits. So `timeout` killed it every time and
+the snippet printed `blocked: good` for a port that had
+answered. We proved that against a port known to be open:
+frosti's own sshd on 127.0.0.1:22 gave exit 124, while
+`exec 3<>` on the same port gave 0, and gave 1 on a closed port.
+`cmd_apply` printed the same broken hint, so both were fixed.
+
+That mattered at once, because frosti was running a predecessor
+ruleset installed on 10 August, four differences away from what
+the script generates. Its unpinned `tcp dport 53 accept` let a
+guest reach any service on any of the host's addresses on port
+53, and it rejected only unique-local and link-local IPv6 rather
+than all of it. Its systemd unit was ordered
+`After=libvirtd.service` and loaded from `/etc/nftables.d`, the
+directory the script deliberately avoids. The wipe that ordering
+fails to prevent is latent on frosti rather than live:
+`/etc/nftables.conf` carries no include for that directory, and
+`nftables.service` is disabled.
+
+`apply` and `persist` have now run. `nft -c` accepts the
+generated ruleset on nftables 1.0.9. From the guest, internet
+and DNS still work; the router answers `refused` from the
+forward chain's reject; and frosti's LAN address, its gateway
+and its tailnet address all go silent from the input chain's
+drop, as does the second dnsmasq on 192.168.122.1:53 that the
+pinning closed. A fresh host-into-guest TCP connect still
+succeeds, so the `established,related` rule holds.
+
+**The reboot is still outstanding.** Persistence is the one part
+that cannot be confirmed any other way, so the *(unverified)*
+marker stays on the heading until `status` passes after a
+restart.
+
 ### 2026-09-13
 
 **`git` gets its credential before the clone, out of the same
