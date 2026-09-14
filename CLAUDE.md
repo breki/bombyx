@@ -377,6 +377,19 @@ for tools that are not present:
   them sat next to a `///` block. Reach for `Edit` with an
   anchor unique in the file, and keep a scripted replace for a
   substitution that fits on one line.
+
+  **A script that batches several replacements and writes once
+  at the end reports success for edits it never made.** Three
+  did so in one sitting. Each asserted its matches and wrote
+  the file after the last one, so a failed assertion raised and
+  the write never ran -- while the shell's next `echo ok`
+  printed anyway, because the failure was the script's exit
+  status and nothing read it. One such edit was reported
+  applied, and a reviewer found the unchanged text two stages
+  later. Write the file after **each** successful replacement,
+  and read the result back: a fix is landed when `grep` or
+  `sed -n` shows it, never when the script that made it says
+  so.
 - **Print the variable before claiming what it holds.** Three
   false statements this week came from writing an environment
   claim from expectation: that the guest's DMI exposes the host
@@ -468,6 +481,15 @@ here as well.
   to happen and why. Do not batch silently and only speak at
   the end -- a run of silent tool calls reads as "lost".
   This holds regardless of the active output style.
+- **Do not poll for a subagent. Wait for the notification.**
+  The harness reports an `Agent` call's completion on its own.
+  One `/review` run spent about fifteen `sleep 115` calls
+  waiting on three reviewers that took five to eleven minutes
+  each, and one of those sleeps hit its own timeout and was
+  backgrounded, which produced a second notification to read.
+  Say in one sentence that the reviewer is running, then stop.
+  Start other work only when it touches no file the reviewer
+  is reading.
 - **Lead with context before a decision-making question,
   and show concrete artifacts** -- for a technical choice
   (grammar, API shape, data layout), write out what each
