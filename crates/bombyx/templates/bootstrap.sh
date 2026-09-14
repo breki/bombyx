@@ -69,7 +69,11 @@ set -euo pipefail
 #
 # WHETHER a key was configured arrives as BOMBYX_DEPLOY_KEY,
 # which the Vagrantfile sets to `1` or `0` on every render, and
-# is never read off this filesystem. The upload lands in the
+# is never read off this filesystem. This flag reports the
+# config, where the two further down report what bombyx staged
+# for the run. The key is the reason: it already sits on the VM
+# host, bombyx only checks it is there, and vagrant uploads it
+# -- so there is nothing for bombyx to stage. The upload lands in the
 # `vagrant` user's own .ssh directory, and that user is the one
 # the agent works as -- so testing for the file would let the
 # guest answer a question about the operator's config. A
@@ -363,9 +367,20 @@ readonly CLONE_DIR="$HOME/project"
 #
 #     cp "$BOMBYX_ENV_FILE" .env
 #
-# BOMBYX_ENV_FILE_PRESENT answers whether the operator
-# configured one. It arrives from the generated Vagrantfile,
-# which sets it to 1 or 0 on every render. The same reasoning
+# BOMBYX_ENV_FILE_PRESENT answers whether bombyx staged one for
+# this run. Staging is what bombyx does just before it runs
+# vagrant: it writes the file into the project directory on the
+# VM host, beside the Vagrantfile, and removes it again as soon
+# as that vagrant run ends. So the file exists on the VM host
+# for the length of one run and no longer.
+#
+# The flag arrives from the generated Vagrantfile, which sets it
+# to 1 or 0 on every render, from the same value bombyx writes
+# the file from -- so bombyx cannot announce a file it never
+# staged. The file can still be missing by the time this script
+# runs, which is what the check further down is for: a
+# `vagrant provision` started by hand on the VM host has nothing
+# staged beside it. The same reasoning
 # the deploy-key block gives applies: the file sits in an
 # account the agent works as, so asking the filesystem would
 # let the guest answer on the operator's behalf.
@@ -423,17 +438,17 @@ if [ "${BOMBYX_ENV_FILE_PRESENT:-}" = 1 ]; then
 
     export BOMBYX_ENV_FILE="$ENV_FILE"
 else
-    # Nothing configured, so the name still has to be exported:
+    # Nothing staged, so the name still has to be exported:
     # the project's script reads it, and an unset name under
     # `set -u` would abort that script instead of telling it
     # there is no file.
     export BOMBYX_ENV_FILE=""
 
-    # An earlier run may have left one, and the operator has
-    # since removed `env_file` from the config. Leaving it would
-    # keep a credential alive that the config no longer names.
+    # An earlier run may have left one, and bombyx staged no
+    # secrets file this time. Leaving it would keep a credential
+    # alive that nothing in this run named.
     #
-    # Not configured, and the lookup found nothing: say so and
+    # Nothing staged, and the lookup found nothing: say so and
     # carry on. `bombyx_home` is read for this file and nothing
     # else -- the clone uses `$HOME` -- so refusing here would
     # stop a project that has never had an `env_file` from
@@ -464,15 +479,16 @@ fi
 # rather than here because a `.env` file is not that format and
 # the project's own script runs long after the clone.
 #
-# BOMBYX_GIT_CRED_PRESENT answers whether one was configured,
-# and it arrives from the generated Vagrantfile on every render.
-# The deploy-key banner above argues at length why that is the
-# only trustworthy answer: this file sits in an account the
-# agent works as, so asking the filesystem would let the guest
-# answer on the operator's behalf and keep a credential alive
-# that the config no longer names.
+# BOMBYX_GIT_CRED_PRESENT answers whether bombyx staged one for
+# this run -- staged in the sense the secrets-file block above
+# gives -- and it arrives from the generated Vagrantfile on
+# every render. The deploy-key block near the top of this file
+# argues at length why that is the only trustworthy answer:
+# this file sits in an account the agent works as, so asking
+# the filesystem would let the guest answer on the operator's
+# behalf and keep a credential alive that nothing staged.
 if [ "${BOMBYX_GIT_CRED_PRESENT:-}" = 1 ]; then
-    # Configured, so the upload must have happened. Carrying on
+    # Staged, so the upload must have happened. Carrying on
     # would reach the clone with no credential and fail there,
     # naming the repository rather than the file that went
     # missing.
@@ -493,9 +509,9 @@ if [ "${BOMBYX_GIT_CRED_PRESENT:-}" = 1 ]; then
             "The error above says why."
     fi
 else
-    # Not configured, so a file an earlier run left has to go.
-    # Leaving it would keep a token alive that the config no
-    # longer names, and `git` would go on sending it.
+    # Nothing staged, so a file an earlier run left has to go.
+    # Leaving it would keep a token alive that nothing in this
+    # run named, and `git` would go on sending it.
     if ! rm -f "$GIT_CRED"; then
         refuse "no repo_token is configured and the git" \
             "credential at $GIT_CRED could not be removed. The" \

@@ -1172,14 +1172,16 @@ downstream file.
 
 ## Build and toolchain recipes
 
-Three recipes live in `docs/developer/build-recipes.md`, because
-each is needed rarely and none is a rule you follow on every
+Two recipes live in `docs/developer/build-recipes.md`, because
+each is needed rarely and neither is a rule you follow on every
 commit: **scoped `unsafe` in `xtask`** (the workspace forbids
 `unsafe_code`, so build tooling that needs an OS API redefines
-the lint block for `xtask` alone), **coverage exceptions for
+the lint block for `xtask` alone) and **coverage exceptions for
 hardware-bound code** (extract the unmockable I/O into a leaf
 submodule and name it in `[workspace.metadata.coverage]`, so the
-90% gate stays honest), and the **edition-2024 migration** fixes.
+90% gate stays honest). An appendix at the end of that file
+holds the **edition-2024 migration** fixes, which bombyx is
+already past.
 
 Read that file before weakening a lint or a gate. The rule those
 recipes exist to protect: production crates keep

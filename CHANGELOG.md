@@ -15,9 +15,14 @@ and this project adheres to
 ### Changed
 
 - **BREAKING:** A bad --project value is now refused where the argument is
-  built, and the message quotes the name back: invalid project name "../etc".
-  Config::load_project, Config::from_registry and Registry::project take a
-  checked ProjectName, so the name rule runs once per run rather than twice.
+  built, and the message names the argument while the rule below it quotes the
+  value: `invalid --project value: must start with a letter or digit, got
+  "../etc"`. Config::load_project and Registry::project take a checked
+  ProjectName, so the --project value is checked once, at the argument, rather
+  than twice inside the loader.
+- **BREAKING:** ConfigError::HostMissing carries its place as a PathBuf rather
+  than a String. It has one construction site and the value is always the
+  registry's own path.
 
 ### Fixed
 
@@ -42,16 +47,17 @@ and this project adheres to
   file and a git credential from the config's env_file and repo_token keys,
   while the plan staged those files from what was actually read off the
   workstation. A caller pairing a config with staged contents that did not come
-  from it got a VM that booted and then refused inside the guest.
-  vagrantfile::render and vagrantfile::files now take the same Staged value the
-  plan writes from, so the two cannot disagree.
+  from it got a VM that either refused inside the guest or, in the other
+  direction, deleted an earlier run's secrets file and provisioned on without
+  it, reporting success. vagrantfile::render and vagrantfile::files now take
+  the same Staged value the plan writes from, and both panic when the pair did
+  not come from one config.
 
 ### Removed
 
 - **BREAKING:** ConfigError::Invalid. Only the project name reached it, and that
   value is now checked before it enters the library, so the variant had no
-  construction site left. ConfigError::HostMissing carries its place as a
-  PathBuf rather than a String.
+  construction site left.
 
 ## [0.6.0] - 2026-09-13
 

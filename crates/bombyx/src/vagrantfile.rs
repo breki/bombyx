@@ -87,6 +87,12 @@ const DEPLOY_KEY_GUEST_PATH: &str = "/home/vagrant/.ssh/bombyx-deploy-key";
 /// Environment variable telling the guest that the operator's
 /// config named a `deploy_key`.
 ///
+/// The config, where [`ENV_FILE_PRESENT_ENV`] and
+/// [`CREDENTIAL_PRESENT_ENV`] report what bombyx staged. The
+/// key never passes through bombyx: it is already on the VM
+/// host and vagrant uploads it, so there is nothing to stage
+/// and nothing the two answers could disagree about.
+///
 /// [`render`] sets it in the shell provisioner's `env:` block
 /// on every render. [`BOOTSTRAP`] branches on it.
 ///
@@ -423,8 +429,33 @@ fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
 /// `cfg.source.env_file` here instead would let the rendered
 /// Vagrantfile announce a file the plan never stages, and the
 /// guest would refuse minutes after booting.
+///
+/// # Panics
+///
+/// Panics when `staged` did not come from `cfg`: when the
+/// config names an `env_file` or a `repo_token` and `staged` is
+/// missing the matching half, or when `staged` carries a half
+/// the config names nowhere.
+/// [`Config::read_staged`](crate::config::Config::read_staged)
+/// builds a pair that cannot fail this.
 #[must_use]
 pub fn render(cfg: &Config, staged: &Staged) -> String {
+    // A mispaired call fails here rather than in the guest,
+    // where it is quiet: the guest told `0` deletes the file an
+    // earlier provision left and provisions on without it.
+    assert_eq!(
+        cfg.source.env_file.is_some(),
+        staged.secrets().is_some(),
+        "a config naming an env_file must be rendered against \
+         the secrets read from it"
+    );
+    assert_eq!(
+        cfg.source.repo_token.is_some(),
+        staged.credential().is_some(),
+        "a config naming a repo_token must be rendered against \
+         the credential built from it"
+    );
+
     let vm = &cfg.vm;
     let source = &cfg.source;
     // `None` when `repo` reaches the server by something other
@@ -585,8 +616,9 @@ fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
 /// The Ruby that uploads the project's secrets file, or nothing
 /// at all.
 ///
-/// An empty string when the config names no `env_file`, so a
-/// project without one gets a Vagrantfile with no upload block.
+/// An empty string when nothing was staged, so a project whose
+/// config names no `env_file` gets a Vagrantfile with no upload
+/// block.
 ///
 /// [`render`] places this ahead of the shell provisioner, so
 /// [`BOOTSTRAP`] finds the file already there.
@@ -600,8 +632,8 @@ fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
 /// The `source:` is resolved against the Vagrantfile's own
 /// directory rather than the process's. Vagrant runs the file
 /// through `Kernel.load`, so `__dir__` names that directory.
-fn env_file_block(configured: bool) -> String {
-    if !configured {
+fn env_file_block(staged: bool) -> String {
+    if !staged {
         return String::new();
     }
     format!(
@@ -641,8 +673,8 @@ fn env_file_block(configured: bool) -> String {
 /// because the clone that needs it runs inside that same
 /// script. (Not the script's first network call: the git host's
 /// published ssh keys are fetched before it, over https.)
-fn credential_block(configured: bool) -> String {
-    if !configured {
+fn credential_block(staged: bool) -> String {
+    if !staged {
         return String::new();
     }
     format!(
@@ -666,8 +698,8 @@ fn credential_block(configured: bool) -> String {
 /// Every file bombyx *generates* for the project directory on
 /// the VM host, as `(name, contents)` pairs.
 ///
-/// Not every file that lands there. A configured `env_file`
-/// sends one more and a configured `repo_token` sends another,
+/// Not every file that lands there. A `staged` carrying secrets
+/// sends one more and one carrying a credential sends another,
 /// and neither is generated here: the first comes off the
 /// operator's workstation and the second is built from a value
 /// inside it. This module holds both names, `ENV_FILE_NAME` and
@@ -685,6 +717,10 @@ fn credential_block(configured: bool) -> String {
 /// third file would mean remembering all of them -- and the one
 /// people forget is the test, so the new file would be written
 /// to the host without ever being checked.
+///
+/// # Panics
+///
+/// Whenever [`render`] does, and for the same reason.
 #[must_use]
 pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 2] {
     [
@@ -1323,6 +1359,22 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "a config naming an env_file")]
+    fn a_config_naming_a_file_cannot_be_rendered_against_nothing() {
+        // Announcing `0` for a config that names an `env_file`
+        // is the quiet half of a mismatch. `bootstrap.sh`
+        // refuses the loud half -- announced `1`, nothing
+        // uploaded -- but a `0` sends the guest down the branch
+        // that deletes the file an earlier provision left and
+        // provisions on with no secrets and no complaint.
+        //
+        // `Config::read_staged` is the only production route to
+        // a `Staged`, so this cannot happen on a bombyx run. The
+        // check is here because both arguments are public.
+        let _ = render(&cfg_with_env_file(), &Staged::default());
+    }
+
+    #[test]
     fn what_the_guest_is_told_follows_what_was_staged() {
         // The render and the write step read one value. A
         // Vagrantfile announcing a secrets file that `plan`
@@ -1338,7 +1390,10 @@ mod tests {
             "the upload block is missing:\n{announced}"
         );
 
-        let unstaged = render(&cfg, &Staged::default());
+        // The other side of the pair: a config naming no file,
+        // rendered against the `Staged` that config implies.
+        let plain = cfg_with(Provider::Libvirt);
+        let unstaged = render(&plain, &plain.staged_for_tests());
         assert_eq!(rendered(&unstaged, ENV_FILE_PRESENT_ENV), "\"0\"");
         assert!(
             !unstaged.contains("bombyx_env_file = File.expand_path"),
@@ -1357,10 +1412,8 @@ mod tests {
         //
         // The contents are covered separately, in `plan`: they
         // travel on a pipe and reach no command line at all.
-        for (name, contents) in files(
-            &cfg_with_env_file(),
-            &cfg_with_env_file().staged_for_tests(),
-        ) {
+        let cfg = cfg_with_env_file();
+        for (name, contents) in files(&cfg, &cfg.staged_for_tests()) {
             assert!(
                 !contents.contains(ENV_FILE),
                 "{name} holds the workstation path"

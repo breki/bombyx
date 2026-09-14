@@ -523,26 +523,27 @@ impl Config {
     #[must_use]
     pub(crate) fn staged_for_tests(&self) -> Staged {
         let Some(path) = self.source.env_file.as_ref() else {
+            // The same refusal [`Config::read_staged`] makes, so
+            // a fixture cannot build a pair no run can produce.
+            assert!(
+                self.source.repo_token.is_none(),
+                "a repo_token with no env_file is a config \
+                 read_staged refuses"
+            );
             return Staged::default();
         };
         let body = self.source.repo_token.as_ref().map_or_else(
-            || {
-                "PLAIN=value
-"
-                .to_owned()
-            },
-            |token| {
-                format!(
-                    "{}=hunter2
-",
-                    token.var.as_str()
-                )
-            },
+            || "PLAIN=value\n".to_owned(),
+            |token| format!("{}=hunter2\n", token.var.as_str()),
         );
         let secrets = Secrets::for_tests(body.as_bytes());
+        // The variable is always there -- the body above is
+        // built from the name the token asks for. What can fail
+        // is a fixture whose `repo` reaches the server by ssh,
+        // since a token needs an https host to be sent to.
         let credential = self
             .credential(&secrets, path.as_str())
-            .expect("the fixture names the variable it supplies");
+            .expect("the fixture's repo must have an https host");
         Staged {
             secrets: Some(secrets),
             credential,
@@ -782,7 +783,7 @@ impl Config {
 
         // Ranked for the same `name` the entry came from, so the
         // host and the settings always come from one project.
-        let (host, origin) = host::rank(registry, name.as_str())?;
+        let (host, origin) = host::rank(registry, name)?;
 
         let route = transport::resolve(host.as_str(), this_machine);
         Ok((project.to_config(key, host, route), origin))
@@ -1914,27 +1915,6 @@ mod load_project_tests {
                     "{name:?} must be advised quoted, got {text}"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn an_illegal_name_cannot_be_built_into_the_argument() {
-        // No message may advise a table heading the parser would
-        // refuse. `[projects...]` with a `/` or a `..` in it
-        // cannot be written down: the whole file fails to parse,
-        // so an operator following the advice breaks every
-        // project rather than fixing this one.
-        //
-        // `Config::load_project` asks for a `ProjectName`, so
-        // the refusal happens where the argument is built and
-        // the loader never sees such a value. The whole family,
-        // not the case that prompted it; each one is refused for
-        // its own reason inside `name::check_segment`.
-        for name in ["", ".", "..", "../../etc", "-x", "a/b", "a/"] {
-            assert!(
-                ProjectName::parse(name).is_err(),
-                "{name:?} must be refused as a project name"
-            );
         }
     }
 }

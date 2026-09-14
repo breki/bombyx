@@ -340,8 +340,8 @@ fn run() -> Result<Ran> {
     // which is where the value came from. `Config::load_project`
     // takes the checked value and cannot be reached with
     // anything else.
-    let project = ProjectName::parse(&project)
-        .with_context(|| format!("invalid project name {project:?}"))?;
+    let project =
+        ProjectName::parse(&project).context("invalid --project value")?;
 
     // No arm names the registry file here. Every error that
     // could want one names it already: a value breaking its

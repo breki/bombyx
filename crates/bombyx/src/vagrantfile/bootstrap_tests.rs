@@ -864,21 +864,24 @@ fn the_bootstrap_script_deletes_a_key_no_upload_replaced() {
     // from the earlier run would stay in the guest with
     // nothing pointing at it.
     //
-    // The needle carries the `!` because `refuse` removes the
-    // same three files on its way out, and its line starts
-    // with the same nine characters -- a `contains` without
-    // the `!` reports success for a script whose else branch
-    // removes nothing.
-    let flat = flat_bootstrap();
-    let branch = flat
-        .find("if [ \"${BOMBYX_DEPLOY_KEY:-}\" = 1 ]; then")
-        .expect("the branch must be there");
-    let removal = flat
-        .find("! rm -f \"$DEPLOY_KEY\"")
-        .expect("the else branch must remove a leftover");
+    // One needle spanning the removal and the refusal beneath
+    // it, rather than two offsets compared. Two weaker shapes
+    // both pass on a script that is wrong: `refuse` removes the
+    // same three files on its way out, so the whole of
+    // `rm -f \"$DEPLOY_KEY\"` sits on its line too and a bare
+    // needle matches that instead; and an offset ordering is
+    // satisfied by an unconditional removal placed after the
+    // `fi`, which would delete a key the config *does* name.
+    //
+    // `flat_bootstrap` joins each continuation and collapses
+    // the runs of whitespace, so a command and the first line
+    // of its refusal sit next to each other in one string.
+    let needle = "if ! rm -f \"$DEPLOY_KEY\"; then \
+                  refuse \"the config names no deploy key, but the one at\"";
     assert!(
-        branch < removal,
-        "the removal must sit in the branch for no configured key"
+        flat_bootstrap().contains(needle),
+        "the removal for a config naming no key is gone, or no \
+         longer refuses when it fails"
     );
 }
 

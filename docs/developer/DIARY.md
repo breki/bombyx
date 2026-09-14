@@ -4,6 +4,42 @@ Development diary for bombyx. Newest entries first.
 
 ### 2026-09-14
 
+**The review round on the backlog clearance, and the script
+that lied about applying an edit**
+
+Three stages, 34 findings, 20 fixed. Two are worth the record.
+
+`red-team` found the half of the pairing bug we had not: a
+config naming `env_file` rendered against `Staged::default()`
+announces `0`, and the guest then takes the branch that deletes
+the file an earlier provision left and provisions on reporting
+success. Our own fix had closed the loud direction and opened
+the quiet one. `render` now asserts the pair came from one
+config. That keeps two sources of truth reconciled by a panic,
+which `rt-2026-09-14-the-present-pair-keeps-two-sources-of-truth`
+records: the pair has been rewritten five times in two days,
+and making the mismatch unrepresentable is its own commit.
+
+The other is a process failure rather than a code one. A
+`python3` heredoc applied two edits, asserted each match, and
+wrote the file once at the end. The second assertion failed, so
+the script raised, the write never ran -- and the shell's `echo
+ok` on the next line printed anyway. The first edit was
+reported applied and was not. `fresh-reader` found the
+unchanged text two stages later as FR-5, which is the same
+finding `red-team` had already made as RT-7. Cost: one stage of
+review spent re-finding a fix that was never written. The habit
+that follows is to write the file after each successful
+replacement, and to read the artifact back rather than trust
+the script's own report -- which `/review` already asks for
+under **Read the artifact back before claiming a fix landed**,
+and which we did not do.
+
+Stage 2 stopped at two rounds rather than three, because four
+of round 2's six findings landed on round 1's own fixes. All
+four were prose, which is the documented shape: sharpening a
+comment is how the next round's findings get made.
+
 **Clearing the artisan backlog found a test that could not
 fail**
 

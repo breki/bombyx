@@ -288,16 +288,16 @@ impl Registry {
     ///
     /// The key comes back because a caller reporting where the
     /// host came from wants the table heading as this file
-    /// spells it, and re-parsing `name` into a [`ProjectName`]
-    /// would be checking a value the lookup has already proved
-    /// legal.
+    /// spells it, and the argument alone does not carry that
+    /// spelling.
     ///
     /// **Absence is `None`, never an error.** A name with no
-    /// table, and a name no table key could hold, both answer
-    /// `None`, because asking which host a project prefers is
-    /// not asking for its entry. [`Registry::project`] is what
-    /// reports a missing entry, once, with a message saying
-    /// which table to write.
+    /// table answers `None`, because asking which host a project
+    /// prefers is not asking for its entry. [`Registry::project`]
+    /// is what reports a missing entry, once, with a message
+    /// saying which table to write. A name no table key could
+    /// hold cannot arrive here at all: building the
+    /// [`ProjectName`] this takes is what refuses one.
     ///
     /// **The host it returns has passed the host rule**, applied
     /// by [`parse`] to every key in the file. So the guarantee
@@ -315,9 +315,9 @@ impl Registry {
     /// for that.
     pub(crate) fn project_host(
         &self,
-        name: &str,
+        name: &ProjectName,
     ) -> Option<(&ProjectName, &str)> {
-        let (key, project) = self.projects.get_key_value(name)?;
+        let (key, project) = self.projects.get_key_value(name.as_str())?;
         Some((key, project.host.as_deref()?))
     }
 
@@ -531,7 +531,7 @@ mod tests {
 
     /// The host `name`'s entry names, without the key beside it.
     fn host_of<'a>(registry: &'a Registry, name: &str) -> Option<&'a str> {
-        registry.project_host(name).map(|(_key, host)| host)
+        registry.project_host(&named(name)).map(|(_key, host)| host)
     }
 
     /// Writes `source` as a registry file in a fresh directory,
@@ -660,11 +660,18 @@ mod tests {
 
     #[test]
     fn a_name_with_no_entry_supplies_no_host() {
-        // Including a name no table key could hold. Asking for
-        // a host is not asking for the entry, so this reports
-        // absence rather than the error `project` raises.
+        // Asking for a host is not asking for the entry, so this
+        // reports absence rather than the error `project`
+        // raises.
+        //
+        // Only names a table key could hold. The other half of
+        // the old rule -- that `""`, `../../etc` and `-x` also
+        // answer `None` -- is now the argument type's, since
+        // `ProjectName::parse` refuses all three, and
+        // `an_illegal_name_cannot_be_built_into_the_argument`
+        // in `config.rs` is where that family is listed.
         let registry = parsed(&registry_toml());
-        for name in ["other", "", "../../etc", "-x"] {
+        for name in ["other", "myprojekt"] {
             assert_eq!(host_of(&registry, name), None, "{name:?}");
         }
     }
@@ -740,18 +747,11 @@ mod tests {
     }
 
     #[test]
-    fn a_name_no_table_could_carry_never_reaches_a_lookup() {
-        // "not found -- add `[projects.../etc]`" is advice the
-        // operator cannot take: that table is refused by the
-        // parser, so typing it breaks the whole file. The
-        // requested name gets the same rule the key does, and
-        // `ProjectName` is where it runs -- so a caller cannot
-        // ask this registry about such a name at all.
-        for bad in ["", "..", "../../etc", "-x", "a/b"] {
-            assert!(ProjectName::parse(bad).is_err(), "{bad:?} accepted");
-        }
-        // A name of a legal shape that is simply absent still
-        // reports absence, which is the case the message is for.
+    fn a_name_of_a_legal_shape_that_is_absent_reports_absence() {
+        // Which is the case `ProjectNotFound`'s message is for.
+        // A name no table key could hold cannot reach this
+        // lookup: `ProjectName` refuses it first, and
+        // `crate::name` enumerates that family.
         let registry = parsed(&registry_toml());
         assert!(matches!(
             registry.project(&named("myprojekt")).unwrap_err(),

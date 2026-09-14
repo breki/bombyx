@@ -207,10 +207,13 @@ header above it:
   (`remote::vagrant_in_then_remove`). `bootstrap.sh` tightens it
   to 0600 and exports `BOMBYX_ENV_FILE` naming it; it places the
   file nowhere itself, so the project's own script does the copy.
-  Whether one was configured reaches the guest as
-  `BOMBYX_ENV_FILE_PRESENT`, always set, and the unconfigured
-  branch removes a leftover and exports an empty
-  `BOMBYX_ENV_FILE`.
+  Whether bombyx staged one reaches the guest as
+  `BOMBYX_ENV_FILE_PRESENT`, always set. It matches what the
+  config names, since `Config::read_staged` reads the file the
+  config names or nothing at all, but `vagrantfile::render`
+  takes the staged value rather than the key -- and panics if
+  the two it is handed disagree. The branch for nothing staged
+  removes a leftover and exports an empty `BOMBYX_ENV_FILE`.
 - `repo_token` and `repo_user` are optional and are stated
   together or not at all. `repo_token` names a variable inside
   the file `env_file` points at, and `repo_user` the username
@@ -243,13 +246,13 @@ header above it:
   `credential.helper` setting, and a helper string carrying a
   space is handed to a SHELL -- so a space splits the path and a
   `$` is expanded, which is what rules out `~` and `$HOME`. A
-  project's `[env]` table can set `HOME`. Whether one was
-  configured reaches the guest as `BOMBYX_GIT_CRED_PRESENT`,
-  always set. `bootstrap.sh` tightens
-  it to 0600, names the setting on the clone and the fetch
-  through its `git_net` wrapper, and records it on the clone so
-  the agent can push; the unconfigured branch removes a leftover
-  and unsets it
+  project's `[env]` table can set `HOME`. Whether bombyx staged
+  one reaches the guest as `BOMBYX_GIT_CRED_PRESENT`, always
+  set, the same way `BOMBYX_ENV_FILE_PRESENT` is.
+  `bootstrap.sh` tightens it to 0600, names the setting on the
+  clone and the fetch through its `git_net` wrapper, and records
+  it on the clone so the agent can push; the branch for nothing
+  staged removes a leftover and unsets it
 - Host-key verification, which is **independent of
   `deploy_key`** -- it applies to a public repository cloned
   over ssh just as much. A repository reached over ssh carries
@@ -334,21 +337,22 @@ project's other settings: a file edited between two reads could
 supply a project host and a file-wide host that never
 coexisted.
 
-`Config::load_project(name, registry)` is the only loader.
-`registry` is the file to read -- `--config` when the operator
-passed one, `config::registry_file()` otherwise, and `None`
-when the environment names no config directory at all. It reads
-the `[projects.<name>]` table for every setting but the host,
-ranks the host across the two keys, derives `Config::transport`
-from the host that won, and returns a `(Config, HostOrigin)`
-pair so the binary reports the winner rather than re-deriving
-the rule. Its errors include
-`RegistryNotFound` for a machine with no registry file,
-`ProjectNotFound` for a file with no table for `name`, and
-`HostMissing` when neither `host` key names one. An illegal
-project name is refused before the file is looked for, so no
-message ever advises a `[projects.<name>]` heading that the
-parser would reject.
+`Config::load_project(name, registry)` is the only loader, and
+`name` is a `ProjectName` rather than a string. `registry` is
+the file to read -- `--config` when the operator passed one,
+`config::registry_file()` otherwise, and `None` when the
+environment names no config directory at all. It reads the
+`[projects.<name>]` table for every setting but the host, ranks
+the host across the two keys, derives `Config::transport` from
+the host that won, and returns a `(Config, HostOrigin)` pair so
+the binary reports the winner rather than re-deriving the rule.
+Its errors include `RegistryNotFound` for a machine with no
+registry file, `ProjectNotFound` for a file with no table for
+`name`, and `HostMissing` when neither `host` key names one.
+An illegal project name is refused where the argument is built
+-- in `main.rs`, for the `--project` value -- before any file
+is opened, so no message ever advises a `[projects.<name>]`
+heading that the parser would reject.
 
 The binary is the only thing that reads `std::env`. A config
 directory from the environment must be an anchored path -- a

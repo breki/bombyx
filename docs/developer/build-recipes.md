@@ -1,7 +1,7 @@
 # Build and toolchain recipes
 
-These three recipes configure the build. You need each one
-rarely, and none applies on a normal commit. `CLAUDE.md`
+Three sections: two recipes and one appendix. You need each
+one rarely, and none applies on a normal commit. `CLAUDE.md`
 carries the always-on standards; these are here so they do not
 sit in every session's context.
 
@@ -41,6 +41,12 @@ Production crates keep `[lints] workspace = true` and
 remain `unsafe`-forbidden. Document the scoped
 exception with a comment near the use site so reviewers
 can verify the unsafe block is genuinely necessary.
+
+**Where bombyx stands: `xtask` holds no `unsafe` block
+today, so nothing here has taken this exception.** The
+Win32 example above comes from the template, whose
+downstream projects run a local server that can go
+stale. bombyx has no runtime services.
 
 ## Coverage exceptions for hardware-bound code
 
@@ -96,6 +102,16 @@ What this gets you: the orchestrator is fully covered
 play_audio_native() { Ok => ..., Err => ... }`), the
 leaf is honestly acknowledged as untested in CI, and no
 `#[cfg(test)]` branch leaks into production code.
+
+**Where bombyx stands: the root `Cargo.toml` names no
+coverage exclusion, and the section sits there
+commented out.** The audio and GPIO examples above come
+from the template. A bombyx-specific escape hatch would
+be spelled `BOMBYX_TEST_*` rather than `RUSTBASE_TEST_*`
+-- though note that `config::env` reserves the
+`BOMBYX_` prefix for the variables the generated
+Vagrantfile sets, so a test hatch reaching the guest
+would need a name outside it.
 
 When NOT to use this recipe: if the I/O can be faked
 with a trait + dependency injection at the call site

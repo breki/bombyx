@@ -774,8 +774,9 @@ fn a_malformed_project_name_does_not_blame_the_registry() {
     // carry a bad one: a table key is a `ProjectName`, refused
     // while the file parses. So naming the file here would send
     // the operator to edit the one place the value is not. The
-    // message quotes the name back, because `--project` is what
-    // the operator has to retype.
+    // context line names the argument and the `NameError` under
+    // it quotes the value, so between them the operator learns
+    // what to retype without the name appearing twice.
     // Its own command, not `bombyx_in`: that helper appends
     // `--project myproject`, so this would be asserting about a
     // second occurrence and clap's last-one-wins.
@@ -788,10 +789,8 @@ fn a_malformed_project_name_does_not_blame_the_registry() {
         .assert()
         .failure();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(
-        stderr.contains("invalid project name \"../etc\""),
-        "{stderr}"
-    );
+    assert!(stderr.contains("invalid --project value"), "{stderr}");
+    assert!(stderr.contains("got \"../etc\""), "{stderr}");
     assert!(!stderr.contains(USER_CONFIG_FILE), "{stderr}");
 }
 

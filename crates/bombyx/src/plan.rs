@@ -1277,7 +1277,7 @@ mod tests {
     /// `with_token` decides whether the config also names a
     /// `repo_token`, which is what makes bombyx build the git
     /// credential as well.
-    fn staged(with_token: bool) -> (Config, Staged) {
+    fn staged_project(with_token: bool) -> (Config, Staged) {
         use crate::config::{EnvFilePath, RepoToken, RepoTokenVar, RepoUser};
 
         let dir = tempfile::tempdir().expect("a temp dir");
@@ -1331,10 +1331,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = {
-                let (cfg, staged) = staged(true);
-                plan(&action, &cfg, Tty::NoPty, &staged)
-            };
+            let (cfg, staged) = staged_project(true);
+            let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
             let write = cmds
                 .iter()
                 .position(|c| script(c).contains("bombyx.env"))
@@ -1414,10 +1412,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = {
-                let (cfg, staged) = staged(true);
-                plan(&action, &cfg, Tty::NoPty, &staged)
-            };
+            let (cfg, staged) = staged_project(true);
+            let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
             let write = cmds
                 .iter()
                 .position(|c| script(c).contains("bombyx.git-credentials"))
@@ -1440,10 +1436,8 @@ mod tests {
         // one token, so a count measures the token -- and
         // `docs/usage.md` invites the operator to paste a dry
         // run into a bug report.
-        let cmds = {
-            let (cfg, staged) = staged(true);
-            plan(&Action::Up, &cfg, Tty::NoPty, &staged)
-        };
+        let (cfg, staged) = staged_project(true);
+        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, &staged);
         let cred = cmds
             .iter()
             .find(|c| script(c).contains("bombyx.git-credentials"))
@@ -1477,10 +1471,8 @@ mod tests {
         // project cloning a public repository over https, or one
         // cloning over ssh with a deploy key, is in this case.
         for action in all_actions() {
-            for c in {
-                let (cfg, staged) = staged(false);
-                plan(&action, &cfg, Tty::NoPty, &staged)
-            } {
+            let (cfg, staged) = staged_project(false);
+            for c in plan(&action, &cfg, Tty::NoPty, &staged) {
                 assert!(
                     c.stdin.is_none()
                         || !script(&c).contains("bombyx.git-credentials"),
@@ -1500,10 +1492,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            for c in {
-                let (cfg, staged) = staged(true);
-                plan(&action, &cfg, Tty::NoPty, &staged)
-            } {
+            let (cfg, staged) = staged_project(true);
+            for c in plan(&action, &cfg, Tty::NoPty, &staged) {
                 for arg in &c.args {
                     assert!(!arg.contains("hunter2"), "{action:?}: {arg}");
                 }
@@ -1521,10 +1511,8 @@ mod tests {
         // staged file goes with it and there is nothing for
         // these plans to write or remove on their own.
         for action in [Action::Destroy, Action::Discard(scratch("pr-1234"))] {
-            for c in {
-                let (cfg, staged) = staged(true);
-                plan(&action, &cfg, Tty::NoPty, &staged)
-            } {
+            let (cfg, staged) = staged_project(true);
+            for c in plan(&action, &cfg, Tty::NoPty, &staged) {
                 assert!(
                     !script(&c).contains("bombyx.env"),
                     "{action:?}: teardown must not stage anything"
