@@ -113,6 +113,27 @@ For each finding:
 Number findings **PE-1, PE-2, ...** across the whole session,
 not per batch, so a pick never points at two findings.
 
+## Presenting the choices
+
+The operator picks from a one-line reply, or from a selection
+prompt the main agent builds from your batch, one question per
+finding. Write each finding so it survives either:
+
+- **Keep shows the original, verbatim.** When the choice is
+  offered as options, one option leaves the sentence unchanged,
+  and its text is the original quoted in full -- never a bare
+  label like "keep" or "no change" with the words left off. The
+  operator compares the rewrites against the real sentence, so
+  the real sentence has to be on screen.
+- **Every option carries its own full text.** Put the whole
+  rewritten sentence in each rewrite option and the whole
+  original in the keep option, so a reader choosing between them
+  reads the words themselves, not a pointer back to your report.
+- **Show enough context to decide.** Quote the whole sentence,
+  and the line before or after it when the meaning leans on
+  them, so the choice reads on its own. A rewrite shown as a
+  bare fragment cannot be judged.
+
 Example:
 
 ```

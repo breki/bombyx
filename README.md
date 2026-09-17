@@ -6,6 +6,13 @@ your workstation over SSH.
 *Bombyx mori* is the domesticated silkworm, the animal that spins the
 cocoon. The tool builds the enclosure; the agent works inside it.
 
+![A Bombyx mori silk moth (macro of the head)](docs/images/bombyx-moth.jpg)
+
+<sub>Photo by [CSIRO][moth-src], [CC BY 3.0][moth-lic].</sub>
+
+[moth-src]: https://commons.wikimedia.org/wiki/File:CSIRO_ScienceImage_10746_An_adult_silkworm_moth.jpg
+[moth-lic]: https://creativecommons.org/licenses/by/3.0/
+
 ## Why
 
 An AI coding agent on your own machine can read whatever you can: your
@@ -16,11 +23,9 @@ files, and none of your credentials -- ideally on a machine that is
 not your laptop.
 
 bombyx is the control plane for that setup. It runs `vagrant` on a
-libvirt VM host -- another machine over SSH, or this one directly --
-and generates the files that machine needs, so you stay on your
-workstation. It wraps `ssh` and `vagrant` rather than reimplementing
-them: if bombyx breaks, `ssh vmhost` and `vagrant up` by hand still
-work.
+libvirt VM host, either a separate machine over SSH or this one
+directly. It generates the files that host needs, and you stay on
+your workstation the whole time.
 
 For what a VM can and cannot protect -- including the one credential
 that has to live inside the guest -- see
@@ -47,9 +52,28 @@ machines and what `bombyx up` does step by step.
 
 ## Install
 
+No Rust toolchain needed -- each release carries a prebuilt binary.
+Download the archive for your platform from the
+[releases page](https://github.com/breki/bombyx/releases), check it
+against `SHA256SUMS`, and put the binary on your `PATH`:
+
+<!-- version: 0.6.0 -->
+
 ```bash
-cargo install --path crates/bombyx
+VERSION=0.6.0
+BASE=https://github.com/breki/bombyx/releases/download/v$VERSION
+TARGET=x86_64-unknown-linux-gnu
+
+curl -LO "$BASE/bombyx-v$VERSION-$TARGET.tar.gz"
+curl -LO "$BASE/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+tar xzf "bombyx-v$VERSION-$TARGET.tar.gz"
+install -m755 "bombyx-v$VERSION-$TARGET/bombyx" ~/.local/bin/bombyx
 ```
+
+For the macOS and Windows targets, and the verification detail, see
+[docs/quickstart.md](docs/quickstart.md). After the first install,
+`bombyx self-update` does the download and verify for you.
 
 That installs the CLI on your workstation. The VM host needs libvirt,
 Vagrant and its `libvirt` provider --
@@ -98,8 +122,7 @@ handle private repositories and secrets --
 `repo_token`, and where bombyx looks for this file.
 
 Name the project on every command but `list`: `bombyx --project
-myproject up`. bombyx reads nothing from the project's directory, so it
-cannot guess which project you mean from where you are standing.
+myproject up`.
 
 ## Use
 
@@ -122,7 +145,7 @@ bombyx list               # every project and its VM state
 bombyx self-update        # update this binary to the newest release
 ```
 
-Two lifecycles, on purpose:
+bombyx keeps two lifecycles separate on purpose:
 
 - **Persistent** (`up`/`down`) for your own projects -- warm caches,
   fast boots, reset by snapshot.
@@ -164,18 +187,7 @@ cooldown.
 
 ## Status
 
-Early, but tested against reality. Every command that drives a VM has
-been run against a real libvirt host (Ubuntu 24.04, Vagrant 2.4.9,
-vagrant-libvirt 0.12.2). Those runs took the local route, where the VM
-host is the workstation, so the `ssh` spelling still rests on
-`--dry-run`, and no provider but libvirt has been tried. `self-update`
-is not on that list because it talks to GitHub rather than a VM host.
-
-## Origin
-
-Derived from the [rustbase](https://github.com/breki/rustbase)
-template; see `.template-sync.toml` for the commit this project was
-created from, and `/template-sync` to pull upstream improvements.
+Still in alpha, under active development.
 
 ## License
 
