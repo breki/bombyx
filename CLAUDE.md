@@ -706,15 +706,16 @@ Examples of what to log:
 This feedback will be used to improve the template for
 future projects.
 
-The file uses three sections (see its header for
+The file uses two sections (see its header for
 section semantics): **Open divergences** (gaps the
-project intentionally keeps), **Resolved** (gaps closed
-by retrofit work), and **Suggestions to flow back to
-the template**. `/template-improve` routes new entries
-into the appropriate section by calling
-`cargo xtask feedback-add`, which mints a stable
-`tf-<yyyy-mm-dd>-<slug>` ID, inserts at the section top,
-and dedups -- the file is never hand-edited.
+project intentionally keeps) and **Suggestions to flow
+back to the template**. A resolved divergence is removed
+rather than filed, since the file holds live work only.
+`/template-improve` routes new entries into the
+appropriate section by calling `cargo xtask feedback-add`,
+which mints a stable `tf-<yyyy-mm-dd>-<slug>` ID, inserts
+at the section top, and dedups -- the file is never
+hand-edited.
 
 `/template-backfeed` (template repo only) pulls a
 downstream's feedback back upstream. It uses a watermark in

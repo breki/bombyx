@@ -3,9 +3,7 @@
 Issues, improvements, and observations about the
 [rustbase](https://github.com/breki/rustbase) template.
 
-This file uses three lifecycle sections, the same shape
-adopted by Ledgerstone (a downstream project) and now
-shipped with the template itself:
+This file uses two lifecycle sections:
 
 - **Open divergences** -- things the project knows are
   suboptimal, missing, or differently-shaped than the
@@ -13,15 +11,17 @@ shipped with the template itself:
   are intentional or pending differences from the
   template; in this template repo they are known
   template issues awaiting fix.
-- **Resolved** -- entries closed out by a retrofit /
-  fix commit. Keeps the history visible without
-  cluttering the open list.
 - **Suggestions to flow back to the template** -- in a
   derived project, this is where ideas live that the
   project wants to push upstream. In this template repo
   the section is informational (there is no upstream),
   but the structure is preserved so new entries route
   identically across template and derived projects.
+
+The template ships a third section, **Resolved**; bombyx
+drops it and holds live work only, so a divergence closed
+here is removed rather than filed, the way git history
+records what shipped.
 
 `/template-improve` adds new entries by asking which
 section they belong to.
@@ -88,10 +88,6 @@ registered `path` resolves -- a few lines in `xtask` would turn a
 silent dangling reference into a failed gate. The prune instructions
 should also name `skills.json` explicitly, since it is the one place a
 removed subsystem leaves a description behind.
-
-## Resolved
-
-_None yet._
 
 ## Suggestions to flow back to the template
 

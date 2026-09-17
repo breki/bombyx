@@ -1,8 +1,9 @@
 # record-files-typed-header
 
-**Status:** In progress -- increments 1-3 done; 4 partly done
-(fresh-reader trimmed, template-feedback stale claims fixed);
-deferred: template-feedback broad trim + `## Resolved` cascade
+**Status:** In progress -- increments 1-3 done; 4 mostly done
+(fresh-reader trimmed, template-feedback stale claims fixed,
+`## Resolved` cascade removed); deferred: template-feedback broad
+rationale trim
 **Captured:** (see `docs/todo.md`)
 **Started:** 2026-09-17
 
@@ -201,15 +202,27 @@ edits, verified by the tooling round-tripping them.
   - **Deferred, still open:**
     - The broad `template-feedback.md` rationale trim (operator
       chose minimal for now).
-    - Removing the empty `## Resolved` section and its
-      `FeedbackSection::Resolved` cascade -- a loose-end from
-      increments 1-2. It is a real `feedback.rs` test refactor
-      (the variant is a fixture section in a dozen tests), not the
-      rationale-trim work, so it wants its own commit.
     - The pre-existing `### <id> -- <title>` heading lines in
       `template-feedback.md` run past 80 columns (the title-repeat
       convention). No gate reads them; a future pass could move the
       title into a `**Summary:**` field.
+- 2026-09-17: increment 4c (`## Resolved` cascade) done.
+  - Removed the empty `## Resolved` section from
+    `template-feedback.md` and, so the tooling cannot offer a
+    section that no longer exists, dropped `FeedbackSection::
+    Resolved` from `xtask/src/feedback.rs` (variant, `header_
+    keyword` arm, doc comments). Refactored the dozen tests that
+    used `## Resolved` as a fixture onto the two live sections.
+  - A resolved divergence is now removed, not filed: updated the
+    file preamble (three -> two sections, noting the deliberate
+    divergence from the template, which keeps three), the
+    `/template-improve` skill (dropped the resolved routing;
+    resolution means remove the entry), and CLAUDE.md's feedback
+    description. `feedback-add --help` now offers only
+    open/suggestion. `backfeed.rs` still names `## Resolved` as an
+    example section header, correctly -- it reads downstream files
+    that may still carry one.
+  - clippy, tests, canon and records all green.
 - 2026-09-17: increment 4a (fresh-reader log) done.
   - **Operator decision, reversing the increment-1 note above:**
     the **Explanations to keep** do-not-trim registry is retired --
