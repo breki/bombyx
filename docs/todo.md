@@ -190,16 +190,6 @@ into the reference docs first -- see the `/implement` skill.
   Either say it in move_to_done's doc comment and the Done clap help, or carry
   the body across. Found while using the fixed tool for the first time.
 
-- **readme-vagrantfile-pointer** -- README promises what Part 3 deletes
-  Found by /review2 (fresh-reader FR-11) while working local-host-execution
-  (#38); pre-existing and out of that issue's scope. README.md points at
-  docs/tutorial.md for "a sample project with a Vagrantfile and a provisioning
-  script", but tutorial.md Part 3 is headed "The Vagrantfile: bombyx writes it"
-  and ends by telling the reader a committed one is read by nothing and should
-  be deleted. The README pointer describes what Part 3 produced before bombyx
-  generated the file. Fix is in README.md: list what Part 3 actually produces, a
-  provisioning script and a project table.
-
 - **vm-disk-size-unset** -- no disk key, so the guest gets the box's own size
   Found by the local-route verification run (#37), driving the CLI against the
   VM host.
@@ -235,22 +225,6 @@ into the reference docs first -- see the `/implement` skill.
   the sample is what needs settling either way: either the domain name gains the
   project, or the sample stops promising more than the directory layout
   delivers.
-
-- **tutorial-box-lacks-git** -- two passages still assume the Debian box
-  Found while working box-must-carry-git, and verified by booting it on the VM
-  host on 2026-09-05: debian/bookworm64, which docs/tutorial.md used to tell the
-  reader to use, has no git, so bootstrap.sh refuses and the first up exits 1
-  after the download and the boot. The table in Part 3 now names
-  generic/ubuntu2204, whose guest booted and provisioned to completion the same
-  day, and the paragraphs under it explain the failure and warn readers off the
-  Debian box. What is left is the two passages written around that box, which
-  still mention it: Part 3's provision.sh runs chsh because the Debian box gives
-  its user /bin/sh, and When something goes wrong explains the arrow-key
-  behaviour the same box causes. Both are currently handled by telling the
-  reader they will not apply, which is an explanation where a rewrite belongs.
-  Doing this properly means running the tutorial end to end, which has never
-  happened -- its header already marks the Part 3 and Part 4 transcripts
-  unverified.
 
 - **split-project-out-of-registry** -- registry.rs holds three types
   registry.rs is 930 lines and defines three types: Project (public, public
@@ -506,26 +480,6 @@ into the reference docs first -- see the `/implement` skill.
   may set it; it reads the passwd entry instead, which is what ENV_FILE already
   does. Found while working issue #78, deliberately left out of that change.
 
-- **tutorial-debian-box-warning** -- keep, reword, or cut Debian digression
-  docs/tutorial.md, ~line 444 (PE-28). The debian/bookworm64 warning reads
-  awkwardly ("the box two later passages ... are written around"), but the real
-  question is whether it over-explains. It steers the reader off a box with no
-  git, which breaks the first up at clone time, and admits two later passages
-  still assume that box: the chsh line in the sample provision.sh, and the
-  arrow-key troubleshooting entry. Decide: keep and reword (split it, e.g. "two
-  later passages were written assuming you picked it"), or cut/trim the whole
-  Debian digression. Surfaced in a four-round blue-pencil prose pass.
-
-- **tutorial-provision-git-warning** -- reword the subject-held-open sentence
-  docs/tutorial.md, ~line 474 (PE-29), the 'your own provision.sh cannot save
-  you here' paragraph. The sentence 'the apt-get install ... you are about to
-  write ... never runs' holds the subject open before the verb. Substance is
-  sound: the guest clones the repo that holds provision.sh, so the
-  version-control tool must pre-exist in the box. Decide: keep and reword (make
-  the line the subject, then explain that the tool has to be present before that
-  file exists on the guest), or leave as is. Surfaced in a four-round
-  blue-pencil prose pass.
-
 - **record-files-typed-header** -- typed per-item header, not prose parsing
   Give the mutated record-collection files a per-item, machine-parseable header
   so the tooling reads fields, not prose. Scope: docs/todo.md and the record
@@ -573,6 +527,18 @@ into the reference docs first -- see the `/implement` skill.
   documentation-overhaul move 2.
 
 ## Done
+
+- **readme-vagrantfile-pointer** -- README promises what Part 3 deletes
+  (2026-09-17)
+
+- **tutorial-provision-git-warning** -- reword the subject-held-open sentence
+  (2026-09-17)
+
+- **tutorial-debian-box-warning** -- keep, reword, or cut Debian digression
+  (2026-09-17)
+
+- **tutorial-box-lacks-git** -- two passages still assume the Debian box
+  (2026-09-17)
 
 - **env-file-rules-stated-five-times** -- one rule, five documents, drifting
   (2026-09-17)

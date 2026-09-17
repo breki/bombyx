@@ -1,7 +1,6 @@
 # documentation-overhaul
 
-**Status:** Move 3 in progress (2026-09-17) -- firewall doc split
-done; tutorial cleanup pending
+**Status:** Move 3 complete (2026-09-17); moves 4-5 remain
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -232,3 +231,13 @@ stale-record cleanup, not the firewall split.
   `docs/vm-host-firewall.md`; `vm-host-setup.md` down to install +
   verify plus a stub; all inbound links repointed;
   `cargo xtask validate` green. Tutorial cleanup still pending.
+- 2026-09-17: commit 2 (tutorial cleanup) done. Modernized the
+  tutorial off its Debian-box legacy: trimmed the ~40-line
+  why-not-Debian aside (was lines 445-483) to a six-line happy-path
+  note, reworded the `chsh` comment and the arrow-key troubleshooting
+  entry to be box-agnostic (the `chsh` code was already a safe
+  conditional), and the awkward "provision.sh cannot save you"
+  sentence went with the trim. `readme-vagrantfile-pointer` needed no
+  edit -- the stale pointer was already gone (removed when the README
+  was trimmed in `d0df54e`), verified now. All four related items
+  moved to Done. Move 3 complete.

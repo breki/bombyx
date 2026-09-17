@@ -442,45 +442,12 @@ Then change these:
 | `source.repo` | the URL you push this repository to |
 | `source.ref` | the branch you push, `main` here |
 
-**Do not reach for `debian/bookworm64` here**, which is the
-obvious Debian choice and the box two later passages of this
-tutorial are written around. It has no `git`, so a first `up`
-on it cannot finish. Booting it on a Linux workstation on
-2026-09-05 confirmed that: the VM comes up, and then the
-provisioning refuses and exits 1.
-
-**Every refusal prints two `bombyx:` lines**, and it is worth
-seeing the shape once. The first says what went wrong; the
-second says what became of every credential that had already
-been uploaded, because a guest that stops part-way must not keep
-one quietly. There are three it can be talking about -- a deploy
-key, a git credential and a secrets file -- and the second line
-spells out which of the three applied to this run. Vagrant prefixes
-each line with `default:`, and each reaches the terminal as one
-long line.
-
-```
-bombyx: git is not installed in this box. Install it in the box, or choose one with git, so the guest can clone the project.
-bombyx: any uploaded deploy key and any git credential have been removed from this guest, and so has any secrets file at /home/vagrant/.bombyx-env.
-```
-
-*(The wording is the script's own text, not a transcript of
-that run. What was measured is the behaviour, not these exact
-words.)*
-
-**Your own `provision.sh` cannot save you here**, and this is
-the part that surprises people. bombyx runs one provisioner in
-the guest, its own bootstrap script, and that script's first
-job is to clone your repository. `provision.sh` lives inside
-that repository. So the `apt-get install ... git` you are
-about to write under **`vagrant/provision.sh`** below never
-runs: `git` is what fetches the file that would have installed
-it.
-
-`generic/ubuntu2204` carries `git`. A guest booted on it on
-2026-09-05 and provisioned to completion, and it is the value
-in `config.toml.sample`. Both boots are recorded under
-`tutorial-box-lacks-git` in `docs/todo.md`.
+**Pick a box that carries `git`.** `generic/ubuntu2204` does,
+and it is the value in `config.toml.sample`. A box without it --
+`debian/bookworm64`, say -- cannot finish the first `up`: the
+guest boots, then the provisioner refuses at clone time and
+exits 1. Your own `provision.sh` cannot rescue it, because `git`
+is what would fetch that file in the first place.
 
 **A GitHub or Bitbucket URL over ssh needs `curl` in the box,
 and `jq` as well for GitHub.** Before it clones, bombyx has the
@@ -627,11 +594,11 @@ sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   build-essential ca-certificates curl git jq ripgrep tmux
 
-# The Debian box creates its user with /bin/sh, which is dash --
-# no line editing at all, so arrow keys print `^[[A` inside
-# `bombyx shell`. The tell is a bare `$ ` prompt instead of
-# bash's `user@host:dir$`. dash never consults TERM or
-# terminfo, which is why checking those comes back clean.
+# Some boxes give the vagrant user /bin/sh (dash), which has no
+# line editing, so arrow keys print `^[[A` inside `bombyx shell`
+# and the prompt is a bare `$ ` instead of bash's
+# `user@host:dir$`. Switch to bash when that is the case; on a
+# box that already uses bash this check does nothing.
 if [ "$(getent passwd vagrant | cut -d: -f7)" != "/bin/bash" ]; then
   sudo chsh -s /bin/bash vagrant
 fi
@@ -967,8 +934,9 @@ dealt with:
 - **Edits to `provision.sh` appear to do nothing.** `up` skips
   provisioners once the VM exists; use `bombyx provision`.
   Part 5.
-- **Arrow keys print `^[[A` inside the VM.** The box created
-  its user with dash rather than bash. Part 3.
+- **Arrow keys print `^[[A` inside the VM.** The box's user
+  shell is dash, not bash; the `chsh` step in Part 3 switches
+  it at the next login.
 - **`reset` says the snapshot was not found.** Two causes. The
   VM predates this behaviour and has had no `up` since, so
   nothing ever saved one. Or an `up` tried and could not: that
