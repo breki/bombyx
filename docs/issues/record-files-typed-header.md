@@ -183,6 +183,26 @@ edits, verified by the tooling round-tripping them.
   - Left for increment 2 (logs live-only): reviewer-log and
     template-feedback entries about the removed `--doc`/Done are now
     moot findings, to be dropped there.
+- 2026-09-17: increment 4a (fresh-reader log) done.
+  - **Operator decision, reversing the increment-1 note above:**
+    the **Explanations to keep** do-not-trim registry is retired --
+    "we are not going to use it any longer." Removed the section
+    from `fresh-reader-log.md`, and with it the instructions that
+    fed it: the "What worked" section in `.claude/agents/fresh-
+    reader.md` and the matching sentences in
+    `.claude/commands/code-reviewers.md` and `review.md`, so the
+    reviewer no longer produces output with nowhere to go.
+  - Trimmed the deferred backlog to the fact: cut re-derived
+    rationale, "Swept" lifecycle paragraphs and round-local
+    "Found by FR-N" trailers; dropped the one finding my own 3b
+    work resolved (`fr-2026-09-04-todo-md-header-documents-one-
+    entry-shape` -- the queue now has one shape and its header says
+    so). Verified the older `.claude` and `vm-host-setup.md`
+    findings are still live before keeping them. 24 deferred
+    entries -> 23; records-check now 5 files, 118 entries. canon
+    and records green.
+  - Left for 4b: trim `template-feedback.md` rationale, including
+    the now-stale `--doc`/`--issue`/`move_to_done` sentences.
 - 2026-09-17: increment 3b (queue onto headed entries) done.
   - `docs/todo.md`: converted 38 bullets to `### <slug>` entries
     with `**Summary:**` fields via a scratchpad awk converter

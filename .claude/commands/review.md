@@ -456,11 +456,6 @@ fixed**, per **Log what you defer** above. Say in the report
 that this stage's limit excluded it rather than that nobody
 thought it mattered.
 
-`fresh-reader`'s **What worked** section is not a finding and
-needs no action. Carry it into the report anyway, so the
-passages it named are known to carry a reason the next time
-somebody trims comments.
-
 ## When it stops converging
 
 Findings landing on earlier fixes are not saying the fixes were

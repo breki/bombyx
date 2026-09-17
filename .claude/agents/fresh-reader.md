@@ -82,21 +82,6 @@ them is a comprehension problem in the usual sense:
 10. **A count that disagrees with the list it introduces**, or
     a cross-reference to a step number that has moved.
 
-## What worked
-
-**You are the only reviewer asked this, so do not skip it.**
-
-End with a short section naming the two or three explanations
-in these files that genuinely helped -- the comment that
-answered your question before you had to go looking, the
-example that made a mechanism land. Say what each one did
-right.
-
-This is not politeness. Those passages are invisible to a
-reviewer hunting defects, so they get shortened away in the
-next editing pass by somebody who cannot tell them apart from
-padding. Naming them is what protects them.
-
 ## Reporting
 
 Number every finding **FR-1, FR-2, ...** in the order you
@@ -123,8 +108,7 @@ belongs to the other two.
 list, as long as the confusion started in a file on your list.
 Say where you went and what you found there.
 
-If you find nothing, say "No issues found." -- but still give
-the **What worked** section.
+If you find nothing, say "No issues found."
 
 Your final message is the report itself. It is consumed by
 `/review`, not shown to a human directly, so return the

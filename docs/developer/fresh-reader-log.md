@@ -1,21 +1,8 @@
 # Fresh Reader Findings -- Deferred backlog
 
 Comprehension review findings, from the reviewer that reads the
-changed files cold. Newest first.
-
-An entry here is a place where the code did not explain itself
-and we chose not to fix it yet. A finding that *was* fixed
-leaves no entry -- the comment it produced is the record.
-
-**Two sections, and only the first is a backlog.** `/review`
-says that ten or more open items mean the backlog has itself
-become the problem, and that count is about work nobody has
-done. The **Explanations to keep** section at the end is the
-opposite: passages a comprehension review named as carrying a
-reason, recorded so a later tidy-up cannot take them without
-noticing. Those are finished work and are not counted.
-
-## Deferred findings
+changed files cold. Newest first. A finding that was fixed leaves
+no entry -- the comment it produced is the record.
 
 ---
 
@@ -24,24 +11,15 @@ noticing. Those are finished work and are not counted.
 **Category:** Comprehension
 
 `CLAUDE.md` under **Voice** names "limits what stealing it is
-worth" as *the* example of a comparative with no comparison, and
-says the defect matters twice over in a document about risk,
-because a hedged comparative reads as reassurance and a reader
-cannot check reassurance.
-
-The phrase is still in `README.md`, `config.toml.sample` and
-`docs/trust-boundary.md`, alongside "narrower than it first
-looks", "narrower than it looks", "the tighter choice" and
-"Read-only is tighter". A reader deciding what scope of token to
-give a VM gets nothing actionable from any of them; the passage
-in `docs/trust-boundary.md` that names what each token type
-actually reaches is what answers the question.
-
-Every one of them predates this branch, and the repair is to
-name the reach instead, the way that passage already does.
-Deferred as out of scope for the `repo_token` work rather than
-because it is wrong.
-
+worth" as the example of a comparative with no comparison. The
+phrase and its kin -- "narrower than it first looks", "narrower
+than it looks", "the tighter choice", "Read-only is tighter" --
+are still in `README.md`, `config.toml.sample` and
+`docs/trust-boundary.md`, and a reader deciding a token's scope
+gets nothing actionable from any of them. The repair is to name
+the reach instead, the way the trust-boundary passage that lists
+what each token type reaches already does. Deferred as out of
+scope for the `repo_token` work.
 
 ### fr-2026-09-13-trust-boundary-opening-qualifies-early
 
@@ -49,51 +27,25 @@ because it is wrong.
 
 The blockquote at the top of `docs/trust-boundary.md` qualifies
 "Statement one", "The boundary" and "Where project code lives
-today" -- a numbered statement and two headings that appear 20 to
-60 lines further down. A reader meets the caveat before the thing
-being caveated, cannot tell which two statements are meant, and
-has to scroll down and back. The note also restates claims the
-body then makes again.
-
-The repair is to move the caveat below **The boundary**, keeping
-at the top only what a reader needs first: that neither statement
-has been confirmed against a remote VM host, and that statement
-one is a property of a machine rather than of bombyx.
-
-Deferred rather than applied: this is pre-existing prose, and
-restructuring a document's opening is out of scope for a change
-that only added one paragraph to it.
+today" -- a statement and two headings 20 to 60 lines below, so
+the caveat arrives before the thing it caveats. The repair is to
+move it below **The boundary**, keeping at the top only that
+neither statement is confirmed against a remote VM host and that
+statement one is a property of a machine, not of bombyx. Deferred:
+restructuring a document's opening is out of scope for a
+one-paragraph change.
 
 ### fr-2026-09-11-named-rather-than-linked-is-explained-everywhere
 
 **Category:** Duplicated explanation deferred for its own commit
 
-Five doc comments each spend a line or three explaining that a
-public rustdoc page may not link to a private item, so the
-comment names it in backticks instead:
-`crates/bombyx/src/listing.rs:431`,
-`crates/bombyx/src/config/host.rs:73`,
-`crates/bombyx/src/config.rs:551`,
-`crates/bombyx/src/config/registry.rs:360` and
-`crates/bombyx/src/config/vm.rs:121`. A sixth, in `term.rs`'s
-module header, now states the same thing for that module.
-
-`fresh-reader` reported it as reading cost rather than as an
-error: by the third occurrence a reader skims the parentheses,
-and one of them sits inside `render`'s doc, which is a place the
-reader does want to read closely.
-
-The convention is real and the `doc` gate enforces the
-underlying rule (`xtask/src/doc_cmd.rs` runs rustdoc twice under
-`-D warnings`). What is deferred is stating it once -- in
-`CLAUDE.md` under **Code comments**, or in
-`docs/architecture.md` -- and letting each comment simply write
-the name in backticks with no apology.
-
-Deferred rather than applied because `/review` forbids
-collapsing copies in the round that finds them: the replacement
-is a rule in one place plus five sites that must each be trimmed
-without changing what they were explaining, and that is a commit
+Five doc comments each explain that a public rustdoc page may not
+link to a private item, so the comment names it in backticks --
+`crates/bombyx/src/listing.rs`, `config/host.rs`, `config.rs`,
+`config/registry.rs` and `config/vm.rs` -- and a sixth in
+`term.rs`'s module header. Deferred: `/review` forbids collapsing
+copies in the round that finds them. State the rule once (in
+`CLAUDE.md` or `docs/architecture.md`) and trim the six, a commit
 of its own.
 
 ### fr-2026-09-11-doctor-transcript-omits-project
@@ -102,156 +54,93 @@ of its own.
 
 `docs/vm-host-setup.md` under **Checking that it worked** tells
 the reader to run `bombyx --project <name> doctor`, and the
-transcript four lines below it opens with `$ bombyx doctor`.
-That command cannot produce that output: `main.rs` rejects every
-subcommand but `self-update` when `--project` is absent, with
-"--project is required". A reader who copies the prompt line
-gets an error and then has reason to distrust the sample output
-around it.
-
-Found while reviewing the fog-warning change, which touches a
-different section of the same page. Deferred as out of scope for
-that change; the fix is to spell the transcript's prompt line
-the way the sentence above it already does.
-
----
+transcript below opens with `$ bombyx doctor`, which `main.rs`
+rejects without `--project`. The fix is to spell the transcript's
+prompt line the way the sentence above it does. Deferred as out of
+scope for the change that found it.
 
 ### fr-2026-09-11-page-has-no-date-keeping-rule
 
 **Category:** Staleness cannot be judged
 
-`docs/vm-host-setup.md` states its age in three different ways.
-The header stamps Steps 1 and 2 as verified on Ubuntu 24.04.4
-with Vagrant 2.4.9 in August 2026. The fog section says the gem
-pair was "Seen with ... in August 2026, which is what a fresh
-host set up from this page gets today", where "today" carries no
-date of its own. A reader cannot tell which facts the August
-stamp covers, and an undated "today" ages without showing it.
-
-The repair is one rule applied once: the header carries the
-check date, and a section that was checked separately says so
-explicitly rather than saying "today".
-
----
+`docs/vm-host-setup.md` states its age two ways: the header stamps
+Steps 1 and 2 as verified in August 2026, and the fog section
+quotes gem versions "in August 2026, which is what a fresh host
+set up from this page gets today", where "today" carries no date.
+A reader cannot tell which facts the stamp covers, and an undated
+"today" ages without showing it. The repair is one rule: the
+header carries the check date, and a separately-checked section
+says so rather than saying "today".
 
 ### fr-2026-09-11-step-3-verification-status-unstated
 
 **Category:** Unmarked verification status
 
-`docs/vm-host-setup.md` promises in its header that unverified
-steps carry an inline marker, and stamps Steps 1 and 2 as
-verified. Step 3, the libvirt provider plugin, carries no marker
-either way, while its body reports a real run ("it built and
-linked without any help, installing `vagrant-libvirt 0.12.2` in
-about a minute"). Its `CONFIGURE_ARGS` fallback looks like the
-half that was not exercised.
-
-The reviewer reached this while judging how much to trust the
-gem versions quoted in the fog section, which are Step 3's
-output. Either extend the header to Steps 1 to 3, or mark the
-fallback unverified.
+`docs/vm-host-setup.md` promises that unverified steps carry an
+inline marker and stamps Steps 1 and 2 verified. Step 3, the
+libvirt provider plugin, carries no marker either way, while its
+body reports a real run and its `CONFIGURE_ARGS` fallback looks
+like the half that was not exercised. Either extend the header to
+Step 3 or mark the fallback unverified.
 
 ### fr-2026-09-06-round-local-finding-ids-promise-a-record
 
 **Category:** A citation with nothing behind it
 
-`xtask/src/feedback.rs` cites `(RT-3)` at line 92 and `(RT-4)`
-at line 109, and thirteen more instances sit in
-`xtask/src/coverage.rs`, `dep_age.rs`, `backfeed.rs` and
-`dep_age/preflight.rs`. These are round-local numbers from a
-review run, not backlog IDs: `xtask/src/canon.rs`'s
-`is_backlog_id` requires `rt-<ISO date>-<slug>`, and the
-reviewer logs hold only that shape. So a reader who tries to
-look one up finds nothing.
-
-Each comment already states its property in full, so the tag
-adds no information and can simply go. The alternative is
-citing the durable `rt-<date>-<slug>` ID, which greps.
-
-Deferred: the files are outside the change that found it, and
-`canon-check` does not read `.rs`, so nothing gates the shape
-either way. Found as FR-10 in the `/review2` on the backlog
-sweep, 2026-09-06.
+`xtask/src/feedback.rs` cites `(RT-3)` and `(RT-4)`, and thirteen
+more instances sit in `coverage.rs`, `dep_age.rs`, `backfeed.rs`
+and `dep_age/preflight.rs`. These are round-local numbers, not
+backlog ids -- `canon.rs`'s `is_backlog_id` requires
+`rt-<date>-<slug>` -- so a reader who looks one up finds nothing.
+Each comment already states its property in full, so the tag can
+go, or cite the durable `rt-<date>-<slug>` id. Deferred: the files
+are outside the change that found it, and no gate reads `.rs` for
+the shape.
 
 ### fr-2026-09-06-usage-dates-a-case-by-unstated-behaviour
 
 **Category:** A condition the reader cannot locate
 
-`docs/usage.md` around line 141 says "The first is a VM you
-created before this behaviour existed, and which branch you are
-in depends on whether you have run `up` since." Two snags.
-bombyx is pre-release and the sentence names no version, so
-"before this behaviour existed" gives a reader no way to tell
-whether it applies to them. And "which branch you are in" reads
-as a git branch, in a document whose next paragraphs are about
-`ref`, `repo` and checkouts.
-
-The repair is to state the observable condition instead of the
-history -- a VM whose `fresh-install` snapshot records
-something other than a fresh install, or that has none -- and
-to say "which of the two cases applies to you".
-
-Deferred: pre-existing prose outside the change. Found as FR-17
-in the `/review2` on the backlog sweep, 2026-09-06.
+`docs/usage.md` says "The first is a VM you created before this
+behaviour existed, and which branch you are in depends on whether
+you have run `up` since." bombyx is pre-release and names no
+version, so "before this behaviour existed" gives no test, and
+"which branch you are in" reads as a git branch in a passage about
+`ref` and checkouts. The repair is to state the observable
+condition -- a VM whose `fresh-install` snapshot records something
+other than a fresh install, or has none -- and say "which of the
+two cases applies to you". Deferred: pre-existing prose outside the
+change.
 
 ### fr-2026-09-06-tutorial-transcripts-dated-by-release
 
 **Category:** A qualification the reader cannot apply
 
-`docs/tutorial.md` around line 19 warns that the transcripts in
-Parts 3 and 4 "show behaviour that is unreleased at the time of
-writing ... none of which 0.4.1 could produce". But Part 1
-installs with `cargo install --path crates/bombyx` from a
-clone, so the reader's binary is whatever the checkout builds
-rather than 0.4.1, and the warning gives them no way to tell
-whether the transcripts match what they will see.
-
-Tie the qualification to what the reader has: the transcripts
-were written from the current source rather than captured from
-a run, and a binary installed from a published 0.4.1 archive
-prints something different.
-
-Deferred: pre-existing prose outside the change, and the
-version figure is the kind `/release` moves. Found as FR-20 in
-the `/review2` on the backlog sweep, 2026-09-06.
+`docs/tutorial.md` warns that the Part 3 and 4 transcripts show
+behaviour "none of which 0.4.1 could produce", but Part 1 installs
+from a clone, so the reader's binary is whatever the checkout
+builds rather than 0.4.1, and the warning gives no way to tell
+whether the transcripts match. Tie the qualification to what the
+reader has: the transcripts were written from current source, and
+a binary from a published 0.4.1 archive prints something
+different. Deferred: pre-existing prose, and the version figure is
+the kind `/release` moves.
 
 ### fr-2026-09-05-provider-argument-lives-in-a-comment
 
 **Category:** reasoning in a comment rather than in `docs/`
 
-`remote::PROVIDER_ENV`'s doc comment holds the whole case for
-how bombyx selects a provider: what rendering a provider block
-does, why the environment variable rather than
-`vagrant up --provider`, three facts measured on the VM host, why
-every project call but the teardown carries it, why the
-teardown is exempt, how a WSL2 host inverts that, and the known
-limit with its backlog ID. Four other places defer to it --
-`docs/architecture.md`, `plan.rs`'s test, `probe.rs` and
-`vagrantfile.rs` -- so the argument is owned by a comment and
-pointed at from a document, which is backwards. `CLAUDE.md`
-under **Code comments** says reasoning belongs in `docs/` and
-that a shared explanation is not owned by a comment.
-
-**Updated 2026-09-07**, during the review on issue #48. The
-inventory above is what the comment holds now; the entry was
-filed when it held "why only the boot carries it" instead. The
-comment grew by two paragraphs in that work, so the case for
-moving it is stronger rather than weaker. `docs/architecture.md`
-now carries the three measurements as well, which is the first
-half of the fix below -- what remains is cutting the constant
-back to the local fact.
-
-The fix is a subsection in `docs/architecture.md` holding the
-mechanism, the measurements and the consequence, with the
-constant cut back to the local fact and a pointer. Not applied
-in the round that found it, per `/review` under **Review, then
-fix**: a consolidation is never applied in its own round, and
-this prose had already failed to converge over three red-team
-rounds.
-
-Found by `fresh-reader` in stage 3 of the review on issue #45.
-
----
+`remote::PROVIDER_ENV`'s doc comment holds the whole case for how
+bombyx selects a provider: the mechanism, the environment variable
+over `vagrant up --provider`, three measured facts, why every
+project call but the teardown carries it, the WSL2 inversion, and
+the known limit. Four places defer to it, so the argument is owned
+by a comment and pointed at from documents, which is backwards.
+`docs/architecture.md` now carries the three measurements (the
+first half of the fix); what remains is a subsection there holding
+the mechanism and consequence, with the constant cut back to the
+local fact and a pointer. Deferred per `/review`: a consolidation
+is not applied in the round that finds it.
 
 ### fr-2026-09-05-field-rules-filed-under-a-traps-heading
 
@@ -259,270 +148,135 @@ Found by `fresh-reader` in stage 3 of the review on issue #45.
 
 In `docs/architecture.md`, the subsection **Two traps a reader
 cannot see from the code** ends with the clap trap, and then
-seventy more lines continue under it: the library-consumer
-paragraph, the `remote_root` newtype paragraph, the whole
-`| Field | Refused | Because |` table and every `remote_root`
-rule. The block opens "Three things keep that survivable
+seventy more lines continue under it -- the library-consumer
+paragraph, the `remote_root` newtype paragraph, and the whole
+refusal table. The block opens "Three things keep that survivable
 meanwhile", and "that" refers to a sentence a hundred lines and
-two headings earlier.
-
-The fix is to move the block back beside the gap it qualifies,
-or give it a heading naming its subject and replace "that" with
-the noun. Predates #18 and is untouched by it.
-
-Deferred during the `/review2` on #18: it is a structural move
-in a 550-line document, outside that change's scope. Found as
-FR-1.
+two headings earlier. The fix is to move the block beside the gap
+it qualifies, or give it a heading and replace "that" with the
+noun. Deferred: a structural move in a 550-line document, outside
+the change's scope.
 
 ### fr-2026-09-05-registry-named-in-clap-help-without-introduction
 
 **Category:** Terminology (clap help -- outside a prose reviewer's lane)
 
-`bombyx --help` prints "Path to your registry" for `--config`,
-and the word is not introduced anywhere the operator reads
-before that. #18 added an introduction to `README.md` under
-**Configure**, which leaves the help text itself: a reader who
-starts at `--help` still meets "your registry" cold, with no way
-to tell it from "your config file".
-
-Logged rather than fixed because `/review2` under **Stage 3**
-keeps `fresh-reader` out of clap `///` help: editing it changes
-the program's output. Found as FR-14.
+`bombyx --help` prints "Path to your registry" for `--config`, and
+the word is introduced nowhere the operator reads before that. #18
+added an introduction to `README.md`, which leaves the help text
+itself: a reader starting at `--help` meets "your registry" cold.
+Logged rather than fixed because editing clap `///` help changes
+the program's output, which is outside a prose reviewer's lane.
 
 ### fr-2026-09-04-canon-rs-assumes-the-review-vocabulary
 
 **Category:** Terms used before they are introduced
 
-Four findings from one read of `xtask/src/canon.rs`, all the
-same shape: the module explains its mechanisms and not its
-words.
-
-- FR-3. "canon" carries the whole module and is never defined
-  in it. Which files it covers is only decidable 460 lines
-  down, in `canon_files`, and a reader cannot tell whether
-  `docs/` is in scope. One clause naming the four kinds of
-  file, and saying `docs/` is deliberately out, would settle
-  it.
-- FR-4. `unknown_ids` and `is_backlog_id` never say what
-  `rt-`, `aq-` and `fr-` stand for, what a backlog is, or
-  where one lives. The reader worked the prefixes out from
-  `code-reviewers.md`, not from the file.
-- FR-5. "The ID scheme exists so an ID greps" and "the
-  declaration is in the prose, so it greps" have no subject
-  doing anything, and in this repo a third reading is live:
-  `CLAUDE.md` warns that a wrapped phrase defeats grep. Say
-  who searches for what.
-- FR-6. In `ungranted_git`, "The declaration may wrap across
-  lines" sits right after `grants` is read from the single
-  `allowed-tools:` line, and means the *other* declaration --
-  the prose sentence ``no `git <sub>` grant``. The reader
-  concluded a wrapped `allowed-tools:` was tolerated, then
-  found it was not.
-
-Deferred: all four are prose the wrapped-bold change did not
-touch, and fixing them is churn outside its diff.
-
----
-
-### fr-2026-09-04-todo-md-header-documents-one-entry-shape
-
-**Category:** A convention the file does not state
-
-FR-14. `docs/todo.md`'s header describes only the linked entry
-shape, while the file holds three: linked
-(`[**slug**](issues/slug.md)`), bare bold, and backticked.
-Somebody completing an item by hand cannot tell which to
-write, or that a bare bold slug is correct for an item with no
-planning document rather than one somebody forgot to link. The
-pending `todo-done-link` item explains the absence 200 lines
-below, and reads as a bug report rather than as the file's
-conventions.
-
-Deferred: `todo-done-link` is likely to change which shapes
-are legal, so documenting all three now would be written
-twice.
-
----
+Four findings from one read of `xtask/src/canon.rs`, all the same
+shape: the module explains its mechanisms and not its words.
+"canon" carries the module and is never defined in it; `unknown_
+ids` and `is_backlog_id` never say what `rt-`, `aq-` and `fr-`
+stand for or where a backlog lives; "the id scheme exists so an id
+greps" has no subject doing the searching; and in `ungranted_git`,
+"the declaration may wrap across lines" sits beside the
+`allowed-tools:` read but means the prose grant instead, so a
+reader concludes a wrapped `allowed-tools:` is tolerated. Deferred:
+all four are prose the change did not touch.
 
 ### fr-2026-09-04-open-questions-count-does-not-match-its-list
 
 **Category:** A count that disagrees with the list under it
 
-`docs/issues/project-config-off-repo.md`'s progress log says
-"Two of the three **Open questions** above are now answered",
-and what follows answers one: `remote_root` stays per-project.
-The other two sentences say `destroy`'s positional is step 7
-and still open, and that the `.git/config` question stays
-parked. A reader cannot tell which second question was meant,
-or whether an answer was decided and never written down.
-
-Predates this branch -- the text came in with commit 03f7528,
-the seven-step re-split -- so it is logged rather than fixed
-here. Either say "One of the three", or, if assigning
-`destroy`'s positional to step 7 counts as closing that
-question, say so in those words.
+`docs/issues/project-config-off-repo.md`'s progress log says "Two
+of the three **Open questions** above are now answered", and what
+follows answers one. A reader cannot tell which second question
+was meant, or whether an answer was decided and never written.
+Either say "One of the three", or, if assigning `destroy`'s
+positional to step 7 closes that question, say so. Predates this
+branch.
 
 ### fr-2026-09-03-no-reviewer-emits-the-severity-field
 
 **Category:** A judgement with no named source
 
-`/review`'s fixing bar asks what would make a reader, the
-operator or bombyx act wrongly. No reviewer emits that. `red-team`
-emits **Why it matters** and **Example trigger**, `artisan` emits
-**Why it matters: impact on maintainability**, and `fresh-reader`
-emits **Where it left me**. Impact on maintainability is not the
-same test, and "where it left me" states a question the reader
-could not answer, which is close but not it.
-
-So the caller with twenty findings in front of them has no
-statement of which field carries the answer, or whether they
-judge it themselves from the **What** field. `red-team`'s
-**Example trigger** is probably the closest thing to a severity
-statement in any of the three briefs, and nothing says so.
-
+`/review`'s fixing bar asks what would make a reader, the operator
+or bombyx act wrongly, and no reviewer emits that field. `red-team`
+emits **Example trigger** (the closest thing), `artisan`
+**Why it matters: impact on maintainability**, `fresh-reader`
+**Where it left me** -- none the same test. So a caller sorting
+findings has no statement of which field carries the answer.
 Deferred: naming the field per reviewer touches all three agent
-briefs, and `/review` was frozen until a run against a real code
-diff had exercised the bar.
-
-**Swept 2026-09-11: that blocker is discharged.** The review of
-`bombyx list` ran all three stages against a real code diff, 39
-findings. The gap held: sorting them by what would make somebody
-act wrongly was done by reading each **What** field, because no
-brief names a field that answers it. `red-team`'s **Example
-trigger** was again the closest thing. The entry is now
-actionable rather than blocked.
-
-Found by the Fresh Reader review (FR-4), 2026-09-03.
-
----
+briefs.
 
 ### fr-2026-09-03-count-the-note-has-no-destination
 
 **Category:** A mechanic with no definition
 
-`/review` says that a single isolated defect in an earlier
-round's fix is not the breaking-fixes case: "fix it, note it,
-and count the note against the next round." Where the note goes
-and what the count decides are both unstated. Three readings
-are available: an item in the run's report, a backlog entry
-(but a fixed finding gets no entry, and this one was fixed), or
-a tally that trips the "more than one defect in an earlier
-round's fix" condition when the next round adds to it. The
-third is probably meant, and only a guess gets you there.
-
-Deferred: naming the destination is one clause, but it changes
-what a stop condition counts, so it wants deciding rather than
-guessing.
-
-**Swept 2026-09-11: the ambiguity fired.** Stage 2 of the review
-of `bombyx list` stopped after two rounds because three of round
-2's findings were defects in round 1's fixes. Deciding that
-meant counting them, and nothing said where the count lives, so
-it was kept in the run's report and in
-`target/review-2-2.findings` -- which `target/` does not commit.
-The third reading in the paragraph above is the one that was
-guessed.
-
-Found by the Fresh Reader review (FR-3), 2026-09-03.
-
----
+`/review` says a single isolated defect in an earlier round's fix
+is "fix it, note it, and count the note against the next round",
+and where the note goes and what the count decides are both
+unstated. The likely reading is a tally that trips the
+"more than one defect in an earlier round's fix" stop condition,
+but only a guess gets there. Deferred: naming the destination
+changes what a stop condition counts, so it wants deciding.
 
 ### fr-2026-09-03-retrospect-writes-a-backlog-without-its-format
 
 **Category:** An instruction that omits what the actor needs
 
 `.claude/commands/retrospect.md` tells the actor to append a
-real reviewer finding to the backlog for that reviewer, naming
-all three files. It does not say what an entry looks like:
-newest-first, immediately after the `---`, the
-`<rt|aq|fr>-<date>-<slug>` ID, then a `**Category:**` line and
-a description. That rule is in `/review` under **Log what you
-defer**, and the same file already points there for the
-logged-versus-fixed rule -- so the omission at the write site
-is the odd one. Reading the existing entries is a workable
-fallback, but the ID's date is not derivable from them with
-confidence.
-
-Deferred: one pointer, in a file outside the work under review.
-
-Found by the Fresh Reader review (FR-4), 2026-09-03.
-
----
+reviewer finding to the backlog but not what an entry looks like
+(newest-first, after the `---`, the `<rt|aq|fr>-<date>-<slug>` id,
+a `**Category:**` line, a description). That rule is in `/review`
+under **Log what you defer**, and the same file already points
+there for another rule, so the omission at the write site is the
+odd one. Deferred: one pointer, in a file outside the review.
 
 ### fr-2026-09-03-diff-filter-case-mechanism-unstated
 
 **Category:** A mechanism the comment leans on without stating
 
-`/review` explains its snapshot commands carefully, and stops
-one clause short on this one: "`--diff-filter=d` drops deleted
-paths, which `fresh-reader` can only fail to open." Uppercase
-`D` *selects* deleted paths; a lowercase filter letter inverts
-the selection. The comment states the effect and hides the
-mechanism, so a reader adding another filter letter cannot
-predict which case to use. `CLAUDE.md` asks for the mechanism
-before the conclusion.
-
-Deferred: one clause, in the loop prose `/review` now says to
-sweep as its own change.
-
-Found by the Fresh Reader review (FR-9), 2026-09-03.
-
----
+`/review` says "`--diff-filter=d` drops deleted paths, which
+`fresh-reader` can only fail to open." Uppercase `D` selects
+deleted paths; a lowercase filter letter inverts the selection.
+The comment states the effect and hides the mechanism, so a reader
+adding another filter letter cannot predict which case to use, and
+`CLAUDE.md` asks for the mechanism before the conclusion. Deferred:
+one clause, in the loop prose `/review` sweeps as its own change.
 
 ### fr-2026-09-03-step-two-spawn-prohibition-unscoped
 
 **Category:** An instruction that collides with a later step
 
-`/review` step 2 says a workflow file should be walked "against
-the current tree without spawning anything", and step 3 of the
-same round spawns three agents. A reader cannot tell whether
-the prohibition is scoped to step 2's walk-through -- do not
-exercise the workflow by spawning the agents it describes -- or
-is a claim about the round. The sentence after it, about agent
-edits taking effect next session, suggests the former without
-saying it.
-
-Deferred: scoping it is one clause, in the loop prose.
-
-Found by the Fresh Reader review (FR-13), 2026-09-03.
-
----
+`/review` step 2 says a workflow file should be walked "against the
+current tree without spawning anything", and step 3 of the same
+round spawns three agents. A reader cannot tell whether the
+prohibition is scoped to step 2's walk-through or is a claim about
+the round. Deferred: scoping it is one clause, in the loop prose.
 
 ### fr-2026-09-03-implement-md-stale-tool-grants
 
 **Category:** Command definition
 
-`.claude/commands/implement.md:3` grants
-`Bash(scripts/e2e.sh*)`, and `CLAUDE.md` states that
-`scripts/e2e.sh` does not exist -- `implement.md:96-98` says so
-itself. The same frontmatter grants `Skill(commit)` but not
-`Skill(review)`, while step 6 tells the actor to "Optionally run
-`/review`", so a reader cannot tell whether the command invokes
-it or hands off to the developer.
-
-Deferred: outside the diff of the commit under review.
-
-Found by the Fresh Reader review (FR-8, FR-9), 2026-09-03.
-
----
+`.claude/commands/implement.md` grants `Bash(scripts/e2e.sh*)`,
+and `CLAUDE.md` states `scripts/e2e.sh` does not exist -- the file
+says so itself. The frontmatter also grants `Skill(commit)` but
+not `Skill(review)`, while step 6 says to "Optionally run
+`/review`", so a reader cannot tell whether the command invokes it
+or hands off. Deferred: outside the diff of the change that found
+it.
 
 ### fr-2026-09-03-retrospect-examples-name-absent-tools
 
 **Category:** An example that is itself the defect it illustrates
 
-`.claude/commands/retrospect.md:95-96` and `:179-185` illustrate
-a Cleanup finding -- "a skill/command referencing a tool, file
-or workflow that no longer exists" -- with the `web-dev` skill
-and `playwright.config.js`. Neither exists here, and `CLAUDE.md`
-states Playwright is not used. The live instance of that shape
-is `implement.md`'s `scripts/e2e.sh` grant, which would make the
-example real.
-
-Deferred: outside the diff of the commit under review.
-
-Found by the Fresh Reader review (FR-15), 2026-09-03.
-
----
+`.claude/commands/retrospect.md` illustrates a Cleanup finding --
+"a skill/command referencing a tool, file or workflow that no
+longer exists" -- with the `web-dev` skill and
+`playwright.config.js`, neither of which exists here. The live
+instance of that shape is `implement.md`'s `scripts/e2e.sh` grant,
+which would make the example real. Deferred: outside the diff of
+the change that found it.
 
 ### fr-2026-09-03-code-reviewers-does-not-say-what-it-is
 
@@ -531,172 +285,18 @@ Found by the Fresh Reader review (FR-15), 2026-09-03.
 `.claude/commands/code-reviewers.md` has no frontmatter, unlike
 every sibling in that directory, so a reader cannot tell whether
 `/code-reviewers` is invokable or whether the file is reference
-material `/review` reads. It is in fact registered as a skill,
-which the file itself never says.
-
-Deferred: outside the diff of the commit under review.
-
-Found by the Fresh Reader review (FR-5), 2026-09-03.
-
----
+material `/review` reads. It is registered as a skill, which the
+file never says. Deferred: outside the diff of the change that
+found it.
 
 ### fr-2026-09-03-simplify-row-not-marked-global
 
 **Category:** Skills table does not distinguish global from project
 
 `CLAUDE.md`'s skills table lists `/simplify` with no in-repo
-definition: there is no `.claude/commands/simplify.md`, and
-`.claude/skills.json` declares only `architect`. Both `red-team`
-and the Fresh Reader read that as a dangling row and asked for
-its deletion. **They were wrong about the cause** -- `/simplify`
-is a live global skill, which neither reviewer could see from
-the repo. The real gap is that the table mixes project skills
-with global ones and never marks which is which, so a reader
-deciding how to harden work before a commit is offered a third
-option they cannot locate.
-
-Deferred: outside the diff of the commit under review.
-
-Found by the Fresh Reader review (FR-14) and the red team review
-(RT-12), 2026-09-03.
-
----
-
-## Explanations to keep
-
-Not findings. Each entry below is a passage a comprehension
-review named as carrying a reason rather than padding, kept so
-that somebody trimming comments later has something to check
-against. Nothing here is outstanding work.
-
----
-
-### fr-2026-09-11-vm-host-setup-what-worked
-
-**Category:** What worked -- do not trim
-
-Two comprehension reviews of `docs/vm-host-setup.md` named these
-passages as carrying a reason rather than padding. They are
-pre-existing prose, so a later trim could take them without
-anyone noticing what was lost.
-
-The `usermod -a` warning: it states the mechanism (`-G` without
-`-a` replaces the supplementary group list), then the
-consequence (losing `sudo` on a machine reached only over SSH),
-then the follow-on fact, that bombyx opens a new connection per
-command and so picks the groups up on its own.
-
-**Why the non-interactive PATH causes trouble**: it prints the
-actual default `PATH`, names the startup files that kind of
-shell skips, and gives the two `ssh` commands that show the
-difference on the reader's own host. The reviewer reported being
-able to diagnose a variant without returning to the page.
-
-**Always name the libvirt URI** and the pair under "Two of those
-commands need care": both explain why the obvious check passes
-while the real thing is broken -- a bare `virsh list` reaching
-the per-user daemon, and `sudo vagrant plugin install` landing
-in `/root/.vagrant.d`.
-
-The storage-pool autostart note: it states that the consequence
-is delayed and shows the `pool-list` row with the `no` in it,
-which is what connects a later failure to the reboot that caused
-it.
-
----
-
-### fr-2026-09-07-clone-in-home-what-worked
-
-**Category:** What worked -- do not trim
-
-From the comprehension review of the clone-in-home work. Four
-passages were named as carrying a reason rather than padding.
-
-`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
-table with its worked failure, named as the model the rest of
-that file should follow.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
-showing four spellings of one address collapse to one string.
-
-`crates/bombyx/templates/bootstrap.sh` and its mirror in
-`crates/bombyx/src/vagrantfile.rs`, the `safe.directory`
-paragraph: git normally refuses another user's repository, that
-guard does not apply under `sudo`, and a `post-checkout` hook
-was measured running at `uid=0`. The reviewer called it the only
-passage that explains why the privilege arrangement exists at
-all -- without it the rest reads as ceremony.
-
-`crates/bombyx/templates/bootstrap.sh`, the "deliberately no
-`git clean`" paragraph, the only place stating that committing
-inside the guest does not survive a provision and that pushing
-is what does. Four other comments depend on that fact.
-
----
-
-### fr-2026-09-07-explanations-worth-keeping-two
-
-**Category:** What worked -- do not trim
-
-From the comprehension review of the branch that made the
-project's script run as the agent. Five passages were named as
-carrying a reason rather than padding.
-
-`crates/bombyx/templates/bootstrap.sh`, the `set -euo pipefail`
-table and the `${VAR:?message}` paragraph: three flags with one
-consequence each, then a concrete failure that names the
-mechanism, and the bare `:` explained before three lines that
-would otherwise read as statements with no verb. The reviewer
-called it the shape the rest of the file should be measured
-against.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
-showing four spellings of one repository address collapse to one
-string.
-
-`crates/bombyx/src/config/guards.rs`, the argument for the
-leading-dash rule: `git` accepts options after positionals,
-which most tools do not. It is the one forward reference out of
-the script that answered the question the reader arrives with.
-
-`docs/architecture.md`, "That is not hypothetical" with
-`/root/.rustup` and `/root/jutro` named. One measured symptom
-turns a preference into an incident report; the paths are the
-load-bearing part.
-
-`docs/trust-boundary.md`, the paragraph on what an on-path
-attacker does *not* get: the wrong intuition named first, then
-the mechanism, then the real consequence.
-
----
-
-### fr-2026-09-07-explanations-worth-keeping
-
-**Category:** What worked -- do not trim
-
-From the comprehension review of the `deploy_key` work. Four
-passages were named as carrying a reason rather than padding, so
-a later tidy-up has something to check against.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR:?message}`
-explanation: it states the mechanism before using it -- `:` is
-the shell's do-nothing command, so each line is a bare check
-that the variable arrived -- and draws the conclusion second.
-
-`crates/bombyx/templates/bootstrap.sh`, the `${VAR%text}` block
-that lays out the four spellings of one repository address.
-Three lines of example did what a paragraph could not, and it is
-the passage most at risk of reading as decoration.
-
-`config.toml.sample`, the `deploy_key` comment: it answers an
-operator's questions in the order they ask them, and the line
-"vagrant runs on the VM host, so `~` is that machine's home
-directory and not yours" is nine words of mechanism.
-
-`crates/bombyx/src/plan.rs`, the four-line comment on the
-deploy-key check step: local fact, then a name to follow for the
-reason, then stop. The same review found that reason argued in
-full in four places and half-argued in three more; this is the
-shape the others should have.
-
----
+definition, and both reviewers read that as a dangling row.
+`/simplify` is a live global skill neither could see from the repo.
+The real gap is that the table mixes project skills with global
+ones and never marks which is which, so a reader is offered an
+option they cannot locate. Deferred: outside the diff of the change
+that found it.

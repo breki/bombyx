@@ -44,11 +44,6 @@ other two are constitutionally blind to: both of them already
 know what the change is for, so neither can notice that the code
 never says.
 
-`fresh-reader` is also the only one asked what **worked**. Its
-report ends with the two or three explanations worth keeping,
-which is what stops them being edited away by somebody who
-cannot tell a comment that carries a reason from padding.
-
 This file defines *which* reviewers run, *when*, and *how* to
 spawn them. The review criteria themselves live in the agent
 files above.
