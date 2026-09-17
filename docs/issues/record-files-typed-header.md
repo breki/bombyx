@@ -1,0 +1,103 @@
+# record-files-typed-header
+
+**Status:** Planning
+**Captured:** (see `docs/todo.md`)
+**Started:** 2026-09-17
+
+Prerequisite for move 4 of the documentation-overhaul program
+(`docs/issues/documentation-overhaul.md`). Started at the operator's
+direction as its own code project; it may span several sessions.
+
+## Problem
+
+Five "record-collection" files carry many small entries and are
+mutated by tooling, but their per-entry metadata (status, id, dates,
+cross-references) lives in prose. The tooling parses that prose, which
+drifts, and status is encoded as *which section* an entry sits in
+(`## Pending` vs `## Done`), so `todo done` splices a block between
+sections instead of flipping a field.
+
+Give each entry a small, strict, machine-parseable header so the
+tooling reads fields, not prose, and one integrity gate can validate
+every cross-reference through a shared `id:` field.
+
+## Scope
+
+In: `docs/todo.md`, `docs/developer/redteam-log.md`,
+`docs/developer/artisan-log.md`, `docs/developer/fresh-reader-log.md`,
+`docs/developer/template-feedback.md`. Out: `CHANGELOG.md` (external
+Keep-a-Changelog convention) and `backfeed-ledger.toml` (already TOML).
+
+## Context
+
+- `xtask/src/todo.rs` (1,454 lines, ~40 tests) is section-based:
+  `add` appends under `## Pending`; `done` moves a bullet to the top
+  of `## Done`; `list` reads one section. Entry shape is
+  `- **slug** -- summary` with wrapped continuation/body lines.
+- `feedback-add` (in xtask) maintains `template-feedback.md`
+  (`tf-<date>-<slug>` ids, three sections).
+- ID schemes: todo kebab-case slugs; redteam `RT-<n>`; artisan
+  `AQ-<n>`; fresh-reader `FR-<n>`; template-feedback
+  `tf-<date>-<slug>`. (Format map in progress.)
+
+## Decisions (2026-09-17)
+
+The format map (an Explore run) surfaced the real shape, and two
+operator decisions reshaped the project:
+
+- **Files hold LIVE work only.** Completed/closed/resolved entries are
+  dropped -- git history, the CHANGELOG, and commit messages already
+  record what shipped. This merges the project with move 4's "collapse
+  the backlogs." Consequences: `todo.md` loses `## Done`; the reviewer
+  logs keep only open (deferred) findings; `template-feedback.md`'s
+  `## Resolved` (already `_None yet._`) goes. `fresh-reader-log.md`'s
+  **Explanations to keep** stays -- those are do-not-trim markers, not
+  done items. `todo done` becomes *remove the entry*, not move-to-Done.
+- **State is a field, tool regroups on write** -- but with live-only
+  there is barely any state left to track, so this mostly collapses:
+  `todo.md` becomes one live queue, no sections to regroup.
+- **Cross-ref check validates durable IDs only.** Round-local reviewer
+  numbers (`RT-7`, `AQ-9`, `FR-12`) stay as unchecked provenance in a
+  `source` field / prose. The gate validates durable IDs
+  (`<rt|aq|fr|tf>-<date>-<slug>` and todo slugs) that appear in
+  dedicated fields (`depends_on`, `supersedes`). The two known-dangling
+  durable IDs are citations *of done items*, so they largely vanish
+  with the done items.
+
+### The map's key facts
+
+- Two entry shapes: `todo.md` = `- **slug** -- summary` bullets in
+  `## Pending`/`## Done`; the four logs = `### <id>` + `**Category:**`
+  + prose. Two ID schemes: todo dateless kebab slug; logs/feedback
+  `<prefix>-<date>-<slug>`.
+- `fresh-reader-log.md` has two `##` sections; only "Deferred findings"
+  is a backlog. "Explanations to keep" is finished work -- never an
+  open item.
+- `template-feedback.md` repeats its title after the ID on the heading
+  line and has three lifecycle sections (Resolved is empty).
+
+## Plan (increments, each its own commit)
+
+1. **`todo.md` live-only.** `todo done <slug>` removes the pending
+   entry (drop `--date`/`--doc`, drop `move_to_done` + `DoneDate` +
+   `DocLink` + link guards + `list --done`); drop the `## Done`
+   section and its content; update the preamble and the `/implement`
+   skill (which calls `todo done`). Behaviour change -> TDD.
+2. **Reviewer logs + feedback live-only.** Remove the closed/swept
+   findings from `redteam-log.md`, `artisan-log.md`,
+   `fresh-reader-log.md` (Deferred section only); drop
+   `template-feedback.md`'s empty `## Resolved`. Docs edits; no tool.
+3. **Typed header + integrity gate.** Give each live entry a
+   machine-parseable header; build a shared parser + a
+   `cargo xtask records-check` gate (validates `depends_on`/
+   `supersedes` durable IDs), added to `validate`. TDD, red test per
+   failure mode.
+4. **Move-4 remainder.** Fold-or-delete `fresh-reader-log.md`
+   (decision pending), trim `template-feedback.md` rationale.
+
+## Test strategy
+
+Unit tests in `xtask` for every tooling change (behaviour change ->
+red first). The integrity gate gets a red test per failure mode
+(dangling id, malformed header, duplicate id). Migrations are data
+edits, verified by the tooling round-tripping them.
