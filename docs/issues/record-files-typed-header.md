@@ -1,6 +1,6 @@
 # record-files-typed-header
 
-**Status:** In progress -- increment 1 (todo.md live-only) done
+**Status:** In progress -- increments 1-2 done
 **Captured:** (see `docs/todo.md`)
 **Started:** 2026-09-17
 
@@ -130,3 +130,22 @@ edits, verified by the tooling round-tripping them.
   - Left for increment 2 (logs live-only): reviewer-log and
     template-feedback entries about the removed `--doc`/Done are now
     moot findings, to be dropped there.
+- 2026-09-17: increment 2 (reviewer logs live-only) done.
+  - `redteam-log.md`: removed the two moot `--doc`/`DocLink` findings
+    (`rt-2026-09-04-doc-cannot-link-a-plans-own-section`,
+    `rt-2026-09-04-doc-existence-check-answers-for-this-machine`) and
+    the one CLOSED finding (`rt-2026-08-31-chmod-symlink-race`, kept
+    "for the lesson" -- the operator confirmed removal; the lesson
+    survives in git and in the code comment beside the fix). 15 -> 12
+    entries.
+  - `fresh-reader-log.md`: removed the moot `--doc` help finding
+    (`fr-2026-09-04-todo-help-hides-four-of-five-doc-rules`). The
+    "Explanations to keep" section is untouched.
+  - Learned that "Swept" means reviewed-and-updated in a backlog
+    sweep, not closed, so swept-but-open findings stay.
+    `artisan-log.md` had no closed or moot entries.
+  - Deferred to increment 3 (tooling): dropping
+    `template-feedback.md`'s empty `## Resolved` cascades into the
+    `feedback-add` `FeedbackSection::Resolved` enum, CLAUDE.md, and
+    the file preamble -- a tooling change, not docs-only, so it rides
+    with the typed-header/gate work rather than this cleanup.
