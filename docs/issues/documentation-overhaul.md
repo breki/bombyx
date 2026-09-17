@@ -1,6 +1,7 @@
 # documentation-overhaul
 
-**Status:** Move 3 complete (2026-09-17); moves 4-5 remain
+**Status:** Moves 1-3 complete (2026-09-17); move 4 planned (see
+below); move 5 remains
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -223,7 +224,21 @@ and gets its own commit and its own decisions.
 Noted for a later move (out of scope here): `vm-host-wsl2.md` still
 says "The diary does not say which probe either run used" -- a
 dangling reference to the removed `DIARY.md`. Belongs with the
-stale-record cleanup, not the firewall split.
+stale-record cleanup, not the firewall split. Captured as
+`wsl2-doc-diary-ref` in `docs/todo.md`.
+
+## Move 4 note (2026-09-17)
+
+Move 4 ("tag and collapse the backlogs") turned out to hinge on
+`record-files-typed-header`, which is a code project, not a docs edit.
+It has its own working doc, `docs/issues/record-files-typed-header.md`,
+and two operator decisions reshaped it: the record files hold LIVE
+work only (dropping done/closed entries -- which IS most of "collapse
+the backlogs"), and the cross-reference gate checks durable IDs only.
+The design and a four-increment plan are committed there; the code was
+deliberately banked for a fresh, focused session rather than rushed at
+the end of this one. Move 5 (house style + length budget) still
+remains, and the move-1 length-estimate clause lands there.
 
 ## Move 3 progress log
 
