@@ -1,9 +1,9 @@
 # documentation-overhaul
 
-**Status:** Moves 1-3 and 5 complete (2026-09-17); move 4 mostly
-done via `record-files-typed-header` (one deferred item: the broad
-`template-feedback.md` rationale trim). Acceptance pending a final
-`/docs-audit`.
+**Status:** All five moves complete (2026-09-17), but the
+acceptance `/docs-audit` ran and **acceptance is not met**: five
+files still rate mannered Heavy. Remaining work is a punch-list,
+not a move -- see "Audit findings and remaining work" at the end.
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -286,3 +286,74 @@ remains, and the move-1 length-estimate clause lands there.
   plan docs: the deferred broad `template-feedback.md` rationale
   trim (move 4), then a final `/docs-audit` showing no file rated
   mannered Heavy.
+
+## Audit findings and remaining work (2026-09-17)
+
+A `/docs-audit` fan-out (six read-only assessors over all 22 files)
+ran as the acceptance measure. Tally: 9 Keep, 10 Trim, 3 Delete.
+Structure is where the program aimed -- one home per topic, the
+quickstart -> tutorial -> usage ladder, reference split out of the
+guides. But **acceptance is not met**: it asks for no file rated
+mannered Heavy, and five still are -- `docs/architecture.md`,
+`docs/developer/template-feedback.md`, `docs/developer/redteam-log.md`,
+`docs/developer/artisan-log.md` and
+`docs/issues/project-config-off-repo.md`. So the deferred
+template-feedback trim alone does not close the program.
+
+The remaining work, in value order. Each is a docs edit and its own
+commit; capture the untracked ones in `docs/todo.md` before
+starting.
+
+1. **Delete `docs/issues/project-config-off-repo.md` now.** 827
+   mannered lines opening "In progress" for a design that shipped
+   everywhere else -- the "stale record read as current" failure
+   this program exists to end, and the biggest single win. Safe:
+   its durable "why" already lives in `architecture.md`,
+   `trust-boundary.md` and `llms.txt`. (Not yet tracked.)
+
+2. **Refresh `docs/tutorial.md`.** It runs on `0.4.1` while the
+   shipped version is `0.6.0`, and its header caveat calls the
+   Vagrantfile-generation design "unreleased" -- now false, so an
+   agent reads current behaviour as not-yet-shipped. Also collapse
+   its dry-run and provision/snapshot passages, which re-explain
+   `usage.md`, to cross-links. (Not yet tracked.)
+
+3. **Broad `template-feedback.md` rationale trim** -- the deferred
+   move-4 item. ~50-60% cut: keep the upstream suggestion plus a
+   short rationale, drop the bombyx-internal incident narration and
+   the superseded design bodies.
+
+4. **Trim the reviewer-log bodies to the fact.** `redteam-log.md`
+   and `artisan-log.md` still re-derive each finding with
+   review-provenance war-stories; cut each to defect + repro +
+   one-line deferral, the shape `fresh-reader-log.md` already has,
+   and de-duplicate the artisan findings that merely restate
+   `docs/todo.md` items. (Not yet tracked.)
+
+5. **Trim the long `docs/todo.md` bodies** (e.g.
+   `self-update-resolves-tar-late`, `config-home-env-provenance`)
+   to the fact and the open decision, and fix the wrapped
+   `**Summary:**` line in `config-tests-own-file`. (Not yet
+   tracked.)
+
+6. **Trim `architecture.md` and CLAUDE.md's mannered residue.**
+   `architecture.md`'s design-rationale essays cut to mechanism
+   plus the owning test name; CLAUDE.md's "Environment Constraints"
+   war-stories cut to the rule. (Not yet tracked.)
+
+7. **Drop the drifted commands table in
+   `docs/ai-agents/guidelines.md`** and point at CLAUDE.md's Skills
+   table; it already disagrees with canon (wrong `/todo`
+   description). (Not yet tracked.)
+
+Lower-priority, already tracked: the `DIARY.md` dangle in
+`vm-host-wsl2.md` (`wsl2-doc-diary-ref`) and the version-sentinel
+drift (`sync-version-sentinels`). Also repeat the dated and
+`*(unverified)*` markers next to the claims they qualify in the
+vm-host and trust docs, not only in their headers.
+
+The style to match: `quickstart.md`, `fresh-reader-log.md`,
+`supply-chain.md`, `build-recipes.md`, `README.md`.
+
+The program closes -- and both plan docs are removed -- when a
+re-run `/docs-audit` shows no file rated Heavy.
