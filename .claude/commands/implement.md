@@ -144,17 +144,17 @@ particular:
    in the tree this session. Either way the finished item leaves
    no `docs/issues/<slug>.md`.
 
-4. In `docs/todo.md`, move the item to Done mechanically (do not
-   hand-edit the file):
+4. In `docs/todo.md`, remove the finished item mechanically (do
+   not hand-edit the file):
 
    ```
-   cargo xtask todo done <slug> --date <today's date>
+   cargo xtask todo done <slug>
    ```
 
-   The command moves the bullet to the top of `## Done` (newest
-   first) and stamps the date. Omit `--doc`: the working doc is
-   gone, so the Done entry carries its summary and no link. Pass
-   `--summary "<text>"` to override the pending summary.
+   The queue holds live work only, so this removes the entry.
+   What shipped is recorded by the `/commit` body, the CHANGELOG
+   and git history, so there is no `## Done` section to move it
+   into.
 
 5. Verify the change manually -- actually run it,
    do not infer from a green suite. For a change to

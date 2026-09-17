@@ -1,6 +1,6 @@
 # record-files-typed-header
 
-**Status:** Planning
+**Status:** In progress -- increment 1 (todo.md live-only) done
 **Captured:** (see `docs/todo.md`)
 **Started:** 2026-09-17
 
@@ -101,3 +101,32 @@ Unit tests in `xtask` for every tooling change (behaviour change ->
 red first). The integrity gate gets a red test per failure mode
 (dangling id, malformed header, duplicate id). Migrations are data
 edits, verified by the tooling round-tripping them.
+
+## Progress log
+
+- 2026-09-17: increment 1 (todo.md live-only) done.
+  - `xtask/src/todo.rs`: `todo done <slug>` now removes the pending
+    entry (new `remove_pending`) instead of moving it to `## Done`.
+    Deleted the dead machinery -- `move_to_done`, `DoneDate`,
+    `DocLink` and its three link guards, the `list --done` flag, and
+    the `Done` subcommand's `--summary`/`--date`/`--doc` args -- and
+    rewrote the test module (dropped the `## Done` fixtures and the
+    move_to_done/DoneDate/DocLink tests; added `remove_pending`
+    tests). Fixed every surviving doc-comment that linked to the
+    removed items (the doc gate enforces intra-doc links).
+  - `docs/todo.md`: removed the `## Done` section. Removed two items
+    made moot by the change (`done-drops-the-body-silently`,
+    `doc-link-guard-path-family` -- the latter guards the deleted
+    `DocLink`), using the new `todo done`; reworded
+    `add-issue-flag-unused` off its stale `done --doc` references and
+    trimmed the in-progress `record-files-typed-header` item to a
+    pointer here.
+  - Skills: `/implement`, `/issue`, `/todo` reworded -- `todo done`
+    removes rather than moves; `issue.md`'s guard anecdote no longer
+    names the removed `--doc`.
+  - `cargo xtask validate` green (coverage 98%); dogfooded on the
+    real file (removed the two moot items; `list` works; `--done` is
+    gone).
+  - Left for increment 2 (logs live-only): reviewer-log and
+    template-feedback entries about the removed `--doc`/Done are now
+    moot findings, to be dropped there.

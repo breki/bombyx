@@ -91,9 +91,9 @@ same primitive needs it too. Both are easy to walk past while
 writing the guard the issue asked for.
 
 Name the primitive out loud, then list every value that reaches
-it. A `--doc` guard was written as a bare function and covered
-one argument of four; reviewers produced both rules afterwards,
-by which point two of the three unguarded siblings turned out to
+it. A guard was once written as a bare function and covered one
+argument of four; reviewers produced both rules afterwards, by
+which point two of the three unguarded siblings turned out to
 inject text into the file the guard was protecting.
 
 **Scope discipline.** Fix what the issue describes. When you
@@ -248,25 +248,24 @@ Comment on the issue with the outcome: what was fixed, the
 commit, the verification, and what remains unverified.
 
 **The operator merges the PR, so this command ends here.** Two
-things wait on that merge: closing the issue, and moving its
-entry in `docs/todo.md` to `## Done`. Say in your report that
-both are outstanding.
+things wait on that merge: closing the issue, and removing its
+entry from `docs/todo.md`. Say in your report that both are
+outstanding.
 
 The one exception is an issue step 1 established was already
 satisfied. Close that one there and then, with the evidence.
 
-Nothing moves the backlog entry on your behalf. The command that
-does needs a date:
+Nothing removes the backlog entry on your behalf:
 
 ```
-cargo xtask todo done <slug> --date <today's date>
+cargo xtask todo done <slug>
 ```
 
-Omit `--doc`. Planning documents under `docs/issues/` are
-working files, removed when the item is done, so a Done entry no
-longer links to one. If a planning doc existed for this item,
-promote anything durable from it first -- a design or security
-decision, a non-obvious constraint -- into `docs/architecture.md`,
+The queue holds live work only, so this removes the entry; what
+shipped is recorded by the PR and the CHANGELOG. If a planning
+doc existed for this item, promote anything durable from it
+first -- a design or security decision, a non-obvious
+constraint -- into `docs/architecture.md`,
 `docs/trust-boundary.md`, a code comment, or the PR body, then
 remove it with `git rm docs/issues/<slug>.md`.
 

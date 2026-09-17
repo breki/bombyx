@@ -86,8 +86,8 @@ todo list` and show its output (each line is
 
 - Never hand-edit `docs/todo.md`; go through
   `cargo xtask todo`.
-- Never edit the `## Done` section from this command
-  (`todo done` is `/implement`'s finalise step).
+- This command only captures; removing a finished item
+  (`todo done`) is `/implement`'s finalise step.
 - Never create files in `docs/issues/` from this
   command -- that is `/implement`'s job.
 - Never run tests, builds, or git commands.

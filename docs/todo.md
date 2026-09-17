@@ -170,25 +170,14 @@ into the reference docs first -- see the `/implement` skill.
   there found still described as pending.
 
 - **add-issue-flag-unused** -- todo add --issue has no caller
-  The flag renders a pending entry as a link to issues/<slug>.md, derived rather
-  than given, so it can write a dead link the way todo done used to. Nothing
-  calls it: no file under .claude/ mentions it, and /todo documents only --slug,
-  --summary and --body. Guarding it the way done --doc is now guarded would be
-  wrong, because at capture time the spec may legitimately not exist yet. So the
-  question is whether the flag should take a path like done --doc does, or be
-  deleted. Found while fixing #7, and kept out of it: that issue is about done,
-  and this flag has no caller to endanger.
-
-- **done-drops-the-body-silently** -- say that todo done discards the body
-  move_to_done splices the whole pending block away and re-emits only the slug,
-  summary and date, so an entry's analysis body is dropped without a word. That
-  is intended -- every entry under ## Done is two or three lines -- but nothing
-  says so, and 'block spliced, content not carried' is exactly the shape of the
-  summary-loss bug the /review2 on #7 found. Completing done-links-may-dangle
-  and todo-done-link on 2026-09-04 dropped a dozen lines of analysis each; the
-  content survives in git history and in docs/developer/template-feedback.md.
-  Either say it in move_to_done's doc comment and the Done clap help, or carry
-  the body across. Found while using the fixed tool for the first time.
+  The flag renders a pending entry as a link to issues/<slug>.md, derived
+  rather than given, so it can write a link to a file nobody has created.
+  Nothing calls it: no file under .claude/ mentions it, and /todo documents
+  only --slug, --summary and --body. It cannot simply refuse a missing target,
+  because at capture time the spec may legitimately not exist yet. So the
+  question is whether the flag should take an explicit path, or be deleted.
+  Found while fixing #7, and kept out of it: that issue is about done, and this
+  flag has no caller to endanger.
 
 - **vm-disk-size-unset** -- no disk key, so the guest gets the box's own size
   Found by the local-route verification run (#37), driving the CLI against the
@@ -292,23 +281,6 @@ into the reference docs first -- see the `/implement` skill.
   public paths `bombyx::config::{RepoUrl, ScriptPath, GitRef}` unchanged. The
   `checked_str_newtype!` macro took roughly 40 lines back out of the file in the
   meantime, so this is not urgent.
-
-- **doc-link-guard-path-family** -- DocLink accepts a doubled or trailing slash
-  DocLink::new refuses blank, rooted, unrenderable, escaping and naming-no-file
-  paths, but not the rest of the family CLAUDE.md enumerates under Test-Driven
-  Development: doubled slash, trailing slash and an interior . segment. Both
-  --doc issues//project-config-off-repo.md and --doc
-  ./issues/../issues/project-config-off-repo.md pass every rule today.
-  escapes_repo skips empty and . components deliberately, and
-  Path::join(..).is_file() normalises the doubled separator, so the existence
-  check agrees while the written link keeps the odd spelling. The guard doc
-  comment claims it refuses every shape that would not survive the trip to
-  another reader, which is one claim wider than the code. Whether a renderer
-  resolves docs/issues//plan.md was not verified and should not be assumed; what
-  was verified is that the check normalises and the rendered link does not. Fix:
-  refuse an empty or . component in escapes_repo, which costs nothing because no
-  real target needs one, and add the four rows to the existing test table.
-  Raised by red-team in round 3 of the /review2 on #7, at the ceiling.
 
 - **registry-not-found-advice** -- the no-registry message advises too little
   ConfigError::RegistryNotFound in crates/bombyx/src/config/error.rs tells an
@@ -481,29 +453,11 @@ into the reference docs first -- see the `/implement` skill.
   does. Found while working issue #78, deliberately left out of that change.
 
 - **record-files-typed-header** -- typed per-item header, not prose parsing
-  Give the mutated record-collection files a per-item, machine-parseable header
-  so the tooling reads fields, not prose. Scope: docs/todo.md and the record
-  files that share its shape -- the three reviewer logs (redteam-log.md,
-  artisan-log.md, fresh-reader-log.md) and docs/developer/template-feedback.md.
-  Leave CHANGELOG.md (external Keep-a-Changelog convention, append-mostly) and
-  backfeed-ledger.toml (already structured TOML). Shape: each record is a
-  section under a reserved heading; directly under it a small strict key:value
-  header (status, summary, created/completed, id, source, depends_on) ending at
-  the first blank line; the prose below is a body the tooling carries verbatim
-  and never interprets. Status becomes a field rather than a section, so todo
-  done flips a field in place instead of splicing a block between Pending and
-  Done -- which is the mechanism behind done-drops-the-body-silently. The payoff
-  that justifies touching all five files is a shared id: field, so one integrity
-  gate can validate every cross-reference (RT-7, AQ-9, FR-12, tf-... citations)
-  -- the check backlog-ids-dangle-in-docs asks for. Sequence: prove it on
-  docs/todo.md first (no external consumer, no agent-authored format), settle
-  the cargo xtask todo helpers, then extend the identical format to the logs and
-  feedback, whose blast radius is larger because the logs are written by the
-  reviewer agents and feedback has a /template-backfeed watermark consumer.
-  Relates to or would subsume done-drops-the-body-silently,
-  add-issue-flag-unused and backlog-ids-dangle-in-docs; same class as the
-  already-closed todo-tooling-format-mismatch, todo-done-link and
-  done-links-may-dangle. Surfaced in a design discussion, not from a review.
+  Give the mutated record files (docs/todo.md, the three reviewer logs,
+  template-feedback.md) a machine-parseable per-entry header so tooling reads
+  fields, not prose, and one integrity gate can validate cross-references. In
+  progress, reshaped to live-only files (done/closed entries dropped): the
+  design and increment plan live in docs/issues/record-files-typed-header.md.
 
 - **documentation-overhaul** -- de-manner and de-duplicate the docs
   A multi-move program to cut the documentation to a lean, plain corpus that
@@ -533,145 +487,3 @@ into the reference docs first -- see the `/implement` skill.
   pointed at is lost, so reword to state the uncertainty without the diary (e.g.
   'Neither run recorded which probe it used'). Part of the stale-record cleanup;
   surfaced during documentation-overhaul move 3.
-
-## Done
-
-- **readme-vagrantfile-pointer** -- README promises what Part 3 deletes
-  (2026-09-17)
-
-- **tutorial-provision-git-warning** -- reword the subject-held-open sentence
-  (2026-09-17)
-
-- **tutorial-debian-box-warning** -- keep, reword, or cut Debian digression
-  (2026-09-17)
-
-- **tutorial-box-lacks-git** -- two passages still assume the Debian box
-  (2026-09-17)
-
-- **env-file-rules-stated-five-times** -- one rule, five documents, drifting
-  (2026-09-17)
-
-- **generated-files-world-readable** -- the Vagrantfile lands at mode 664
-  (2026-09-13)
-
-- **list-registered-vms** -- list the registered projects and their VM state
-  (2026-09-12)
-
-- **disarm-on-the-ssh-route**
-  -- the VM host's own environment reaches vagrant
-  (2026-09-07)
-
-- **comments-narrating-the-past** -- the eight comments that entry named
-  (2026-09-06)
-
-- **newtype-remaining-config-fields** -- types for the five checked fields
-  (2026-09-06)
-
-- **provider-configured-not-selected** -- vagrant picks the provider, not bombyx
-  (2026-09-05)
-
-- **reset-needs-snapshot**
-  -- reset depends on a snapshot nothing creates
-  (2026-09-05)
-
-- **box-must-carry-git**
-  -- the git requirement surfaces after the boot
-  (2026-09-05)
-
-- **tutorial-local-route-now-booted**
-  -- a guest has booted on the local route
-  (2026-09-05)
-
-- **local-route-verification-run**
-  -- drive the new CLI against a real VM host
-  (2026-09-05)
-
-- **local-host-execution** -- run vagrant directly when this machine is the host
-  (2026-09-05)
-
-- [**project-selection-flag**](issues/project-config-off-repo.md)
-  -- `--project` names the project explicitly
-  (2026-09-05)
-
-- [**registry-config-load**](issues/project-config-off-repo.md)
-  -- load a Config from the registry by name
-  (2026-09-05)
-
-- [**registry-project-host**](issues/project-config-off-repo.md)
-  -- an optional host key per project
-  (2026-09-04)
-
-- [**registry-projects-table**](issues/project-config-off-repo.md)
-  -- config.toml gains a projects table
-  (2026-09-04)
-
-- **todo-done-link** -- todo done writes a link that need not resolve
-  (2026-09-04)
-
-- **done-links-may-dangle** -- todo done can write a dangling issue link
-  (2026-09-04)
-
-- [**overlay-drop-host-source**](issues/project-config-off-repo.md)
-  -- delete bombyx.local.toml entirely
-  (2026-09-04)
-
-- **canon-xref-wrapped-bold** -- canon-check reads paragraphs
-  (2026-09-04)
-
-- [**overlay-drop-project-overrides**](issues/project-config-off-repo.md)
-  -- the overlay carries a host and nothing else
-  (2026-09-04)
-
-- [**remote-clone-project-source**](issues/project-config-off-repo.md)
-  -- dropped the push; no program read the archive
-  (2026-09-02)
-
-- **generate-vagrantfile**
-  -- generate per provider from bombyx templates
-  (2026-08-30)
-
-- **trust-boundary-doc**
-  -- write down that the VM host is trusted
-  (2026-08-30)
-
-- **crlf-staircase-on-windows**
-  -- output staircases on a Windows console
-  (2026-08-18)
-
-- **phantom-deploy-command**
-  -- stripped the references; bombyx has no deploy step
-  (2026-08-12)
-
-- **provision-command**
-  -- re-run provisioning on a running VM
-  (2026-08-10)
-
-- **doctor-preflight**
-  -- bombyx doctor: read-only preflight checks
-  (2026-08-10)
-
-- **discard-leaves-dir**
-  -- discard now removes the scratch directory too
-  (2026-08-10)
-
-- **destroy-project-vm**
-  -- destroy the project VM and remove its directory
-  (2026-08-10)
-
-- **todo-tooling-format-mismatch**
-  -- todo list and done now read backticked entries too
-  (2026-08-10)
-
-- **first-real-run** -- drove bombyx against a real libvirt host
-  (Ubuntu 24.04, Vagrant 2.4.9, vagrant-libvirt 0.12.2).
-  Full sequence exercised: `up`, `status`, `shell`, `down`,
-  `scratch`, `discard`, `reset`, plus a second `up` for
-  idempotency and a live traversal rejection. Confirmed the
-  tilde fix, the tar-push (no nesting, `.vagrant` preserved,
-  archive cleaned up) and project-scoped scratch dirs against
-  reality. Turned up `discard-leaves-dir` and
-  `reset-needs-snapshot`. (2026-08-10)
-- **drop-frontend-tooling**
-  -- Delete leftover frontend tooling from the CLI-only prune
-  (2026-08-09)
-
