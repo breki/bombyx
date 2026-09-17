@@ -1,6 +1,7 @@
 # documentation-overhaul
 
-**Status:** Move 2 complete (2026-09-17); moves 3-5 remain
+**Status:** Move 3 in progress (2026-09-17) -- firewall doc split
+done; tutorial cleanup pending
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -196,3 +197,38 @@ the three duplications differ wildly in size.
   `env_file` "trailing separator" wording is a deliberate, correct
   distinction (POSIX path on the host vs the operator's own machine
   where `\` counts), not drift -- preserved. Move 2 complete.
+
+## Move 3 decisions (2026-09-17)
+
+Split into commits like move 2. Part A (firewall doc) is clean and
+prescribed; part B (tutorial cleanup) is a cluster of judgment calls
+and gets its own commit and its own decisions.
+
+- **Commit 1 (this one): firewall doc split.** Lifted the ~440-line
+  nftables/network-isolation section (was `vm-host-setup.md` lines
+  352-791) into a new `docs/vm-host-firewall.md`, promoting its
+  heading levels and adding a one-line back-link to
+  `vm-host-setup.md`. Left a short stub + pointer in
+  `vm-host-setup.md` (835 -> 401 lines). Repointed the seven inbound
+  references that named the old section: `trust-boundary.md` (x2),
+  `tutorial.md` (x3, including a new "Where to go next" bullet), and
+  `vm-host-wsl2.md` (x2).
+- **Commit 2 (next): tutorial cleanup.** The four related items --
+  `tutorial-box-lacks-git` (a correctness fix: two passages still
+  assume the git-less Debian box), `tutorial-debian-box-warning`
+  (keep/reword/cut a digression), `tutorial-provision-git-warning`
+  (reword one awkward sentence), and `readme-vagrantfile-pointer`
+  (a stale README pointer). These are not a clean "move digressions
+  to usage.md"; they need their own decisions.
+
+Noted for a later move (out of scope here): `vm-host-wsl2.md` still
+says "The diary does not say which probe either run used" -- a
+dangling reference to the removed `DIARY.md`. Belongs with the
+stale-record cleanup, not the firewall split.
+
+## Move 3 progress log
+
+- 2026-09-17: commit 1 (firewall doc split) done. New
+  `docs/vm-host-firewall.md`; `vm-host-setup.md` down to install +
+  verify plus a stub; all inbound links repointed;
+  `cargo xtask validate` green. Tutorial cleanup still pending.

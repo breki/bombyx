@@ -212,7 +212,7 @@ attacked for it, and under the first option the VM host holds
 that copy.
 
 A firewall on the host narrows that, and does not close it.
-`docs/vm-host-setup.md` describes an nftables ruleset whose
+`docs/vm-host-firewall.md` describes an nftables ruleset whose
 input chain drops new connections arriving on the guest bridge,
 accepting only established traffic and DHCP and DNS from the
 gateway address. Once those rules are loaded, a guest cannot
@@ -564,7 +564,7 @@ on the workstation or the VM host, or the boot happens in two
 phases. This is unresolved.
 
 **The guest has to reach the git host, and the network rules
-may forbid it.** `docs/vm-host-setup.md` describes an nftables
+may forbid it.** `docs/vm-host-firewall.md` describes an nftables
 ruleset that keeps agent VMs off the home network. A guest that
 cannot resolve and reach the repository cannot clone it, so the
 egress allowed by those rules has to include the git host

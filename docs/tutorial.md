@@ -366,8 +366,8 @@ going to run code you do not trust, that is worth closing.
 `scripts/agent-vm-firewall.sh` in this repo loads an nftables
 ruleset that allows outbound internet and refuses private
 destinations, and **Keeping agent VMs off your home network** in
-`vm-host-setup.md` explains what it does and does not buy. That
-section is marked unverified, so read it before applying it.
+`vm-host-firewall.md` explains what it does and does not buy.
+That page is marked unverified, so read it before applying it.
 
 You can skip this and come back to it. The rest of the tutorial
 does not depend on it.
@@ -978,7 +978,7 @@ dealt with:
   Part 4.
 - **A mount or a host service hangs rather than failing.** The
   nftables rules drop guest-initiated traffic to the host. See
-  **What this does and does not buy** in `vm-host-setup.md`.
+  **What this does and does not buy** in `vm-host-firewall.md`.
 
 One habit worth borrowing: when you check whether a bombyx
 command succeeded, do not pipe it through `tee` or `tail`. A
@@ -994,4 +994,6 @@ failed run reads as a pass. Redirect to a file instead
   generated files are written, what teardown removes, how
   to read `doctor`.
 - [vm-host-setup.md](vm-host-setup.md) -- the host in detail,
-  including the network isolation rules and other distributions.
+  including the other distributions.
+- [vm-host-firewall.md](vm-host-firewall.md) -- keeping agent
+  VMs off your home network with host nftables rules.

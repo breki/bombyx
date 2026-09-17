@@ -380,12 +380,12 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/sshd.conf
 ## What this arrangement does not solve
 
 The guest network exposure described under "Keeping agent VMs off
-your home network" in [vm-host-setup.md](vm-host-setup.md) turns
+your home network" in [vm-host-firewall.md](vm-host-firewall.md) turns
 out to be **smaller** on a WSL host than on a dedicated one, and
 the reason is worth knowing rather than assuming either way.
 
 **Read both measurements in this section as suspect**
-*(unverified)*. The probe `docs/vm-host-setup.md` published at
+*(unverified)*. The probe `docs/vm-host-firewall.md` published at
 the time read from the socket after connecting, and that times
 out on any port which waits for the client to speak first, so it
 reported a blocked path for a port that had answered. The diary
