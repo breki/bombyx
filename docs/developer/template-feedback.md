@@ -95,6 +95,79 @@ _None yet._
 
 ## Suggestions to flow back to the template
 
+### tf-2026-09-17-make-issue-planning-docs-ephemeral -- make issue planning docs ephemeral
+
+The template's `/implement` and `/issue` skills keep a permanent
+per-item planning record at `docs/issues/<slug>.md`, and the
+`todo done` step links the backlog Done entry to it with
+`--doc issues/<slug>.md`. In practice these accumulate as
+write-once, read-rarely files: this project reached twelve of
+them. They mix superseded intermediate designs with what actually
+shipped, carry `file.rs:NNN` line numbers that go stale, and
+duplicate what git history, `CHANGELOG.md`, and `architecture.md`
+already hold. For an AI agent the worst part is that a reversed
+intermediate decision reads as the current design. (This rests on
+a documentation audit and the observed accumulation, not a single
+measurement.)
+
+Change adopted here: the issue doc becomes a working document
+only. It is created and committed while the item is in flight,
+but on completion `/implement` and `/issue` first promote
+anything durable -- a design or security decision with its
+rationale, a non-obvious constraint -- into `docs/architecture.md`,
+`docs/trust-boundary.md`, or a comment beside the code, and the
+"what was and was not verified" note into the commit or PR body;
+then they remove the doc with `git rm docs/issues/<slug>.md`. The
+`todo done` call drops `--doc`, so the Done entry carries its
+summary and no link. This needed `Bash(git rm:*)` added to both
+skills' `allowed-tools`.
+
+Suggested for the template: make `docs/issues/<slug>.md`
+ephemeral the same way -- add a "promote durable decisions, then
+`git rm` the doc" close-out to `/implement` and `/issue`, grant
+`git rm` in their `allowed-tools`, and drop `--doc` from the
+`todo done` call (it is already optional). The permanent home for
+a decision worth keeping is an architecture-level doc, not a
+frozen planning record. See this project's `/implement` and
+`/issue` skill diffs in the same change that logged this.
+
+### tf-2026-09-17-drop-the-auto-generated-development-diary -- drop the auto-generated development diary
+
+The template's `/commit` skill carries an "Update development
+diary" step that appends a narrated entry to
+`docs/developer/DIARY.md` on every significant commit, and the
+template ships that file. In practice the diary becomes a large,
+append-only, write-only log: in this project it reached ~5100
+lines before we removed it. At that size nobody reads it front to
+back, and it cannot be sampled safely -- superseded facts sit
+beside current ones (for example a deploy-key path recorded as
+both `/root/.ssh` and `/home/vagrant/.ssh`), so an agent mining
+it can cite a stale fact as current.
+
+Its content duplicates places that already own it: git commit
+bodies for the change and its rationale, `CHANGELOG.md` for
+user-visible changes, and the per-decision `docs/issues/<slug>.md`
+records. The one thing it does uniquely -- cross-commit "we tried
+X, it failed, so we chose Z" narrative -- belongs in the issue
+doc when the work is tracked. The diary is also the single
+biggest reservoir of over-mannered, anecdotal prose, because a
+step on every commit keeps manufacturing it.
+
+Suggested fix for the template: remove the "Update development
+diary" step from `/commit`, drop `docs/developer/DIARY.md`, and
+strike the diary from the descriptive prose in `CLAUDE.md`,
+`llms.txt`, and the other `.claude/commands/` files, letting git
+bodies + `CHANGELOG.md` + `docs/issues/` carry the rationale.
+Keep the diary path in the `sync-candidates` never-sync set so a
+future sync does not resurrect it. If a running log is still
+wanted, make it opt-in and terse -- one dated line per change,
+decision plus reason -- rather than narrated entries every
+commit.
+
+This project removed the diary in the same change that logged this
+feedback; see the `/commit` skill diff and the removal of
+`docs/developer/DIARY.md`.
+
 ### tf-2026-09-11-issue-rundown-and-short-are-worth-shipping -- issue, rundown and short are worth shipping
 
 bombyx wrote three commands the template does not ship, and all

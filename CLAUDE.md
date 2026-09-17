@@ -548,7 +548,7 @@ one direct bookkeeping commit for the version bump.)
 
 Committing and releasing are separate:
 
-- **`/commit`** is a save-point. It updates the diary and the
+- **`/commit`** is a save-point. It updates the
   `CHANGELOG.md` `[Unreleased]` block and commits. It does
   **no reviewing** -- see **Reviewing is its own process**
   below. It does **not** bump the version, touch `Cargo.lock`,
@@ -750,12 +750,12 @@ a fresh empty `[Unreleased]` above it.
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline with stepwise progress |
 | `/review` | The three reviewers in sequence, red-team looping until behaviour settles; commits nothing, independent of `/commit` |
-| `/commit` | Save-point commit with diary and CHANGELOG (no reviewing, no version bump) |
+| `/commit` | Save-point commit with CHANGELOG (no reviewing, no version bump) |
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |
 | `/rundown` | Grouped one-line rundown of the session's work, ending with the decisions and actions left for the operator. Reports only -- changes nothing |
 | `/todo` | Capture a work item into `docs/todo.md` (no implementation) |
-| `/implement` | Plan + implement a captured item; writes `docs/issues/<slug>.md` |
+| `/implement` | Plan + implement a captured item via a working `docs/issues/<slug>.md`, removed when the work lands |
 | `/issue` | Work a GitHub issue end to end: verify, implement, review, PR |
 | `/update-deps` | Upgrade third-party deps to the newest versions outside the 14-day cooldown |
 | `/simplify` | Review changed code for quality |

@@ -1,11 +1,15 @@
 ---
 description: Plan and implement a captured issue from docs/todo.md
-allowed-tools: Bash(cargo xtask*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(scripts/e2e.sh*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit)
+allowed-tools: Bash(cargo xtask*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git rm:*), Bash(scripts/e2e.sh*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit)
 ---
 
-Plan and implement an item captured by `/todo`. The
-plan lives at `docs/issues/<slug>.md` and is updated
-as the work progresses.
+Plan and implement an item captured by `/todo`. The plan lives
+at `docs/issues/<slug>.md` while the work is in progress -- a
+working document, committed as the work lands and **removed when
+the item is done**. What outlives it is the code, the reference
+docs (`docs/architecture.md`, `docs/trust-boundary.md`), and the
+`/commit` body; Phase 3 promotes anything durable into those
+before the doc goes.
 
 ## Selecting the issue
 
@@ -123,35 +127,34 @@ particular:
    and `docs/`. Clean up stale content while you are
    there.
 
-3. In `docs/issues/<slug>.md`:
-   - Set `Status:` to `Done`.
-   - Add `**Completed:** <today's date>`.
-   - Add a final `## Outcome` section: what shipped,
-     links to changed files (path:line where
-     useful), follow-ups.
+3. **Promote anything durable, then remove the working doc.**
+   The issue doc was scratch for planning and decisions; it does
+   not stay in the tree. Before removing it, move anything worth
+   keeping into its permanent home:
+   - a design or security decision with its rationale, and any
+     non-obvious constraint -- into `docs/architecture.md` or
+     `docs/trust-boundary.md`, or a comment beside the code it
+     governs;
+   - what shipped and, above all, **what was and was not
+     verified** (Definition of Done item 3) -- into the `/commit`
+     body in step 6.
 
-4. In `docs/todo.md`, move the item to Done
-   mechanically (do not hand-edit the file):
+   Then remove the doc: `git rm docs/issues/<slug>.md` if it was
+   ever committed, or just delete the working file if it only sat
+   in the tree this session. Either way the finished item leaves
+   no `docs/issues/<slug>.md`.
+
+4. In `docs/todo.md`, move the item to Done mechanically (do not
+   hand-edit the file):
 
    ```
-   cargo xtask todo done <slug> --date <today's date> \
-     --doc issues/<slug>.md
+   cargo xtask todo done <slug> --date <today's date>
    ```
 
-   The command moves the bullet to the top of `## Done`
-   (newest first) and stamps the date. `--doc` is the
-   document the entry links to, relative to `docs/`, and
-   `/implement` always has one because Phase 1 step 4
-   wrote it.
-   The command refuses a `--doc` that names no file under
-   `docs/`, which stops the commonest dead link. It does not
-   stop every one -- the check follows symlinks and ignores case
-   on Windows and macOS. That is recorded in
-   `docs/developer/redteam-log.md`, as
-   `rt-2026-09-04-doc-existence-check-answers-for-this-machine`.
-
-   Pass `--summary "<text>"` to override the pending summary
-   for the Done entry.
+   The command moves the bullet to the top of `## Done` (newest
+   first) and stamps the date. Omit `--doc`: the working doc is
+   gone, so the Done entry carries its summary and no link. Pass
+   `--summary "<text>"` to override the pending summary.
 
 5. Verify the change manually -- actually run it,
    do not infer from a green suite. For a change to
@@ -174,7 +177,9 @@ particular:
 ## Rules
 
 - Never skip the plan phase, even for a small change.
-  The issue doc is the audit trail.
+  The issue doc organizes the work while it is in flight;
+  the record that survives is the `/commit` body and the
+  reference docs Phase 3 feeds, not the doc itself.
 - Never start implementing before the user explicitly
   approves the plan.
 - Never edit `## Done` items in `docs/todo.md` except

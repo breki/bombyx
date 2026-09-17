@@ -109,14 +109,10 @@ follow is a real defect -- `artisan.md` has a category for
 exactly this, and the reviewers have found false claims in
 these files that no gate could catch.
 
-Two kinds of file are exempt even then, because their content
-is not prose anybody reads to learn the project: the reviewers'
-own backlogs (`docs/developer/*-log.md`) and the diary
-(`docs/developer/DIARY.md`). `/review` under **Snapshot**
-already subtracts the backlogs. It does not subtract the diary,
-because `/commit` writes that after `/review` has finished, so
-a diary edit reaches a snapshot only when one is already
-sitting in the tree.
+One kind of file is exempt even then, because its content is
+not prose anybody reads to learn the project: the reviewers'
+own backlogs (`docs/developer/*-log.md`). `/review` under
+**Snapshot** already subtracts them.
 
 ## How to spawn
 

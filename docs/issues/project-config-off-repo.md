@@ -504,9 +504,9 @@ commands stay identical, which a dry run can show.
 
 ## Progress log
 
-**Oldest first**, unlike `docs/developer/DIARY.md`. Every step
-entry below carries the same date, so the order of the headings
-is the only thing that says which landed first -- and two of
+**Oldest first.** Every step entry below carries the same date,
+so the order of the headings is the only thing that says which
+landed first -- and two of
 them are out of it: step 4's entry sits above step 3's because
 it was written first. An entry is written when a step is merged,
 so the Status line at the top of this document is what says how

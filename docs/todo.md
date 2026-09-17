@@ -8,9 +8,10 @@ Project work queue.
 - `/implement` (no arguments) lists pending items and asks
   which to act on.
 
-Each implemented item gets a planning doc at
-`docs/issues/<slug>.md` that captures the problem statement,
-plan, decisions, and outcome.
+While an item is being implemented it gets a working planning
+doc at `docs/issues/<slug>.md` (problem, plan, decisions). It is
+removed when the item lands, with any durable decision promoted
+into the reference docs first -- see the `/implement` skill.
 
 ## Pending
 
@@ -27,7 +28,7 @@ plan, decisions, and outcome.
   chain.
   `nft -c` accepts the generated ruleset on nftables 1.0.9, and a fresh
   host-into-guest connection still works, so the input drop does not break
-  bombyx. The 2026-09-14 diary entry holds the detail.
+  bombyx.
   What is left is the reboot. Persistence is the one part that cannot be
   confirmed any other way and it fails silently, so run
   `sudo agent-vm-firewall status` after a restart and only then drop the
@@ -557,7 +558,7 @@ plan, decisions, and outcome.
 - **list-registered-vms** -- list the registered projects and their VM state
   (2026-09-12)
 
-- [**disarm-on-the-ssh-route**](issues/disarm-on-the-ssh-route.md)
+- **disarm-on-the-ssh-route**
   -- the VM host's own environment reaches vagrant
   (2026-09-07)
 
@@ -626,39 +627,39 @@ plan, decisions, and outcome.
   -- dropped the push; no program read the archive
   (2026-09-02)
 
-- [**generate-vagrantfile**](issues/generate-vagrantfile.md)
+- **generate-vagrantfile**
   -- generate per provider from bombyx templates
   (2026-08-30)
 
-- [**trust-boundary-doc**](issues/trust-boundary-doc.md)
+- **trust-boundary-doc**
   -- write down that the VM host is trusted
   (2026-08-30)
 
-- [**crlf-staircase-on-windows**](issues/crlf-staircase-on-windows.md)
+- **crlf-staircase-on-windows**
   -- output staircases on a Windows console
   (2026-08-18)
 
-- [**phantom-deploy-command**](issues/phantom-deploy-command.md)
+- **phantom-deploy-command**
   -- stripped the references; bombyx has no deploy step
   (2026-08-12)
 
-- [**provision-command**](issues/provision-command.md)
+- **provision-command**
   -- re-run provisioning on a running VM
   (2026-08-10)
 
-- [**doctor-preflight**](issues/doctor-preflight.md)
+- **doctor-preflight**
   -- bombyx doctor: read-only preflight checks
   (2026-08-10)
 
-- [**discard-leaves-dir**](issues/discard-leaves-dir.md)
+- **discard-leaves-dir**
   -- discard now removes the scratch directory too
   (2026-08-10)
 
-- [**destroy-project-vm**](issues/destroy-project-vm.md)
+- **destroy-project-vm**
   -- destroy the project VM and remove its directory
   (2026-08-10)
 
-- [**todo-tooling-format-mismatch**](issues/todo-tooling-format-mismatch.md)
+- **todo-tooling-format-mismatch**
   -- todo list and done now read backticked entries too
   (2026-08-10)
 
@@ -671,7 +672,7 @@ plan, decisions, and outcome.
   archive cleaned up) and project-scoped scratch dirs against
   reality. Turned up `discard-leaves-dir` and
   `reset-needs-snapshot`. (2026-08-10)
-- [**drop-frontend-tooling**](issues/drop-frontend-tooling.md)
+- **drop-frontend-tooling**
   -- Delete leftover frontend tooling from the CLI-only prune
   (2026-08-09)
 

@@ -126,7 +126,7 @@ Boundary: since <ref> (<why>).
 - **No filler items.** "Ran the tests" belongs in a rundown only
   when the result is interesting. A green gate is one line at the
   end, not one per gate.
-- **Never edit anything**, including the backlogs and the diary.
+- **Never edit anything**, including the backlogs.
   If the rundown surfaces something that should be recorded
   durably, put it under *Loose ends* and let the operator send you
   to `/todo` or `/commit`.

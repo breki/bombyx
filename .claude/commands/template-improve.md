@@ -64,14 +64,11 @@ and not a change to this file.
 ### 2. Read more than the commit messages
 
 A commit subject rarely says "this was the template's
-fault". The content that does is in four places, and all
-four are in range:
+fault". The content that does is in three places, and all
+three are in range:
 
 - **Commit bodies.** This project writes why, not just
   what, so a body often names the surprise directly.
-- **`docs/developer/DIARY.md`.** The entries record what
-  cost an hour and why, which is exactly the asymmetry
-  template feedback wants.
 - **The three reviewer backlogs under `docs/developer/`**:
   `redteam-log.md`, `artisan-log.md`, `fresh-reader-log.md`.
   A deferred finding against template-provided code *is*
