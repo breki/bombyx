@@ -550,6 +550,31 @@ into the reference docs first -- see the `/implement` skill.
   file exists on the guest), or leave as is. Surfaced in a four-round
   blue-pencil prose pass.
 
+- **record-files-typed-header** -- typed per-item header, not prose parsing
+  Give the mutated record-collection files a per-item, machine-parseable header
+  so the tooling reads fields, not prose. Scope: docs/todo.md and the record
+  files that share its shape -- the three reviewer logs (redteam-log.md,
+  artisan-log.md, fresh-reader-log.md) and docs/developer/template-feedback.md.
+  Leave CHANGELOG.md (external Keep-a-Changelog convention, append-mostly) and
+  backfeed-ledger.toml (already structured TOML). Shape: each record is a
+  section under a reserved heading; directly under it a small strict key:value
+  header (status, summary, created/completed, id, source, depends_on) ending at
+  the first blank line; the prose below is a body the tooling carries verbatim
+  and never interprets. Status becomes a field rather than a section, so todo
+  done flips a field in place instead of splicing a block between Pending and
+  Done -- which is the mechanism behind done-drops-the-body-silently. The payoff
+  that justifies touching all five files is a shared id: field, so one integrity
+  gate can validate every cross-reference (RT-7, AQ-9, FR-12, tf-... citations)
+  -- the check backlog-ids-dangle-in-docs asks for. Sequence: prove it on
+  docs/todo.md first (no external consumer, no agent-authored format), settle
+  the cargo xtask todo helpers, then extend the identical format to the logs and
+  feedback, whose blast radius is larger because the logs are written by the
+  reviewer agents and feedback has a /template-backfeed watermark consumer.
+  Relates to or would subsume done-drops-the-body-silently,
+  add-issue-flag-unused and backlog-ids-dangle-in-docs; same class as the
+  already-closed todo-tooling-format-mismatch, todo-done-link and
+  done-links-may-dangle. Surfaced in a design discussion, not from a review.
+
 ## Done
 
 - **generated-files-world-readable** -- the Vagrantfile lands at mode 664

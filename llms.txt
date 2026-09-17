@@ -457,6 +457,7 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 | `/validate` | Full quality pipeline |
 | `/commit` | Commit with CHANGELOG (no reviewing) |
 | `/review` | Review the work with the three reviewers, one at a time; commits nothing |
+| `/docs-audit` | Rate the whole doc corpus and recommend keep/trim/delete; changes nothing |
 | `/release` | Cut a SemVer release |
 | `/retrospect` | Workflow retrospective |
 | `/todo` | Capture a work item into `docs/todo.md` |

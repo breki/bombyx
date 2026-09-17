@@ -754,6 +754,7 @@ a fresh empty `[Unreleased]` above it.
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |
 | `/rundown` | Grouped one-line rundown of the session's work, ending with the decisions and actions left for the operator. Reports only -- changes nothing |
+| `/docs-audit` | Read-only audit of the whole documentation corpus: rate each file and recommend keep, trim, or delete. Changes nothing |
 | `/todo` | Capture a work item into `docs/todo.md` (no implementation) |
 | `/implement` | Plan + implement a captured item via a working `docs/issues/<slug>.md`, removed when the work lands |
 | `/issue` | Work a GitHub issue end to end: verify, implement, review, PR |
