@@ -183,18 +183,6 @@ greps" has no subject doing the searching; and in `ungranted_git`,
 reader concludes a wrapped `allowed-tools:` is tolerated. Deferred:
 all four are prose the change did not touch.
 
-### fr-2026-09-04-open-questions-count-does-not-match-its-list
-
-**Category:** A count that disagrees with the list under it
-
-`docs/issues/project-config-off-repo.md`'s progress log says "Two
-of the three **Open questions** above are now answered", and what
-follows answers one. A reader cannot tell which second question
-was meant, or whether an answer was decided and never written.
-Either say "One of the three", or, if assigning `destroy`'s
-positional to step 7 closes that question, say so. Predates this
-branch.
-
 ### fr-2026-09-03-no-reviewer-emits-the-severity-field
 
 **Category:** A judgement with no named source

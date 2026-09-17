@@ -44,9 +44,10 @@ agent before editing prose.
   cannot resurrect it.
 - Issue docs made ephemeral: `/implement` and `/issue` promote durable
   decisions into the reference docs, then remove the working doc.
-  `docs/issues/` pruned to the in-progress `project-config-off-repo.md`
-  after a coverage check confirmed the durable reasoning already lives
-  in `architecture.md`, `trust-boundary.md`, and `vm-host-wsl2.md`.
+  `docs/issues/` pruned to the working docs; `project-config-off-repo.md`
+  was kept while in progress and removed on 2026-09-17 once a coverage
+  check confirmed its durable reasoning lives in `architecture.md`,
+  `trust-boundary.md`, and `llms.txt`.
 - `/docs-audit` command added -- re-run it to measure each move.
 - `record-files-typed-header` captured in `docs/todo.md`.
 
@@ -294,22 +295,23 @@ ran as the acceptance measure. Tally: 9 Keep, 10 Trim, 3 Delete.
 Structure is where the program aimed -- one home per topic, the
 quickstart -> tutorial -> usage ladder, reference split out of the
 guides. But **acceptance is not met**: it asks for no file rated
-mannered Heavy, and five still are -- `docs/architecture.md`,
-`docs/developer/template-feedback.md`, `docs/developer/redteam-log.md`,
-`docs/developer/artisan-log.md` and
-`docs/issues/project-config-off-repo.md`. So the deferred
+mannered Heavy, and four still are -- `docs/architecture.md`,
+`docs/developer/template-feedback.md`, `docs/developer/redteam-log.md`
+and `docs/developer/artisan-log.md`. (A fifth,
+`docs/issues/project-config-off-repo.md`, also rated Heavy and has
+since been deleted -- item 1 below.) So the deferred
 template-feedback trim alone does not close the program.
 
 The remaining work, in value order. Each is a docs edit and its own
 commit; capture the untracked ones in `docs/todo.md` before
 starting.
 
-1. **Delete `docs/issues/project-config-off-repo.md` now.** 827
-   mannered lines opening "In progress" for a design that shipped
-   everywhere else -- the "stale record read as current" failure
-   this program exists to end, and the biggest single win. Safe:
-   its durable "why" already lives in `architecture.md`,
-   `trust-boundary.md` and `llms.txt`. (Not yet tracked.)
+1. **Delete `docs/issues/project-config-off-repo.md`.** DONE
+   2026-09-17: a coverage check confirmed all 11 durable facts live
+   in `architecture.md`, `trust-boundary.md` and `llms.txt`, and
+   the one still-open question is preserved as
+   `destroy-confirmation-shape`; the 827-line doc was removed and
+   the one reviewer finding about it dropped.
 
 2. **Refresh `docs/tutorial.md`.** It runs on `0.4.1` while the
    shipped version is `0.6.0`, and its header caveat calls the

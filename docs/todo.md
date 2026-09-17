@@ -596,15 +596,6 @@ pointed at is lost, so reword to state the uncertainty without the diary (e.g.
 'Neither run recorded which probe it used'). Part of the stale-record cleanup;
 surfaced during documentation-overhaul move 3.
 
-### delete-project-config-off-repo-doc
-
-**Summary:** delete the shipped project-config-off-repo planning doc
-
-From the 2026-09-17 docs-audit (biggest single win). The 827-line issue doc
-opens In progress for a design that shipped everywhere else. The durable why
-already lives in architecture.md, trust-boundary.md and llms.txt; verify that,
-then git rm. See the punch-list in docs/issues/documentation-overhaul.md.
-
 ### tutorial-version-drift
 
 **Summary:** tutorial runs on 0.4.1 with a now-false unreleased caveat
