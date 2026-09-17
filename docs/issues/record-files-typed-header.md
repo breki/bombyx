@@ -1,6 +1,6 @@
 # record-files-typed-header
 
-**Status:** In progress -- increments 1-2 done
+**Status:** In progress -- increments 1-3 done; increment 4 remains
 **Captured:** (see `docs/todo.md`)
 **Started:** 2026-09-17
 
@@ -183,6 +183,35 @@ edits, verified by the tooling round-tripping them.
   - Left for increment 2 (logs live-only): reviewer-log and
     template-feedback entries about the removed `--doc`/Done are now
     moot findings, to be dropped there.
+- 2026-09-17: increment 3b (queue onto headed entries) done.
+  - `docs/todo.md`: converted 38 bullets to `### <slug>` entries
+    with `**Summary:**` fields via a scratchpad awk converter
+    (entry-count parity checked, no over-width lines). Added the
+    two genuine live-to-live cross-refs -- `agent-vlan` ->
+    `wire-vm-host`, `status-all-aggregator` -> `status-endpoint` --
+    which now exercise the dangling-ref check on real data.
+    Refs to completed items (e.g. `project-selection-flag`) stay
+    in prose, unchecked. Updated the preamble to state the entry
+    shape.
+  - `xtask/src/todo.rs`: rewritten to read via `records::parse`
+    and mutate `### <slug>` entries (`append_entry`,
+    `remove_entry`) instead of `## Pending` bullets. Dropped the
+    bullet/link/section machinery and the `--issue` flag (no
+    caller; the link shape it wrote is gone), which resolves
+    `add-issue-flag-unused` -- removed that entry with the tool.
+    `records` exposes `parse`, `Record` accessors and `valid_id`
+    so the queue and the gate share one parser. 16 tests.
+  - `docs/todo.md` joined the record set: `records-check` covers
+    5 files, 123 entries. Skills updated: `/todo` (summary budget
+    is now a flat 67 after the `**Summary:**` prefix, not
+    70-minus-slug; "bullet" -> "entry"), `/implement` (`## Pending`
+    -> `### <slug>` entry).
+  - Surfaced, deferred to increment 4: `template-feedback.md`'s
+    todo-done-link entries still describe bombyx's `--doc`/
+    `--issue`/`move_to_done`, all now removed. Those sentences are
+    stale for bombyx (the upstream suggestion still stands). Not
+    canon and no gate reads them; increment 4 ("trim
+    template-feedback.md rationale") owns it.
 - 2026-09-17: increment 3a (record parser + gate) done.
   - `xtask/src/records.rs`: a shared parser (heading id up to
     ` -- `, a field block of `**Label:** value` lines that ends at

@@ -7,7 +7,7 @@ Collect an issue or idea into `docs/todo.md`. This
 command **only captures** -- it never implements. Use
 `/implement` to act on a captured item.
 
-The mechanical work -- slug-uniqueness check, bullet
+The mechanical work -- slug-uniqueness check, entry
 placement, listing, wrapping to 80 columns -- lives in
 `cargo xtask todo`, so this skill never hand-edits
 `docs/todo.md`. The skill owns the *judgment*: turning
@@ -39,27 +39,22 @@ the user's words into a slug and a summary.
      --summary "<one-line summary, see budget below>"
    ```
 
-   The summary shares one 80-column line with the slug,
-   rendered as `- **<slug>** -- <summary>`. That prefix
-   costs 10 characters plus the slug, so the budget is
-   **70 minus the slug length** -- not a flat 80. The
-   23-character `suspend-resume-commands` left 47. A
-   50-character slug (the cap) leaves only 20, so a long
-   slug and a long summary cannot both fit.
+   The summary is written on its own `**Summary:**` line,
+   so it must fit 80 columns after that 13-character
+   prefix -- a budget of **67 characters**, the same
+   whatever the slug is.
 
    Write a phrase, not a sentence, and put anything longer
    in `--body`. The command rejects an over-long summary
    and reports the exact remaining budget; recover by
-   shortening the summary, not by shortening the slug to
-   buy room.
+   shortening the summary or moving detail into `--body`.
 
    Add `--body "<longer text>"` when the user gave
    more than a one-liner (kept verbatim, wrapped by the
    command). The command refuses a slug that already
-   exists (pending or done); if it errors on a
-   collision, append `-2` / `-3` to the slug and retry.
-   Keep the user's wording -- do not paraphrase or
-   expand.
+   exists; if it errors on a collision, append `-2` / `-3`
+   to the slug and retry. Keep the user's wording -- do
+   not paraphrase or expand.
 
    **When a GitHub issue already holds the detail, the
    body is a pointer, not a copy.** Give the issue

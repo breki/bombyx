@@ -20,10 +20,8 @@ use std::fmt::Write as _;
 use crate::helpers::workspace_root;
 
 /// The record files the gate reads, repo-relative.
-///
-/// `docs/todo.md` joins this set once its bullets become headed
-/// entries (increment 3b of `record-files-typed-header`).
 const RECORD_FILES: &[&str] = &[
+    "docs/todo.md",
     "docs/developer/redteam-log.md",
     "docs/developer/artisan-log.md",
     "docs/developer/fresh-reader-log.md",
@@ -46,13 +44,34 @@ const KNOWN_LABELS: &[&str] = &[
 const CROSS_REF_LABELS: &[&str] = &["Depends on", "Supersedes"];
 
 /// One parsed entry.
-struct Record {
+pub(crate) struct Record {
     /// The durable id, taken from the heading up to a ` -- `.
     id: String,
     /// 1-indexed source line of the `###` heading.
     line: usize,
     /// The field block, in source order.
     fields: Vec<Field>,
+}
+
+impl Record {
+    /// The entry's durable id.
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The 1-indexed source line of the `###` heading, so a caller
+    /// mutating the file can find where the entry begins.
+    pub(crate) fn heading_line(&self) -> usize {
+        self.line
+    }
+
+    /// The value of the field with this label, or `None`.
+    pub(crate) fn field(&self, label: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| f.value.as_str())
+    }
 }
 
 /// One `**Label:** value` line from an entry's field block.
@@ -111,7 +130,7 @@ fn parse_field(line: &str) -> Option<(String, String)> {
 /// heading, after an optional blank line; it ends at the first blank
 /// or non-field line. So a `**Status:**` deeper in the body is prose,
 /// not a field.
-fn parse_records(content: &str) -> Vec<Record> {
+pub(crate) fn parse(content: &str) -> Vec<Record> {
     let lines: Vec<&str> = content.lines().collect();
     let mut out = Vec::new();
     let mut i = 0;
@@ -153,7 +172,7 @@ fn parse_records(content: &str) -> Vec<Record> {
 /// queue's shape). Kebab already covers a durable id, so this only
 /// refuses an id with uppercase, spaces, underscores or stray
 /// punctuation.
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.split('-').all(|seg| {
             !seg.is_empty()
@@ -178,7 +197,7 @@ fn ref_ids(value: &str) -> Vec<&str> {
 fn findings_for(files: &[(String, String)]) -> Vec<Finding> {
     let parsed: Vec<(String, Vec<Record>)> = files
         .iter()
-        .map(|(name, text)| (name.clone(), parse_records(text)))
+        .map(|(name, text)| (name.clone(), parse(text)))
         .collect();
 
     // The id universe, and where each id was declared.
@@ -255,8 +274,7 @@ fn collect() -> Result<(Vec<Finding>, usize, usize), String> {
             .map_err(|e| format!("cannot read {f}: {e}"))?;
         files.push(((*f).to_string(), text));
     }
-    let records: usize =
-        files.iter().map(|(_, t)| parse_records(t).len()).sum();
+    let records: usize = files.iter().map(|(_, t)| parse(t).len()).sum();
     let findings = findings_for(&files);
     Ok((findings, files.len(), records))
 }
@@ -333,7 +351,7 @@ mod tests {
 Body text follows.
 **Status:** Resolved 2026-09-13 -- not a field.
 ";
-        let records = parse_records(src);
+        let records = parse(src);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].fields.len(), 1);
         assert_eq!(records[0].fields[0].label, "Category");
@@ -350,7 +368,7 @@ Body text follows.
 
 Prose body.
 ";
-        let records = parse_records(src);
+        let records = parse(src);
         let labels: Vec<&str> =
             records[0].fields.iter().map(|f| f.label.as_str()).collect();
         assert_eq!(labels, vec!["Summary", "Issue", "Depends on"]);
@@ -359,7 +377,7 @@ Prose body.
     #[test]
     fn a_heading_with_no_blank_before_its_field_still_parses() {
         let src = "### a-slug\n**Category:** X\n\nBody.\n";
-        let records = parse_records(src);
+        let records = parse(src);
         assert_eq!(records[0].fields.len(), 1);
     }
 

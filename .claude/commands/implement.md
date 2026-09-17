@@ -15,7 +15,7 @@ before the doc goes.
 
 - **With a slug argument** (e.g.
   `/implement search-bar-perf`): use that slug. If it
-  does not exist under `## Pending` in `docs/todo.md`,
+  is not an `### <slug>` entry in `docs/todo.md`,
   stop and tell the user.
 - **Without arguments**: read `docs/todo.md`, list
   the pending slugs with their summaries, and ask the
