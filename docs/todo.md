@@ -595,3 +595,55 @@ was deleted in 5da163a, so the reference dangles. The which-probe detail it
 pointed at is lost, so reword to state the uncertainty without the diary (e.g.
 'Neither run recorded which probe it used'). Part of the stale-record cleanup;
 surfaced during documentation-overhaul move 3.
+
+### delete-project-config-off-repo-doc
+
+**Summary:** delete the shipped project-config-off-repo planning doc
+
+From the 2026-09-17 docs-audit (biggest single win). The 827-line issue doc
+opens In progress for a design that shipped everywhere else. The durable why
+already lives in architecture.md, trust-boundary.md and llms.txt; verify that,
+then git rm. See the punch-list in docs/issues/documentation-overhaul.md.
+
+### tutorial-version-drift
+
+**Summary:** tutorial runs on 0.4.1 with a now-false unreleased caveat
+
+docs/tutorial.md is written against 0.4.1 while shipped is 0.6.0, and its header
+caveat calls the Vagrantfile-generation design unreleased, which is now false.
+Refresh to 0.6.0 and collapse the dry-run and provision/snapshot passages that
+duplicate usage.md. From the 2026-09-17 docs-audit.
+
+### trim-reviewer-log-bodies
+
+**Summary:** trim redteam and artisan log entries to the fact
+
+redteam-log.md and artisan-log.md still re-derive each finding with
+review-provenance war-stories. Cut each to defect plus repro plus one-line
+deferral, the shape fresh-reader-log.md already has, and de-duplicate the
+artisan findings that merely restate todo items. From the 2026-09-17 docs-audit.
+
+### trim-todo-entry-bodies
+
+**Summary:** trim long todo.md bodies to fact and open decision
+
+Several entries (self-update-resolves-tar-late, config-home-env-provenance,
+others) still carry re-derived rationale. Cut to the fact and the open decision,
+and fix the wrapped Summary line in config-tests-own-file. From the 2026-09-17
+docs-audit.
+
+### trim-architecture-claude-mannered-prose
+
+**Summary:** cut mannered residue in architecture.md and CLAUDE.md
+
+architecture.md's design-rationale essays cut to mechanism plus the owning test
+name; CLAUDE.md's Environment Constraints war-stories cut to the rule. Both rate
+mannered Heavy or Some-to-Heavy in the audit. From the 2026-09-17 docs-audit.
+
+### guidelines-commands-table-drifts
+
+**Summary:** ai-agents guidelines commands table contradicts canon
+
+docs/ai-agents/guidelines.md carries a partial Available Commands table that
+disagrees with CLAUDE.md's Skills table (wrong /todo description). Drop it and
+point at canon. From the 2026-09-17 docs-audit.

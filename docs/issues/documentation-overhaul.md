@@ -355,5 +355,13 @@ vm-host and trust docs, not only in their headers.
 The style to match: `quickstart.md`, `fresh-reader-log.md`,
 `supply-chain.md`, `build-recipes.md`, `README.md`.
 
+Captured 2026-09-17: the untracked items above are now queue
+entries -- `delete-project-config-off-repo-doc` (1),
+`tutorial-version-drift` (2), `trim-reviewer-log-bodies` (4),
+`trim-todo-entry-bodies` (5), `trim-architecture-claude-mannered-
+prose` (6) and `guidelines-commands-table-drifts` (7). Item 3 (the
+broad `template-feedback.md` trim) stays tracked in this plan and
+in `record-files-typed-header.md`.
+
 The program closes -- and both plan docs are removed -- when a
 re-run `/docs-audit` shows no file rated Heavy.
