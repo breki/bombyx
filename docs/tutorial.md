@@ -11,17 +11,18 @@ three steps later.
 
 > **What this was checked against.**
 >
-> The workstation steps were run on Windows 11 in August 2026,
-> against bombyx 0.4.1, including the two failure cases in
-> **When something goes wrong**.
+> The workstation steps (Parts 1 and 2) were run on Windows 11 in
+> August 2026, including the two failure cases in **When something
+> goes wrong**.
 >
-> **The transcripts in Parts 3 and 4 are not from that run
-> (unverified).** They show behaviour that is unreleased at the
-> time of writing -- bombyx generating the Vagrantfile, `up` as
-> five `ssh` commands, `doctor` without the `tar` and `scp`
-> rows -- none of which 0.4.1 could produce. They are written
-> from the code rather than captured from a machine. Treat
-> your own first `bombyx up` as the real test.
+> **The transcripts in Parts 3 and 4 are written from the code,
+> not captured from a run *(unverified)*.** bombyx generating the
+> Vagrantfile, `up` as five `ssh` commands, and `doctor` without
+> the `tar` and `scp` rows are all current behaviour; the exact
+> output is transcribed from the source rather than run against a
+> remote VM host. Part 1 installs bombyx from the clone, so your
+> binary is built from that same source -- treat your own first
+> `bombyx up` as the real test.
 >
 > **One route has since been exercised end to end.** On
 > 2026-09-05, the whole sequence was run on a Linux workstation
@@ -130,7 +131,7 @@ Check it landed:
 
 ```console
 $ bombyx --version
-bombyx 0.4.1        # whatever you installed
+bombyx 0.6.0        # whatever you installed
 ```
 
 ### Give the VM host an SSH alias
@@ -704,80 +705,33 @@ one a VM command runs.
 
 ### Look at what `up` would do
 
+Every bombyx command takes `--dry-run`, which prints the exact
+shell it would run and touches nothing:
+
 ```console
 $ bombyx --project myproject --dry-run up
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; rm -f ~/'vms/myproject/bombyx.git-credentials' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.git-credentials' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
-Five commands, and every one of them is an `ssh`: make the
-directory, write the two files bombyx generates, boot, then take
-a snapshot called `fresh-install` so `bombyx reset` has a state
-to return to later, unless the VM already has one. bombyx runs
-nothing on your workstation.
+`up` is five `ssh` commands, and bombyx runs nothing on your
+workstation: it makes a directory on the host, writes the two
+files it generates -- the Vagrantfile and `bootstrap.sh` -- down a
+pipe so their contents never appear as command arguments, boots
+with `vagrant up`, and takes a `fresh-install` snapshot so
+`bombyx reset` has a state to return to. A project that sets
+`env_file` or `repo_token` gets a sixth or seventh command staging
+that file.
 
-Look at the end of the fourth line, the one that runs
-`vagrant up`. After the boot finishes, it deletes the two files
-bombyx can stage on the VM host -- a secrets file (from
-`env_file`) and a git credential (from `repo_token`). Both removals run on every
-boot even though this project sets neither key, because a run
-somebody interrupted can leave a file there and the config may
-have stopped naming it since. A project that does set `env_file`
-gets a sixth command, writing that file beside the other two,
-and one that also sets `repo_token` gets a seventh.
+**Seeing what would run** in [usage.md](usage.md) walks the plan
+line by line: why every line clears the five `VAGRANT_*` variables
+first, why the two `BOMBYX_VM_*` variables carry a `$` for the
+host's shell to fill in, and why you must never pipe the plan into
+a shell (under `dash` it boots against an empty Vagrantfile with a
+zero exit). The two file sizes it reports change with almost every
+release, so run the command to see the figures for the version you
+have.
 
-The two writes print as one line each, and neither line holds
-the file it writes. bombyx sends a generated file down a pipe
-to the `ssh` process rather than passing it as an argument,
-because every logged-in account on a machine can list the
-arguments of a running command and none of them can read a
-pipe. So `--dry-run` has no file content to print, and the
-trailing comment gives its size instead. The host
-receives the whole file either way.
-
-One line gives no size: the git credential a `repo_token`
-produces. That file is fixed text plus the token, so its length
-would measure the token, and `docs/usage.md` says more about
-it. This project configures no token, so the plan above has no
-such line.
-
-Do not feed this plan to a shell -- not `| sh`, not
-`sh < plan.sh`. When a shell reads a script from standard
-input, it hands that same input to the children it starts.
-`ssh` forwards its standard input to the far side on every line
-here, so each `ssh` command in the plan consumes part of the
-plan's own remaining text as its input. What you are left with
-depends on the shell, and one of the cases is quiet: under
-`dash`, every line still runs, both generated files are written
-empty, and `vagrant up` boots against an empty Vagrantfile with
-a zero exit status. **Seeing what would run** in
-[usage.md](usage.md) has all four cases.
-
-Where the real output gives those sizes, the transcript above
-says `N`. The two files grow and shrink with almost every
-release, so a number copied in here is stale by the next one,
-and it has been wrong more often than right. Run the command to
-see the figures for the version you have.
-
-Every line begins with the same `unset`. Five vagrant variables
-can redirect a command to a different directory or a different
-provider. If any were already set on your VM host, that value --
-not the one you configured -- would decide where these commands
-land. bombyx clears all five variables, then re-adds the
-provider from your `config.toml` in front of every `vagrant`
-call. `bombyx destroy` is the one exception,
-and `usage.md` says why.
-
-The two `BOMBYX_VM_*` variables are how the guest learns
-which machine it is running on. The generated Vagrantfile
-forwards them into the VM, where `provision.sh` can read them.
-The `\$` is deliberate: that name has to be filled in by the
-host's shell, not by yours. Every bombyx command accepts
-`--dry-run`, and the output is real shell -- worth using
-whenever you are unsure what a command is about to touch,
+`--dry-run` is real shell and touches nothing, so it is worth
+using whenever you are unsure what a command is about to do,
 especially `destroy`.
 
 ### Boot it

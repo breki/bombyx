@@ -596,15 +596,6 @@ pointed at is lost, so reword to state the uncertainty without the diary (e.g.
 'Neither run recorded which probe it used'). Part of the stale-record cleanup;
 surfaced during documentation-overhaul move 3.
 
-### tutorial-version-drift
-
-**Summary:** tutorial runs on 0.4.1 with a now-false unreleased caveat
-
-docs/tutorial.md is written against 0.4.1 while shipped is 0.6.0, and its header
-caveat calls the Vagrantfile-generation design unreleased, which is now false.
-Refresh to 0.6.0 and collapse the dry-run and provision/snapshot passages that
-duplicate usage.md. From the 2026-09-17 docs-audit.
-
 ### trim-reviewer-log-bodies
 
 **Summary:** trim redteam and artisan log entries to the fact
