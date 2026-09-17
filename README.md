@@ -55,25 +55,11 @@ machines and what `bombyx up` does step by step.
 No Rust toolchain needed -- each release carries a prebuilt binary.
 Download the archive for your platform from the
 [releases page](https://github.com/breki/bombyx/releases), check it
-against `SHA256SUMS`, and put the binary on your `PATH`:
-
-<!-- version: 0.6.0 -->
-
-```bash
-VERSION=0.6.0
-BASE=https://github.com/breki/bombyx/releases/download/v$VERSION
-TARGET=x86_64-unknown-linux-gnu
-
-curl -LO "$BASE/bombyx-v$VERSION-$TARGET.tar.gz"
-curl -LO "$BASE/SHA256SUMS"
-sha256sum --check --ignore-missing SHA256SUMS
-tar xzf "bombyx-v$VERSION-$TARGET.tar.gz"
-install -m755 "bombyx-v$VERSION-$TARGET/bombyx" ~/.local/bin/bombyx
-```
-
-For the macOS and Windows targets, and the verification detail, see
-[docs/quickstart.md](docs/quickstart.md). After the first install,
-`bombyx self-update` does the download and verify for you.
+against `SHA256SUMS`, and put the binary on your `PATH`.
+[docs/quickstart.md](docs/quickstart.md) gives the exact commands
+for Linux, macOS and Windows, with the verification detail. After
+the first install, `bombyx self-update` does the download and
+verify for you.
 
 That installs the CLI on your workstation. The VM host needs libvirt,
 Vagrant and its `libvirt` provider --

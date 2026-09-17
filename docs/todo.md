@@ -585,6 +585,17 @@ into the reference docs first -- see the `/implement` skill.
   ephemeral-issue-doc change. Grew out of the 2026-09-17 /docs-audit; re-run
   /docs-audit to measure progress.
 
+- **sync-version-sentinels** -- the docs' version sentinels drift on release
+  `/release` bumps `crates/bombyx/Cargo.toml` and the CHANGELOG but never
+  rewrites the `<!-- version: X -->` sentinel and the `VERSION=X` line beneath
+  it in the docs. That is how `docs/quickstart.md` drifted to 0.5.0 while the
+  source of truth was 0.6.0. As of documentation-overhaul move 2, quickstart is
+  the single owner of the install snippet, so there is one sentinel to keep in
+  step -- but nothing keeps it. Fix: a unit-tested `cargo xtask` step (or a
+  `/release` step) that rewrites every version sentinel from `Cargo.toml`,
+  ideally gated by a check like `canon-check`. Surfaced during
+  documentation-overhaul move 2.
+
 ## Done
 
 - **generated-files-world-readable** -- the Vagrantfile lands at mode 664

@@ -1,6 +1,7 @@
 # documentation-overhaul
 
-**Status:** Move 1 in progress (2026-09-17)
+**Status:** Move 2 in progress (2026-09-17) -- install version done;
+env_file/config-check consolidation pending
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -152,3 +153,30 @@ the ephemeral-issue-doc convention.
   the 600-650 estimate; the operator accepted 866, since the residue
   is reference material and mechanism, not manner. Moves 2-5 remain;
   this plan doc stays until the whole program is done.
+
+## Move 2 decisions (2026-09-17)
+
+Move 2 is split into review-sized commits rather than one, because
+the three duplications differ wildly in size.
+
+- **Commit 1 (this one): install version.** `docs/quickstart.md`
+  drifted to 0.5.0 while `Cargo.toml` and README were 0.6.0. Fixed
+  quickstart to 0.6.0 and made it the single owner of the install
+  snippet: README dropped its version-pinned block for a one-line
+  pointer to quickstart, so only one file now carries the version.
+  Root cause captured as `sync-version-sentinels` in `docs/todo.md`:
+  `/release` never rewrites the `<!-- version: -->` sentinels, so the
+  docs-only "one owner" fix is a stopgap until an xtask step syncs
+  them. That mechanism fix is out of this docs-only move's scope.
+- **Commit 2 (next): env_file/config-check consolidation.** The
+  `env-file-rules-stated-five-times` item plus the config-check
+  reasoning in `docs/usage.md` that restates `docs/architecture.md`.
+  Left for its own commit -- it spans README, usage, architecture,
+  trust-boundary, tutorial and code comments, and drifted twice in
+  one review, so it earns an isolated, carefully-reviewed change.
+
+## Move 2 progress log
+
+- 2026-09-17: commit 1 done. quickstart -> 0.6.0, README delegates
+  install to quickstart, `sync-version-sentinels` todo captured.
+  env_file/config-check consolidation still pending.
