@@ -1,7 +1,9 @@
 # documentation-overhaul
 
-**Status:** Moves 1-3 complete (2026-09-17); move 4 planned (see
-below); move 5 remains
+**Status:** Moves 1-3 and 5 complete (2026-09-17); move 4 mostly
+done via `record-files-typed-header` (one deferred item: the broad
+`template-feedback.md` rationale trim). Acceptance pending a final
+`/docs-audit`.
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -256,3 +258,31 @@ remains, and the move-1 length-estimate clause lands there.
   edit -- the stale pointer was already gone (removed when the README
   was trimmed in `d0df54e`), verified now. All four related items
   moved to Done. Move 3 complete.
+
+## Move 5 decisions and progress (2026-09-17)
+
+- **House style stated once, in `CLAUDE.md` under Writing.** The
+  Writing section already carried the mechanism-first, plain,
+  reason-not-history rules. Move 5 added the missing principle
+  explicitly: state the rule, not the war-story that taught it --
+  one clause of reasoning where it prevents a mistake, the incident
+  dropped (git history keeps it), with
+  `docs/developer/supply-chain.md` named as the model. It is stated
+  in the always-loaded manual rather than a new file, so a fresh
+  agent meets it every session; it governs the whole corpus, though
+  a file whose job is carrying an argument upstream
+  (`template-feedback.md`) keeps more of its rationale by nature.
+- **Length budget on the manual: near 900 lines.** `CLAUDE.md` is
+  always loaded, so it pays for every session. The budget is a
+  documented soft cap, not a gate -- the manual reminds the agent to
+  move reference detail or a retold incident to `docs/` / `llms.txt`
+  and leave the rule. `wc -l CLAUDE.md` is the check. Chosen near
+  the current size (876 -> ~888 after this move); move 1 targeted
+  600-650 and landed at 866, which the operator accepted as
+  mechanism and reference, not manner, so the cap protects that
+  level rather than the original estimate.
+- Move 5 done. `canon-check` and `cargo xtask validate` green.
+  Remaining before the program's acceptance and the removal of both
+  plan docs: the deferred broad `template-feedback.md` rationale
+  trim (move 4), then a final `/docs-audit` showing no file rated
+  mannered Heavy.

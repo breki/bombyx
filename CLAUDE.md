@@ -26,6 +26,19 @@ reason the code is the way it is, not its history -- bombyx is
 pre-release, so "this used to" and "an earlier version" are
 defects, not context.
 
+State the rule, not the war-story that taught it. Where the
+reasoning prevents a real mistake, keep it to one clause and
+drop the incident -- git history holds that. The model is
+`docs/developer/supply-chain.md`: mechanism first, plain, no
+anecdote. A doc that reads as a report of what went wrong has
+regrown the manner this corpus was cut free of.
+
+This manual is always loaded, so every line costs each session.
+Keep it near 900 lines: when a section grows past its rule into
+reference detail or a retold incident, move that detail to
+`docs/` or `llms.txt` and leave the rule. Run `wc -l CLAUDE.md`
+to check.
+
 Begin every chat reply with a summary under forty words,
 wrapped in `[short]` and `[/short]` tags on their own lines,
 before the body. A speech synthesizer reads it, so use whole
