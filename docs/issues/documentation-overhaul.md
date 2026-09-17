@@ -1,6 +1,6 @@
 # documentation-overhaul
 
-**Status:** Planning
+**Status:** Move 1 in progress (2026-09-17)
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -122,3 +122,33 @@ Done when a `/docs-audit` run shows no file rated mannered Heavy, the
 duplication list is empty (each topic has one home), and `canon-check`
 and `cargo xtask validate` are green. Remove this plan doc then, per
 the ephemeral-issue-doc convention.
+
+## Move 1 decisions (2026-09-17)
+
+- **Cut depth: rule plus one-line why.** Each anecdote becomes its
+  rule plus a single clause of reasoning where the reasoning prevents
+  a real mistake; the incident itself is dropped (git history keeps
+  it). Target: `CLAUDE.md` around 600-650 lines, down from 1001.
+- **Table ownership: `CLAUDE.md` owns both.** The build-command and
+  skills tables stay in the always-loaded manual (the agent needs the
+  command list at hand, and canon-check reads `CLAUDE.md` but not
+  `docs/`). `llms.txt` drops its shorter copies and links to
+  `CLAUDE.md`. A third reference file was considered and declined: it
+  would split the command list out of the only auto-loaded file.
+- **Split of concerns confirmed:** `CLAUDE.md` = how to work here
+  (workflow, standards, commands, skills); `llms.txt` = what the
+  project is (structure, model, config, conventions).
+
+## Move 1 progress log
+
+- 2026-09-17: decisions recorded above; starting the `CLAUDE.md` and
+  `llms.txt` rewrite.
+- 2026-09-17: move 1 done. `CLAUDE.md` de-mannered 1001 -> 866 lines;
+  every war-story cut to its rule plus one illustrative clause, no
+  rule dropped (verified by diffing the bolded rule inventory).
+  Duplicated build-command and skills tables removed from `llms.txt`
+  (447 lines, down from 474), which now points to `CLAUDE.md`.
+  `canon-check` and `cargo xtask validate` green. Length landed above
+  the 600-650 estimate; the operator accepted 866, since the residue
+  is reference material and mechanism, not manner. Moves 2-5 remain;
+  this plan doc stays until the whole program is done.
