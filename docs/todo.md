@@ -575,6 +575,16 @@ into the reference docs first -- see the `/implement` skill.
   already-closed todo-tooling-format-mismatch, todo-done-link and
   done-links-may-dangle. Surfaced in a design discussion, not from a review.
 
+- **documentation-overhaul** -- de-manner and de-duplicate the docs
+  A multi-move program to cut the documentation to a lean, plain corpus that
+  does not mislead an AI agent: de-manner the canon (CLAUDE.md, llms.txt), give
+  each duplicated topic one owning file, split reference material out of the
+  guides, and tag/collapse the backlogs. The plan a fresh agent runs top to
+  bottom is docs/issues/documentation-overhaul.md -- start at the first
+  unfinished move. Already done: the auto-diary removal and the
+  ephemeral-issue-doc change. Grew out of the 2026-09-17 /docs-audit; re-run
+  /docs-audit to measure progress.
+
 ## Done
 
 - **generated-files-world-readable** -- the Vagrantfile lands at mode 664
