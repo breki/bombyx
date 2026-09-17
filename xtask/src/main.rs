@@ -14,6 +14,7 @@ mod feedback;
 mod fmt_cmd;
 mod helpers;
 mod licenses;
+mod records;
 mod sync;
 mod test_cmd;
 mod todo;
@@ -67,6 +68,10 @@ enum XCommand {
     /// Check the claims canon prose makes about this repo:
     /// cross-references, paths, `git` grants, width, backlog IDs
     CanonCheck,
+    /// Check the record files' integrity: duplicate ids, unknown
+    /// field labels, malformed heading ids, and dangling
+    /// `Depends on` / `Supersedes` cross-references
+    RecordsCheck,
     /// Security-advisory audit (RUSTSEC); requires
     /// cargo-audit
     Audit,
@@ -196,6 +201,7 @@ fn main() {
         XCommand::Coverage => coverage::coverage(),
         XCommand::Dupes => dupes::dupes(),
         XCommand::CanonCheck => canon::canon_check(),
+        XCommand::RecordsCheck => records::records_check(),
         XCommand::Audit => audit::audit(),
         XCommand::Deny => deny::deny(),
         XCommand::Licenses {

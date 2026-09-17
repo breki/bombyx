@@ -76,7 +76,60 @@ operator decisions reshaped the project:
 - `template-feedback.md` repeats its title after the ID on the heading
   line and has three lifecycle sections (Resolved is empty).
 
+## Header format (2026-09-17, operator-confirmed)
+
+Two `AskUserQuestion` answers fix the shape:
+
+- **Bold-label lines.** Fields are written as `**Label:** value`,
+  continuing the reviewer logs' existing `**Category:**` convention --
+  not a fenced TOML block. Renders cleanly, smallest migration.
+- **Unify onto headed entries.** `docs/todo.md`'s bullets become
+  `### <slug>` sections carrying the same fields, so there is one
+  entry shape and one parser across all five files.
+
+The record model the parser reads:
+
+- An entry opens with an `### <id>` heading. The id is the heading
+  text up to a ` -- ` separator if present (so template-feedback's
+  `### tf-... -- title` keeps its trailing title and `feedback-add`
+  needs no change), else the whole heading. Durable ids are
+  `<rt|aq|fr|tf>-<date>-<slug>`; the queue uses a dateless kebab slug.
+- Directly under the heading (after an optional blank line) sits the
+  **field block**: consecutive one-line `**Label:** value` fields.
+  The block ends at the first blank or non-field line; a `**X:**` that
+  appears later in the body is prose, not a field. So a body's
+  `**Swept ...**` or `**Status:** ...` is never mistaken for a field.
+  Known labels: Category, Summary, Source, Issue, Depends on,
+  Supersedes. No field is mandatory (template-feedback entries carry
+  none).
+- Everything after the field block is the prose body.
+
+`records-check` validates four things and nothing about phrasing:
+duplicate id across the set, unknown field label, malformed heading
+id, and a `Depends on`/`Supersedes` id that is in no entry. Only ids
+in those two **fields** are checked; a durable id in prose stays
+unchecked provenance -- which is where a citation of a done/removed
+item lives, so it does not dangle the gate.
+
 ## Plan (increments, each its own commit)
+
+Increment 3 splits into two commits so each leaves `validate` green
+and is reviewable on its own:
+
+- **3a -- parser + gate.** Shared `records` parser in `xtask` and a
+  `cargo xtask records-check` gate over the four `###`-heading files
+  (redteam, artisan, fresh-reader, template-feedback), wired into
+  `validate` after Canon. Those files already conform, so the
+  migration is near-zero; the gate's teeth today are duplicate-id,
+  unknown-label and malformed-id, with the cross-ref check ready for
+  the refs the queue brings. TDD via fixtures, red test per failure
+  mode.
+- **3b -- queue onto headed entries.** Convert `docs/todo.md` to
+  `### <slug>` sections, rewrite `todo.rs` to add/list/remove over
+  them, add `docs/todo.md` to the record set, and update the `/todo`,
+  `/implement`, `/issue` skills. The queue is where live-to-live refs
+  first appear (e.g. `minimal-vagrantfile` -> `doctor-checks-hyperv-
+  support`), so it gives the cross-ref check real data.
 
 1. **`todo.md` live-only.** `todo done <slug>` removes the pending
    entry (drop `--date`/`--doc`, drop `move_to_done` + `DoneDate` +
@@ -130,6 +183,24 @@ edits, verified by the tooling round-tripping them.
   - Left for increment 2 (logs live-only): reviewer-log and
     template-feedback entries about the removed `--doc`/Done are now
     moot findings, to be dropped there.
+- 2026-09-17: increment 3a (record parser + gate) done.
+  - `xtask/src/records.rs`: a shared parser (heading id up to
+    ` -- `, a field block of `**Label:** value` lines that ends at
+    the first blank or non-field line, then prose) and the
+    `records-check` gate over the four `###`-heading files. Four
+    checks: duplicate id, unknown label, malformed id, dangling
+    `Depends on`/`Supersedes`. 14 fixture tests, one red per
+    failure mode.
+  - Wired `RecordsCheck` into `main.rs` and the `validate` step
+    table (after Canon, both markdown-only), updated the order
+    test. Renumbered CLAUDE.md's gate list to eleven and added the
+    command to Build Commands.
+  - The four files already conformed, so no data migration:
+    `records-check` runs clean (4 files, 86 entries). `validate`
+    green (11 gates, coverage 98%).
+  - Left for 3b: `docs/todo.md` conversion + `todo.rs` rewrite,
+    where the first live-to-live cross-refs appear and exercise the
+    dangling-ref check on real data.
 - 2026-09-17: increment 2 (reviewer logs live-only) done.
   - `redteam-log.md`: removed the two moot `--doc`/`DocLink` findings
     (`rt-2026-09-04-doc-cannot-link-a-plans-own-section`,

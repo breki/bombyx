@@ -82,6 +82,7 @@ cargo xtask doc               # doc build + doc-link check
 cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
 cargo xtask canon-check       # canon prose claims vs the tree
+cargo xtask records-check     # record files' ids and cross-refs
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
 cargo xtask deny              # licence/bans/sources gate (cargo-deny, offline)
@@ -510,7 +511,7 @@ just when the code compiles:
    does not replace reading your own diff either way.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
-`cargo xtask validate` runs ten gates, **listed here in the
+`cargo xtask validate` runs eleven gates, **listed here in the
 order they execute** so the numbers match what the run prints:
 
 1. **Dependency cooldown** (`cargo xtask dep-age-check`) --
@@ -535,25 +536,33 @@ order they execute** so the numbers match what the run prints:
    80 columns, and a cited backlog ID that is in no backlog. It
    reads markdown only, so it needs no compilation and runs
    before every gate that does
-4. **Code duplication <= 6%** (production code, tests excluded)
-5. **Licences, bans and sources** (`cargo xtask deny`) -- runs
+4. **Record files** (`cargo xtask records-check`) -- also
+   markdown-only, and runs right after Canon. Reads the record
+   files (the three reviewer logs and `template-feedback.md`) and
+   fails on four kinds of defect: an entry id used twice across
+   the set, a `**Label:**` outside the known set, a heading id of
+   the wrong shape, and a `Depends on` / `Supersedes` id that
+   names no entry. Only ids in those two fields are resolved, so a
+   durable id in prose stays unchecked provenance
+5. **Code duplication <= 6%** (production code, tests excluded)
+6. **Licences, bans and sources** (`cargo xtask deny`) -- runs
    offline against `deny.toml`; a licence outside the allow-list,
    a banned crate or a non-crates.io source fails, and a missing
    `cargo-deny` is an error rather than a warning because there
    is no network here to be down
-6. **No warnings**: `cargo clippy --all-targets -- -D warnings`
-7. **Documentation builds and every doc link resolves**
+7. **No warnings**: `cargo clippy --all-targets -- -D warnings`
+8. **Documentation builds and every doc link resolves**
    (`cargo xtask doc`) -- see "Doc gate" below
-8. **`xtask`'s own tests pass** -- this step runs `-p xtask`
+9. **`xtask`'s own tests pass** -- this step runs `-p xtask`
    only, which is why the run prints `Test (xtask only)`
-9. **Coverage >= 90% overall and >= 85% per module** -- one
+10. **Coverage >= 90% overall and >= 85% per module** -- one
    file below the per-module floor fails the run even when the
    workspace figure passes. `xtask/src/coverage.rs` owns both as
    `OVERALL_THRESHOLD` and `MODULE_THRESHOLD`. This is also where
    the *workspace* tests run, under
    `llvm-cov --workspace --exclude xtask`, so the same tests are
    not compiled and run twice
-10. **Security audit** (RUSTSEC; `cargo xtask audit`) -- a
+11. **Security audit** (RUSTSEC; `cargo xtask audit`) -- a
    positive vulnerability fails; an unreachable advisory DB
    degrades to a warning
 
