@@ -1,7 +1,6 @@
 # documentation-overhaul
 
-**Status:** Move 2 in progress (2026-09-17) -- install version done;
-env_file/config-check consolidation pending
+**Status:** Move 2 complete (2026-09-17); moves 3-5 remain
 **Captured:** 2026-09-17
 
 A program of work to cut the documentation from a large, mannered,
@@ -180,3 +179,20 @@ the three duplications differ wildly in size.
 - 2026-09-17: commit 1 done. quickstart -> 0.6.0, README delegates
   install to quickstart, `sync-version-sentinels` todo captured.
   env_file/config-check consolidation still pending.
+- 2026-09-17: commit 2 done. Consolidated the env_file/deploy_key
+  rules onto owners. An Explore-agent map found the copies split
+  into two kinds: self-documenting artifacts (`config.toml.sample`
+  inline comments, the Rust `# Errors` blocks) that must state their
+  own rule locally and are kept, and prose docs where the real
+  duplication lived. Owners: `architecture.md` for the exact path
+  rule and the "why"; `trust-boundary.md` for retention (how long
+  the host holds the staged secrets, and that an interrupted run
+  leaves it). `docs/usage.md` was the doc re-deriving both, so it
+  now gives a short operator-facing version and links out (three
+  edits). `architecture.md` needed no change -- it already deferred
+  retention to `trust-boundary.md` and its wording was consistent.
+  Correction to the plan: README does not state the retention fact
+  (it points to usage.md), and the `deploy_key` "trailing slash" vs
+  `env_file` "trailing separator" wording is a deliberate, correct
+  distinction (POSIX path on the host vs the operator's own machine
+  where `\` counts), not drift -- preserved. Move 2 complete.
