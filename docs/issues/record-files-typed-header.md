@@ -1,6 +1,8 @@
 # record-files-typed-header
 
-**Status:** In progress -- increments 1-3 done; increment 4 remains
+**Status:** In progress -- increments 1-3 done; 4 partly done
+(fresh-reader trimmed, template-feedback stale claims fixed);
+deferred: template-feedback broad trim + `## Resolved` cascade
 **Captured:** (see `docs/todo.md`)
 **Started:** 2026-09-17
 
@@ -183,6 +185,31 @@ edits, verified by the tooling round-tripping them.
   - Left for increment 2 (logs live-only): reviewer-log and
     template-feedback entries about the removed `--doc`/Done are now
     moot findings, to be dropped there.
+- 2026-09-17: increment 4b (template-feedback stale claims) done.
+  - **Operator decision:** trim depth for `template-feedback.md`
+    is *minimal* -- fix only the now-false claims, defer the
+    broader rationale trim. The file's job is carrying arguments
+    upstream, so aggressive trimming cuts against its purpose.
+  - Fixed the stale bombyx-state claims in
+    `tf-2026-09-04-todo-done-should-take-its-link-target`: added a
+    dated note that bombyx has dropped queue issue links entirely
+    (live-only queue; no `done --doc`, no `add --issue`), and
+    reworded the `add --issue` clause from present to past. The
+    `tf-2026-08-10` entries describe the template and use
+    past-tense bombyx anecdotes, so they stay true and untouched.
+    records-check green (5 files, 118 entries).
+  - **Deferred, still open:**
+    - The broad `template-feedback.md` rationale trim (operator
+      chose minimal for now).
+    - Removing the empty `## Resolved` section and its
+      `FeedbackSection::Resolved` cascade -- a loose-end from
+      increments 1-2. It is a real `feedback.rs` test refactor
+      (the variant is a fixture section in a dozen tests), not the
+      rationale-trim work, so it wants its own commit.
+    - The pre-existing `### <id> -- <title>` heading lines in
+      `template-feedback.md` run past 80 columns (the title-repeat
+      convention). No gate reads them; a future pass could move the
+      title into a `**Summary:**` field.
 - 2026-09-17: increment 4a (fresh-reader log) done.
   - **Operator decision, reversing the increment-1 note above:**
     the **Explanations to keep** do-not-trim registry is retired --

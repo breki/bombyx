@@ -450,6 +450,14 @@ are wrong for the commonest one. bombyx shipped a third in
 `0501500` and `a442513`; the template still has the original
 behaviour.
 
+**Update (2026-09-17):** bombyx has since dropped queue issue
+links entirely -- the queue holds live work only and `todo done`
+removes the entry, so bombyx no longer has `done --doc` or
+`add --issue`. The bombyx `--doc` detail below is the design as
+it stood, not current. The template-facing suggestion still
+stands: let the caller name the link target, or drop links as
+bombyx did.
+
 In the template, `move_to_done` in `xtask/src/todo.rs` derives
 the link from the slug, always rendering
 `- [**slug**](issues/<slug>.md)`. The path is valid in both
@@ -537,11 +545,11 @@ already, applied only when *reading* lines back and never to
 what `add` was given.
 
 `add --issue` is the untouched sibling. It derives its path the
-same way and can write the same dead link, and in bombyx it has
-no caller. Guarding it as `done` is now guarded would be wrong,
-because at capture time the spec may legitimately not exist yet
--- so the open question is whether it should take a path or be
-deleted.
+same way and can write the same dead link, and in bombyx it had
+no caller and has since been removed. Guarding it as `done` was
+guarded would be wrong, because at capture time the spec may
+legitimately not exist yet -- so for the template the open
+question is whether it should take a path or be deleted.
 
 ### tf-2026-08-30-xtask-invocations-in-command-files-are-not-quiet -- xtask invocations in command files are not quiet
 
