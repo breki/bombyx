@@ -230,6 +230,18 @@ whatever it stores without crossing the bridge. A firewall is
 the right precaution and it is not a reason to put the
 project's source on the machine running the hypervisor.
 
+This is not hypothetical. Docker Sandboxes isolates coding agents
+the same way -- a small VM with the project shared in -- and kept
+a live host-guest file share (virtio-fs) and a guest-to-host
+socket relay. Both were escaped from inside the sandbox by
+planted symlinks in September 2026 (CVE-2026-77179,
+CVE-2026-79994), giving in-sandbox code read and write on host
+files as the hypervisor user. bombyx runs no such share: the
+guest clones the repository itself, and nothing on the host
+re-opens a guest-controlled path. Docker's own advised
+workaround -- a read-only git clone, no read-write host mount --
+is bombyx's default, not a fallback.
+
 That the first option is smaller is true, and it is not
 sufficient.
 
