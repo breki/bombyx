@@ -6,51 +6,6 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-09-13-trust-boundary-opening-qualifies-early
-
-**Category:** Structure
-
-The blockquote at the top of `docs/trust-boundary.md` qualifies
-"Statement one", "The boundary" and "Where project code lives
-today" -- a statement and two headings 20 to 60 lines below, so
-the caveat arrives before the thing it caveats. The repair is to
-move it below **The boundary**, keeping at the top only that
-neither statement is confirmed against a remote VM host and that
-statement one is a property of a machine, not of bombyx. Deferred:
-restructuring a document's opening is out of scope for a
-one-paragraph change.
-
-### fr-2026-09-05-provider-argument-lives-in-a-comment
-
-**Category:** reasoning in a comment rather than in `docs/`
-
-`remote::PROVIDER_ENV`'s doc comment holds the whole case for how
-bombyx selects a provider: the mechanism, the environment variable
-over `vagrant up --provider`, three measured facts, why every
-project call but the teardown carries it, the WSL2 inversion, and
-the known limit. Four places defer to it, so the argument is owned
-by a comment and pointed at from documents, which is backwards.
-`docs/architecture.md` now carries the three measurements (the
-first half of the fix); what remains is a subsection there holding
-the mechanism and consequence, with the constant cut back to the
-local fact and a pointer. Deferred per `/review`: a consolidation
-is not applied in the round that finds it.
-
-### fr-2026-09-05-field-rules-filed-under-a-traps-heading
-
-**Category:** Structure
-
-In `docs/architecture.md`, the subsection **Two traps a reader
-cannot see from the code** ends with the clap trap, and then
-seventy more lines continue under it -- the library-consumer
-paragraph, the `remote_root` newtype paragraph, and the whole
-refusal table. The block opens "Three things keep that survivable
-meanwhile", and "that" refers to a sentence a hundred lines and
-two headings earlier. The fix is to move the block beside the gap
-it qualifies, or give it a heading and replace "that" with the
-noun. Deferred: a structural move in a 550-line document, outside
-the change's scope.
-
 ### fr-2026-09-05-registry-named-in-clap-help-without-introduction
 
 **Category:** Terminology (clap help -- outside a prose reviewer's lane)

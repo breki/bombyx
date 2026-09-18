@@ -7,26 +7,12 @@ because the reasoning is easy to lose and expensive to rebuild,
 and because several planned pieces of work only make sense once
 you know which way it went.
 
-> **Both statements are now reached as far as bombyx is
-> concerned. We have not confirmed either against a remote VM
-> host.**
->
-> Statement one is a property of a *machine*, so no change to
-> bombyx can establish it: a workstation someone develops the
-> project on holds the code whatever bombyx does. What this
-> work reached is that bombyx neither requires a checkout nor
-> puts a project file anywhere outside the guest.
->
-> "The boundary" states the target. "Where project code lives
-> today" states the current behaviour, which was read from
-> `crates/bombyx/src/plan.rs` rather than recalled.
->
-> What landed: bombyx generates the Vagrantfile and writes it on
-> the VM host, the guest clones the project itself, the push is
-> gone, and every setting now comes out of the operator's own
-> `config.toml` with `--project` naming the project. So neither
-> the workstation nor the VM host opens a file in the project's
-> repository, and the workstation needs no checkout.
+> **Neither statement below is confirmed against a remote VM
+> host.** Statement one is also a property of a *machine*, not of
+> bombyx: a workstation someone develops the project on holds the
+> code whatever bombyx does, so what this work reached is that
+> bombyx neither requires a checkout nor puts a project file
+> anywhere outside the guest.
 
 ## The boundary
 
@@ -55,7 +41,8 @@ workstation reads one file, `config.toml` in the operator's own
 config directory, and opens nothing in the project's directory
 -- so it needs no checkout, and `--project` is what tells
 bombyx which project a command is about. The work that got here
-is `project-config-off-repo`.
+is `project-config-off-repo`, and the current behaviour below was
+read from `crates/bombyx/src/plan.rs` rather than recalled.
 
 Two qualifications go with that, and this document owns both.
 The first is the guest's disk image, below. The second is that
