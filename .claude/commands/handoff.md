@@ -15,11 +15,13 @@ itself. It makes no other edit, no commit, and runs no gate.
 ## Usage
 
 ```
-/handoff                       # write handoff.md under docs/issues/
+/handoff                       # write bombyx-handoff.md in your home dir
 /handoff <path>                # write it somewhere else
 ```
 
-The default output is `handoff.md` in the `docs/issues/` directory.
+The default output is `bombyx-handoff.md` in your home directory
+(`~` on Linux and macOS, `%USERPROFILE%` on Windows) -- outside the
+repository, so the handoff is never placed under source control.
 
 ## Instructions
 
@@ -77,9 +79,10 @@ rather than dropping it silently.
 ### 4. Hand it over
 
 Print the output path and one line: start the new session, have it
-read the file, and delete the file once it has. Do not commit it --
-it is session state, not a durable record, and `docs/issues/`
-holds live work only.
+read the file, and delete the file once it has. Keep it outside the
+repository (the default home-directory path does this): the handoff
+is throwaway session state, not a durable record, and must not land
+under source control.
 
 ## Rules
 
