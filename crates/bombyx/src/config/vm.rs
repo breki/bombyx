@@ -119,9 +119,7 @@ pub struct Vm {
     /// caller assigning to this public field gets the same rule
     /// the config file got. What the type does *not* do is name
     /// the key when it refuses one, which is why serde reads it
-    /// through `positive_cpus` -- named rather than linked,
-    /// because it is private and rustdoc refuses a public page
-    /// pointing at one.
+    /// through `positive_cpus`.
     #[serde(deserialize_with = "positive_cpus")]
     pub cpus: NonZeroU32,
     /// Memory in MiB. Never zero.

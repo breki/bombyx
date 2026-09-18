@@ -443,7 +443,7 @@ mod tests {
     fn latest_aged_selects_by_version_not_publish_date() {
         // A backport to an older line (1.9.7) shipped *after*
         // the higher aged release (2.4.0) must NOT win -- else
-        // the pin would downgrade the dependency (RT-1).
+        // the pin would downgrade the dependency.
         let today = days_from_civil(2026, 7, 15);
         let versions = vec![
             ("2.4.0".to_string(), days_from_civil(2026, 5, 1)),
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn latest_aged_same_day_tie_breaks_to_higher_version() {
         // Same publish day: 1.10.0 must beat 1.9.0 by numeric
-        // (not string) version order (RT-2).
+        // (not string) version order.
         let today = days_from_civil(2026, 7, 15);
         let day = days_from_civil(2026, 6, 20);
         let versions =

@@ -567,8 +567,7 @@ mod tests {
 
     #[test]
     fn parse_coverage_ignore_keeps_hash_inside_a_pattern() {
-        // `#` inside a quoted pattern is literal, not a comment
-        // (RT-3).
+        // `#` inside a quoted pattern is literal, not a comment.
         let toml = "[workspace.metadata.coverage]\n\
                     ignore = [\"src/v#2/a.rs\"]\n";
         assert_eq!(parse_coverage_ignore(toml), ["src/v#2/a.rs"]);
@@ -612,8 +611,8 @@ mod tests {
 
     #[test]
     fn validate_ignore_patterns_rejects_match_all() {
-        // A match-all pattern would silently neuter the gate
-        // (RT-1) -- it must fail loudly.
+        // A match-all pattern would silently neuter the gate --
+        // it must fail loudly.
         for p in [".", ".*", ".+", ".*?"] {
             assert!(
                 validate_ignore_patterns(vec![p.to_string()]).is_err(),

@@ -332,6 +332,10 @@ everything here as well.
   reason -- the path is resolved on the guest, and `PathBuf`
   answers for the machine bombyx was compiled for.
 - All public items must have doc comments
+- **Reference a private item by a backticked name, not an intra-doc
+  `[link]`.** The public rustdoc pass rejects a link from a public
+  page to a private item, so a doc comment that mentions one names
+  it in backticks instead (the Doc gate section explains that pass).
 - Wrap markdown at 80 characters per line
 - **Prose written to GitHub is not wrapped.** An issue body, an
   issue comment, a PR title and a PR description each get one

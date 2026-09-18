@@ -428,7 +428,7 @@ mod tests {
     fn crate_step_picks_highest_aged_below_current() {
         // A higher aged release (2.0.0) exists, but the locked
         // 1.5.0 is fresh; the pin must go *down* to 1.4.0, never
-        // up to 2.0.0 (RT-1).
+        // up to 2.0.0.
         let versions = vec![
             ("2.0.0".to_string(), day(2026, 6, 1)), // aged, higher
             ("1.4.0".to_string(), day(2026, 6, 1)), // aged, lower
@@ -444,7 +444,7 @@ mod tests {
     fn crate_step_dead_end_not_upgrade_on_fresh_backport() {
         // The only aged version (2.0.0) sits *above* the fresh
         // locked backport (1.4.0). Pinning up would be a silent
-        // upgrade, so this is a dead end -- not a Pin (RT-1).
+        // upgrade, so this is a dead end -- not a Pin.
         let versions = vec![
             ("2.0.0".to_string(), day(2026, 6, 1)), // aged, higher
             ("1.4.0".to_string(), day(2026, 7, 14)), // fresh, current
@@ -596,7 +596,7 @@ mod tests {
         // keeps forcing this one fresh). The applied-pins guard
         // must stop after the second round -- reporting a dead
         // end, with the pin listed exactly once, not spinning to
-        // MAX_ITERS re-printing it (RT-2).
+        // MAX_ITERS re-printing it.
         let cur = lock(&[("loop", "1.0.0")]);
         let read = || Ok(cur.clone());
         let base = || Some(lock(&[]));

@@ -356,8 +356,7 @@ impl Registry {
     /// `host` is a `String` here on purpose -- the field says
     /// why -- and this module's `parse` applies its rule to
     /// every `host` in the file, so it too has passed before
-    /// this runs. (Named rather than linked: `parse` is private,
-    /// and rustdoc refuses a public page pointing at one.)
+    /// this runs.
     ///
     /// The key comes back beside the entry, so a caller
     /// building a `super::Config` gets a [`ProjectName`] the

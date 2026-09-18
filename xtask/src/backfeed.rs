@@ -235,7 +235,7 @@ fn hash_level(line: &str) -> Option<usize> {
 /// blocks masked out: a line inside a ```` ``` ````/`~~~` fence
 /// (and the fence lines themselves) yields `None`, so a `###`
 /// that is really a code sample in an entry body is not
-/// mistaken for a new entry (RT-4).
+/// mistaken for a new entry.
 fn boundary_levels(lines: &[&str]) -> Vec<Option<usize>> {
     let mut in_fence = false;
     lines
@@ -334,7 +334,7 @@ fn downstream_name(path: &str, name_override: Option<&str>) -> String {
 /// A plausible git object id: 7..=64 lowercase/uppercase hex
 /// chars (SHA-1 or SHA-256, possibly abbreviated). Used to
 /// reject anything that is not a commit id before it is
-/// recorded to the committed ledger (RT-2).
+/// recorded to the committed ledger.
 fn is_hex_sha(s: &str) -> bool {
     (7..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -349,7 +349,7 @@ fn is_hex_sha(s: &str) -> bool {
 /// component so a hostile downstream `.git/HEAD` cannot make
 /// this read an arbitrary file via path traversal, and the
 /// resolved value must look like a git object id before it is
-/// accepted (RT-2) -- otherwise the traversed file's first
+/// accepted -- otherwise the traversed file's first
 /// line would be written verbatim into the committed ledger.
 fn read_git_head(ds_path: &str) -> Option<String> {
     let git = Path::new(ds_path).join(".git");
@@ -642,7 +642,7 @@ Body of older.
     #[test]
     fn entry_blocks_ignores_headers_inside_code_fences() {
         // A `###` line inside a fenced code sample in an entry
-        // body must not split off a spurious entry (RT-4).
+        // body must not split off a spurious entry.
         let md = "\
 ## Open divergences
 
@@ -742,7 +742,7 @@ Back to prose.
     #[test]
     fn extract_iso_date_handles_non_ascii_without_panic() {
         // Multibyte chars before/around the window must not
-        // panic on a non-char-boundary slice (RT-1).
+        // panic on a non-char-boundary slice.
         assert_eq!(extract_iso_date("### Café UI regression"), None);
         assert_eq!(
             extract_iso_date("### café then 2026-07-16"),

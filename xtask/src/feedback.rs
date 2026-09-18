@@ -91,7 +91,7 @@ fn format_entry(id: &str, title: &str, body: &str) -> String {
 /// `### <id> -- ...`), not a bare substring, so an ID that is a
 /// prefix of a different same-day ID -- or that appears inside
 /// some entry's body prose -- does not spuriously suppress the
-/// add (RT-3).
+/// add.
 fn has_entry(md: &str, id: &str) -> bool {
     md.lines().any(|l| {
         l.strip_prefix("### ").is_some_and(|rest| {
@@ -108,7 +108,7 @@ fn is_target_section(line: &str, kw: &str) -> bool {
 
 /// Index of the first section header matching `kw`, skipping
 /// any `## `-looking line inside a fenced code block so a code
-/// sample cannot be chosen as the insertion point (RT-4).
+/// sample cannot be chosen as the insertion point.
 fn find_section(lines: &[&str], kw: &str) -> Option<usize> {
     let mut in_fence = false;
     for (idx, l) in lines.iter().enumerate() {
@@ -309,7 +309,7 @@ Body.
     #[test]
     fn find_section_skips_headers_in_code_fences() {
         // A section header inside a code fence must not be chosen
-        // as the section (RT-4).
+        // as the section.
         let md = "\
 ## Open divergences
 

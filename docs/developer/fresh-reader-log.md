@@ -20,33 +20,6 @@ statement one is a property of a machine, not of bombyx. Deferred:
 restructuring a document's opening is out of scope for a
 one-paragraph change.
 
-### fr-2026-09-11-named-rather-than-linked-is-explained-everywhere
-
-**Category:** Duplicated explanation deferred for its own commit
-
-Five doc comments each explain that a public rustdoc page may not
-link to a private item, so the comment names it in backticks --
-`crates/bombyx/src/listing.rs`, `config/host.rs`, `config.rs`,
-`config/registry.rs` and `config/vm.rs` -- and a sixth in
-`term.rs`'s module header. Deferred: `/review` forbids collapsing
-copies in the round that finds them. State the rule once (in
-`CLAUDE.md` or `docs/architecture.md`) and trim the six, a commit
-of its own.
-
-### fr-2026-09-06-round-local-finding-ids-promise-a-record
-
-**Category:** A citation with nothing behind it
-
-`xtask/src/feedback.rs` cites `(RT-3)` and `(RT-4)`, and thirteen
-more instances sit in `coverage.rs`, `dep_age.rs`, `backfeed.rs`
-and `dep_age/preflight.rs`. These are round-local numbers, not
-backlog ids -- `canon.rs`'s `is_backlog_id` requires
-`rt-<date>-<slug>` -- so a reader who looks one up finds nothing.
-Each comment already states its property in full, so the tag can
-go, or cite the durable `rt-<date>-<slug>` id. Deferred: the files
-are outside the change that found it, and no gate reads `.rs` for
-the shape.
-
 ### fr-2026-09-05-provider-argument-lives-in-a-comment
 
 **Category:** reasoning in a comment rather than in `docs/`
