@@ -109,13 +109,9 @@ Check preconditions at the start:
 
 ## Available Commands
 
-| Command | Description |
-|---------|-------------|
-| `/check` | Type-check all targets, running none |
-| `/test` | Run tests with minimal output |
-| `/validate` | Full quality pipeline |
-| `/commit` | Git commit with project conventions |
-| `/todo` | Process pending TODO items |
+The `## Skills` table in `CLAUDE.md` is the single, reviewed list
+of every command and what it does. This file does not repeat it,
+so the two cannot drift.
 
 ## Hooks
 

@@ -350,7 +350,10 @@ starting.
 7. **Drop the drifted commands table in
    `docs/ai-agents/guidelines.md`** and point at CLAUDE.md's Skills
    table; it already disagrees with canon (wrong `/todo`
-   description). (Not yet tracked.)
+   description). DONE 2026-09-18: the five-row table replaced with
+   a one-sentence pointer to the `## Skills` table, the heading
+   kept; the Stop hook reference in the same file was verified
+   accurate and left.
 
 Lower-priority, already tracked: the `DIARY.md` dangle in
 `vm-host-wsl2.md` (`wsl2-doc-diary-ref`) and the version-sentinel

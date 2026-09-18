@@ -605,10 +605,3 @@ others) still carry re-derived rationale. Cut to the fact and the open decision,
 and fix the wrapped Summary line in config-tests-own-file. From the 2026-09-17
 docs-audit.
 
-### guidelines-commands-table-drifts
-
-**Summary:** ai-agents guidelines commands table contradicts canon
-
-docs/ai-agents/guidelines.md carries a partial Available Commands table that
-disagrees with CLAUDE.md's Skills table (wrong /todo description). Drop it and
-point at canon. From the 2026-09-17 docs-audit.
