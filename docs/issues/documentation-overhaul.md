@@ -318,7 +318,10 @@ starting.
    Vagrantfile-generation design "unreleased" -- now false, so an
    agent reads current behaviour as not-yet-shipped. Also collapse
    its dry-run and provision/snapshot passages, which re-explain
-   `usage.md`, to cross-links. (Not yet tracked.)
+   `usage.md`, to cross-links. DONE 2026-09-18 (commit fe5cff8):
+   version drift fixed and the dry-run duplication collapsed. The
+   broader tutorial/usage rule duplication the re-audit found is
+   separate follow-up, now `tutorial-usage-rule-duplication`.
 
 3. **Broad `template-feedback.md` rationale trim.** WON'T DO
    2026-09-18, operator decision: do not trim this file. Its job is
@@ -385,6 +388,17 @@ broad `template-feedback.md` trim) was decided against on
 2026-09-18 -- see item 3 above.
 
 The program closes -- and both plan docs are removed -- when a
-re-run `/docs-audit` shows no file rated Heavy, with one standing
-exemption: `template-feedback.md` is kept full on purpose (item 3)
-and its rating does not block the close.
+re-run `/docs-audit` shows no file rated Heavy, with two standing
+exemptions: `template-feedback.md` (item 3) and `vm-host-wsl2.md`
+are kept full on purpose, so their ratings do not block the close.
+
+The 2026-09-18 re-audit met that condition: every non-exempt file
+rated Some or None. `vm-host-wsl2.md` rated Heavy for mannered
+prose and depth; the manner was cut and the dangling `DIARY.md`
+reference fixed on 2026-09-18, and the operator chose to keep the
+remaining verification/gap detail (2026-09-18), exempting it here
+for the same reason as `template-feedback.md`: the detail is the
+value. The re-audit also surfaced follow-up work now in the queue
+(`tutorial-usage-rule-duplication`,
+`architecture-trustboundary-credential-dedup`), which does not
+block the close.

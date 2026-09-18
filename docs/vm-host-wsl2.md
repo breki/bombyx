@@ -14,6 +14,11 @@ the same non-interactive `PATH` trap. This page covers only what
 is different, and each difference is a failure you would
 otherwise spend an afternoon diagnosing.
 
+This page is deliberately detailed, including findings still
+marked *(unverified)*: each is a WSL-specific trap that is
+expensive to rediscover, so the detail is kept rather than
+trimmed for length.
+
 > **Verified end to end on 14 August 2026** against Windows 11
 > (build 26200.9168), WSL 2.7.11 with kernel 6.18.33.2, Ubuntu
 > 24.04.4, libvirt 10.0.0, QEMU 8.2.2, Vagrant 2.4.9 and
