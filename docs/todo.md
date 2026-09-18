@@ -542,18 +542,6 @@ step -- but nothing keeps it. Fix: a unit-tested `cargo xtask` step (or a
 ideally gated by a check like `canon-check`. Surfaced during
 documentation-overhaul move 2.
 
-### tutorial-usage-rule-duplication
-
-**Summary:** usage.md owns the shared rules; tutorial should link, not restate
-
-The 2026-09-18 docs-audit found tutorial.md and usage.md both teach the
-fresh-install snapshot rule, provision-vs-up, and destroy-confirmation in full
-(the doctor transcript appears four times). usage.md is the better-owned
-reference home; tutorial.md should point to it, as it already does for
---dry-run. Also drop the pre-release-defect phrasing in both ("a VM you created
-before this behaviour existed" / "predates this behaviour"), which CLAUDE.md
-classes as a defect, not context.
-
 ### architecture-trustboundary-credential-dedup
 
 **Summary:** one owner for the credential routing argued in both docs

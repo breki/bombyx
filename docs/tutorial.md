@@ -683,25 +683,19 @@ who wants the same VM copies that table rather than cloning it.
 From any directory -- bombyx reads nothing out of the project's,
 so where you stand makes no difference:
 
-```console
-$ bombyx --project myproject doctor
-  local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
-  vmhost  ssh               ok
-  vmhost  login shell       ok    posix
-  vmhost  vagrant           ok    /usr/bin/vagrant
-  vmhost  project dir       ok    /home/igor (will create /home/igor/vms/myproject)
-  vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
-all checks passed
+```bash
+bombyx --project myproject doctor
 ```
 
 `doctor` changes nothing and runs every check rather than
 stopping at the first failure, so one run tells you everything
-that is wrong. Fix anything that is not `ok` before continuing:
-`up` creates a directory on the host and writes two files before
-it runs `vagrant`, so a missing piece otherwise surfaces
-half-way through. `usage.md` explains how to read each line.
-`ssh` is the only local program checked, because it is the only
-one a VM command runs.
+that is wrong. You want every row `ok`; fix anything that is not
+before continuing, because `up` creates a directory on the host
+and writes two files before it runs `vagrant`, so a missing piece
+otherwise surfaces half-way through. [usage.md](usage.md) under
+**Checking a host with doctor** has a sample run and how to read
+each line. `ssh` is the only local program checked, because it is
+the only one a VM command runs.
 
 ### Look at what `up` would do
 
@@ -785,15 +779,10 @@ That replaces the existing snapshot without asking. `reset`
 can no longer take you back to that state -- it is gone. The VM
 itself and its caches are untouched.
 
-Two occasions call for it. The first is a VM you created before
-this behaviour existed, and what you have depends on whether you
-have run `up` since. If you have, that `up` took a snapshot of
-the machine as it stood, which was not a fresh install. If you
-have not, there is no snapshot at all. Either way `bombyx
-snapshot` is how you set the point you want. The second occasion
-is a machine brought somewhere worth returning to -- a long
-dependency build finished, say. You want that point to be the
-new starting point.
+Two occasions call for it: a VM whose `fresh-install` snapshot
+does not record a fresh install, and a machine you have brought
+somewhere worth returning to -- a long dependency build finished,
+say. [usage.md](usage.md) under **`bombyx snapshot`** covers both.
 
 ## Part 5: living with it
 
@@ -813,18 +802,14 @@ When you change `vagrant/provision.sh`, use `provision`, not
 bombyx provision
 ```
 
-`up` provisions a VM only when it first creates one. Every later
-`up` leaves the guest running the script it cloned when the VM
-was created -- and reports success, which is what makes the gap
-easy to miss. `provision` re-runs the bootstrap, which fetches
-your repository again and checks it out in the clone the guest
-already has, so push the change first. That checkout is forced.
-It discards any edits to tracked files. It also discards an
-untracked file, if the new commit adds a tracked file at that
-same path. It also
-detaches HEAD, so committing inside the guest is not enough --
-the next `provision` leaves that commit on no branch. See
-[usage.md](usage.md) for what survives.
+`up` provisions a VM only when it first creates one; every later
+`up` leaves the old script in place and still reports success,
+which makes the gap easy to miss. `provision` re-runs the
+bootstrap, so push your change first. The re-checkout is forced
+and detaches HEAD, so an agent's uncommitted edits and in-guest
+commits do not survive it -- [usage.md](usage.md) under **Why
+`provision` is a separate command** has exactly what is kept and
+what is lost.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM instead of your project one:
@@ -841,10 +826,10 @@ confirmation:
 bombyx destroy myproject
 ```
 
-`destroy` prints the resolved `<host>:<directory>` it is about
-to remove. Check the printed `<host>:<directory>`, not the name
-you typed a moment ago -- re-typing that name checks your
-typing, not the VM.
+`destroy` prints the resolved `<host>:<directory>` it is about to
+remove; check that target, not the name you typed.
+[usage.md](usage.md) under **Why `destroy` asks for the project
+name** explains why the name alone proves little.
 
 ## When something goes wrong
 
@@ -892,12 +877,11 @@ dealt with:
   shell is dash, not bash; the `chsh` step in Part 3 switches
   it at the next login.
 - **`reset` says the snapshot was not found.** Two causes. The
-  VM predates this behaviour and has had no `up` since, so
-  nothing ever saved one. Or an `up` tried and could not: that
-  step is advisory, so it warns on stderr and lets `up`
-  succeed, and the warning is easy to miss several commands
-  later. Either way, run `snapshot` and read what it says.
-  Part 4.
+  VM has no `fresh-install` snapshot because no `up` has saved
+  one. Or an `up` tried and could not: that step is advisory, so
+  it warns on stderr and lets `up` succeed, and the warning is
+  easy to miss several commands later. Either way, run `snapshot`
+  and read what it says. Part 4.
 - **A mount or a host service hangs rather than failing.** The
   nftables rules drop guest-initiated traffic to the host. See
   **What this does and does not buy** in `vm-host-firewall.md`.
