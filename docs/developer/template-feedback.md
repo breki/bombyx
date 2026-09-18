@@ -23,6 +23,14 @@ drops it and holds live work only, so a divergence closed
 here is removed rather than filed, the way git history
 records what shipped.
 
+These entries are kept full on purpose. Each carries the whole
+argument -- the mechanism, the evidence, and the suggested fix --
+because that is what lets rustbase adopt the improvement; a
+trimmed entry loses the detail the template needs. So the
+lean-prose trimming applied elsewhere in the docs does not apply
+here, and a docs audit that rates this file verbose is reading it
+against the wrong standard.
+
 `/template-improve` adds new entries by asking which
 section they belong to.
 

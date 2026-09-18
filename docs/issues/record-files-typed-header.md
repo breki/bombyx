@@ -2,8 +2,10 @@
 
 **Status:** In progress -- increments 1-3 done; 4 mostly done
 (fresh-reader trimmed, template-feedback stale claims fixed,
-`## Resolved` cascade removed); deferred: template-feedback broad
-rationale trim
+`## Resolved` cascade removed). The template-feedback broad
+rationale trim is now decided against (2026-09-18): the file is
+kept full so rustbase can adopt the improvements -- see
+`documentation-overhaul.md` item 3.
 **Captured:** (see `docs/todo.md`)
 **Started:** 2026-09-17
 
@@ -149,7 +151,8 @@ and is reviewable on its own:
    `supersedes` durable IDs), added to `validate`. TDD, red test per
    failure mode.
 4. **Move-4 remainder.** Fold-or-delete `fresh-reader-log.md`
-   (decision pending), trim `template-feedback.md` rationale.
+   (decision pending). The `template-feedback.md` rationale trim is
+   decided against (2026-09-18) -- kept full for upstream adoption.
 
 ## Test strategy
 
@@ -200,8 +203,10 @@ edits, verified by the tooling round-tripping them.
     past-tense bombyx anecdotes, so they stay true and untouched.
     records-check green (5 files, 118 entries).
   - **Deferred, still open:**
-    - The broad `template-feedback.md` rationale trim (operator
-      chose minimal for now).
+    - The broad `template-feedback.md` rationale trim was later
+      decided against outright (2026-09-18): the file is kept full
+      so rustbase can adopt the improvements. Not just deferred --
+      dropped. See `documentation-overhaul.md` item 3.
     - The pre-existing `### <id> -- <title>` heading lines in
       `template-feedback.md` run past 80 columns (the title-repeat
       convention). No gate reads them; a future pass could move the

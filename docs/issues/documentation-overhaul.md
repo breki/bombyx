@@ -320,10 +320,16 @@ starting.
    its dry-run and provision/snapshot passages, which re-explain
    `usage.md`, to cross-links. (Not yet tracked.)
 
-3. **Broad `template-feedback.md` rationale trim** -- the deferred
-   move-4 item. ~50-60% cut: keep the upstream suggestion plus a
-   short rationale, drop the bombyx-internal incident narration and
-   the superseded design bodies.
+3. **Broad `template-feedback.md` rationale trim.** WON'T DO
+   2026-09-18, operator decision: do not trim this file. Its job is
+   to carry a complete, self-contained argument upstream to
+   rustbase, and losing the mechanism, evidence and provenance
+   would make each improvement harder for the template to adopt --
+   which defeats the file's purpose. This supersedes the earlier
+   "~50-60% cut" plan and the 2026-09-17 minimal-trim deferral in
+   `record-files-typed-header.md`. Consequence: the file stays full
+   and is exempt from the corpus's lean-prose trimming, so the
+   acceptance below excludes it.
 
 4. **Trim the reviewer-log bodies to the fact.** `redteam-log.md`
    and `artisan-log.md` still re-derive each finding with
@@ -375,8 +381,10 @@ entries -- `delete-project-config-off-repo-doc` (1),
 `tutorial-version-drift` (2), `trim-reviewer-log-bodies` (4),
 `trim-todo-entry-bodies` (5), `trim-architecture-claude-mannered-
 prose` (6) and `guidelines-commands-table-drifts` (7). Item 3 (the
-broad `template-feedback.md` trim) stays tracked in this plan and
-in `record-files-typed-header.md`.
+broad `template-feedback.md` trim) was decided against on
+2026-09-18 -- see item 3 above.
 
 The program closes -- and both plan docs are removed -- when a
-re-run `/docs-audit` shows no file rated Heavy.
+re-run `/docs-audit` shows no file rated Heavy, with one standing
+exemption: `template-feedback.md` is kept full on purpose (item 3)
+and its rating does not block the close.
