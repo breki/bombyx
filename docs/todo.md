@@ -528,29 +528,6 @@ then use `$HOME`, because a project's `[env]` table may set it;
 it reads the passwd entry instead, as `ENV_FILE` already does.
 Found while working issue #78, left out of that change.
 
-### record-files-typed-header
-
-**Summary:** typed per-item header, not prose parsing
-
-Give the mutated record files (docs/todo.md, the three reviewer logs,
-template-feedback.md) a machine-parseable per-entry header so tooling reads
-fields, not prose, and one integrity gate can validate cross-references. In
-progress, reshaped to live-only files (done/closed entries dropped): the
-design and increment plan live in docs/issues/record-files-typed-header.md.
-
-### documentation-overhaul
-
-**Summary:** de-manner and de-duplicate the docs
-
-A multi-move program to cut the documentation to a lean, plain corpus that
-does not mislead an AI agent: de-manner the canon (CLAUDE.md, llms.txt), give
-each duplicated topic one owning file, split reference material out of the
-guides, and tag/collapse the backlogs. The plan a fresh agent runs top to
-bottom is docs/issues/documentation-overhaul.md -- start at the first
-unfinished move. Already done: the auto-diary removal and the
-ephemeral-issue-doc change. Grew out of the 2026-09-17 /docs-audit; re-run
-/docs-audit to measure progress.
-
 ### sync-version-sentinels
 
 **Summary:** the docs' version sentinels drift on release

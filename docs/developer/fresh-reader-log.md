@@ -48,17 +48,6 @@ copies in the round that finds them. State the rule once (in
 `CLAUDE.md` or `docs/architecture.md`) and trim the six, a commit
 of its own.
 
-### fr-2026-09-11-doctor-transcript-omits-project
-
-**Category:** False claim about the tool
-
-`docs/vm-host-setup.md` under **Checking that it worked** tells
-the reader to run `bombyx --project <name> doctor`, and the
-transcript below opens with `$ bombyx doctor`, which `main.rs`
-rejects without `--project`. The fix is to spell the transcript's
-prompt line the way the sentence above it does. Deferred as out of
-scope for the change that found it.
-
 ### fr-2026-09-11-page-has-no-date-keeping-rule
 
 **Category:** Staleness cannot be judged
@@ -96,21 +85,6 @@ Each comment already states its property in full, so the tag can
 go, or cite the durable `rt-<date>-<slug>` id. Deferred: the files
 are outside the change that found it, and no gate reads `.rs` for
 the shape.
-
-### fr-2026-09-06-usage-dates-a-case-by-unstated-behaviour
-
-**Category:** A condition the reader cannot locate
-
-`docs/usage.md` says "The first is a VM you created before this
-behaviour existed, and which branch you are in depends on whether
-you have run `up` since." bombyx is pre-release and names no
-version, so "before this behaviour existed" gives no test, and
-"which branch you are in" reads as a git branch in a passage about
-`ref` and checkouts. The repair is to state the observable
-condition -- a VM whose `fresh-install` snapshot records something
-other than a fresh install, or has none -- and say "which of the
-two cases applies to you". Deferred: pre-existing prose outside the
-change.
 
 ### fr-2026-09-06-tutorial-transcripts-dated-by-release
 
@@ -246,13 +220,12 @@ the round. Deferred: scoping it is one clause, in the loop prose.
 
 **Category:** Command definition
 
-`.claude/commands/implement.md` grants `Bash(scripts/e2e.sh*)`,
-and `CLAUDE.md` states `scripts/e2e.sh` does not exist -- the file
-says so itself. The frontmatter also grants `Skill(commit)` but
-not `Skill(review)`, while step 6 says to "Optionally run
+`.claude/commands/implement.md`'s frontmatter grants `Skill(commit)`
+but not `Skill(review)`, while step 6 says to "Optionally run
 `/review`", so a reader cannot tell whether the command invokes it
-or hands off. Deferred: outside the diff of the change that found
-it.
+or hands off. (The stale `Bash(scripts/e2e.sh*)` grant this entry
+also named was removed on 2026-09-18.) Deferred: settling
+invoke-vs-hand-off is a decision, not a scope call.
 
 ### fr-2026-09-03-retrospect-examples-name-absent-tools
 

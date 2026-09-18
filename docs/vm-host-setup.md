@@ -260,7 +260,7 @@ host, and names each failure without offering a remedy — the
 remedies are here:
 
 ```console
-$ bombyx doctor
+$ bombyx --project <name> doctor
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 in C:\Windows...
   vmhost  ssh               ok
   vmhost  login shell       ok    posix

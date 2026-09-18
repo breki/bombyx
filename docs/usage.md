@@ -144,15 +144,14 @@ point, not the machine, which is why it takes no confirmation
 argument the way `destroy` does. Both commands still need
 `--project`, as every command does.
 
-It is worth running in two situations. The first is a VM you
-created before this behaviour existed, and which branch you are
-in depends on whether you have run `up` since. If you have, its
-`fresh-install` exists and records the moment of that `up`,
-which was not a fresh install. If you have not, there is no
-snapshot at all. The second is a machine you have brought
-somewhere worth returning to -- a long dependency build
-finished, a toolchain installed -- which makes a better starting
-point than the original one.
+It is worth running in two situations. The first is a VM whose
+`fresh-install` snapshot does not record a fresh install -- either
+it records a later `up` (so restoring returns to that moment, not
+a clean install) or there is no snapshot at all. Which of the two
+you have depends on whether you have run `up` on that VM. The
+second is a machine you have brought somewhere worth returning to
+-- a long dependency build finished, a toolchain installed --
+which makes a better starting point than the original one.
 
 ### Why `destroy` asks for the project name
 
