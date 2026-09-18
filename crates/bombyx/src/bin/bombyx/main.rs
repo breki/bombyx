@@ -27,7 +27,7 @@ use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
 use bombyx::listing;
-use bombyx::name::ScratchName;
+use bombyx::name::{ProjectName, ScratchName};
 use bombyx::plan::{Action, plan};
 use bombyx::remote::{RemoteCommand, Tty};
 use bombyx::term;
@@ -334,15 +334,20 @@ fn run() -> Result<Ran> {
         )
     })?;
 
+    // Checked here, at the argument, so no later message can
+    // advise a `[projects.<name>]` heading the TOML parser
+    // refuses -- and so the refusal names the command line,
+    // which is where the value came from. `Config::load_project`
+    // takes the checked value and cannot be reached with
+    // anything else.
+    let project =
+        ProjectName::parse(&project).context("invalid --project value")?;
+
     // No arm names the registry file here. Every error that
     // could want one names it already: a value breaking its
     // type's rule is refused by serde and arrives as
     // `ConfigError::Parse`, which carries the path and the
-    // line. The one variant that names no file is
-    // `Invalid { field: "project" }`, and that value came from
-    // the command line rather than from the file, so naming the
-    // file would send the operator to edit the one place the
-    // value is not.
+    // line.
     let (cfg, host_origin) =
         Config::load_project(&project, registry.as_deref())?;
 

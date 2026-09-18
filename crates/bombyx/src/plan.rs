@@ -282,7 +282,7 @@ fn write_then(
         ));
     }
     cmds.push(remote::ensure_dir(cfg, dir));
-    for (name, contents) in vagrantfile::files(cfg) {
+    for (name, contents) in vagrantfile::files(cfg, staged) {
         cmds.push(remote::write_file(cfg, dir, name, contents.as_bytes()));
     }
 
@@ -1255,8 +1255,9 @@ mod tests {
         }
     }
 
-    /// What a caller stages for a project naming an `env_file`,
-    /// with a token value distinctive enough to search for.
+    /// A project naming an `env_file`, and what a caller stages
+    /// for it -- with a token value distinctive enough to
+    /// search for.
     ///
     /// Built by writing a real file and going through
     /// `Config::read_staged`, rather than by assembling the
@@ -1264,10 +1265,16 @@ mod tests {
     /// and it means these tests exercise the same path a run
     /// takes.
     ///
+    /// The config comes back with the `Staged`, because the two
+    /// belong together: the Vagrantfile `plan` writes is
+    /// rendered from the second, and handing it the first
+    /// alongside a `Staged` read for some other project is the
+    /// pairing this signature exists to prevent.
+    ///
     /// `with_token` decides whether the config also names a
     /// `repo_token`, which is what makes bombyx build the git
     /// credential as well.
-    fn staged(with_token: bool) -> Staged {
+    fn staged_project(with_token: bool) -> (Config, Staged) {
         use crate::config::{EnvFilePath, RepoToken, RepoTokenVar, RepoUser};
 
         let dir = tempfile::tempdir().expect("a temp dir");
@@ -1286,7 +1293,8 @@ mod tests {
                     .expect("a plain username"),
             });
         }
-        cfg.read_staged(|_| None).expect("the file is there")
+        let staged = cfg.read_staged(|_| None).expect("the file is there");
+        (cfg, staged)
     }
 
     #[test]
@@ -1320,7 +1328,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg(), Tty::NoPty, &staged(true));
+            let (cfg, staged) = staged_project(true);
+            let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
             let write = cmds
                 .iter()
                 .position(|c| script(c).contains("bombyx.env"))
@@ -1400,7 +1409,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds = plan(&action, &cfg(), Tty::NoPty, &staged(true));
+            let (cfg, staged) = staged_project(true);
+            let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
             let write = cmds
                 .iter()
                 .position(|c| script(c).contains("bombyx.git-credentials"))
@@ -1423,7 +1433,8 @@ mod tests {
         // one token, so a count measures the token -- and
         // `docs/usage.md` invites the operator to paste a dry
         // run into a bug report.
-        let cmds = plan(&Action::Up, &cfg(), Tty::NoPty, &staged(true));
+        let (cfg, staged) = staged_project(true);
+        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, &staged);
         let cred = cmds
             .iter()
             .find(|c| script(c).contains("bombyx.git-credentials"))
@@ -1457,7 +1468,8 @@ mod tests {
         // project cloning a public repository over https, or one
         // cloning over ssh with a deploy key, is in this case.
         for action in all_actions() {
-            for c in plan(&action, &cfg(), Tty::NoPty, &staged(false)) {
+            let (cfg, staged) = staged_project(false);
+            for c in plan(&action, &cfg, Tty::NoPty, &staged) {
                 assert!(
                     c.stdin.is_none()
                         || !script(&c).contains("bombyx.git-credentials"),
@@ -1477,7 +1489,8 @@ mod tests {
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            for c in plan(&action, &cfg(), Tty::NoPty, &staged(true)) {
+            let (cfg, staged) = staged_project(true);
+            for c in plan(&action, &cfg, Tty::NoPty, &staged) {
                 for arg in &c.args {
                     assert!(!arg.contains("hunter2"), "{action:?}: {arg}");
                 }
@@ -1495,7 +1508,8 @@ mod tests {
         // staged file goes with it and there is nothing for
         // these plans to write or remove on their own.
         for action in [Action::Destroy, Action::Discard(scratch("pr-1234"))] {
-            for c in plan(&action, &cfg(), Tty::NoPty, &staged(true)) {
+            let (cfg, staged) = staged_project(true);
+            for c in plan(&action, &cfg, Tty::NoPty, &staged) {
                 assert!(
                     !script(&c).contains("bombyx.env"),
                     "{action:?}: teardown must not stage anything"

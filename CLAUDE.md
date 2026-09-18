@@ -206,6 +206,14 @@ for tools that are not present:
   tends to sit next to a `///` block. Reach for `Edit` with an
   anchor unique in the file, and keep a scripted replace for a
   substitution that fits on one line.
+
+  **A batched replace that writes the file once at the end
+  reports success for edits it never made.** A failed assertion
+  raises and the write never runs, while the shell's next
+  `echo ok` prints anyway, because nothing reads the script's
+  exit status. Write the file after **each** successful
+  replacement and read it back: a fix is landed when `grep` or
+  `sed -n` shows it, not when the script that made it says so.
 - **Print the variable before claiming what it holds.** A claim
   about what a variable, a file or a platform actually contains
   needs the command that read it, in the same breath --
@@ -274,6 +282,12 @@ everything here as well.
   to happen and why. Do not batch silently and only speak at
   the end -- a run of silent tool calls reads as "lost". This
   holds regardless of the active output style.
+- **Do not poll for a subagent. Wait for the notification.**
+  The harness reports an `Agent` call's completion on its own,
+  so a `sleep`-loop waiting on a reviewer only burns turns and
+  can background itself on its own timeout. Say in one sentence
+  that the reviewer is running, then stop; start other work
+  only when it touches no file the reviewer is reading.
 - **Lead with context before a decision-making question,
   and show concrete artifacts** -- for a technical choice
   (grammar, API shape, data layout), write out what each
@@ -748,14 +762,16 @@ downstream file.
 
 ## Build and toolchain recipes
 
-Three recipes live in `docs/developer/build-recipes.md`, because
-each is needed rarely and none is a rule you follow on every
+Two recipes live in `docs/developer/build-recipes.md`, because
+each is needed rarely and neither is a rule you follow on every
 commit: **scoped `unsafe` in `xtask`** (the workspace forbids
 `unsafe_code`, so build tooling that needs an OS API redefines
-the lint block for `xtask` alone), **coverage exceptions for
+the lint block for `xtask` alone) and **coverage exceptions for
 hardware-bound code** (extract the unmockable I/O into a leaf
 submodule and name it in `[workspace.metadata.coverage]`, so the
-90% gate stays honest), and the **edition-2024 migration** fixes.
+90% gate stays honest). An appendix at the end of that file
+holds the **edition-2024 migration** fixes, which bombyx is
+already past.
 
 Read that file before weakening a lint or a gate. The rule those
 recipes exist to protect: production crates keep

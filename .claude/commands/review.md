@@ -99,6 +99,8 @@ is not one.
 
 ```bash
 mkdir -p target
+BASE=HEAD                            # uncommitted work
+# BASE=$(git merge-base main HEAD)   # a branch already pushed
 git ls-files --others --exclude-standard  # untracked: check first
 git add -N <the untracked paths of this work>
 EXCL=':(exclude)docs/developer/*-log.md'
@@ -181,9 +183,13 @@ A failure recorded here is normally left for the stage that
 owns it. Some failures cannot be recorded without a fix first
 -- a sample config that will not load, a quoted command with a
 typo in it. **If you fix anything while running the artifacts,
-write the snapshot again before spawning anyone.** Overwrite
-the same name: a fix made here is the one edit no reviewer has
-seen, so it is exactly the one they must be shown.
+run the whole Snapshot block again before spawning anyone**,
+from `git ls-files --others` down. Overwrite the same name: a
+fix made here is the one edit no reviewer has seen, so it is
+exactly the one they must be shown. The whole block, not the
+two `git diff` lines: a fix that adds a file changes the
+`.files` list as well as the diff, and an added file reaches
+neither until `git add -N` has run on it.
 
 ### Re-snapshot before each stage and each round
 

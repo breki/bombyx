@@ -298,23 +298,6 @@ every row green plus one skip, and `bombyx up` then fails. Writing the probe
 honestly needs a Windows VM host, which nobody has, so this is blocked rather
 than merely unwritten -- the skip row is the honest report until then.
 
-### project-parsed-at-cli-edge
-
-**Summary:** the project name is checked twice
-
-Found by the artisan review of the #43 branch (AQ-5). The `--project` value
-arrives as a `String` in `main.rs` and stays one into the library, where
-`check_segment` runs on it twice on the ordinary path: once in
-`Config::load_project` before the registry is opened, and again in
-`Registry::project` before the map is consulted. The sibling value already
-does better -- `vm_name` parses the scratch name into a `ScratchName` at the
-CLI edge. Parsing the project name into a `ProjectName` there and taking
-`&ProjectName` in both functions would leave one check. The trade to weigh:
-the message for a bad name moves from `ConfigError::Invalid { field: "project"
-}` to the CLI layer, and the parse has to stay ahead of any file being opened,
-because `ProjectNotFound` advises writing a table heading the parser would
-refuse.
-
 ### split-source-module
 
 **Summary:** source.rs holds three unrelated newtypes

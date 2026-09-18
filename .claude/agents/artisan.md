@@ -70,9 +70,10 @@ findings. If you find nothing, say "No issues found."
 
 Number every finding **AQ-1, AQ-2, ...** in the order you
 report them. `/review` cites those IDs when it reports what it
-fixed, deferred and declined, and a deferred finding keeps its
-ID in the backlog. A finding with no ID cannot be tracked
-either way.
+fixed, deferred and declined. The number lives only as long as
+the run: a deferred finding is logged under a fresh
+`aq-<date>-<slug>` ID, so do not expect `AQ-3` to appear in the
+backlog. A finding with no ID cannot be cited at all.
 
 For each finding, include:
 1. **ID**: `AQ-<n>`
