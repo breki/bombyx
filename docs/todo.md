@@ -596,15 +596,6 @@ pointed at is lost, so reword to state the uncertainty without the diary (e.g.
 'Neither run recorded which probe it used'). Part of the stale-record cleanup;
 surfaced during documentation-overhaul move 3.
 
-### trim-reviewer-log-bodies
-
-**Summary:** trim redteam and artisan log entries to the fact
-
-redteam-log.md and artisan-log.md still re-derive each finding with
-review-provenance war-stories. Cut each to defect plus repro plus one-line
-deferral, the shape fresh-reader-log.md already has, and de-duplicate the
-artisan findings that merely restate todo items. From the 2026-09-17 docs-audit.
-
 ### trim-todo-entry-bodies
 
 **Summary:** trim long todo.md bodies to fact and open decision
