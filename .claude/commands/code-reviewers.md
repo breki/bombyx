@@ -1,3 +1,7 @@
+---
+description: Code reviewers -- which run and how; the reference /review follows
+---
+
 # Code reviewers (which run, and how)
 
 Three reviewers are available to `/review`. Their personas live

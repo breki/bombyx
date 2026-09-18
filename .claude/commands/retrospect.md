@@ -180,11 +180,11 @@ Speed:
 
 Cleanup:
   3-stale-skill-ref [trivial]
-    Short: `web-dev` names a renamed config file.
-    Long: the web-dev skill still names
-      `playwright.config.js`; the file is
-      `playwright.config.ts`.
-    Fix: rename the reference in the web-dev skill.
+    Short: a command names a script that was renamed.
+    Long: a command file's example still calls the old
+      script name after a rename, so the example no
+      longer runs.
+    Fix: update the reference to the current name.
 ```
 
 Every shown finding names a concrete edit / command /
@@ -208,9 +208,10 @@ escalation paths:
 
 - **Real reviewer finding:** append to the backlog
   for that reviewer -- `docs/developer/redteam-log.md`,
-  `artisan-log.md` or `fresh-reader-log.md` (only when
-  the finding describes a defect in shipped code, not a
-  process gap).
+  `artisan-log.md` or `fresh-reader-log.md` -- in the
+  entry shape `/review` under **Log what you defer**
+  gives (only when the finding describes a defect in
+  shipped code, not a process gap).
 - **TODO item:** capture via `/todo <text>` for a
   follow-up implementation pass.
 - **Doc edit:** small process rule changes (e.g. "add

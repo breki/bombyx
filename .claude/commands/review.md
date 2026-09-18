@@ -124,7 +124,9 @@ from the paths before it, which is why `.` comes first. The
 backlogs are subtracted because the stages write to them, and
 left in they would hand each round the previous round's own
 report to find defects in. `--diff-filter=d` drops deleted
-paths, which `fresh-reader` can only fail to open.
+paths -- a lowercase filter letter excludes that status, where
+uppercase `D` would select only deletions -- which `fresh-reader`
+can only fail to open.
 
 The index keeps the intent-to-add entries. Report that, and
 report the undo with it: `git reset -- <the paths added with
@@ -165,7 +167,8 @@ leaves the gates behind it *could not run*.
   that is *must not run*, and a dry run or a disposable target
   is the substitute.
 - **A workflow file** (`.claude/**`, `CLAUDE.md`) -- walk it
-  against the current tree without spawning anything. An edited
+  against the current tree yourself, without spawning a reviewer
+  for this walk; step 3's reviewers still run as usual. An edited
   agent file only takes effect next session, so record that
   part as *could not run*.
 

@@ -142,21 +142,6 @@ itself: a reader starting at `--help` meets "your registry" cold.
 Logged rather than fixed because editing clap `///` help changes
 the program's output, which is outside a prose reviewer's lane.
 
-### fr-2026-09-04-canon-rs-assumes-the-review-vocabulary
-
-**Category:** Terms used before they are introduced
-
-Four findings from one read of `xtask/src/canon.rs`, all the same
-shape: the module explains its mechanisms and not its words.
-"canon" carries the module and is never defined in it; `unknown_
-ids` and `is_backlog_id` never say what `rt-`, `aq-` and `fr-`
-stand for or where a backlog lives; "the id scheme exists so an id
-greps" has no subject doing the searching; and in `ungranted_git`,
-"the declaration may wrap across lines" sits beside the
-`allowed-tools:` read but means the prose grant instead, so a
-reader concludes a wrapped `allowed-tools:` is tolerated. Deferred:
-all four are prose the change did not touch.
-
 ### fr-2026-09-03-no-reviewer-emits-the-severity-field
 
 **Category:** A judgement with no named source
@@ -182,40 +167,6 @@ unstated. The likely reading is a tally that trips the
 but only a guess gets there. Deferred: naming the destination
 changes what a stop condition counts, so it wants deciding.
 
-### fr-2026-09-03-retrospect-writes-a-backlog-without-its-format
-
-**Category:** An instruction that omits what the actor needs
-
-`.claude/commands/retrospect.md` tells the actor to append a
-reviewer finding to the backlog but not what an entry looks like
-(newest-first, after the `---`, the `<rt|aq|fr>-<date>-<slug>` id,
-a `**Category:**` line, a description). That rule is in `/review`
-under **Log what you defer**, and the same file already points
-there for another rule, so the omission at the write site is the
-odd one. Deferred: one pointer, in a file outside the review.
-
-### fr-2026-09-03-diff-filter-case-mechanism-unstated
-
-**Category:** A mechanism the comment leans on without stating
-
-`/review` says "`--diff-filter=d` drops deleted paths, which
-`fresh-reader` can only fail to open." Uppercase `D` selects
-deleted paths; a lowercase filter letter inverts the selection.
-The comment states the effect and hides the mechanism, so a reader
-adding another filter letter cannot predict which case to use, and
-`CLAUDE.md` asks for the mechanism before the conclusion. Deferred:
-one clause, in the loop prose `/review` sweeps as its own change.
-
-### fr-2026-09-03-step-two-spawn-prohibition-unscoped
-
-**Category:** An instruction that collides with a later step
-
-`/review` step 2 says a workflow file should be walked "against the
-current tree without spawning anything", and step 3 of the same
-round spawns three agents. A reader cannot tell whether the
-prohibition is scoped to step 2's walk-through or is a claim about
-the round. Deferred: scoping it is one clause, in the loop prose.
-
 ### fr-2026-09-03-implement-md-stale-tool-grants
 
 **Category:** Command definition
@@ -226,29 +177,6 @@ but not `Skill(review)`, while step 6 says to "Optionally run
 or hands off. (The stale `Bash(scripts/e2e.sh*)` grant this entry
 also named was removed on 2026-09-18.) Deferred: settling
 invoke-vs-hand-off is a decision, not a scope call.
-
-### fr-2026-09-03-retrospect-examples-name-absent-tools
-
-**Category:** An example that is itself the defect it illustrates
-
-`.claude/commands/retrospect.md` illustrates a Cleanup finding --
-"a skill/command referencing a tool, file or workflow that no
-longer exists" -- with the `web-dev` skill and
-`playwright.config.js`, neither of which exists here. The live
-instance of that shape is `implement.md`'s `scripts/e2e.sh` grant,
-which would make the example real. Deferred: outside the diff of
-the change that found it.
-
-### fr-2026-09-03-code-reviewers-does-not-say-what-it-is
-
-**Category:** A file whose kind is unclear from its content
-
-`.claude/commands/code-reviewers.md` has no frontmatter, unlike
-every sibling in that directory, so a reader cannot tell whether
-`/code-reviewers` is invokable or whether the file is reference
-material `/review` reads. It is registered as a skill, which the
-file never says. Deferred: outside the diff of the change that
-found it.
 
 ### fr-2026-09-03-simplify-row-not-marked-global
 

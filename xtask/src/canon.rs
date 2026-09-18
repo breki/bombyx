@@ -1,5 +1,9 @@
 //! Checks the claims canon prose makes about this repository.
 //!
+//! Canon is the reviewed, shared guidance -- `CLAUDE.md`,
+//! `llms.txt`, and the `.claude/` commands and agents -- plus, for
+//! the dangling-ID check alone, the reference docs under `docs/`.
+//!
 //! Some of what a canon review looks for is decidable by a
 //! command: does this cross-reference resolve, does this path
 //! exist, is this `git` subcommand in the skill's
@@ -327,8 +331,10 @@ fn ungranted_git(file: &str, content: &str) -> Vec<Finding> {
     else {
         return Vec::new();
     };
-    // The declaration may wrap across lines, so match it
-    // against the text with every whitespace run collapsed.
+    // A `git` mention in the prose may wrap across lines, so
+    // match it against the text with every whitespace run
+    // collapsed. (The `allowed-tools:` grant read above is one
+    // line.)
     let flat = content.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = Vec::new();
     for (i, line) in content.lines().enumerate() {
@@ -412,8 +418,10 @@ fn over_wide(file: &str, content: &str) -> Vec<Finding> {
 
 /// Backlog IDs cited in prose that appear in no backlog.
 ///
-/// The ID scheme exists so an ID greps; a citation that finds
-/// nothing defeats it.
+/// A backlog ID (`rt-`/`aq-`/`fr-` plus a date and slug, minted by
+/// a reviewer log under `docs/developer/`) is meant to grep to its
+/// entry, so a reader can follow a citation to the finding it
+/// names; a citation that greps to nothing defeats that.
 fn unknown_ids(
     file: &str,
     content: &str,
@@ -437,8 +445,8 @@ fn unknown_ids(
     out
 }
 
-/// True for `rt-`/`aq-`/`fr-` followed by an ISO date and a
-/// non-empty slug.
+/// True for a backlog ID: `rt-` (red-team), `aq-` (artisan) or
+/// `fr-` (fresh-reader), then an ISO date and a non-empty slug.
 fn is_backlog_id(word: &str) -> bool {
     let Some(rest) = ["rt-", "aq-", "fr-"]
         .iter()
