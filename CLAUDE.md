@@ -663,6 +663,9 @@ a fresh empty `[Unreleased]` above it.
 | `/template-improve` | Log feedback for the rustbase template |
 | `/template-sync` | Sync upstream template changes |
 
+Every skill above is defined under `.claude/` in this repo except
+`/simplify`, which is a global built-in and has no file here.
+
 ## Template tooling: determinism vs judgment
 
 The template-maintenance workflows (`/template-sync`,

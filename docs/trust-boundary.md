@@ -268,8 +268,9 @@ reads as tighter than it is.
 Cloning a private repository requires one, and the credential
 has to be inside the machine whose contents are assumed
 untrustworthy. Scoping it -- read-only, one repository,
-short-lived -- limits what stealing it is worth. Scoping does
-not prevent the theft. This remains an accepted exposure rather
+short-lived -- limits what a stolen copy reaches: it cannot push,
+cannot touch another repository, and expires. Scoping does not
+prevent the theft. This remains an accepted exposure rather
 than a solved problem, and it qualifies the phrase "no
 credentials" in `README.md`.
 

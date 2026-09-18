@@ -6,21 +6,6 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-09-13-comparatives-without-their-comparison
-
-**Category:** Comprehension
-
-`CLAUDE.md` under **Voice** names "limits what stealing it is
-worth" as the example of a comparative with no comparison. The
-phrase and its kin -- "narrower than it first looks", "narrower
-than it looks", "the tighter choice", "Read-only is tighter" --
-are still in `README.md`, `config.toml.sample` and
-`docs/trust-boundary.md`, and a reader deciding a token's scope
-gets nothing actionable from any of them. The repair is to name
-the reach instead, the way the trust-boundary passage that lists
-what each token type reaches already does. Deferred as out of
-scope for the `repo_token` work.
-
 ### fr-2026-09-13-trust-boundary-opening-qualifies-early
 
 **Category:** Structure
@@ -48,30 +33,6 @@ copies in the round that finds them. State the rule once (in
 `CLAUDE.md` or `docs/architecture.md`) and trim the six, a commit
 of its own.
 
-### fr-2026-09-11-page-has-no-date-keeping-rule
-
-**Category:** Staleness cannot be judged
-
-`docs/vm-host-setup.md` states its age two ways: the header stamps
-Steps 1 and 2 as verified in August 2026, and the fog section
-quotes gem versions "in August 2026, which is what a fresh host
-set up from this page gets today", where "today" carries no date.
-A reader cannot tell which facts the stamp covers, and an undated
-"today" ages without showing it. The repair is one rule: the
-header carries the check date, and a separately-checked section
-says so rather than saying "today".
-
-### fr-2026-09-11-step-3-verification-status-unstated
-
-**Category:** Unmarked verification status
-
-`docs/vm-host-setup.md` promises that unverified steps carry an
-inline marker and stamps Steps 1 and 2 verified. Step 3, the
-libvirt provider plugin, carries no marker either way, while its
-body reports a real run and its `CONFIGURE_ARGS` fallback looks
-like the half that was not exercised. Either extend the header to
-Step 3 or mark the fallback unverified.
-
 ### fr-2026-09-06-round-local-finding-ids-promise-a-record
 
 **Category:** A citation with nothing behind it
@@ -85,20 +46,6 @@ Each comment already states its property in full, so the tag can
 go, or cite the durable `rt-<date>-<slug>` id. Deferred: the files
 are outside the change that found it, and no gate reads `.rs` for
 the shape.
-
-### fr-2026-09-06-tutorial-transcripts-dated-by-release
-
-**Category:** A qualification the reader cannot apply
-
-`docs/tutorial.md` warns that the Part 3 and 4 transcripts show
-behaviour "none of which 0.4.1 could produce", but Part 1 installs
-from a clone, so the reader's binary is whatever the checkout
-builds rather than 0.4.1, and the warning gives no way to tell
-whether the transcripts match. Tie the qualification to what the
-reader has: the transcripts were written from current source, and
-a binary from a published 0.4.1 archive prints something
-different. Deferred: pre-existing prose, and the version figure is
-the kind `/release` moves.
 
 ### fr-2026-09-05-provider-argument-lives-in-a-comment
 
@@ -177,15 +124,3 @@ but not `Skill(review)`, while step 6 says to "Optionally run
 or hands off. (The stale `Bash(scripts/e2e.sh*)` grant this entry
 also named was removed on 2026-09-18.) Deferred: settling
 invoke-vs-hand-off is a decision, not a scope call.
-
-### fr-2026-09-03-simplify-row-not-marked-global
-
-**Category:** Skills table does not distinguish global from project
-
-`CLAUDE.md`'s skills table lists `/simplify` with no in-repo
-definition, and both reviewers read that as a dangling row.
-`/simplify` is a live global skill neither could see from the repo.
-The real gap is that the table mixes project skills with global
-ones and never marks which is which, so a reader is offered an
-option they cannot locate. Deferred: outside the diff of the change
-that found it.

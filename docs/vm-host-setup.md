@@ -173,7 +173,8 @@ ships inside Vagrant, which is the part most likely to fail.
 On Ubuntu 24.04 with Vagrant 2.4.9 it built and linked without
 any help, installing `vagrant-libvirt 0.12.2` in about a
 minute. If the build cannot link on your machine, point it at
-Vagrant's own libraries and try again:
+Vagrant's own libraries and try again *(unverified -- the build
+above needed no fallback)*:
 
 ```bash
 CONFIGURE_ARGS='with-ldflags=-L/opt/vagrant/embedded/lib' \
@@ -234,8 +235,8 @@ The cause is a version mismatch between two gems that
 `vagrant plugin install` resolves separately: it installs the
 newest `fog-libvirt` alongside whatever `vagrant-libvirt`
 release you asked for. Seen with `vagrant-libvirt 0.12.2` and
-`fog-libvirt 0.15.0` in August 2026, which is what a fresh host
-set up from this page gets today.
+`fog-libvirt 0.15.0` at the August 2026 check above. A fresh host
+gets whatever `fog-libvirt` is current when you set it up.
 
 Do not try to fix it by pinning `fog-libvirt` to an older
 release. That means overriding dependency resolution inside

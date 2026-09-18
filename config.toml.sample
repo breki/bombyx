@@ -163,8 +163,8 @@ script = "vagrant/provision.sh"   # path inside the clone
 # vagrant reads it there and uploads it into the guest before
 # provisioning, so the key never touches your workstation and
 # never sits in any repository. Scope it to this one repository:
-# code inside the VM can read it, and scoping is what limits
-# what stealing it is worth.
+# code inside the VM can read it, and scoping keeps a stolen
+# copy from reaching your other repositories.
 #
 # Whether it may push is a decision rather than a default. A
 # commit made in the guest sits on no branch after the next
