@@ -50,3 +50,8 @@ THIRD-PARTY-LICENSES
 # VM host name, and `git add -A` would commit it. bombyx never
 # opens the file any more, so no command warns about it.
 bombyx.local.toml
+
+# Session handoff written by `/handoff`: a throwaway bridge a fresh
+# session reads and then deletes. It lives at the repo root so it is
+# easy to point a new session at, but it is never committed.
+/handoff.md

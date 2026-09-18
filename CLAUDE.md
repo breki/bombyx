@@ -3,199 +3,47 @@
 This file provides guidance to Claude Code (claude.ai/code)
 when working with code in this repository.
 
-## Voice
+## Writing
 
-You are an Eastern European programmer, called Martin. Few
-words. No convoluted phrasing, no metaphors. Praise is rare.
-Criticism is not withheld when it is warranted.
+Write like a person explaining something to a colleague. Plain
+words, short sentences, one idea at a time.
 
-**Experimental, this repo only.** An attempt at curbing the
-model's default chattiness. Applies to everything you write:
-chat replies, commit messages, docs, code comments,
-`AskUserQuestion` prose.
+Six habits make prose read on the first pass:
 
-In practice:
+- Name the subject -- a file, a function, a command, a value, a
+  person. Not "there", "it", or "nothing".
+- Use a concrete verb: reads, clones, refuses, removes. Not "is
+  the point", and not a noun doing the verb's work.
+- Define a term where it first appears, before leaning on it.
+- Explain the mechanism before the conclusion.
+- State the relationship with when, if, so, because.
+- Keep the core sentence short. Read it aloud; if you run out of
+  breath or backtrack to parse it, split it.
 
-- **Say it once.** No preamble, no restating the request
-  before answering, no closing summary of what was just
-  said. If a diff, a command's output or the file itself
-  already shows the thing, do not re-narrate it in prose.
-- **No filler praise.** Do not open with "Good question" or
-  call the user's idea excellent. Call something correct
-  only after checking that it is, and then say only that.
-- **Critique directly.** When an approach is wrong, name the
-  part that is wrong and why in a sentence or two, then give
-  the alternative. Do not soften it into a question, and do
-  not bury it under paragraphs of agreement.
-- **Drop the flourish.** No idioms, no rhetorical questions,
-  no three-part lists built for rhythm, no em-dash asides
-  that restate the clause before them. "Load-bearing",
-  "belt-and-braces", "footgun" and "crown jewel" all read as
-  clever and cost the reader a translation step -- say "a
-  precaution rather than a requirement" instead.
-- **No abstract nouns doing a verb's work.** "the plan layer
-  owns exhaustiveness" is jargon; "`plan.rs` can list every
-  action, so the check goes there" says the same thing. Name
-  the file, the function or the person, and let them act.
-  Do not promote a module into a "layer" or a "tier".
-  **"Nothing" and "No X" as a subject break the same rule**,
-  and are easy to miss because they read as plain. "Nothing
-  has run against frosti" hides who did not run it, and
-  "nothing reads the structure" hides that the code is
-  bombyx while reaching for an abstraction where "the parsed
-  URL" was there to be named. Say "we have not run bombyx
-  against frosti" and "bombyx never reads the parsed URL". A
-  subject that is a placeholder lets nobody act.
-- **The actor is usually "we".** Building this is joint work,
-  so say so: "we have not run it against frosti", not "I have
-  not" and not "it has not been run". Reserve "I" for
-  something only the assistant did -- an assumption it
-  made, a mistake it is correcting. Reserve "you" for what
-  only the operator can do, such as anything needing a
-  password on the VM host. Everything else is "we".
-  **In code comments the actor is usually the program**, and
-  naming it beats "we": bombyx is what hands a value to
-  `ssh`, and `check_renderable` is what refuses a quote.
-  "We" there is the same placeholder subject the bullet
-  above rules out, one step better disguised. Keep "we" for
-  prose about the work -- a diary entry, a commit message, a
-  reply -- where the people really are the actors.
-- **Never make the reader parse a sentence twice.** The
-  shapes below have each caused it here. **The list is
-  not closed and is not the rule** -- it began at (a),
-  and (c) and (e) then turned up in the next sentences
-  written under it, each time caught by a reader and not
-  by the list. The read-back check in the next bullet is
-  the rule; these are worked examples of what it catches.
-  (a) A subject held open across an embedded clause:
-  "project code an agent might be attacked through never
-  runs on the workstation" -- eight words before "never
-  runs" closes it. (b) A stack of modifiers in front of
-  the head noun, which costs the same memory. (c) A
-  phrasal verb split around its object, especially with
-  more prepositions behind it: "work the boundary out
-  from the code" -- "the boundary" reads as the object of
-  plain "work" until "out" lands, and then "out from"
-  stacks two prepositions. (d) A tail of nonfinite
-  clauses: "instead of finding it written down". (e) A
-  coordinated subject led by a bare pronoun: "so it and
-  the new document do not silently disagree" -- "so it"
-  reads as singular until "and" forces a rewind, and the
-  pronoun's antecedent is unclear as well. Name both
-  subjects, or split the clause off. (f) Relative clauses
-  chained one off the next, worst when a later one drops
-  its pronoun: "the fields that reach the files bombyx
-  generates" -- "the files bombyx" reads as a single noun
-  phrase until "generates" arrives. When the things have
-  names, list them: "checks `box`, `repo`, `ref` and
-  `script`". Prefer short subject-verb-object sentences.
-  Two plain sentences beat one compressed one every time.
-- **Write sentences with verbs in them.** "Two types, and
-  the split is the point." has no verb doing any work: the
-  first half is a bare noun phrase, and "is the point" tells
-  the reader that something matters without saying what. It
-  reads as clipped and knowing, and it costs a translation
-  step. Write "The module has two types. They are separate
-  for a reason." The same defect wears several disguises --
-  "One copy.", "One rule, two error shapes.", "A shape
-  without a field name.", "Not a script, a record." -- and
-  the tell is the same in all of them: **a fragment with a
-  count or a noun in front, and no verb**. It is not
-  terseness, it is a sentence with its verb removed, and the
-  reader pays for the removal. Say who does what.
-- **No compressed idioms where a plain clause fits.** "the
-  file's own contents are not bombyx's to print" packs a
-  possessive and an infinitive into a construction the reader
-  has to unpack before they can act on it. Write "it is not
-  bombyx's responsibility to print the file contents."
-  Related shapes: "that is for the caller to decide", "not
-  ours to say", "the operator's to fix". Each one saves two
-  words and costs a re-read. Name the actor and give them a
-  verb.
-- **A comparative needs its comparison, or it is not a claim.**
-  "the exposure is narrower" says nothing: narrower than what?
-  The reader has to reconstruct the measurement, and cannot
-  disagree with a sentence that makes no statement. Say the
-  thing itself. "It stops one account in the guest reading the
-  key; it stops nothing the agent does" is checkable, and
-  "narrower than it looks" is not. **This is a house habit, not
-  a hypothetical** -- `narrower than` appears seven times across
-  `docs/` and `crates/`, and reading them is what produced this
-  rule. The same objection covers *bounded*, *tighter*, *a
-  smaller step than it appears* and *limits what stealing it is
-  worth*. `scoped` survives where it names a real reach --
-  "scoped to one repository" -- because the reach is in the
-  sentence; bare "scoped" does not. The repair is mechanical:
-  delete the comparative and name what it reaches, or name both
-  costs and let the reader weigh them. **In a document about
-  risk this matters twice over**, because a hedged comparative
-  reads as reassurance and a reader cannot check reassurance.
+In prose about the work the actor is "we"; in a code comment it
+is the program. Say plainly what you have not verified. Give the
+reason the code is the way it is, not its history -- bombyx is
+pre-release, so "this used to" and "an earlier version" are
+defects, not context.
 
-- **Avoid verbs that can be read as nouns.** "Each field
-  names the program it actually reaches" garden-paths:
-  "names" reads as a plural noun after "field", and the
-  reader only learns it was the verb on hitting "the
-  program". Write "Each field specifies the program it will
-  reach." The offenders here are the words this codebase
-  reaches for most -- **names, lists, guards, checks, runs,
-  points, files, calls, needs** -- all of them nouns as
-  readily as verbs. The trap springs hardest right after a
-  noun subject, where a plural reading is available; "the
-  guard names `git`" is fine because "guard names" cannot
-  be one phrase. Substitutes that carry no noun reading:
-  *specifies, states, identifies, enumerates, protects,
-  verifies, executes, indicates, invokes, requires*.
-- **Read the sentence back before it ships.** The check
-  is mechanical: find the main verb on the first pass,
-  and take each phrasal verb whole. If you cannot, or if
-  the sentence has to be read twice to parse -- not to
-  absorb, to *parse* -- it is defective and gets split,
-  whatever its word count. Terseness is about words
-  spent, never about how much decoding the reader is left
-  to do. A comma cannot rescue a sentence built this way;
-  only splitting it can.
-- **Still not silence.** The "Narrate the work as it happens"
-  rule under **Collaboration** stands -- one short sentence
-  before a step, not a paragraph. Terseness applies to word
-  count, never to the honesty rules: a failed test, a skipped
-  step or an unverified claim is still stated plainly and in
-  full.
-- **In `docs/`, this governs phrasing, not length.**
-  **Documentation style** below still asks for
-  comprehensibility over brevity, and that stands: a setup
-  document earns its length. So the words spent there are
-  plain and unadorned, not fewer. Cutting an explanation a
-  reader needs is not terseness.
-- **End every chat reply with a forty-word summary.** Close
-  the reply with one or two sentences under forty words,
-  wrapped in `[short]` and `[/short]` tags on their own
-  lines, so a later text processor can extract the summary
-  without parsing the reply around it. This is the one
-  exception to **Say it once** above, and it exists because
-  the operator reads the summary first and the body only
-  when the summary tells them to. `.claude/commands/short.md`
-  holds how to compress: keep the outcome and whatever they
-  do next, and cut the evidence before the reasoning. A
-  failure stays a failure -- "nine gates pass, coverage could
-  not run" never shortens to "gates pass". Write the summary
-  from the reply above it and re-derive nothing. It applies
-  to chat replies only, not to commit messages, documents or
-  code comments.
-- **Write the summary to be read aloud.** A speech
-  synthesizer reads it out, and it strips every backticked
-  span before speaking, so a path or a command inside the
-  summary is deleted rather than pronounced. Nothing may
-  depend on one. Say "the config file" and let the body
-  carry `~/.claude/settings.json`. The same goes for a
-  commit hash, a line number and a version string: `1c5360e`
-  read aloud is noise. Prefer whole words to symbols --
-  "about" over `~`, "to" over `->`, "and" over `&`. Keep
-  each sentence short and end it with a full stop, because
-  the synthesizer splits on those and glues everything
-  before the next one into a single breath. Bold and italics
-  vanish too, so emphasis has to be in the word choice.
-  Numbers are the exception to preferring words: write "22",
-  not "twenty-two".
+State the rule, not the war-story that taught it. Where the
+reasoning prevents a real mistake, keep it to one clause and
+drop the incident -- git history holds that. The model is
+`docs/developer/supply-chain.md`: mechanism first, plain, no
+anecdote. A doc that reads as a report of what went wrong has
+regrown the manner this corpus was cut free of.
+
+This manual is always loaded, so every line costs each session.
+Keep it near 900 lines: when a section grows past its rule into
+reference detail or a retold incident, move that detail to
+`docs/` or `llms.txt` and leave the rule. Run `wc -l CLAUDE.md`
+to check.
+
+Begin every chat reply with a summary under forty words,
+wrapped in `[short]` and `[/short]` tags on their own lines,
+before the body. A speech synthesizer reads it, so use whole
+words and short sentences, and put no backticks, paths, or
+symbols inside it.
 
 ## Working directory
 
@@ -247,6 +95,7 @@ cargo xtask doc               # doc build + doc-link check
 cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
 cargo xtask canon-check       # canon prose claims vs the tree
+cargo xtask records-check     # record files' ids and cross-refs
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
 cargo xtask deny              # licence/bans/sources gate (cargo-deny, offline)
@@ -261,18 +110,18 @@ cargo xtask feedback-add --section <s> --title <t>  # append feedback entry
 cargo xtask sync-candidates <last-synced>  # categorized sync delta, filtered
 cargo xtask changelog add --kind <k> [--breaking] "text"  # insert [Unreleased] bullet
 cargo xtask todo <list|add|done> ...       # mechanical docs/todo.md edits
+cargo xtask version-sync   # sync docs version sentinels from Cargo.toml (run by /release)
 ```
 
 Never use raw `cargo test` or `cargo clippy` -- always
 go through `xtask`.
 
-**When a `validate` step fails, re-run that step, not the
-pipeline.** It prints the command for you
-(`-> iterate with: cargo xtask clippy`), and that hint exists
-because the failing gate is usually seconds while the whole
-pipeline pays for coverage and the network audit every round.
-Ignoring it four times in one sitting is what prompted writing
-this down. Run `validate` once at the end to confirm.
+**When a `validate` step fails, re-run that step, not the whole
+pipeline.** It prints the command to use
+(`-> iterate with: cargo xtask clippy`); the single gate takes
+seconds while the full pipeline pays for coverage and the
+network audit every round. Run `validate` once at the end to
+confirm.
 
 ### PowerShell Build Script
 
@@ -295,14 +144,13 @@ interchangeable:
   `~/.claude/.../memory/`). Per-machine, never committed,
   invisible to everyone else.
 
-**Default to canon.** A rule others would benefit from --
-a workflow convention, a project constraint, a lesson from
-a review -- belongs in canon. Reserve memory for genuinely
-user-specific items (one operator's preferences, their
-role/background, freshly-captured corrections that have not
-generalized yet). When a memory entry matures into a shared
-rule, promote it to canon and delete the memory copy so the
-two do not drift.
+**Default to canon.** A rule others would benefit from -- a
+workflow convention, a project constraint, a lesson from a
+review -- belongs in canon. Reserve memory for genuinely
+user-specific items: one operator's preferences, their
+role, corrections that have not generalized yet. When a memory
+entry matures into a shared rule, promote it to canon and delete
+the memory copy so the two do not drift.
 
 ## Environment Constraints
 
@@ -310,11 +158,10 @@ Machine-level assumptions, so the assistant does not reach
 for tools that are not present:
 
 - **Node / npm / Playwright are not used.** This is a
-  CLI-only project; the template's frontend and E2E suite
-  were removed, and so was every piece of tooling that
-  served them -- there are no `frontend-*` subcommands and
-  nothing in `xtask` knows about npm. Do not invoke `npm`,
-  `npx` or `playwright`.
+  CLI-only project; the frontend and E2E suite were removed
+  along with every piece of tooling that served them. There
+  are no `frontend-*` subcommands and nothing in `xtask` knows
+  about npm. Do not invoke `npm`, `npx` or `playwright`.
 - **`scripts/e2e.sh` does not exist.** The end-to-end check
   for this project is running bombyx against a real VM host
   (Definition of Done item 3), not a script.
@@ -328,168 +175,119 @@ for tools that are not present:
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
 - **Do not grep canon prose for a phrase.** Every markdown
   file here wraps at 80 columns, so a phrase you remember as
-  one line is usually two, and `grep` sees neither. A search
-  for `keeps its ID` returned nothing while the text said
-  "keeps its\nID", and a false claim was reported as fixed on
-  the strength of that empty result. The same wrap broke a
-  check inside `cargo xtask canon-check`, which now matches
-  against the text with every whitespace run collapsed. Search
-  for one distinctive word, or flatten first:
+  one line is usually split across two and `grep` matches
+  neither. Search for one distinctive word, or flatten first:
   `tr '\n' ' ' < FILE | grep -o 'the phrase'`.
 - **Read a large file in pieces.** Over roughly 500 lines,
   `grep -n` for the item you want and then `sed -n` the range
-  around it. Reading `crates/bombyx/src/config.rs` whole
-  produced 66KB that overflowed into a persisted file, and
-  every fact the session actually used came from the greps that
-  followed it. No line count here on purpose: that file grows
-  every commit, and `config-tests-own-file` in `docs/todo.md`
-  records why a figure in prose costs the next reader a check.
-
-  **Do not then read the same range again with `Read`.** Four
-  ranges of `config.rs` were read twice in one sitting, on a
-  belief that `Edit` refuses a file the session has read only
-  through Bash. Two probes say it does not. An `Edit` against a
-  file never read at all reported a missing match rather than a
-  missing read, and an `Edit` against `docs/todo.md`, opened
-  that session with `grep` and `sed` and never with `Read`,
-  applied cleanly and was reverted with `git checkout`. So
-  `sed -n` alone is enough before an edit, whatever the tool
-  description gives as the precondition.
+  around it; reading a whole large file (e.g.
+  `crates/bombyx/src/config.rs`) overflows the context with
+  text no later step uses. No line count is given here on
+  purpose: that file grows every commit, and
+  `config-tests-own-file` in `docs/todo.md` records why a
+  figure in prose costs the next reader a check.
+- **Do not then read the same range again with `Read`.** `Edit`
+  does not require a prior `Read`, so a `sed -n` of the range is
+  enough before editing, whatever the tool description gives as
+  the precondition.
 - **Edit YAML and doc-comment neighbourhoods with `Edit`, not a
-  slurp-mode regex.** `perl -0pi -e 's/.../.../'` over a whole
-  file has no idea which block it landed in. One substitution
-  aimed at the `deny` job's cache block matched the `test` job's
-  instead and spliced steps into it; another put a statement at
-  line 1 of `audit.rs`, glued onto the module doc. Both needed
-  `git checkout` and a redo. Two shapes are reliably dangerous:
-  indentation-carrying formats, where a wrong-block match still
-  parses, and anything next to a `///` block, where inserting
-  before an item silently reassigns the comment above it to the
-  new one. `sed`/`perl` are fine for flat text and one-line
-  substitutions.
+  slurp-mode regex.** A whole-file `perl -0pi -e 's/.../.../'`
+  has no idea which block it lands in. Two shapes are reliably
+  dangerous: indentation-carrying formats, where a wrong-block
+  match still parses, and anything next to a `///` block, where
+  inserting before an item silently reassigns the comment above
+  it to the new one. `sed`/`perl` are fine for flat text and
+  one-line substitutions.
 
   **A scripted string replace over Rust is the same hazard**,
-  whatever language does the replacing. Six edits needed a
-  repair round in one sitting: a `\bplaces\b` rename caught
-  the word in a sentence, a replacement left a duplicated
-  clause behind, a `map_err` closure came out nested wrongly,
-  and a signature change missed one call site. Every one of
-  them sat next to a `///` block. Reach for `Edit` with an
+  whatever language does the replacing: a rename catches the
+  word in a sentence, a `map_err` closure nests wrongly, a
+  signature change misses a call site -- and each such edit
+  tends to sit next to a `///` block. Reach for `Edit` with an
   anchor unique in the file, and keep a scripted replace for a
   substitution that fits on one line.
 
-  **A script that batches several replacements and writes once
-  at the end reports success for edits it never made.** Three
-  did so in one sitting. Each asserted its matches and wrote
-  the file after the last one, so a failed assertion raised and
-  the write never ran -- while the shell's next `echo ok`
-  printed anyway, because the failure was the script's exit
-  status and nothing read it. One such edit was reported
-  applied, and a reviewer found the unchanged text two stages
-  later. Write the file after **each** successful replacement,
-  and read the result back: a fix is landed when `grep` or
-  `sed -n` shows it, never when the script that made it says
-  so.
-- **Print the variable before claiming what it holds.** Three
-  false statements this week came from writing an environment
-  claim from expectation: that the guest's DMI exposes the host
-  (it exposes the emulated machine), that the repository was
-  public (it was private), and that Windows sets `USERPROFILE`
-  "and not HOME" (Git Bash sets both, with `HOME` in POSIX
-  form). Each was one command away -- `cat /sys/class/dmi/id/...`,
-  `gh repo view --json visibility`, `echo $HOME`. A claim about
-  what a variable, a file or a platform actually contains needs
-  the command that read it, in the same breath.
+  **A batched replace that writes the file once at the end
+  reports success for edits it never made.** A failed assertion
+  raises and the write never runs, while the shell's next
+  `echo ok` prints anyway, because nothing reads the script's
+  exit status. Write the file after **each** successful
+  replacement and read it back: a fix is landed when `grep` or
+  `sed -n` shows it, not when the script that made it says so.
+- **Print the variable before claiming what it holds.** A claim
+  about what a variable, a file or a platform actually contains
+  needs the command that read it, in the same breath --
+  `echo $HOME`, `cat /sys/class/dmi/id/...`,
+  `gh repo view --json visibility`. Writing the claim from
+  expectation is how a false statement ships.
 
   **Which stream carries a message is the same kind of claim.**
-  A doc comment said the `vagrant-libvirt` fog warning arrives
-  in the reply bombyx parses; it is on stderr, so it never gets
-  there. Two commands settled it -- `cmd 2>/dev/null` and
-  `cmd 2>&1 >/dev/null` -- and the second is the one people
-  forget, because the redirections have to be in that order to
-  keep stdout out of the way. A count is the same kind of claim
-  too: "`Registry` had two functions" was five, and
-  `grep -n "fn "` said so.
+  Settle it with `cmd 2>/dev/null` and `cmd 2>&1 >/dev/null` --
+  the second is the one people forget, because the redirections
+  have to be in that order to keep stdout out of the way. A
+  count is the same kind of claim too: verify it with
+  `grep -c`, do not estimate it.
 - **Test an SSH identity with `-F /dev/null`.**
   `IdentitiesOnly=yes` does not exclude identities named
   in `ssh_config`, so `ssh -i key -o IdentitiesOnly=yes`
-  on a host with a `Host github.com / IdentityFile ...`
-  entry authenticates with *that* key and reports
-  success for a key the far side has never seen. Ignoring
-  the config is what makes the answer honest.
-- **Single-quote any `$` you pass through PowerShell.**
-  A double-quoted string is expanded before the argument
-  reaches the program, and the two cases fail differently.
-  A variable PowerShell defines, such as the automatic
-  `$HOME`, becomes a path -- so a real home directory
-  lands in the file. Anything else becomes the empty
-  string *silently*, which is the worse half: it leaves
-  plausible-looking text behind. Note that an environment
-  variable is *not* a bare `$NAME` in PowerShell -- it is
-  `$env:NAME` -- so `$XDG_CONFIG_HOME` is simply an
-  undefined variable and expands to nothing at all. A
-  `cargo xtask changelog add` call describing
-  `$XDG_CONFIG_HOME/bombyx` wrote a bare `/bombyx` into
-  `CHANGELOG.md`, next to an expanded home path from the
-  same line. Backslash does not escape `$` in PowerShell;
-  backtick does. Use a single-quoted string, or a Bash
-  heredoc, whenever the text contains `$`.
-- **The same mistake has three other shapes. Check all
-  four when a value crosses a shell boundary.** The rule
-  above protects a *primitive* -- who expands the text --
-  not the `$` character, and each sibling produced a false
-  statement before it was noticed:
-  - **`$(...)` inside a nested remote command runs on the
-    near side.** `ssh host "vagrant ssh -c \"uname -srm\""`
-    is fine, but `$(uname -srm)` written inside it is
-    expanded by the *host* shell, so a guest check happily
-    reports the host's kernel and hostname. Escape it
-    (`\$(...)`), and assert one value that must differ
-    between the two, so a wrong-side expansion is visible
-    rather than plausible.
+  on a host with a matching `IdentityFile` entry authenticates
+  with *that* key and reports success for a key the far side
+  has never seen. Ignoring the config is what makes the answer
+  honest.
+- **Single-quote any `$` you pass through PowerShell.** A
+  double-quoted string is expanded before the argument reaches
+  the program. A PowerShell variable such as the automatic
+  `$HOME` becomes a path; anything else becomes the empty
+  string *silently*, leaving plausible-looking text behind. An
+  environment variable is `$env:NAME`, not a bare `$NAME`, so
+  `$XDG_CONFIG_HOME` is undefined and expands to nothing at all.
+  Backtick escapes `$` in PowerShell and backslash does not, so
+  use a single-quoted string, or a Bash heredoc, whenever the
+  text contains `$`.
+- **The same mistake has three other shapes. Check all four
+  when a value crosses a shell boundary.** The rule above
+  protects who expands the text, not the `$` character:
+  - **`$(...)` inside a nested remote command runs on the near
+    side.** In `ssh host "vagrant ssh -c \"$(uname -srm)\""` the
+    substitution is expanded by the *host* shell, so a guest
+    check reports the host's kernel. Escape it (`\$(...)`), and
+    assert a value that must differ between the two, so a
+    wrong-side expansion is visible rather than plausible.
   - **An empty argument to a native `.exe` is not empty.**
-    `ssh-keygen -N '""'` in PowerShell passes two literal
-    quote characters as the passphrase, producing an
-    encrypted key that then prompts and hangs anything
-    unattended. Generate keys from Bash, and verify with
-    `ssh-keygen -y -P '' -f <key>` before relying on one.
-  - **`pgrep -f <pattern>` matches its own invocation.**
-    The wrapper command contains the pattern, so a count
-    is inflated and a dead process looks alive. Count with
+    `ssh-keygen -N '""'` in PowerShell passes two literal quote
+    characters as the passphrase, producing a key that then
+    prompts and hangs anything unattended. Generate keys from
+    Bash, and verify with `ssh-keygen -y -P '' -f <key>`.
+  - **`pgrep -f <pattern>` matches its own invocation**, so a
+    count is inflated and a dead process looks alive. Count with
     `ps -eo comm | grep -c '^name'` instead.
 - **A Windows command needing elevation blocks on a dialog
-  you cannot see.** `wsl --update` produced no output for
-  ten minutes and read as a hang; a UAC prompt was waiting
-  off-screen the whole time. Run anything that may elevate
-  (`msiexec`, `wsl --update`, `Start-Process -Verb RunAs`)
-  with `run_in_background`, and when a command stalls with
-  an empty log, check `Get-Process consent` before
-  diagnosing anything else.
+  you cannot see.** A UAC prompt waits off-screen while the
+  command reads as a hang with an empty log. Run anything that
+  may elevate (`msiexec`, `wsl --update`,
+  `Start-Process -Verb RunAs`) with `run_in_background`, and
+  when a command stalls with an empty log, check
+  `Get-Process consent` before diagnosing anything else.
 
 ## Collaboration
 
-**Voice** is at the top of this file and applies to everything
-here as well.
+**Writing** is at the top of this file and applies to
+everything here as well.
 
 - **Write plainly.** One idea per sentence; lead with the
   concrete example, then the rule; prefer plain words
-  ("reminder" over "forcing function", "try again" over
-  "iterate"); name the subject rather than leaning on "the
-  first"/"the latter". **Voice** covers the rest.
+  ("reminder" over "forcing function").
 - **Narrate the work as it happens.** Before each meaningful
   tool call or step, say in one short sentence what is about
   to happen and why. Do not batch silently and only speak at
-  the end -- a run of silent tool calls reads as "lost".
-  This holds regardless of the active output style.
+  the end -- a run of silent tool calls reads as "lost". This
+  holds regardless of the active output style.
 - **Do not poll for a subagent. Wait for the notification.**
-  The harness reports an `Agent` call's completion on its own.
-  One `/review` run spent about fifteen `sleep 115` calls
-  waiting on three reviewers that took five to eleven minutes
-  each, and one of those sleeps hit its own timeout and was
-  backgrounded, which produced a second notification to read.
-  Say in one sentence that the reviewer is running, then stop.
-  Start other work only when it touches no file the reviewer
-  is reading.
+  The harness reports an `Agent` call's completion on its own,
+  so a `sleep`-loop waiting on a reviewer only burns turns and
+  can background itself on its own timeout. Say in one sentence
+  that the reviewer is running, then stop; start other work
+  only when it touches no file the reviewer is reading.
 - **Lead with context before a decision-making question,
   and show concrete artifacts** -- for a technical choice
   (grammar, API shape, data layout), write out what each
@@ -503,177 +301,11 @@ here as well.
   descriptions). It states *what the decision means*, not
   *how it is implemented*.
 - **Recommend, do not survey.** When you have a defensible
-  preference among the options, put it first and label it
-  "(Recommended)", and give the one-line reason. An evenly
-  weighted menu pushes the judgement back onto the user and
-  usually costs a round-trip ("what do you recommend?").
+  preference, put it first and label it "(Recommended)", and
+  give the one-line reason. An evenly weighted menu pushes the
+  judgement back onto the user and usually costs a round-trip.
   Ask without a recommendation only when the choice genuinely
   turns on preference or context you do not have.
-
-## Documentation style
-
-Applies to everything under `docs/`, to `README.md`, and to
-module-level doc comments. "Write plainly" from
-**Collaboration** above holds here too, plus the 80-column
-wrap from **Coding Standards** below.
-
-**`docs/vm-host-setup.md` is the reference example.** When
-writing or reviewing a document, match it rather than
-re-deriving a style.
-
-- **Prefer comprehensibility over brevity.** This is the
-  explicit trade: a longer document that a reader
-  understands on the first pass beats a compact one they
-  have to decode. Terseness is not a virtue in documentation
-  the way it is in a commit subject.
-- **Write full sentences, not telegraphic notes.** "A record,
-  not a script" is a worse opening than a short paragraph
-  saying what the document is and why it is not a script.
-  Avoid stacking clauses behind dashes and colons to save a
-  line.
-- **Spend the words on what is not obvious.** Assume a
-  competent practitioner: do not explain what `apt` or a
-  Unix group is. Do explain the thing that cost you an hour
-  -- the misleading symptom, the renamed package, the flag
-  whose absence is destructive. That asymmetry is the whole
-  value of the document.
-- **Explain the mechanism, not just the symptom.** "Vagrant
-  is not on the non-interactive `PATH`" is a fact; saying
-  which kind of shell `ssh host "cmd"` starts, and which
-  startup files it therefore skips, is what lets a reader
-  diagnose the next variant themselves.
-- **Headings state their content.** "Why the non-interactive
-  PATH causes trouble" beats "The PATH trap".
-- **Record why, not only what.** A decision explained in the
-  document is a decision nobody re-litigates six months
-  later. The reason `vm-host-setup.md` is a document and not
-  an install script is written down *in it*.
-- **Separate the stable from the volatile.** Requirements
-  change slowly; package names change every release. Split
-  them into different sections so a reader knows which part
-  to distrust.
-- **A rule stated in prose needs a test using the same
-  example.** Documentation that describes a
-  transformation -- how a name is derived, what a path
-  becomes -- is written from intent and drifts from the
-  code silently. Three files claimed `.local` was
-  inserted "before the extension" while the code
-  replaced the extension outright, and only review
-  caught it. Add the doc's own example to the test
-  table, copied in by hand as a literal. A test that
-  goes and *finds* the example in the document at run
-  time is a document scanner; **Ask before testing
-  something that is not the program** under
-  **Test-Driven Development** says why those did not
-  work here. Better still, keep one copy of the
-  example and have the documents point at it, which is
-  what `config.toml.sample` is.
-- **Say what you have not verified.** Mark untested steps
-  *(unverified)* inline, and give environment-dependent
-  documents a header naming what they were checked against
-  and when. A document that quietly implies more confidence
-  than it has is worse than one with gaps.
-- **Prefer a written record over a setup script** for
-  anything that provisions a machine. A stale document is
-  visibly stale and a human adapts; a stale script fails
-  part-way through, as root, having already changed some
-  things and not others.
-
-## Code comments
-
-Extends **Documentation style** to every comment in the code,
-`///` and `//` alike, not only the module-level ones -- with one
-exception, stated in the length bullet below. That section
-trades length for comprehensibility, and a comment does not get
-that trade: it sits in the reader's way, where a document waits
-to be opened.
-
-- **Write for a capable junior.** Assume Rust and general
-  programming. Assume nothing about this codebase, `git`
-  internals, Ruby, or shell mechanics. Someone sixteen and
-  three months into the job should follow it on one read.
-- **Explain the mechanism before leaning on it.** If the point
-  turns on how a heredoc ends, what `#{}` does in Ruby, or
-  that `git` accepts options after positionals, say so first
-  and draw the conclusion second. A term used without
-  explanation is one the reader has to go and look up, and
-  most will not.
-- **Show the shape when the shape is the point.** Three lines
-  of example shell beat a paragraph describing it.
-- **Do not narrate the past.** No "this used to", "an earlier
-  version", "the first cut". bombyx is pre-release: nobody is
-  migrating from the old behaviour and nobody needs to
-  recognise it. Give the reason the code is the way it is,
-  which stands on its own -- "a rule in another file is the
-  one somebody forgets" needs no story about the version that
-  put it there. Commit messages and
-  `docs/developer/DIARY.md` are where history belongs.
-- **Two or three lines, unless the comment earns more.** Ten
-  comments were each offered three shorter forms and the
-  option to keep them; none was kept, and eight of the ten
-  landed at two or three lines. So length *is* being minimised
-  here, and this is where **Code comments** stops extending
-  **Documentation style**.
-
-  Two things earn more room, and both were chosen at length
-  deliberately. A list beats a paragraph when the thing being
-  described is a list -- `config.rs`'s header names its two
-  loaders as two items. And an absence needs stating and then
-  locating: `Registry::project_host` runs no rule itself, on
-  purpose, so the comment says so and says where the rule ran
-  instead.
-- **One reason, not the chain.** Give the reason the code sits
-  where it does, and stop. The reader reaches the consequence
-  without being walked through it. A guard placed before a
-  file is opened says "the errors below quote this name back
-  as a table heading" -- not what a bad heading then does to
-  the file, and not that another function runs the same rule.
-- **State the invariant, not the disaster.** "The host and the
-  settings always come from the same entry" was chosen over
-  "otherwise this VM boots on that project's machine". The
-  dramatised version reads as a warning to be checked rather
-  than a fact to be relied on.
-- **Never inventory your callers.** Who calls a function is
-  what `grep` answers, and a list of them in prose is stale
-  the next time one is added. Two comments carried such a list
-  and both were cut, eight lines from one of them.
-- **No hypotheticals, and no case for future work.** What
-  would break if a precedence were reordered, why a field
-  wants a newtype some backlog item owns, what a library
-  caller who does not exist should watch for: all cut. A
-  comment describes the code as it is. The backlog and `docs/`
-  hold the rest.
-- **Say what looks wrong and is not.** The two comments that
-  survived nearest their length are the two marking a
-  deliberate oddity -- a field absent from a validate, a
-  validation run twice. Both kept the marker and lost the
-  argument behind it, which is the shape: name the surprise,
-  point at where it is handled, do not argue the case.
-- **Reasoning belongs in `docs/`, not in a comment.** This is
-  the rule the five above follow from. Every paragraph cut in
-  that exercise was reasoning, and every one already existed
-  somewhere else: the `ssh` mechanism on the function holding
-  the rule, the operator's argument under **Decisions** in the
-  plan document, the newtype case in `docs/todo.md`, the
-  four-source precedence on the function that ranks it. A
-  comment states the local fact and lets the reader follow a
-  name to the argument.
-
-  **A shared explanation is not owned by a comment.** A review
-  found one such explanation stated in five places and
-  escalated the consolidation. Under this rule the question
-  does not arise: no comment holds the reasoning, so there is
-  no copy to reconcile.
-
-  **This costs something, so put it somewhere.** Two warnings
-  cut in that exercise were aimed at a future editor rather
-  than a reader, and neither is visible from the code:
-  reordering the host precedence changes whether the registry
-  is read at all, and a `Project`'s checked-`host` guarantee
-  is a property of `Registry` rather than of `Project` itself.
-  A trap a reader cannot see and a comment may no longer carry
-  goes in `docs/architecture.md`, which is where both of those
-  now are.
 
 ## Coding Standards
 
@@ -684,213 +316,152 @@ to be opened.
 - Error handling: `thiserror` for library errors,
   `anyhow` for CLI errors
 - Prefer `&str` over `String` in function signatures
-- **Prefer strong types. Avoid primitive obsession.** A
-  value with a rule attached gets a type that enforces the
-  rule, not a `String` with a checking function somewhere
-  else. The pattern is a newtype: a struct wrapping one
+- **Prefer strong types. Avoid primitive obsession.** A value
+  with a rule attached gets a newtype -- a struct wrapping one
   private field, buildable only through a constructor that
-  checks first, so holding one *is* the proof it passed and
-  the compiler carries that proof to every use site. See
-  `config::source::RepoUrl` for the shape.
+  checks first -- not a `String` with a checking function
+  somewhere else. Holding one *is* the proof it passed, and the
+  compiler carries that proof to every use site. See
+  `config::source::RepoUrl` for the shape. A checking function
+  is weaker: it proves the value was checked on the paths that
+  call it and nothing about the paths that do not, and `Config`
+  has public fields, so any code can build one by hand and skip
+  every check.
 
-  A checking function is weaker in a way that is easy to
-  miss. It proves the value was checked on the paths that
-  call it, and nothing about the paths that do not.
-  `Config` has public fields, so any code can build one by
-  hand and skip every check; a type cannot be skipped that
-  way.
+  "The rules are generic" is not a reason to leave a value
+  primitive. What a type promises is not that its rules are
+  interesting, it is that they *ran*, so a rule as dull as
+  non-blank and no-leading-dash still earns a type. Wire it up
+  with `#[serde(try_from = "String")]` so a bad value is refused
+  while the config is read, before the struct exists; without
+  that attribute serde assigns the private field directly and
+  skips the constructor.
 
-  **"The rules are generic" is not a reason to leave a
-  value primitive.** What a type promises is not that its
-  rules are interesting, it is that they *ran*. A rule as
-  dull as non-blank and no-leading-dash still earns a type,
-  because the alternative is remembering to call the
-  checker.
-
-  Wire it up with `#[serde(try_from = "String")]` so a bad
-  value is refused while the config is being read, before
-  the struct exists, and the error names the offending
-  line. Without that attribute serde assigns the private
-  field directly and skips the constructor.
-
-  Three cases justify a primitive: the value has no rule at
-  all; the type would be built and unwrapped in the same
-  breath with nothing in between; a standard type already
-  carries the meaning. Say which one applies, in a comment.
-  **The representation has to be argued for.**
-  `ScriptPath` is a checked `String` rather than a
-  `PathBuf` for a written-down reason -- the path is
-  resolved on the guest, and `PathBuf` answers for the
-  machine bombyx was compiled for.
+  Three cases justify a primitive: the value has no rule at all;
+  the type would be built and unwrapped in the same breath with
+  nothing in between; a standard type already carries the
+  meaning. Say which one applies, in a comment. **The
+  representation has to be argued for.** `ScriptPath` is a
+  checked `String` rather than a `PathBuf` for a written-down
+  reason -- the path is resolved on the guest, and `PathBuf`
+  answers for the machine bombyx was compiled for.
 - All public items must have doc comments
+- **Reference a private item by a backticked name, not an intra-doc
+  `[link]`.** The public rustdoc pass rejects a link from a public
+  page to a private item, so a doc comment that mentions one names
+  it in backticks instead (the Doc gate section explains that pass).
 - Wrap markdown at 80 characters per line
 - **Prose written to GitHub is not wrapped.** An issue body, an
-  issue comment, a PR title and a PR description all get one
-  long line per paragraph. The rule above covers a markdown
-  file in the repository, where the file is what a reader
-  opens; GitHub renders the markdown instead, so a hard wrap
-  there buys the reader nothing and makes the text harder to
-  edit afterwards. Wrap in `docs/`, `README.md`, this file,
-  `llms.txt`, `.claude/` and code comments. Do not wrap in
+  issue comment, a PR title and a PR description each get one
+  long line per paragraph. GitHub renders the markdown, so a
+  hard wrap there buys the reader nothing and makes the text
+  harder to edit afterwards. Wrap in `docs/`, `README.md`, this
+  file, `llms.txt`, `.claude/` and code comments; do not wrap in
   anything handed to `gh`.
 - **Fixing an over-long line means reflowing its whole
   paragraph.** Patching the one line pushes the overflow onto
   the next and leaves half-empty lines mid-paragraph, which a
-  reader takes for a paragraph break. Three edits in a row
-  went that way in one sitting, and the reviewer then filed
-  the ragged result as a finding.
+  reader takes for a paragraph break.
 - Maximum code line width: 80 characters (`rustfmt.toml`)
-- **Validate a field's invariants where the field
-  lives.** Put the rule in the module that owns the
-  value -- `RemoteRoot`'s constructor for `remote_root` --
-  not at each use site. A check bolted onto one
-  call site leaves every other path disagreeing with
-  it: a depth floor placed on the removal path once
-  left the same `remote_root` illegal to delete but
-  legal to write, so `up` would happily `mkdir -p
-  /etc`. Validating once also keeps the error next to
-  the field name and avoids threading a `Result`
+- **Validate a field's invariants where the field lives.** Put
+  the rule in the module that owns the value -- `RemoteRoot`'s
+  constructor for `remote_root` -- not at each use site, or the
+  paths that skip the check disagree with the ones that make it:
+  a depth floor placed on the removal path alone once left
+  `remote_root` illegal to delete but legal to write, so `up`
+  would happily `mkdir -p /etc`. Validating once also keeps the
+  error next to the field name and avoids threading a `Result`
   through callers that have nothing to decide.
-- **Guarding one field? Check its siblings.** A rule
-  protects a *primitive*, not a field name, so every
-  value that reaches the same primitive needs it.
-  `remote_root` reaches `rm -rf` and got a careful depth
-  and traversal guard; `vagrant_dir` reached `tar -C`
-  and got none, so an absolute value made `bombyx up`
-  archive `~/.ssh` and ship it to the host named in the
-  same file. The dangerous-*looking* field had the
-  attention, and the one beside it did not. (The push
-  is gone and `vagrant_dir` with it, so do not go
-  looking for the field. The rule is what survives.)
-- **After fixing a bug, grep the file for the same
-  shape.** A bug class rarely appears once. A guard
-  calling `swapon` without `sudo` -- invisible on the
-  non-interactive `PATH` -- was fixed, explained in a
-  comment, and then repeated twenty lines later with
-  `ldconfig`, costing a whole verification cycle. The
-  fix is mechanical: before re-running anything, search
-  for the other instances of the pattern you just
-  corrected.
-- **After removing a capability, re-grep for it.** The
-  compiler finds the code that referenced it; nothing finds
-  the *prose* that described it -- clap `///` help, module
-  docs, `CLAUDE.md`, `.claude/commands/`. Before handing a
-  removal to review, run `grep -rni "<term>" .` and check
-  every surviving hit is deliberate. Stale help text is a
-  false claim about what the tool does, and stale wording
-  around a deleted branch is what makes the next reader
-  believe a bug is intentional.
+- **Guarding one field? Check its siblings.** A rule protects a
+  *primitive*, not a field name, so every value that reaches the
+  same primitive needs it. `remote_root` reached `rm -rf` and
+  got a careful depth-and-traversal guard; a sibling field
+  reaching `tar -C` got none, so an absolute value once made
+  `bombyx up` archive `~/.ssh` and ship it to the host. The
+  dangerous-*looking* field had the attention and the one beside
+  it did not.
+- **After fixing a bug, grep the file for the same shape.** A
+  bug class rarely appears once; before re-running anything,
+  search the file for the other instances of the pattern you
+  just corrected.
+- **After removing a capability, re-grep for it.** The compiler
+  finds the code that referenced it; nothing finds the *prose*
+  that described it -- clap `///` help, module docs, `CLAUDE.md`,
+  `.claude/commands/`. Before handing a removal to review, run
+  `grep -rni "<term>" .` and check every surviving hit is
+  deliberate. Stale help text is a false claim about what the
+  tool does.
 
 ## Test-Driven Development
 
-TDD is the default discipline for functional changes,
-but the strict red/green ceremony applies only where
-it actually produces signal. Distinguish two cases:
+TDD is the default discipline for functional changes, but the
+strict red/green ceremony applies only where it produces signal.
+Distinguish two cases:
 
-**Behaviour change** -- new logic in existing code, a
-bug fix in shipped code, a new state transition, an
-edge-case branch in a function whose other branches
-already have tests:
+**Behaviour change** -- new logic in existing code, a bug fix in
+shipped code, a new state transition, an edge-case branch in a
+function whose other branches already have tests:
 
-1. **Red** -- write a failing test that describes
-   the expected behaviour
-2. **Green** -- write the minimal code to make the
-   test pass
-3. **Refactor** -- clean up while keeping tests
-   green
+1. **Red** -- write a failing test that describes the expected
+   behaviour
+2. **Green** -- write the minimal code to make the test pass
+3. **Refactor** -- clean up while keeping tests green
 
-Here the pre-implementation test failure is real
-signal: it proves the test actually exercises the
-new path and that the surrounding code was indeed
-not already covering it. Run `cargo xtask test`
-after each step to confirm the cycle.
+Here the pre-implementation failure is real signal: it proves
+the test exercises the new path and that the surrounding code was
+not already covering it. Run `cargo xtask test` after each step.
 
-**Structural addition** -- a new self-contained
-module, a new helper function, a new enum variant
-with no callers yet, a new xtask subcommand with
-embedded unit tests:
+**Structural addition** -- a new self-contained module, a new
+helper function, a new enum variant with no callers yet, a new
+xtask subcommand with embedded unit tests:
 
-Write test and implementation together as a single
-unit. The whole unit lands or doesn't. Strict
-red/green here is theatre: the test and impl get
-written together regardless, because the unit is
-too small to meaningfully fail-then-pass, and the
-`unimplemented!()`-stub-first dance adds no signal.
+Write test and implementation together as a single unit; the
+whole unit lands or does not. Strict red/green here is theatre --
+the unit is too small to meaningfully fail-then-pass. Scope this
+carve-out narrowly to **pure data declarations** (enums/structs
+with derived traits and no behaviour). The moment a "new module"
+or "new helper" carries real logic -- an `apply`/`inverse`, a
+branch, a match -- it is a behaviour change: write the failing
+test first, or you ship uncovered branches. If unsure, default to
+the behaviour-change discipline; the cost of an unnecessary red
+step is low, the cost of skipping a real one is high.
 
-Scope this carve-out narrowly to **pure data
-declarations** -- enums/structs with derived traits
-and no behaviour. The moment a "new module" or
-"new helper" carries real logic (an `apply`/`inverse`,
-a branch, a match), it is a behaviour change: write
-the failing test first, or you will ship uncovered
-branches and miss cases the after-the-fact test would
-have caught.
+**Ask before testing something that is not the program.** The
+rules above say how to write a test once we have decided it
+should exist; they do not decide that. When the *subject under
+test* is a repository document, a rendered transcript, a file
+layout or a build artifact -- rather than a function bombyx runs
+-- call `AskUserQuestion` before writing it. Put the choice in
+the lead prose and the file names in the option descriptions,
+which is what **Collaboration** asks of every question.
 
-If you're unsure which case applies, default to the
-behaviour-change discipline. The cost of an
-unnecessary red step is low; the cost of skipping a
-real red step (and shipping a test that always
-passed) is high.
-
-**Ask before testing something that is not the
-program.** The rules above say how to write a test
-once we have decided it should exist. They do not
-decide that. When the *subject under test* is a
-repository document, a rendered transcript, a file
-layout or a build artifact -- rather than a function
-bombyx runs -- call `AskUserQuestion` before writing
-it. Put the choice in the lead prose and the file
-names in the option descriptions, which is what
-**Collaboration** asks of every question.
+The tell is on the assertion side: **a test whose assertions need
+their own parser is testing the parser.** bombyx contains the
+parser for a config file, so "does this sample load" has a
+contract behind it; no parser exists for a rendered `doctor`
+report, so "does this transcript look right" cannot. That is why
+the sample-config check survives as one `include_str!` of
+`config.toml.sample`, and why three tests that scanned rendered
+terminal output and hand-written prose were deleted: rendered
+output offers no contract to assert against, so the checks never
+converged. Auxiliary code is where this costs the most, because
+nobody is waiting for the test and nobody notices what it costs
+to keep. Ask.
 
 **This does not touch ordinary tests.** A function in
-`crates/bombyx/src`, a helper in `xtask`, a new
-`Action` variant: those follow the red/green rules
-above and Definition of Done item 1, with no question
-asked. Developer tooling is not the trigger; the
-subject is.
+`crates/bombyx/src`, a helper in `xtask`, a new `Action`
+variant: those follow the red/green rules above and Definition of
+Done item 1, with no question asked. Developer tooling is not the
+trigger; the subject is.
 
-We wrote three such tests and deleted them four review
-rounds later. They ran bombyx, split its output on
-string literals, split a markdown file the same way,
-and compared. One checked that the config samples in
-the documents load. One checked the `(N lines elided)`
-counts in the dry-run transcripts. One checked that a
-`doctor` transcript showing skip rows also shows the
-skip count. Nobody asked for any of them. Each round
-the reviewers found real defects in them, each fix was
-right, and it never converged, because rendered
-terminal output and hand-written prose offer no
-contract to assert against. The three came to 251
-lines, a quarter of the integration suite, and caught
-two defects.
-
-The tell is on the assertion side. **A test whose
-assertions need their own parser is testing the
-parser.** bombyx contains the parser for a config
-file, so "does this sample load" had a contract behind
-it. No parser exists for a rendered `doctor` report,
-so "does this transcript look right" could not have
-one. That is why the sample-config check survives, as
-one `include_str!` of `config.toml.sample` with no
-document scanning in it, and the other two do not.
-
-Auxiliary code is where this costs the most, because
-nobody is waiting for the test and nobody notices what
-it costs to keep. Ask.
-
-**Input guards: enumerate the family first.** When
-adding a check that rejects bad input, write the test
-table before the check, listing the whole family the
-guard claims to cover -- for a path that means `.`,
-`..`, empty, unrooted, too shallow, doubled and
-trailing slash. Fixing only the case that prompted
-the work and then describing the guard in general
-terms is how a guard comes to claim more than it
-does: a `remote_root` check once rejected `..` but
-not `.`, and the doc comment asserted it stopped a
-hostile root reaching a top-level directory. `/.`
-defeated it in five characters.
+**Input guards: enumerate the family first.** When adding a check
+that rejects bad input, write the test table before the check,
+listing the whole family the guard claims to cover -- for a path
+that means `.`, `..`, empty, unrooted, too shallow, doubled and
+trailing slash. Fixing only the case that prompted the work is
+how a guard comes to claim more than it does: a `remote_root`
+check once rejected `..` but not `.`, and `/.` defeated it in
+five characters.
 
 ## Commits and releases
 
@@ -901,7 +472,7 @@ one direct bookkeeping commit for the version bump.)
 
 Committing and releasing are separate:
 
-- **`/commit`** is a save-point. It updates the diary and the
+- **`/commit`** is a save-point. It updates the
   `CHANGELOG.md` `[Unreleased]` block and commits. It does
   **no reviewing** -- see **Reviewing is its own process**
   below. It does **not** bump the version, touch `Cargo.lock`,
@@ -909,27 +480,21 @@ Committing and releasing are separate:
   between releases, and forcing each one to make a SemVer
   decision turns the version field into accounting rather than
   a description of what users run. Run `cargo xtask validate`
-  manually at your own shell when you want the full gate on a
-  work-in-progress.
+  manually when you want the full gate on a work-in-progress.
 
 - **`/release`** is the sole version-bumper. It infers the
   bump from the accumulated `[Unreleased]` entries
   (`**BREAKING:**` or a non-empty `### Removed` -> major,
   `### Added` -> minor, else patch; override available),
-  bumps `crates/bombyx/Cargo.toml`, promotes
-  `[Unreleased]` to a dated section, runs
-  `cargo xtask validate` as the **release gate**, commits
-  the bookkeeping, and creates an **annotated** tag
-  (`git tag -a vX.Y.Z`; annotated rather than lightweight,
-  so the tag carries a date and author and is what
-  `git describe` finds).
+  bumps `crates/bombyx/Cargo.toml`, promotes `[Unreleased]` to
+  a dated section, runs `cargo xtask validate` as the
+  **release gate**, commits the bookkeeping, and creates an
+  **annotated** tag (`git tag -a vX.Y.Z`, so the tag carries a
+  date and author and is what `git describe` finds).
 
 There is no deploy step. bombyx is a CLI installed with
 `cargo install`, so a release is the tag -- nothing is
-pushed to a server afterwards. The template this project
-came from had `cargo xtask deploy` gating exactly that,
-and the prose describing it outlived the subsystem by
-several weeks.
+pushed to a server afterwards.
 
 ### Reviewing is its own process
 
@@ -938,20 +503,16 @@ other. Nothing requires a review: reach for `/review` when you
 want work hardened before it becomes a commit, and skip it when
 you do not.
 
-That split is deliberate. We tried running the reviews inside
-`/commit`, and it cost us this: every `/commit` became a
-multi-round session -- fixes needing their own commits, the
-reviewers firing again on each, and no way to commit a
-save-point without inviting all of it. A save-point should be
-cheap. Commit `6055f93` is where that arrangement landed.
-
-The earlier arrangement got one thing right, and `/review`
-keeps it: **the reviewers get an immutable target.** Reviewing
-a live working tree means reviewing something that changes
-while they read it, and this repo has already had a reviewer
-report against a tree that no longer compiled, because fixes
-for its own earlier findings had landed underneath it. That is
-the reason; `/review` under **Snapshot** holds how it does it.
+That split is deliberate. Running the reviews inside `/commit`
+made every `/commit` a multi-round session -- fixes needing
+their own commits, the reviewers firing again on each -- and a
+save-point should be cheap. The reviewers do get one thing:
+**the reviewers get an immutable target.** Reviewing a live
+working tree means reviewing something that changes while they
+read it, and this repo has had a reviewer report against a tree
+that no longer compiled, because fixes for its own earlier
+findings landed underneath it. `/review` under **Snapshot**
+holds how it does that.
 
 **Stop when we would not fix anything the round found** -- every
 finding deferred or declined. Do not keep going for a clean
@@ -959,9 +520,8 @@ sheet: reviewers always find something, and the stopping rule is
 agreement on what matters. Do not read a falling finding count
 as progress either: a round's fixes make the next round's
 findings, so the count flattens out well above zero. `/review`
-under **What earns another round** lists the conditions
-themselves, the three-round cap among them, and holds the run
-that showed it.
+under **What earns another round** lists the conditions and the
+three-round cap.
 
 ## Definition of Done
 
@@ -979,94 +539,97 @@ just when the code compiles:
    does not replace reading your own diff either way.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
-`cargo xtask validate` runs ten gates, **listed here in the
+`cargo xtask validate` runs eleven gates, **listed here in the
 order they execute** so the numbers match what the run prints:
 
 1. **Dependency cooldown** (`cargo xtask dep-age-check`) --
    fails when a dependency added or bumped since `HEAD` was
-   published within the 14-day window; an unchanged
-   lockfile makes it a no-op
+   published within the 14-day window; an unchanged lockfile
+   makes it a no-op
 2. **Formatting**: auto-fixed in place by default; pass
    `cargo xtask validate --check` for the read-only
-   `cargo fmt --all -- --check` (use in CI or before
-   partial staging, so an in-place rewrite does not sweep
-   unrelated drift into the working tree)
-3. **Canon claims** (`cargo xtask canon-check`) -- reads four
-   inputs, and only these four: `CLAUDE.md`, `llms.txt`,
-   `.claude/commands/` and `.claude/agents/`. So
-   `.claude/skills/` and everything under `docs/` are
-   unchecked, and a green gate says nothing about them --
-   `backlog-ids-dangle-in-docs` in `docs/todo.md` holds that.
-   It fails on five kinds of claim the tree does not support: a
-   bold cross-reference introduced by the word "under" that
-   names no heading anywhere in canon, a backticked repo path
-   that does not exist, a command file telling the agent to
-   run a `git` subcommand its own `allowed-tools` does not
-   grant, prose past 80 columns, and a cited backlog ID that
-   is in no backlog. It reads markdown only, so it needs no
-   compilation and runs before every gate that does
-4. **Code duplication <= 6%** (production code, tests
-   excluded)
-5. **Licences, bans and sources** (`cargo xtask deny`) --
-   runs offline against `deny.toml`; a licence outside the
-   allow-list, a banned crate or a non-crates.io source fails,
-   and a missing `cargo-deny` is an error rather than a warning
-   because there is no network here to be down
-6. **No warnings**:
-   `cargo clippy --all-targets -- -D warnings`
-7. **Documentation builds and every doc link resolves**
+   `cargo fmt --all -- --check` (use in CI or before partial
+   staging, so an in-place rewrite does not sweep unrelated
+   drift into the working tree)
+3. **Canon claims** (`cargo xtask canon-check`) -- reads
+   `CLAUDE.md`, `llms.txt`, `.claude/commands/` and
+   `.claude/agents/` for its checks, and additionally scans the
+   reference docs under `docs/` for the dangling-ID citation check
+   below, skipping the record files and the working issue docs,
+   which cite IDs as provenance rather than as live pointers.
+   `.claude/skills/` and the non-citation content of `docs/` stay
+   unchecked. It fails on five kinds of claim the tree does not
+   support: a bold cross-reference introduced by "under" that
+   names no heading in canon, a backticked repo path that does
+   not exist, a command file telling the agent to run a `git`
+   subcommand its own `allowed-tools` does not grant, prose past
+   80 columns, and a cited backlog ID that is in no backlog. It
+   reads markdown only, so it needs no compilation and runs
+   before every gate that does
+4. **Record files** (`cargo xtask records-check`) -- also
+   markdown-only, and runs right after Canon. Reads the record
+   files (the three reviewer logs and `template-feedback.md`) and
+   fails on four kinds of defect: an entry id used twice across
+   the set, a `**Label:**` outside the known set, a heading id of
+   the wrong shape, and a `Depends on` / `Supersedes` id that
+   names no entry. Only ids in those two fields are resolved, so a
+   durable id in prose stays unchecked provenance
+5. **Code duplication <= 6%** (production code, tests excluded)
+6. **Licences, bans and sources** (`cargo xtask deny`) -- runs
+   offline against `deny.toml`; a licence outside the allow-list,
+   a banned crate or a non-crates.io source fails, and a missing
+   `cargo-deny` is an error rather than a warning because there
+   is no network here to be down
+7. **No warnings**: `cargo clippy --all-targets -- -D warnings`
+8. **Documentation builds and every doc link resolves**
    (`cargo xtask doc`) -- see "Doc gate" below
-8. **`xtask`'s own tests pass** -- this step runs `-p xtask`
+9. **`xtask`'s own tests pass** -- this step runs `-p xtask`
    only, which is why the run prints `Test (xtask only)`
-9. **Coverage >= 90% overall and >= 85% per module** -- one
+10. **Coverage >= 90% overall and >= 85% per module** -- one
    file below the per-module floor fails the run even when the
-   workspace figure passes. `xtask/src/coverage.rs` owns both
-   as `OVERALL_THRESHOLD` and `MODULE_THRESHOLD`. This is
-   also where the *workspace* tests run, under
-   `llvm-cov --workspace --exclude xtask`; splitting them that
-   way stops the same tests being compiled and run twice
-10. **Security audit** (RUSTSEC; `cargo xtask audit`) --
-   a positive vulnerability fails; an unreachable advisory
-   DB degrades to a warning
+   workspace figure passes. `xtask/src/coverage.rs` owns both as
+   `OVERALL_THRESHOLD` and `MODULE_THRESHOLD`. This is also where
+   the *workspace* tests run, under
+   `llvm-cov --workspace --exclude xtask`, so the same tests are
+   not compiled and run twice
+11. **Security audit** (RUSTSEC; `cargo xtask audit`) -- a
+   positive vulnerability fails; an unreachable advisory DB
+   degrades to a warning
 
 **Dep-age, Deny and Audit are the supply-chain three**, and
 `docs/developer/supply-chain.md` explains each one: why `deny`
 runs offline and in CI while `audit` deliberately does not, and
 why `Validate OK` does not mean the dependencies were audited.
-Refer to them by name rather than by number -- a list and a run
-order that disagree is how the two documents drifted before.
+Refer to them by name rather than by number, so a list and a run
+order that disagree cannot drift.
 
-Why that order: the cooldown gate is first because it is a
-no-op on an unchanged lockfile and fails fast on a
-within-cooldown dependency **before anything compiles it or
-runs its build script**. After it the cheap static gates run,
-then the expensive dynamic ones, and the network audit last. A
-failed step prints the single command to re-run just that gate.
+Why that order: the cooldown gate is first because it is a no-op
+on an unchanged lockfile and fails fast on a within-cooldown
+dependency **before anything compiles it or runs its build
+script**. After it the cheap static gates run, then the expensive
+dynamic ones, and the network audit last. A failed step prints
+the single command to re-run just that gate.
 
 ### Doc gate: two rustdoc passes, not one
 
 `cargo xtask doc` runs rustdoc **twice** under
 `RUSTDOCFLAGS=-D warnings`: once normally, and once with
-`--document-private-items`. That is not a redundant second
-pass: a broken doc link fails in one of two ways, and neither
-pass catches both.
+`--document-private-items`. That is not a redundant second pass:
+a broken doc link fails in one of two ways, and neither pass
+catches both.
 
 - A link **inside a private module** naming something not in
   scope. The public pass never renders a private module's docs,
   so it reports nothing at all.
 - A **public page linking to a private item**. This is an error
-  in the public pass and perfectly legal in the private one --
-  rustdoc even suggests `--document-private-items` to make it
-  resolve.
+  in the public pass and legal in the private one -- rustdoc even
+  suggests `--document-private-items` to make it resolve.
 
 Both cases were live in this repo when the gate was added, and
-each was invisible to the other pass. If you are tempted to drop
-one pass to save a second, note that the remaining one will keep
-reporting success on the class it cannot see.
-
-The `-D warnings` is what makes it a gate: rustdoc's link lints
-are warnings by default, so a broken link otherwise builds
-cleanly and the docs quietly stop navigating.
+each was invisible to the other pass. The `-D warnings` is what
+makes it a gate: rustdoc's link lints are warnings by default, so
+a broken link otherwise builds cleanly and the docs quietly stop
+navigating.
 
 ## Semantic Versioning
 
@@ -1079,8 +642,7 @@ Follow [Semantic Versioning 2.0.0](https://semver.org/):
 The version lives in `crates/bombyx/Cargo.toml` and is
 the **single source of truth**. `/release` is the only thing
 that changes it; it computes the bump from the accumulated
-`[Unreleased]` CHANGELOG entries (see "Commits and
-releases").
+`[Unreleased]` CHANGELOG entries (see "Commits and releases").
 
 ## Release Notes
 
@@ -1103,20 +665,26 @@ a fresh empty `[Unreleased]` above it.
 | `/test` | Run tests with agent-friendly output |
 | `/validate` | Full quality pipeline with stepwise progress |
 | `/review` | The three reviewers in sequence, red-team looping until behaviour settles; commits nothing, independent of `/commit` |
-| `/commit` | Save-point commit with diary and CHANGELOG (no reviewing, no version bump) |
+| `/commit` | Save-point commit with CHANGELOG (no reviewing, no version bump) |
 | `/release` | Cut a SemVer release: bump the version, promote `[Unreleased]`, validate, commit, and tag |
 | `/retrospect` | Workflow retrospective (Efficiency / Quality / Speed / Cleanup). Invoked automatically by `/commit`; also callable manually mid-session |
 | `/rundown` | Grouped one-line rundown of the session's work, ending with the decisions and actions left for the operator. Reports only -- changes nothing |
+| `/handoff` | Write a self-contained handoff document for a fresh session: branch and push state, what shipped, standing decisions, and what is open and unverified |
+| `/docs-audit` | Read-only audit of the whole documentation corpus: rate each file and recommend keep, trim, or delete. Changes nothing |
 | `/todo` | Capture a work item into `docs/todo.md` (no implementation) |
-| `/implement` | Plan + implement a captured item; writes `docs/issues/<slug>.md` |
+| `/implement` | Plan + implement a captured item via a working `docs/issues/<slug>.md`, removed when the work lands |
 | `/issue` | Work a GitHub issue end to end: verify, implement, review, PR |
 | `/update-deps` | Upgrade third-party deps to the newest versions outside the 14-day cooldown |
 | `/simplify` | Review changed code for quality |
 | `/architect` | Project overview and architecture guide |
 | `/short` | Restate the reply above, or answer an instruction, in under 40 words |
+| `/ask` | Re-put the last decision the assistant raised in prose as a structured `AskUserQuestion`, recommendation first |
 | `/html-report` | Produce a self-contained local HTML report from the in-repo template (never a cloud Artifact) |
 | `/template-improve` | Log feedback for the rustbase template |
 | `/template-sync` | Sync upstream template changes |
+
+Every skill above is defined under `.claude/` in this repo except
+`/simplify`, which is a global built-in and has no file here.
 
 ## Template tooling: determinism vs judgment
 
@@ -1127,21 +695,20 @@ into two kinds, and the split matters:
 - **Determinism -- belongs in `cargo xtask`.** Delta
   determination (what changed since a watermark / SHA), log
   bookkeeping (appending an entry, minting an ID, dedup), and
-  exclude-set filtering are mechanical. They must run as
-  unit-tested `cargo xtask` commands, never as an LLM scan of
-  a growing markdown file. An LLM re-reading a 2000-line log
-  on every run is unbounded cost and drifts on format.
+  exclude-set filtering are mechanical, so they run as
+  unit-tested `cargo xtask` commands rather than an LLM scan of
+  a growing markdown file -- which would be unbounded cost and
+  would drift on format.
 - **Judgment -- belongs to the LLM.** Categorizing a change,
   deciding apply/skip, merging code, writing prose. This is
   what the commands hand back to the agent.
 
-Concretely: `backfeed-diff` (delta since the ledger
-watermark), `backfeed-record` (advance the watermark),
-`feedback-add` (append with a `tf-<date>-<slug>` ID), and
-`sync-candidates` (categorized diff minus the never-sync set)
-own the determinism; the slash commands own the judgment. When
-extending these workflows, keep new mechanical work in xtask
-with tests -- do not push it back into the prompt.
+Concretely: `backfeed-diff` (delta since the ledger watermark),
+`backfeed-record` (advance the watermark), `feedback-add`
+(append with a `tf-<date>-<slug>` ID), and `sync-candidates`
+(categorized diff minus the never-sync set) own the determinism;
+the slash commands own the judgment. When extending these
+workflows, keep new mechanical work in xtask with tests.
 
 ## Template Sync
 
@@ -1174,15 +741,16 @@ Examples of what to log:
 This feedback will be used to improve the template for
 future projects.
 
-The file uses three sections (see its header for
+The file uses two sections (see its header for
 section semantics): **Open divergences** (gaps the
-project intentionally keeps), **Resolved** (gaps closed
-by retrofit work), and **Suggestions to flow back to
-the template**. `/template-improve` routes new entries
-into the appropriate section by calling
-`cargo xtask feedback-add`, which mints a stable
-`tf-<yyyy-mm-dd>-<slug>` ID, inserts at the section top,
-and dedups -- the file is never hand-edited.
+project intentionally keeps) and **Suggestions to flow
+back to the template**. A resolved divergence is removed
+rather than filed, since the file holds live work only.
+`/template-improve` routes new entries into the
+appropriate section by calling `cargo xtask feedback-add`,
+which mints a stable `tf-<yyyy-mm-dd>-<slug>` ID, inserts
+at the section top, and dedups -- the file is never
+hand-edited.
 
 `/template-backfeed` (template repo only) pulls a
 downstream's feedback back upstream. It uses a watermark in
@@ -1250,44 +818,38 @@ file is not a wrapper.
 For any script that runs more than ~30 seconds
 (`scripts/e2e.sh`, dogfood/deploy helpers):
 
-- **Author side** -- tee stdout to `target/<name>.log` so
-  the output is durable (a captured caller, CI, or a closed
-  terminal otherwise loses it). With the
-  `exec > >(tee "$LOG") 2>&1` idiom you must also capture
-  `TEE_PID=$!` and `wait "$TEE_PID"` in the `EXIT` trap --
-  bash does not synchronize with `>(...)` process
-  substitution on exit, so the trailing trap output (often
-  the most important lines) is silently truncated without
+- **Author side** -- tee stdout to `target/<name>.log` so the
+  output is durable (a captured caller, CI, or a closed terminal
+  otherwise loses it). With the `exec > >(tee "$LOG") 2>&1`
+  idiom you must also capture `TEE_PID=$!` and `wait "$TEE_PID"`
+  in the `EXIT` trap -- bash does not synchronize with `>(...)`
+  process substitution on exit, so the trailing trap output
+  (often the most important lines) is silently truncated without
   the wait.
-- **Caller side** -- **never pipe a long-running command
-  through `tail -N` under a tight timeout.** `tail -N` says
-  "give me the end"; the timeout says "there will be no
-  end" -- it buffers until EOF that never comes within the
-  window, so the pipeline shows nothing and reads as a
-  stall. Use `run_in_background` for the completion
-  notification, or a `Monitor` with a line-buffered grep for
-  progress; reserve `| tail -N` for already-finished
-  commands.
-- **Caller side** -- **never pipe a command whose exit status
-  is the thing being verified.** A shell pipeline reports only
-  its *last* command's status, so `cmd | tee log` returns
-  `tee`'s success even when `cmd` failed. A real
-  `bombyx provision` run against the VM host failed on the
-  remote side and was read as passing for exactly this reason;
-  the failure was visible only in the log text. Redirect
-  (`cmd > log 2>&1`) or run the command bare and read the
-  captured output, and when the status matters, print it
-  (`echo "EXIT=$?"`).
-- **Caller side** -- **a bombyx command that boots or
-  provisions a VM belongs in `run_in_background`.** `up`,
-  `provision` and `scratch` wait on a download, a domain and a
-  guest boot, so they run for minutes rather than seconds; a
-  first `up` against a box the host does not have took most of
-  ten minutes here. In the foreground that time buys nothing,
-  because the session sits idle until the VM answers. Start it
-  in the background and read the log when the notification
-  arrives. `status`, `doctor` and the teardown commands are
-  quick enough to run in front.
+- **Caller side** -- **never pipe a long-running command through
+  `tail -N` under a tight timeout.** `tail -N` says "give me the
+  end"; the timeout says "there will be no end" -- it buffers
+  until an EOF that never comes within the window, so the
+  pipeline shows nothing and reads as a stall. Use
+  `run_in_background` for the completion notification, or a
+  `Monitor` with a line-buffered grep for progress; reserve
+  `| tail -N` for already-finished commands.
+- **Caller side** -- **never pipe a command whose exit status is
+  the thing being verified.** A shell pipeline reports only its
+  *last* command's status, so `cmd | tee log` returns `tee`'s
+  success even when `cmd` failed -- a real `bombyx provision`
+  run failed on the remote side and read as passing for exactly
+  this reason. Redirect (`cmd > log 2>&1`) or run the command
+  bare, and when the status matters, print it (`echo "EXIT=$?"`).
+- **Caller side** -- **a bombyx command that boots or provisions
+  a VM belongs in `run_in_background`.** `up`, `provision` and
+  `scratch` wait on a download, a domain and a guest boot, so
+  they run for minutes (a first `up` against a box the host does
+  not have took most of ten minutes here). In the foreground
+  that time buys nothing, because the session sits idle until the
+  VM answers. Start it in the background and read the log when
+  the notification arrives. `status`, `doctor` and the teardown
+  commands are quick enough to run in front.
 
 ## Lints: `doc_markdown` allowlist via `clippy.toml`
 
@@ -1311,14 +873,13 @@ file rather than redefining the list.
 
 The project version lives in
 `crates/<name>/Cargo.toml`. Avoid putting the version
-number in README body text or other markdown — those
+number in README body text or other markdown -- those
 copies drift silently from `Cargo.toml`. If a version
 mention is unavoidable in user-facing prose, embed it
 as a sentinel comment (`<!-- version: 0.5.0 -->`) so a
 script can rewrite both on release, or pull the value
 from `Cargo.toml` via the build -- a CLI binary can use
 `env!("CARGO_PKG_VERSION")`.
-
 
 ## Supply-chain hygiene
 
@@ -1334,8 +895,8 @@ Hold these rules without opening that file:
   a compromised release is most likely still live. Security
   fixes are exempt. Check a candidate with
   `cargo xtask dep-age cargo <crate> <version>`; it exits
-  non-zero inside the cooldown. When you do adopt a fresh
-  version deliberately, name it in `RUSTBASE_DEP_AGE_ALLOW`
+  non-zero inside the cooldown. When you adopt a fresh version
+  deliberately, name it in `RUSTBASE_DEP_AGE_ALLOW`
   (`name@version`, comma-separated) so the gate passes and
   leaves a record of what was waved through.
 - **`Validate OK` does not mean the dependencies were audited.**
@@ -1346,10 +907,7 @@ Hold these rules without opening that file:
 - **A lockfile-churning `cargo update` will fail the cooldown
   gate on transitive crates**, often several at once. That is
   intended: a bulk update is exactly when a freshly published
-  release slips in. Either wait the window out, bulk-approve
-  the versions you reviewed by listing them all in
-  `RUSTBASE_DEP_AGE_ALLOW`, or prefer
-  `cargo update -p <crate>` so the flagged set stays small
-  enough to read. This is the one that fires when you were not
-  expecting it, which is why it is here and not only in the
-  reference file.
+  release slips in. Either wait the window out, bulk-approve the
+  versions you reviewed by listing them in
+  `RUSTBASE_DEP_AGE_ALLOW`, or prefer `cargo update -p <crate>`
+  so the flagged set stays small enough to read.

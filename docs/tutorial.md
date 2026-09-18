@@ -5,36 +5,34 @@ work on, the VM host that runs the VMs, and a sample project
 that describes one VM. At the end you will have an agent VM you
 can open a shell into, halt, boot again, and throw away.
 
-Read it in order. Each part checks its own work before the next
-one depends on it, which is the difference between a setup that
-works and a setup that fails three steps later for a reason you
-can no longer locate.
+Read it in order. Each part checks itself before the next
+depends on it, so a failure shows up where it happened, not
+three steps later.
 
 > **What this was checked against.**
 >
-> The workstation steps were run on Windows 11 in August 2026,
-> against bombyx 0.4.1, including the two failure cases in
-> **When something goes wrong**.
+> The workstation steps (Parts 1 and 2) were run on Windows 11 in
+> August 2026, including the two failure cases in **When something
+> goes wrong**.
 >
-> **The transcripts in Parts 3 and 4 are not from that run
-> (unverified).** They show behaviour that is unreleased at the
-> time of writing -- bombyx generating the Vagrantfile, `up` as
-> five `ssh` commands, `doctor` without the `tar` and `scp`
-> rows -- none of which 0.4.1 could produce. They are written
-> from the code rather than captured from a machine. Treat
-> your own first `bombyx up` as the real test.
+> **The transcripts in Parts 3 and 4 are written from the code,
+> not captured from a run *(unverified)*.** bombyx generating the
+> Vagrantfile, `up` as five `ssh` commands, and `doctor` without
+> the `tar` and `scp` rows are all current behaviour; the exact
+> output is transcribed from the source rather than run against a
+> remote VM host. Part 1 installs bombyx from the clone, so your
+> binary is built from that same source -- treat your own first
+> `bombyx up` as the real test.
 >
 > **One route has since been exercised end to end.** On
-> 2026-09-05, the whole sequence was run on frosti with `host`
-> naming frosti itself -- `doctor`, `up`, `status`, `shell`,
-> `down`, `provision`, `scratch`, `discard` and `destroy` --
-> against a guest that booted and provisioned to completion.
-> So the local route is verified, guest included.
+> 2026-09-05, the whole sequence was run on a Linux workstation
+> with `host` naming that machine itself -- `doctor`, `up`,
+> `status`, `shell`, `down`, `provision`, `scratch`, `discard`
+> and `destroy` -- against a guest that booted and provisioned
+> to completion. So the local route is verified, guest included.
 > **Running bombyx against your own machine** carries the
-> detail, and
-> [the run record](issues/registry-run-against-frosti.md) holds
-> what it found. The `ssh`-route transcripts below are still
-> written from the code.
+> detail. The `ssh`-route transcripts below are still written
+> from the code.
 >
 > The VM host steps are a summary of
 > [vm-host-setup.md](vm-host-setup.md), which records what it
@@ -107,17 +105,17 @@ holds nothing of yours, and the host firewall rules can keep it
 off your LAN as well.
 
 **Your workstation can be the VM host too, and that is a
-supported way to run this.** You keep most of what matters -- a
-separate kernel, no host filesystem mounted into the guest, no
-credentials inside it -- so an agent that merely misbehaves,
-runs a hostile `postinstall` or acts on a prompt injection is
-still contained. What you give up is the part that depends on
-the host being a different machine: a guest that escapes the
-hypervisor is already on your workstation, and network
-isolation from your own machine is not meaningful. It is a real
-trade, not a pointless one, and it needs no special mode --
-`host` is an SSH alias, so it can point at your own machine
-(see **Running bombyx against your own machine** below).
+supported way to run this.** You keep a separate kernel, no host filesystem
+mounted into the guest, and no credentials inside the guest. So
+an agent that misbehaves, runs a hostile `postinstall`, or acts
+on a prompt injection is still contained. The part you lose is
+the one that needed two machines: an escaped guest is already
+on your workstation, and there is no separate network to
+isolate it from. This is a real trade: you give up network
+isolation, and in exchange you avoid running a second machine at
+all. It needs no special mode -- `host` is an SSH alias, so it
+can point at your own machine (see **Running bombyx against your
+own machine** below).
 
 ## Part 1: the workstation
 
@@ -133,7 +131,7 @@ Check it landed:
 
 ```console
 $ bombyx --version
-bombyx 0.4.1        # whatever you installed
+bombyx <version>    # whatever you installed
 ```
 
 ### Give the VM host an SSH alias
@@ -175,15 +173,17 @@ continue until it is silent.
 
 > **Testing one specific key honestly.** `ssh -i key -o
 > IdentitiesOnly=yes` does *not* ignore identities named in
-> `ssh_config`, so on a machine with other `IdentityFile`
-> entries it can authenticate with a different key and report
-> success for one the host has never seen. Add `-F /dev/null` to
+> `ssh_config`, so it can silently authenticate with a different
+> key on a machine that has other `IdentityFile` entries
+> configured. The reported success then belongs to that other
+> key, not the one you are testing. Add `-F /dev/null` to
 > ignore the config when that is the thing you are testing.
 
 ### Name your VM host, once
 
-bombyx reads no file out of a project's repository at all, and
-the host is the clearest reason why. A project is shared and a
+Because a VM host is never shared the way a project's
+repository is, bombyx reads no file out of that repository at
+all. A project is shared and a
 VM host is not: everyone has their own hardware on their own
 network, so a committed value would be wrong for everyone but
 its author -- and `bombyx destroy` runs `vagrant destroy` and
@@ -246,12 +246,10 @@ the fix under **Why the non-interactive PATH causes trouble**.
 
 ### Running bombyx against your own machine
 
-*Verified on frosti (Ubuntu, vagrant 2.4.9, vagrant-libvirt
-0.12.2) on 2026-09-05: every VM command ran through `sh -c`,
-the two generated files arrived intact, and a guest booted on
-this route and provisioned to completion.
-[The run record](issues/registry-run-against-frosti.md) lists
-what ran and what it did not cover.*
+*Verified on a Linux workstation (Ubuntu, vagrant 2.4.9,
+vagrant-libvirt 0.12.2) on 2026-09-05: every VM command ran
+through `sh -c`, the two generated files arrived intact, and a
+guest booted on this route and provisioned to completion.*
 
 **Read this before you do Part 2, or come back and redo it.**
 This section replaces the SSH alias you wrote in Part 1 and the
@@ -279,31 +277,33 @@ no SSH server to install, no key to authorize to your own
 account and no loopback alias to write.
 
 ```toml
-host = "frosti"     # this machine, so no ssh hop
+host = "nimbus"     # this machine, so no ssh hop
 ```
 
 **Write the name exactly.** The comparison ignores case and
 nothing else, so `host` has to be what your machine calls
 itself, character for character. Run `hostname` and copy what
 it prints. A domain counts: on a machine answering
-`frosti.lan`, `host = "frosti"` gets you the SSH route.
+`nimbus.lan`, `host = "nimbus"` gets you the SSH route.
 
 That strictness is on purpose. A bare label is easy to share --
 plenty of machines are called `ubuntu`, `vagrant` or `build01`
 -- and the domain is the part that says which one you mean.
-Matching on the label alone would let bombyx start a guest on
-your workstation while you believed it was on the isolated
-host, and then delete the workstation's directory on teardown.
+Matching on the label alone risks two things: bombyx starts a
+guest on your workstation while you believe it is on the
+isolated host, and teardown later deletes the workstation's
+directory.
 Getting it wrong the other way just gives you the SSH route,
 which you will notice immediately.
 
-**bombyx never reads your `~/.ssh/config`.** It compares the
-name you wrote and nothing else. Usually that is what you want:
+**bombyx never reads your `~/.ssh/config`.** It checks the name
+you wrote against the machine's own name, no more. Usually that
+is what you want:
 write `host = "selfhost"` with `selfhost` aliased to
 `127.0.0.1` and you get the SSH route, because you asked for it
-by name. It works against you in one case, and it is the one to
-know about: an alias named exactly what your own machine is
-named, pointing at a *different* machine, is believed. Write
+by name. The exception: if an SSH alias has exactly your
+machine's name but points elsewhere, bombyx matches on the name
+and takes the local route anyway. Write
 that one as `you@name` and the SSH route is forced, because the
 `you@` makes the two names differ.
 
@@ -314,8 +314,8 @@ Git for Windows supplies an `sh` for it to run.
 
 You can tell which route is in force. bombyx prints a line on
 stderr whenever it is running here, and `bombyx doctor` reads
-differently in two ways. Its first row names `sh` rather than
-`ssh`, because that is the program bombyx will actually start.
+differently in two ways. In the first row, bombyx prints `sh` rather
+than `ssh`, because that is the program it will actually start.
 And two host rows come back as skips rather than passes:
 `ssh`, which is not used, and `login shell`, because bombyx
 starts `sh` itself rather than asking your login shell to
@@ -326,10 +326,10 @@ above says what you give up by putting the guest on the same
 machine you work on, and the local route is what makes that
 arrangement easy to reach by accident.
 
-Nothing else changes. bombyx still writes the generated files
-and still runs `vagrant`, and the script it builds is
-identical on both routes -- `sh -c` is the same POSIX shell
-`ssh` would have started on a remote host.
+Everything else about bombyx stays the same. bombyx still
+writes the generated files and still runs `vagrant`, and the
+script it builds is identical on both routes -- `sh -c` is the
+same POSIX shell `ssh` would have started on a remote host.
 
 On the `ssh` route the host's login shell has to be POSIX,
 because bombyx sends `mkdir -p` and `cat > file` for the far
@@ -346,17 +346,18 @@ bombyx accepts it as a `provider` value -- `libvirt` and
 `hyperv` are the two it takes, and VirtualBox is not one of
 them. It does not give you the local route, though, and it
 comes with a caveat of its own: its provider needs an elevated
-shell, which an SSH session does not have. bombyx does pass the
-provider to vagrant, so setting `hyperv` on a host that cannot
-supply it fails the boot rather than quietly building a libvirt
-machine, as long as the VM does not exist yet -- vagrant
-records the provider it built a machine with and reads that
-back afterwards, so changing the key later needs a
-`bombyx destroy` first. `bombyx destroy` itself names no
-provider, which is what keeps it able to clear the directory a
-refused boot left behind. That refusal was run on a Linux host
-and it works. Whether a Windows VM host then boots the machine
-is *(unverified)*: nobody has run bombyx against one.
+shell, which an SSH session does not have. Because bombyx
+passes the provider through to vagrant, setting `hyperv` where
+it is not available fails the boot rather than quietly falling
+back to libvirt. This protection applies only before the VM
+exists. Once vagrant creates a machine, it records the provider
+and reads that record back later, so switching providers
+afterward requires a `bombyx destroy` first. `bombyx destroy` does not pass a
+provider at all, so it can remove the directory even after a
+boot failed on a provider mismatch. That refusal was tested on a Linux
+host and works there. But whether a Windows VM host then boots
+the machine is *(unverified)*: nobody has run bombyx against
+one.
 
 ### Optional: keep the VM from reaching your home network
 
@@ -366,11 +367,11 @@ going to run code you do not trust, that is worth closing.
 `scripts/agent-vm-firewall.sh` in this repo loads an nftables
 ruleset that allows outbound internet and refuses private
 destinations, and **Keeping agent VMs off your home network** in
-`vm-host-setup.md` explains what it does and does not buy. That
-section is marked unverified, so read it before applying it.
+`vm-host-firewall.md` explains what it does and does not buy.
+That page is marked unverified, so read it before applying it.
 
-You can skip this and come back to it. Nothing below depends on
-it.
+You can skip this and come back to it. The rest of the tutorial
+does not depend on it.
 
 ## Part 3: the sample project
 
@@ -426,9 +427,10 @@ myproject/                  your project repo
 Open `config.toml.sample`. It is at the root of the bombyx
 clone you made in Part 1, and also at
 <https://github.com/breki/bombyx/blob/main/config.toml.sample>.
-Its comments explain every key, and a test loads that file as
-shipped, so it cannot drift from what bombyx accepts -- which is
-worth something, because it has been unloadable twice.
+Its comments explain every key. A test loads that file as
+shipped, so the sample cannot silently stop parsing. The sample
+has failed to load twice in the past, which is why the test was
+added.
 
 Copy the `[projects.myproject]` block out of it and append it to
 the `config.toml` you wrote in Part 1, below the `host` line.
@@ -441,45 +443,12 @@ Then change these:
 | `source.repo` | the URL you push this repository to |
 | `source.ref` | the branch you push, `main` here |
 
-**Do not reach for `debian/bookworm64` here**, which is the
-obvious Debian choice and the box two later passages of this
-tutorial are written around. It has no `git`, so a first `up`
-on it cannot finish. Booting it on frosti on 2026-09-05
-confirmed that: the VM comes up, and then the provisioning
-refuses and exits 1.
-
-**Every refusal prints two `bombyx:` lines**, and it is worth
-seeing the shape once. The first says what went wrong; the
-second says what became of every credential that had already
-been uploaded, because a guest that stops part-way must not keep
-one quietly. There are three it can be talking about -- a deploy
-key, a git credential and a secrets file -- and the second line
-names whichever ones the run could have had. Vagrant prefixes
-each line with `default:`, and each reaches the terminal as one
-long line.
-
-```
-bombyx: git is not installed in this box. Install it in the box, or choose one with git, so the guest can clone the project.
-bombyx: any uploaded deploy key and any git credential have been removed from this guest, and so has any secrets file at /home/vagrant/.bombyx-env.
-```
-
-*(The wording above is taken from the script rather than copied
-out of that run, so treat the exact text as the script's and
-the behaviour as measured.)*
-
-**Your own `provision.sh` cannot save you here**, and this is
-the part that surprises people. bombyx runs one provisioner in
-the guest, its own bootstrap script, and that script's first
-job is to clone your repository. `provision.sh` lives inside
-that repository. So the `apt-get install ... git` you are
-about to write under **`vagrant/provision.sh`** below never
-runs: `git` is what fetches the file that would have installed
-it.
-
-`generic/ubuntu2204` carries `git`. A guest booted on it on
-2026-09-05 and provisioned to completion, and it is the value
-in `config.toml.sample`. Both boots are recorded under
-`tutorial-box-lacks-git` in `docs/todo.md`.
+**Pick a box that carries `git`.** `generic/ubuntu2204` does,
+and it is the value in `config.toml.sample`. A box without it --
+`debian/bookworm64`, say -- cannot finish the first `up`: the
+guest boots, then the provisioner refuses at clone time and
+exits 1. Your own `provision.sh` cannot rescue it, because `git`
+is what would fetch that file in the first place.
 
 **A GitHub or Bitbucket URL over ssh needs `curl` in the box,
 and `jq` as well for GitHub.** Before it clones, bombyx has the
@@ -537,10 +506,11 @@ would be refused.
 `[vm]` and `[source]` are required, and every key in them
 except `provider`, `deploy_key`, `env_file`, `repo_token` and
 `repo_user` is required too.
-bombyx builds the VM from the first and the guest clones the
-second, so there is nothing sensible for bombyx to guess: a base
-image is a choice, and a repository bombyx invented would be
-cloned into the guest and have its script run there.
+bombyx builds the VM from `[vm]` and the guest clones the
+repository named in `[source]`, so there is nothing sensible for
+bombyx to guess: a base image is a choice, and a repository
+bombyx invented would be cloned into the guest and have its
+script run there.
 
 `remote_root` is optional, shown with its default.
 
@@ -586,9 +556,10 @@ Two things the generated file does that are worth knowing:
   is running on. See "Telling the VM which host it runs on" in
   [../README.md](../README.md).
 
-A `Vagrantfile` committed in `vagrant/` is read by nothing.
-bombyx does not send it, and the guest's own clone is not what
-Vagrant boots from. Delete it rather than maintaining it.
+Neither bombyx nor Vagrant reads a `Vagrantfile` you commit in
+`vagrant/`. bombyx does not send it, and the guest's own clone
+is not what Vagrant boots from. Delete it rather than
+maintaining it.
 
 The guest clones `[source]` itself and runs the script named
 there, which is the file the next section covers.
@@ -608,9 +579,9 @@ mistake this arrangement exists to avoid.
 why every privileged line in the example below has it.
 
 Its working directory is the clone, at `~/project` in that
-user's home -- `bombyx shell` leaves you one directory above
-it, in that home, which is measured rather than assumed. It is
-the only copy of your code in the VM.
+user's home. `bombyx shell` leaves you one directory above it,
+in that home -- confirmed against a real VM rather than
+inferred. The clone is the only copy of your code in the VM.
 
 Write the script to be **re-runnable**. `bombyx provision` runs
 it again on an existing VM, so every step should either be
@@ -624,16 +595,16 @@ sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   build-essential ca-certificates curl git jq ripgrep tmux
 
-# The Debian box creates its user with /bin/sh, which is dash --
-# no line editing at all, so arrow keys print `^[[A` inside
-# `bombyx shell`. The tell is a bare `$ ` prompt instead of
-# bash's `user@host:dir$`. dash never consults TERM or
-# terminfo, which is why checking those comes back clean.
+# Some boxes give the vagrant user /bin/sh (dash), which has no
+# line editing, so arrow keys print `^[[A` inside `bombyx shell`
+# and the prompt is a bare `$ ` instead of bash's
+# `user@host:dir$`. Switch to bash when that is the case; on a
+# box that already uses bash this check does nothing.
 if [ "$(getent passwd vagrant | cut -d: -f7)" != "/bin/bash" ]; then
   sudo chsh -s /bin/bash vagrant
 fi
 
-# Swap, so a big build does not get OOM-killed. `swapon` lives
+# Swap space keeps a big build from getting OOM-killed. `swapon` lives
 # in /sbin, which is not on the non-interactive PATH -- calling
 # it through `sudo` is what makes it resolve, because sudo runs
 # with root's PATH. The same applies to `ldconfig` and most
@@ -651,7 +622,8 @@ sudo swapon --all
 # checked against** in the header.) The guest cannot work that
 # out for itself: `hostname` here answers `myproject`, and the
 # guest's DMI describes the emulated machine (`QEMU`), not the
-# host -- there is nothing to read at any privilege level. The
+# host -- the guest has no way, at any privilege level, to read
+# which host it runs on. The
 # two variables reach this script because the Vagrantfile
 # above passes them in; bombyx put them on the `vagrant`
 # process out on the host. A VM booted by a bare `vagrant up`
@@ -667,11 +639,11 @@ echo "provisioning done"
 Add whatever the agent needs on top -- a language toolchain, an
 agent CLI. Two rules worth keeping:
 
-- **No credentials in this file.** It is committed, and the
-  guest clones it into a machine you are treating as
+- **Do not write credentials into this file.** Git tracks it,
+  and the guest clones it into a machine you are treating as
   expendable. Pass a token in at the moment you need it
   instead, from inside `bombyx shell`.
-- **Everything idempotent.** See above; `provision` re-runs it.
+- **Make every step idempotent.** See above; `provision` re-runs it.
 
 ### Push it, or the guest has nothing to clone
 
@@ -711,98 +683,49 @@ who wants the same VM copies that table rather than cloning it.
 From any directory -- bombyx reads nothing out of the project's,
 so where you stand makes no difference:
 
-```console
-$ bombyx --project myproject doctor
-  local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
-  vmhost  ssh               ok
-  vmhost  login shell       ok    posix
-  vmhost  vagrant           ok    /usr/bin/vagrant
-  vmhost  project dir       ok    /home/igor (will create /home/igor/vms/myproject)
-  vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
-all checks passed
+```bash
+bombyx --project myproject doctor
 ```
 
 `doctor` changes nothing and runs every check rather than
 stopping at the first failure, so one run tells you everything
-that is wrong. Fix anything that is not `ok` before continuing:
-`up` creates a directory on the host and writes two files before
-it runs `vagrant`, so a missing piece otherwise surfaces
-half-way through. `usage.md` explains how to read each line.
-`ssh` is the only local program checked, because it is the only
-one a VM command runs.
+that is wrong. You want every row `ok`; fix anything that is not
+before continuing, because `up` creates a directory on the host
+and writes two files before it runs `vagrant`, so a missing piece
+otherwise surfaces half-way through. [usage.md](usage.md) under
+**Checking a host with doctor** has a sample run and how to read
+each line. `ssh` is the only local program checked, because it is
+the only one a VM command runs.
 
 ### Look at what `up` would do
 
+Every bombyx command takes `--dry-run`, which prints the exact
+shell it would run and touches nothing:
+
 ```console
 $ bombyx --project myproject --dry-run up
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; mkdir -p ~/'vms/myproject'"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/Vagrantfile' && chmod 600 ~/'vms/myproject/Vagrantfile'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; umask 077; cat > ~/'vms/myproject/bootstrap.sh' && chmod 600 ~/'vms/myproject/bootstrap.sh'"  # N bytes on stdin, not shown
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'up'; rc=\$?; rm -f ~/'vms/myproject/bombyx.env' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.env' >&2; [ \"\$rc\" = 0 ] && rc=1; }; rm -f ~/'vms/myproject/bombyx.git-credentials' || { printf 'bombyx: could not remove %s from the VM host; it may hold secrets for this project\\n' ~/'vms/myproject/bombyx.git-credentials' >&2; [ \"\$rc\" = 0 ] && rc=1; }; exit \$rc"
-ssh vmhost "unset VAGRANT_CWD VAGRANT_VAGRANTFILE VAGRANT_DOTFILE_PATH VAGRANT_DEFAULT_PROVIDER VAGRANT_PREFERRED_PROVIDERS; cd ~/'vms/myproject' && { names=\$(BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'list') && if ! printf '%s\\n' \"\$names\" | grep -qx 'fresh-install'; then BOMBYX_VM_HOST='vmhost' BOMBYX_VM_HOSTNAME=\$(hostname -s) VAGRANT_DEFAULT_PROVIDER='libvirt' vagrant 'snapshot' 'save' 'fresh-install'; fi || printf 'bombyx: could not save the fresh-install snapshot for %s; re-run this command with snapshot in place of up\\n' 'myproject' >&2; }"
 ```
 
-Five commands, and every one of them is an `ssh`: make the
-directory, write the two files bombyx generates, boot, then save
-the `fresh-install` snapshot if the VM does not already have
-one. bombyx runs nothing on your workstation.
+`up` is five `ssh` commands, and bombyx runs nothing on your
+workstation: it makes a directory on the host, writes the two
+files it generates -- the Vagrantfile and `bootstrap.sh` -- down a
+pipe so their contents never appear as command arguments, boots
+with `vagrant up`, and takes a `fresh-install` snapshot so
+`bombyx reset` has a state to return to. A project that sets
+`env_file` or `repo_token` gets a sixth or seventh command staging
+that file.
 
-The tail on the boot line removes the two files bombyx can stage
-on the VM host: the secrets file `env_file` sends, and the git
-credential `repo_token` produces. Both removals run on every
-boot even though this project sets neither key, because a run
-somebody interrupted can leave a file there and the config may
-have stopped naming it since. A project that does set `env_file`
-gets a sixth command, writing that file beside the other two,
-and one that also sets `repo_token` gets a seventh.
+**Seeing what would run** in [usage.md](usage.md) walks the plan
+line by line: why every line clears the five `VAGRANT_*` variables
+first, why the two `BOMBYX_VM_*` variables carry a `$` for the
+host's shell to fill in, and why you must never pipe the plan into
+a shell (under `dash` it boots against an empty Vagrantfile with a
+zero exit). The two file sizes it reports change with almost every
+release, so run the command to see the figures for the version you
+have.
 
-The two writes print as one line each, and neither line holds
-the file it writes. bombyx sends a generated file down a pipe
-to the `ssh` process rather than passing it as an argument,
-because every logged-in account on a machine can list the
-arguments of a running command and none of them can read a
-pipe. So there is nothing of the file for `--dry-run` to print,
-and the trailing comment gives its size instead. The host
-receives the whole file either way.
-
-One line gives no size: the git credential a `repo_token`
-produces. That file is fixed text plus the token, so its length
-would measure the token, and `docs/usage.md` says more about
-it. This project configures no token, so the plan above has no
-such line.
-
-Do not feed this plan to a shell -- not `| sh`, not
-`sh < plan.sh`. A shell reading a script from its own standard
-input hands that same input to the children it starts, and `ssh`
-forwards its standard input to the far side on every line here,
-so the plan is eaten by its own commands. What you are left with
-depends on the shell, and one of the cases is quiet: under
-`dash`, every line still runs, both generated files are written
-empty, and `vagrant up` boots against an empty Vagrantfile with
-a zero exit status. **Seeing what would run** in
-[usage.md](usage.md) has all four cases.
-
-Where the real output gives those sizes, the transcript above
-says `N`. The two files grow and shrink with almost every
-release, so a number copied in here is stale by the next one,
-and it has been wrong more often than right. Run the command to
-see the figures for the version you have.
-
-Every line begins with the same `unset`. Five vagrant variables
-can redirect a command to a different directory or a different
-provider, and one of them set on your VM host would otherwise
-decide where these commands land. bombyx clears all five, then
-writes the provider your `config.toml` asks for back in front
-of each `vagrant` call. `bombyx destroy` is the one exception,
-and `usage.md` says why.
-
-The two `BOMBYX_VM_*` variables are how the guest learns
-which machine it is running on. The generated Vagrantfile
-forwards them into the VM, where `provision.sh` can read them.
-The `\$` is deliberate: that name has to be filled in by the
-host's shell, not by yours. Every bombyx command accepts
-`--dry-run`, and the output is real shell -- worth using
-whenever you are unsure what a command is about to touch,
+`--dry-run` is real shell and touches nothing, so it is worth
+using whenever you are unsure what a command is about to do,
 especially `destroy`.
 
 ### Boot it
@@ -852,19 +775,14 @@ When you do want to move it, ask for it:
 bombyx snapshot
 ```
 
-That replaces the existing snapshot without asking, so the state
-`reset` would have returned to is gone. The VM itself and its
-caches are untouched.
+That replaces the existing snapshot without asking. `reset`
+can no longer take you back to that state -- it is gone. The VM
+itself and its caches are untouched.
 
-Two occasions call for it. The first is a VM you created before
-this behaviour existed, and what you have depends on whether you
-have run `up` since. If you have, that `up` took a snapshot of
-the machine as it stood, which was not a fresh install. If you
-have not, there is no snapshot at all. Either way `bombyx
-snapshot` is how you set the point you want. The second occasion
-is a machine you have brought somewhere worth returning to -- a
-long dependency build finished, say -- and want that to be the
-new starting point.
+Two occasions call for it: a VM whose `fresh-install` snapshot
+does not record a fresh install, and a machine you have brought
+somewhere worth returning to -- a long dependency build finished,
+say. [usage.md](usage.md) under **`bombyx snapshot`** covers both.
 
 ## Part 5: living with it
 
@@ -884,17 +802,14 @@ When you change `vagrant/provision.sh`, use `provision`, not
 bombyx provision
 ```
 
-`up` provisions a VM only when it first creates one. Every later
-`up` leaves the guest running the script it cloned when the VM
-was created -- and reports success, which is what makes the gap
-easy to miss. `provision` re-runs the bootstrap, which fetches
-your repository again and checks it out in the clone the guest
-already has, so push the change first. That checkout is forced:
-it overwrites edits to tracked files, and an untracked file
-where the new commit adds one at the same path. It also
-detaches HEAD, so committing inside the guest is not enough --
-the next `provision` leaves that commit on no branch. See
-[usage.md](usage.md) for what survives.
+`up` provisions a VM only when it first creates one; every later
+`up` leaves the old script in place and still reports success,
+which makes the gap easy to miss. `provision` re-runs the
+bootstrap, so push your change first. The re-checkout is forced
+and detaches HEAD, so an agent's uncommitted edits and in-guest
+commits do not survive it -- [usage.md](usage.md) under **Why
+`provision` is a separate command** has exactly what is kept and
+what is lost.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM instead of your project one:
@@ -911,10 +826,10 @@ confirmation:
 bombyx destroy myproject
 ```
 
-`destroy` prints the resolved `<host>:<directory>` it is about
-to remove. Read that, not the name you typed -- you gave that
-name to `--project` a moment earlier, so typing it again
-confirms only that you can read your own command line.
+`destroy` prints the resolved `<host>:<directory>` it is about to
+remove; check that target, not the name you typed.
+[usage.md](usage.md) under **Why `destroy` asks for the project
+name** explains why the name alone proves little.
 
 ## When something goes wrong
 
@@ -958,18 +873,18 @@ dealt with:
 - **Edits to `provision.sh` appear to do nothing.** `up` skips
   provisioners once the VM exists; use `bombyx provision`.
   Part 5.
-- **Arrow keys print `^[[A` inside the VM.** The box created
-  its user with dash rather than bash. Part 3.
+- **Arrow keys print `^[[A` inside the VM.** The box's user
+  shell is dash, not bash; the `chsh` step in Part 3 switches
+  it at the next login.
 - **`reset` says the snapshot was not found.** Two causes. The
-  VM predates this behaviour and has had no `up` since, so
-  nothing ever saved one. Or an `up` tried and could not: that
-  step is advisory, so it warns on stderr and lets `up`
-  succeed, and the warning is easy to miss several commands
-  later. Either way, run `snapshot` and read what it says.
-  Part 4.
+  VM has no `fresh-install` snapshot because no `up` has saved
+  one. Or an `up` tried and could not: that step is advisory, so
+  it warns on stderr and lets `up` succeed, and the warning is
+  easy to miss several commands later. Either way, run `snapshot`
+  and read what it says. Part 4.
 - **A mount or a host service hangs rather than failing.** The
   nftables rules drop guest-initiated traffic to the host. See
-  **What this does and does not buy** in `vm-host-setup.md`.
+  **What this does and does not buy** in `vm-host-firewall.md`.
 
 One habit worth borrowing: when you check whether a bombyx
 command succeeded, do not pipe it through `tee` or `tail`. A
@@ -985,4 +900,6 @@ failed run reads as a pass. Redirect to a file instead
   generated files are written, what teardown removes, how
   to read `doctor`.
 - [vm-host-setup.md](vm-host-setup.md) -- the host in detail,
-  including the network isolation rules and other distributions.
+  including the other distributions.
+- [vm-host-firewall.md](vm-host-firewall.md) -- keeping agent
+  VMs off your home network with host nftables rules.

@@ -92,6 +92,9 @@ fn steps(check: bool) -> Vec<Step> {
         // Reads markdown only, so it needs no compilation and
         // sits ahead of every gate that does.
         step("Canon", "canon-check", run_canon),
+        // Also markdown-only -- keeps the record files' ids and
+        // cross-references sound.
+        step("Records", "records-check", run_records),
         step("Duplication", "dupes", run_duplication),
         step("Deny", "deny", run_deny),
         step("Clippy", "clippy", run_clippy),
@@ -250,9 +253,14 @@ fn run_coverage() -> Result<String, String> {
     }
 }
 
-/// Duplication step -- returns detail string.
+/// Canon step -- returns detail string.
 fn run_canon() -> Result<String, String> {
     canon::canon_check_detail()
+}
+
+/// Records step -- returns detail string.
+fn run_records() -> Result<String, String> {
+    crate::records::records_check_detail()
 }
 
 fn run_duplication() -> Result<String, String> {
@@ -311,6 +319,7 @@ mod tests {
                 "Dep-age",
                 "Fmt",
                 "Canon",
+                "Records",
                 "Duplication",
                 "Deny",
                 "Clippy",

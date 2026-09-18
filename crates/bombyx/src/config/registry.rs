@@ -356,8 +356,7 @@ impl Registry {
     /// `host` is a `String` here on purpose -- the field says
     /// why -- and this module's `parse` applies its rule to
     /// every `host` in the file, so it too has passed before
-    /// this runs. (Named rather than linked: `parse` is private,
-    /// and rustdoc refuses a public page pointing at one.)
+    /// this runs.
     ///
     /// The key comes back beside the entry, so a caller
     /// building a `super::Config` gets a [`ProjectName`] the
@@ -938,7 +937,7 @@ mod tests {
     fn a_good_host_in_every_place_is_accepted() {
         // The other side of the guard: the shapes an operator
         // actually writes must survive it.
-        for good in ["vmhost", "frosti", "user@10.0.0.4", "vm-host_1.lan"] {
+        for good in ["vmhost", "homelab", "user@10.0.0.4", "vm-host_1.lan"] {
             let source = registry_toml().replace(
                 "[projects.myproject]\n",
                 &format!("[projects.myproject]\nhost = {good:?}\n"),

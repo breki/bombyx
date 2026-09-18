@@ -14,6 +14,11 @@ the same non-interactive `PATH` trap. This page covers only what
 is different, and each difference is a failure you would
 otherwise spend an afternoon diagnosing.
 
+This page is deliberately detailed, including findings still
+marked *(unverified)*: each is a WSL-specific trap that is
+expensive to rediscover, so the detail is kept rather than
+trimmed for length.
+
 > **Verified end to end on 14 August 2026** against Windows 11
 > (build 26200.9168), WSL 2.7.11 with kernel 6.18.33.2, Ubuntu
 > 24.04.4, libvirt 10.0.0, QEMU 8.2.2, Vagrant 2.4.9 and
@@ -24,9 +29,7 @@ otherwise spend an afternoon diagnosing.
 ## Whether to do this at all
 
 A WSL2 host gives up the property bombyx exists to provide, and
-it is worth being precise about which one, because the loss is
-smaller than it first appears and larger than it is comfortable
-to admit.
+it is worth being precise about which one.
 
 The agent does **not** run in WSL. It runs in a QEMU guest
 *inside* WSL, a genuine second virtual machine with its own
@@ -39,7 +42,8 @@ What changes is what waits behind that enclosure. On a dedicated
 host, code that escapes the guest lands on a spare Linux box
 holding nothing. Here it lands on the machine holding your
 password manager, your SSH keys and your browser profiles. The
-containment is equally strong; the consequence of failure is not.
+containment is as strong as on a dedicated host. The difference
+is the cost when it fails.
 
 That makes a WSL2 host a good way to exercise bombyx, to develop
 a Vagrantfile, or to work on code you have reason to trust. It is
@@ -380,16 +384,16 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/sshd.conf
 ## What this arrangement does not solve
 
 The guest network exposure described under "Keeping agent VMs off
-your home network" in [vm-host-setup.md](vm-host-setup.md) turns
+your home network" in [vm-host-firewall.md](vm-host-firewall.md) turns
 out to be **smaller** on a WSL host than on a dedicated one, and
 the reason is worth knowing rather than assuming either way.
 
 **Read both measurements in this section as suspect**
-*(unverified)*. The probe `docs/vm-host-setup.md` published at
+*(unverified)*. The probe `docs/vm-host-firewall.md` published at
 the time read from the socket after connecting, and that times
 out on any port which waits for the client to speak first, so it
-reported a blocked path for a port that had answered. The diary
-does not say which probe either run used. If they used that one,
+reported a blocked path for a port that had answered. Neither
+run recorded which probe it used. If they used that one,
 the error runs toward more exposure than this section describes
 rather than less. Both results below are therefore open
 questions, and the corrected helper is under "Checking that it

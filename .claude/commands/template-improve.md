@@ -64,14 +64,11 @@ and not a change to this file.
 ### 2. Read more than the commit messages
 
 A commit subject rarely says "this was the template's
-fault". The content that does is in four places, and all
-four are in range:
+fault". The content that does is in three places, and all
+three are in range:
 
 - **Commit bodies.** This project writes why, not just
   what, so a body often names the surprise directly.
-- **`docs/developer/DIARY.md`.** The entries record what
-  cost an hour and why, which is exactly the asymmetry
-  template feedback wants.
 - **The three reviewer backlogs under `docs/developer/`**:
   `redteam-log.md`, `artisan-log.md`, `fresh-reader-log.md`.
   A deferred finding against template-provided code *is*
@@ -131,29 +128,29 @@ worse than a quiet one.
 ## Writing an entry
 
 Decide which lifecycle section it belongs in. The file has
-three (read the file header for the full semantics):
+two (read the file header for the full semantics):
 
 - **Open divergences** (`--section open`) -- something this
   project knows is suboptimal or differently-shaped than
   the template baseline, and still carries. A pending or
   intentional difference.
-- **Resolved** (`--section resolved`) -- closed out here by
-  a retrofit or fix commit. The entry records what was
-  wrong and how it was closed.
 - **Suggestions to flow back** (`--section suggestion`) --
   an idea to push upstream. **This is where a thing this
   project already fixed for itself goes**, because the
-  template still has it. Do not file that as `resolved`:
-  resolved means the divergence is gone, not that the
-  problem is.
+  template still has it.
 
 Default to **open** when the section is genuinely unclear.
 
+When a divergence is resolved here, remove its entry rather
+than filing it: the file holds live work only, and the commit
+that closes it records what changed. That is different from a
+thing this project fixed for itself while the template still
+has it -- that stays, as a **suggestion**, because the problem
+is not gone upstream.
+
 Choose a short title (a few words -- it drives the ID slug)
 and write the body prose, wrapped at 80 characters. The body
-explains the issue, why it matters, and the suggested fix;
-for a **resolved** entry, end with a one-line summary of the
-fix.
+explains the issue, why it matters, and the suggested fix.
 
 **Record what was measured, not what was assumed.** The
 value of an entry to the template is the fact it does not
@@ -173,7 +170,7 @@ Write the body to a temp file (use the scratchpad, not the
 repo), then:
 
 ```
-cargo xtask feedback-add --section <open|resolved|suggestion> \
+cargo xtask feedback-add --section <open|suggestion> \
   --title "<short title>" --body-file <tmp>
 ```
 

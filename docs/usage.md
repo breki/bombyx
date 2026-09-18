@@ -144,15 +144,14 @@ point, not the machine, which is why it takes no confirmation
 argument the way `destroy` does. Both commands still need
 `--project`, as every command does.
 
-It is worth running in two situations. The first is a VM you
-created before this behaviour existed, and which branch you are
-in depends on whether you have run `up` since. If you have, its
-`fresh-install` exists and records the moment of that `up`,
-which was not a fresh install. If you have not, there is no
-snapshot at all. The second is a machine you have brought
-somewhere worth returning to -- a long dependency build
-finished, a toolchain installed -- which makes a better starting
-point than the original one.
+It is worth running in two situations. The first is a VM whose
+`fresh-install` snapshot does not record a fresh install -- either
+it records a later `up` (so restoring returns to that moment, not
+a clean install) or there is no snapshot at all. Which of the two
+you have depends on whether you have run `up` on that VM. The
+second is a machine you have brought somewhere worth returning to
+-- a long dependency build finished, a toolchain installed --
+which makes a better starting point than the original one.
 
 ### Why `destroy` asks for the project name
 
@@ -208,9 +207,9 @@ are doing, and prints one row per project:
 $ bombyx list
 NAME        HOST             BOX                 CPUS    MEM  STATE
 faraway     offsite.invalid  generic/ubuntu2204     4   8192  unknown
-jutro       frosti           generic/ubuntu2404     8  16384  not created
-neverbuilt  frosti           generic/ubuntu2204     4   8192  not created
-vmtest      frosti           generic/ubuntu2204     2   4096  running
+jutro       vmhost           generic/ubuntu2404     8  16384  not created
+neverbuilt  vmhost           generic/ubuntu2204     4   8192  not created
+vmtest      vmhost           generic/ubuntu2204     2   4096  running
 ```
 
 That is the whole of stdout. Rows are sorted by project name,
@@ -587,8 +586,9 @@ points at this section. It goes through the same command, so it
 gets the same `umask 077` and the same `chmod 600`, and its
 contents travel on the same pipe rather than in an argument.
 The difference is what happens next: the step that runs
-`vagrant` removes it again, so the VM host holds it for the
-length of that run rather than for the life of the VM.
+`vagrant` removes it again, so the VM host holds it only for
+that run. `docs/trust-boundary.md` says exactly how long, and
+what a run you interrupt leaves behind.
 
 A project that also sets `repo_token` sends a fourth on the same
 terms. bombyx builds it from one variable inside the third one,
@@ -620,11 +620,11 @@ repository you did not write.
 
 Because `deploy_key` is checked here and expanded on a machine
 you may not be sitting at, its rules are stricter than they
-look. It must be anchored (`/` or `~/`) and name a file below
-that anchor, with no `.` or `..` segment, no `//` and no
-trailing slash, and `~` only as its first character. Every
-character has to be a letter, a digit, `.`, `_`, `-`, `/` or
-`~`, so a path with a space in it is refused too.
+look: the value must be an anchored path (`/` or `~/`) naming a
+file below that anchor, spelled from a limited character set, so
+a path with a space in it is refused. `docs/architecture.md`
+under **What config values are checked** holds the exact rule
+and why it is shaped that way.
 
 Before `up`, `provision` or `scratch` creates anything, bombyx
 checks on the VM host that the file is there and readable, and
@@ -642,16 +642,12 @@ builds the plan and stops with a message naming the path it
 looked for when the file is not there. Nothing is created on the
 VM host first.
 
-The rules are shorter than `deploy_key`'s for a reason worth
-knowing: the path never reaches a shell on either machine.
-bombyx opens the file itself and the contents travel on the
-command's standard input, so there is nothing to quote. The
-value has to start with `~/` or be an absolute path, and it has
-to name a file rather than a directory -- so a bare `~`, a
-trailing separator, and a final `.` or `..` segment are all
-refused. A relative path is refused because it would resolve
-against whatever directory you happened to run bombyx from. A
-space or a quote in the file name is accepted.
+`env_file`'s rule is shorter, because bombyx opens the file
+itself and hands the path to no shell: the value has to be a
+`~/`-anchored or absolute path naming a file, and a space or a
+quote in the name is accepted. `docs/architecture.md` under
+**What config values are checked** lists exactly what is refused
+and why this rule is shorter than `deploy_key`'s.
 
 A config you did not write can point `env_file` at any file
 your account can read, and bombyx will deliver it into a VM

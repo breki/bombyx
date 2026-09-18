@@ -40,7 +40,7 @@ on its own, and the operator will decline it.
 
 **Canon and documentation** (`.md`, `CLAUDE.md`,
 `.claude/**`): this project keeps its rules in prose, so a
-defect there is a real defect. Read `CLAUDE.md`'s **Voice**
+defect there is a real defect. Read `CLAUDE.md`'s **Writing**
 section first, then look for:
 
 - A cross-reference or step number left stale by a renumber
@@ -58,7 +58,7 @@ section first, then look for:
   a promised guarantee that nothing enforces, a named
   function that does not exist, a described behaviour that
   differs from the implementation.
-- Prose against the **Voice** rules. Three shapes have each
+- Prose against the **Writing** rules. Three shapes have each
   been filed here before: a count-led fragment with no verb
   ("Two things about the order."), a compressed possessive
   idiom ("not bombyx's to print"), and a verb that reads
@@ -80,7 +80,9 @@ For each finding, include:
 2. **Category**: which of the categories above
 3. **What**: the specific issue with file:line ref
 4. **Why it matters**: impact on maintainability
-5. **Better approach**: specific code change
+5. **Consequence**: who acts wrongly if it stands -- a reader,
+   the operator, or bombyx
+6. **Better approach**: specific code change
 
 Your final message is the report itself -- a plain-text list of
 findings (or "No issues found."). It is consumed by the calling

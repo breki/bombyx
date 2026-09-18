@@ -1,9 +1,9 @@
 //! Which package ids go into building the distributed binary.
 //!
 //! Split from the parent module because this is the part most likely
-//! to change again: cargo has already renamed package ids once, and
-//! feature resolution and `dep_kinds` are both still moving. Reading
-//! `LICENSE-APACHE` off disk has nothing to do with any of that.
+//! to change: cargo's package-id format, feature resolution and
+//! `dep_kinds` are all moving targets. Reading `LICENSE-APACHE` off
+//! disk has nothing to do with any of that.
 //!
 //! Everything here is a pure function of the `cargo metadata` JSON,
 //! so the whole set of exclusions is tested without running cargo.
@@ -21,10 +21,10 @@ use serde_json::Value;
 /// in nobody's release archive.
 ///
 /// The test is an **empty** `publish` array, not the absence of one.
-/// Cargo reports `publish = false` as `[]` and an unrestricted crate
-/// as `null`, but `publish = ["some-registry"]` is a third case and
-/// it means the crate *is* distributed. Requiring `null` dropped it
-/// as a root, and with one publishable member that yields an empty
+/// Cargo reports `publish = false` as `[]`, an unrestricted crate as
+/// `null`, and `publish = ["some-registry"]` as a third case that
+/// *is* distributed. Testing for `null` would drop that third case
+/// as a root, leaving one publishable member with an empty
 /// attribution set from a perfectly ordinary manifest.
 pub(super) fn distributed_roots(json: &Value) -> Vec<&str> {
     let members = workspace_members(json);
@@ -48,9 +48,10 @@ fn publish_disabled(publish: &Value) -> bool {
 /// The workspace members' package ids.
 ///
 /// One place for the `workspace_members` JSON shape, because two
-/// callers need it and the shape has already changed once: cargo
-/// moved these ids from `name version (source)` to a
-/// `PackageIdSpec` URL. A format change should mean one edit.
+/// callers need it and the shape is not stable: cargo's package
+/// ids appear as a `name version (source)` string in some versions
+/// and a `PackageIdSpec` URL in others. A format change should
+/// mean one edit.
 pub(super) fn workspace_members(json: &Value) -> Vec<&str> {
     json["workspace_members"]
         .as_array()

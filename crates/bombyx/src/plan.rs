@@ -593,11 +593,8 @@ mod tests {
         // out here. Its shell is pinned twice already -- in
         // `remote` for what the builder emits, and by
         // `up_takes_the_snapshot_after_booting` for the fact that
-        // `up` ends with that builder -- and a third escaped copy
-        // was rewritten by hand three times while this change was
-        // being reviewed, wrongly on each of them. The length
-        // assertion below is what still catches a step that goes
-        // missing.
+        // `up` ends with that builder. The length assertion below
+        // is what catches a step that goes missing.
         let s = scripts_without_payloads(&Action::Up);
         assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
         assert_eq!(
@@ -873,8 +870,8 @@ mod tests {
 
     #[test]
     fn scratch_and_up_take_the_same_shape() {
-        // The two lifecycles must not drift apart again in how
-        // they write and boot. They differ in one step and the
+        // The two lifecycles must not drift apart in how they
+        // write and boot. They differ in one step and the
         // difference is deliberate: `up` ends by saving the
         // snapshot `reset` restores, and a scratch VM has no
         // `reset` -- it is discarded instead.
@@ -1096,8 +1093,8 @@ mod tests {
     /// with the action whose plan produced it.
     ///
     /// Derived from `all_actions` rather than a hand-written
-    /// list of builders, which once enumerated four call sites
-    /// where there were six. `doctor` is left out: its probes
+    /// list of builders, so a new action's script is covered
+    /// without editing this list. `doctor` is left out: its probes
     /// inspect the host's vagrant installation rather than a
     /// project's VM.
     ///

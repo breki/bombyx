@@ -7,26 +7,12 @@ because the reasoning is easy to lose and expensive to rebuild,
 and because several planned pieces of work only make sense once
 you know which way it went.
 
-> **Both statements are now reached as far as bombyx is
-> concerned. We have not confirmed either against a remote VM
-> host.**
->
-> Statement one is a property of a *machine*, so no change to
-> bombyx can establish it: a workstation someone develops the
-> project on holds the code whatever bombyx does. What this
-> work reached is that bombyx neither requires a checkout nor
-> puts a project file anywhere outside the guest.
->
-> "The boundary" states the target. "Where project code lives
-> today" states the current behaviour, which was read from
-> `crates/bombyx/src/plan.rs` rather than recalled.
->
-> What landed: bombyx generates the Vagrantfile and writes it on
-> the VM host, the guest clones the project itself, the push is
-> gone, and every setting now comes out of the operator's own
-> `config.toml` with `--project` naming the project. So neither
-> the workstation nor the VM host opens a file in the project's
-> repository, and the workstation needs no checkout.
+> **Neither statement below is confirmed against a remote VM
+> host.** Statement one is also a property of a *machine*, not of
+> bombyx: a workstation someone develops the project on holds the
+> code whatever bombyx does, so what this work reached is that
+> bombyx neither requires a checkout nor puts a project file
+> anywhere outside the guest.
 
 ## The boundary
 
@@ -55,7 +41,8 @@ workstation reads one file, `config.toml` in the operator's own
 config directory, and opens nothing in the project's directory
 -- so it needs no checkout, and `--project` is what tells
 bombyx which project a command is about. The work that got here
-is `project-config-off-repo`.
+is `project-config-off-repo`, and the current behaviour below was
+read from `crates/bombyx/src/plan.rs` rather than recalled.
 
 Two qualifications go with that, and this document owns both.
 The first is the guest's disk image, below. The second is that
@@ -212,7 +199,7 @@ attacked for it, and under the first option the VM host holds
 that copy.
 
 A firewall on the host narrows that, and does not close it.
-`docs/vm-host-setup.md` describes an nftables ruleset whose
+`docs/vm-host-firewall.md` describes an nftables ruleset whose
 input chain drops new connections arriving on the guest bridge,
 accepting only established traffic and DHCP and DNS from the
 gateway address. Once those rules are loaded, a guest cannot
@@ -229,6 +216,18 @@ guest executes on, so a hypervisor escape reaches the host and
 whatever it stores without crossing the bridge. A firewall is
 the right precaution and it is not a reason to put the
 project's source on the machine running the hypervisor.
+
+This is not hypothetical. Docker Sandboxes isolates coding agents
+the same way -- a small VM with the project shared in -- and kept
+a live host-guest file share (virtio-fs) and a guest-to-host
+socket relay. Both were escaped from inside the sandbox by
+planted symlinks in September 2026 (CVE-2026-77179,
+CVE-2026-79994), giving in-sandbox code read and write on host
+files as the hypervisor user. bombyx runs no such share: the
+guest clones the repository itself, and nothing on the host
+re-opens a guest-controlled path. Docker's own advised
+workaround -- a read-only git clone, no read-write host mount --
+is bombyx's default, not a fallback.
 
 That the first option is smaller is true, and it is not
 sufficient.
@@ -256,8 +255,9 @@ reads as tighter than it is.
 Cloning a private repository requires one, and the credential
 has to be inside the machine whose contents are assumed
 untrustworthy. Scoping it -- read-only, one repository,
-short-lived -- limits what stealing it is worth. Scoping does
-not prevent the theft. This remains an accepted exposure rather
+short-lived -- limits what a stolen copy reaches: it cannot push,
+cannot touch another repository, and expires. Scoping does not
+prevent the theft. This remains an accepted exposure rather
 than a solved problem, and it qualifies the phrase "no
 credentials" in `README.md`.
 
@@ -564,7 +564,7 @@ on the workstation or the VM host, or the boot happens in two
 phases. This is unresolved.
 
 **The guest has to reach the git host, and the network rules
-may forbid it.** `docs/vm-host-setup.md` describes an nftables
+may forbid it.** `docs/vm-host-firewall.md` describes an nftables
 ruleset that keeps agent VMs off the home network. A guest that
 cannot resolve and reach the repository cannot clone it, so the
 egress allowed by those rules has to include the git host

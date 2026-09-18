@@ -104,11 +104,10 @@ BASE=HEAD                            # uncommitted work
 git ls-files --others --exclude-standard  # untracked: check first
 git add -N <the untracked paths of this work>
 EXCL=':(exclude)docs/developer/*-log.md'
-DIARY=':(exclude)docs/developer/DIARY.md'
 OUT=target/review-1
-git diff "$BASE" -- . "$EXCL" "$DIARY" > "$OUT.diff"
+git diff "$BASE" -- . "$EXCL" > "$OUT.diff"
 git diff --name-only --diff-filter=d "$BASE" -- . "$EXCL" \
-  "$DIARY" > "$OUT.files"
+  > "$OUT.files"
 ```
 
 That pair is stage 1's snapshot, so stage 1 does not take
@@ -126,9 +125,9 @@ land in their next `git commit -a`.
 from the paths before it, which is why `.` comes first. The
 backlogs are subtracted because the stages write to them, and
 left in they would hand each round the previous round's own
-report to find defects in. The diary is subtracted because
-`code-reviewers.md` exempts it and nothing else was dropping
-it. `--diff-filter=d` drops deleted paths, which `fresh-reader`
+report to find defects in. `--diff-filter=d` drops deleted
+paths -- a lowercase filter letter excludes that status, where
+uppercase `D` would select only deletions -- which `fresh-reader`
 can only fail to open.
 
 The index keeps the intent-to-add entries. Report that, and
@@ -170,7 +169,8 @@ leaves the gates behind it *could not run*.
   that is *must not run*, and a dry run or a disposable target
   is the substitute.
 - **A workflow file** (`.claude/**`, `CLAUDE.md`) -- walk it
-  against the current tree without spawning anything. An edited
+  against the current tree yourself, without spawning a reviewer
+  for this walk; step 3's reviewers still run as usual. An edited
   agent file only takes effect next session, so record that
   part as *could not run*.
 
@@ -272,7 +272,8 @@ reviewer. Apply the mechanical ones directly -- a stale doc, a
 tightened regex, a renamed local -- and announce the set so the
 developer can interrupt. Fix what is wrong or false, and what
 would make someone act on it wrongly -- a reader, the operator,
-or bombyx itself. That last one matters because most of what
+or bombyx itself, which each reviewer's **Consequence** field
+names. That last one matters because most of what
 this loop guards is not prose: a config value interpolated into
 Ruby without quoting misleads no reader and still hands the VM
 host a command nobody wrote. Leave what would merely read
@@ -393,8 +394,9 @@ defect and we fixed it.** So:
 **When it stops converging** below: more than one defect in an
 earlier round's fix, or one landing where an earlier round
 already fixed something. A single isolated defect in a fix is
-not that: fix it, note it, and count the note against the next
-round.
+not that: fix it, note it in this round's finding list, and carry
+the count forward -- a second such defect, this round or the next,
+is the "more than one" that stops the loop.
 
 **Three rounds is the ceiling.** One branch ran five rounds at
 60, 42, 36, 37 and 33 findings, which is a flat tail rather
@@ -464,11 +466,6 @@ A finding against one of those is real and gets **logged, not
 fixed**, per **Log what you defer** above. Say in the report
 that this stage's limit excluded it rather than that nobody
 thought it mattered.
-
-`fresh-reader`'s **What worked** section is not a finding and
-needs no action. Carry it into the report anyway, so the
-passages it named are known to carry a reason the next time
-somebody trims comments.
 
 ## When it stops converging
 

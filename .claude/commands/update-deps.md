@@ -100,7 +100,7 @@ to the user -- do not force-commit a red gate.
 ### 7. Hand off to /commit
 
 Invoke `/commit`. The change type is **`chore`** (no version
-bump, no diary). In the summary the commit body should list:
+bump). In the summary the commit body should list:
 the majors adopted, the count of crates advanced, any
 `audit` warning cleared, and everything held back as too
 fresh with its age-out date.

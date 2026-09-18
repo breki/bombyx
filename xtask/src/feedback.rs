@@ -19,14 +19,17 @@ use clap::ValueEnum;
 use crate::helpers::{FEEDBACK_REL, is_fence, today_iso, workspace_root};
 
 /// Which lifecycle section of the feedback file an entry
-/// belongs in. clap renders these as `open` / `resolved` /
-/// `suggestion` and rejects anything else at the CLI boundary.
+/// belongs in. clap renders these as `open` / `suggestion` and
+/// rejects anything else at the CLI boundary.
+///
+/// There is no `resolved` section: the feedback file holds live
+/// divergences and upstream suggestions only, so a divergence
+/// closed here is removed rather than filed, the way git history
+/// records what shipped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum FeedbackSection {
     /// Known-suboptimal / pending template issues.
     Open,
-    /// Entries closed out by a fix.
-    Resolved,
     /// Ideas a derived project wants pushed upstream.
     Suggestion,
 }
@@ -37,7 +40,6 @@ impl FeedbackSection {
     fn header_keyword(self) -> &'static str {
         match self {
             FeedbackSection::Open => "open divergences",
-            FeedbackSection::Resolved => "resolved",
             FeedbackSection::Suggestion => "suggestions to flow back",
         }
     }
@@ -89,7 +91,7 @@ fn format_entry(id: &str, title: &str, body: &str) -> String {
 /// `### <id> -- ...`), not a bare substring, so an ID that is a
 /// prefix of a different same-day ID -- or that appears inside
 /// some entry's body prose -- does not spuriously suppress the
-/// add (RT-3).
+/// add.
 fn has_entry(md: &str, id: &str) -> bool {
     md.lines().any(|l| {
         l.strip_prefix("### ").is_some_and(|rest| {
@@ -106,7 +108,7 @@ fn is_target_section(line: &str, kw: &str) -> bool {
 
 /// Index of the first section header matching `kw`, skipping
 /// any `## `-looking line inside a fenced code block so a code
-/// sample cannot be chosen as the insertion point (RT-4).
+/// sample cannot be chosen as the insertion point.
 fn find_section(lines: &[&str], kw: &str) -> Option<usize> {
     let mut in_fence = false;
     for (idx, l) in lines.iter().enumerate() {
@@ -196,7 +198,7 @@ fn read_body(body_file: Option<&str>) -> Result<String, String> {
     Ok(buf)
 }
 
-/// `cargo xtask feedback-add --section <open|resolved|suggestion>
+/// `cargo xtask feedback-add --section <open|suggestion>
 /// --title <title> [--body-file <path>]` -- append a
 /// feedback entry with a minted ID. Body comes from
 /// `--body-file` or stdin. Idempotent: an ID already present is
@@ -272,25 +274,21 @@ mod tests {
 
 Body.
 
-## Resolved
-
-### existing-resolved -- old resolved entry
-
-Body.
-
 ## Suggestions to flow back to the template
 
-Nothing yet.
+### existing-suggestion -- old suggestion entry
+
+Body.
 ";
 
     #[test]
     fn insert_entry_places_at_section_top() {
         let block = "### tf-new -- New Entry\n\nNew body.";
-        let out = insert_entry(DOC, "resolved", block).unwrap();
+        let out = insert_entry(DOC, "suggestions to flow back", block).unwrap();
         let new_pos = out.find("tf-new").unwrap();
-        let old_pos = out.find("existing-resolved").unwrap();
+        let old_pos = out.find("existing-suggestion").unwrap();
         let open_pos = out.find("existing-open").unwrap();
-        // New entry precedes the existing Resolved entry...
+        // New entry precedes the existing Suggestions entry...
         assert!(new_pos < old_pos);
         // ...but comes after the (untouched) Open section.
         assert!(open_pos < new_pos);
@@ -301,32 +299,34 @@ Nothing yet.
         let block = "### tf-new -- New Entry\n\nBody.";
         let out = insert_entry(DOC, "open divergences", block).unwrap();
         let new_pos = out.find("tf-new").unwrap();
-        let resolved_hdr = out.find("## Resolved").unwrap();
-        // Inserted into Open, so it sits above the Resolved header.
-        assert!(new_pos < resolved_hdr);
+        let sugg_hdr = out
+            .find("## Suggestions to flow back to the template")
+            .unwrap();
+        // Inserted into Open, so it sits above the Suggestions header.
+        assert!(new_pos < sugg_hdr);
     }
 
     #[test]
     fn find_section_skips_headers_in_code_fences() {
-        // A `## Resolved` line inside a code fence must not be
-        // chosen as the section (RT-4).
+        // A section header inside a code fence must not be chosen
+        // as the section.
         let md = "\
 ## Open divergences
 
 ### existing -- entry
 
 ```
-## Resolved
+## Suggestions to flow back to the template
 ```
 
-## Resolved
+## Suggestions to flow back to the template
 
 ### real -- entry
 ";
         let lines: Vec<&str> = md.lines().collect();
-        let idx = find_section(&lines, "resolved").unwrap();
+        let idx = find_section(&lines, "suggestions to flow back").unwrap();
         // The real header, not the fenced one.
-        assert_eq!(lines[idx], "## Resolved");
+        assert_eq!(lines[idx], "## Suggestions to flow back to the template");
         assert!(idx > 5);
     }
 
@@ -359,16 +359,18 @@ Body.
 
 _None yet._
 
-## Resolved
+## Suggestions to flow back to the template
 
 _None yet._
 ";
         let out = insert_entry(MD, "open divergences", "### tf-new -- E\n\nB.")
             .unwrap();
-        let resolved = out.find("## Resolved").unwrap();
-        assert!(!out[..resolved].contains("_None yet._"));
+        let sugg = out
+            .find("## Suggestions to flow back to the template")
+            .unwrap();
+        assert!(!out[..sugg].contains("_None yet._"));
         // The section that is still empty keeps its placeholder.
-        assert!(out[resolved..].contains("_None yet._"));
+        assert!(out[sugg..].contains("_None yet._"));
     }
 
     #[test]
@@ -380,18 +382,25 @@ _None yet._
     #[test]
     fn insert_entry_keeps_trailing_newline_and_is_idempotent_shape() {
         let block = "### tf-new -- E\n\nB.";
-        let out = insert_entry(DOC, "resolved", block).unwrap();
+        let out = insert_entry(DOC, "suggestions to flow back", block).unwrap();
         assert!(out.ends_with('\n'));
         // The header line is preserved exactly once.
-        assert_eq!(out.matches("## Resolved").count(), 1);
+        assert_eq!(
+            out.matches("## Suggestions to flow back to the template")
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn is_target_section_matches_level_two_only() {
-        assert!(is_target_section("## Resolved", "resolved"));
         assert!(is_target_section("## Open divergences", "open"));
+        assert!(is_target_section(
+            "## Suggestions to flow back to the template",
+            "suggestions to flow back"
+        ));
         // Entry-level headers are not section headers.
-        assert!(!is_target_section("### tf-x -- resolved thing", "resolved"));
-        assert!(!is_target_section("plain text", "resolved"));
+        assert!(!is_target_section("### tf-x -- open thing", "open"));
+        assert!(!is_target_section("plain text", "open"));
     }
 }

@@ -14,10 +14,12 @@ mod feedback;
 mod fmt_cmd;
 mod helpers;
 mod licenses;
+mod records;
 mod sync;
 mod test_cmd;
 mod todo;
 mod validate;
+mod version_sync;
 
 use clap::{Parser, Subcommand};
 
@@ -67,6 +69,14 @@ enum XCommand {
     /// Check the claims canon prose makes about this repo:
     /// cross-references, paths, `git` grants, width, backlog IDs
     CanonCheck,
+    /// Check the record files' integrity: duplicate ids, unknown
+    /// field labels, malformed heading ids, and dangling
+    /// `Depends on` / `Supersedes` cross-references
+    RecordsCheck,
+    /// Rewrite the docs' `<!-- version: X -->` sentinels and their
+    /// `VERSION=` lines from `crates/bombyx/Cargo.toml` (run by
+    /// `/release`)
+    VersionSync,
     /// Security-advisory audit (RUSTSEC); requires
     /// cargo-audit
     Audit,
@@ -196,6 +206,8 @@ fn main() {
         XCommand::Coverage => coverage::coverage(),
         XCommand::Dupes => dupes::dupes(),
         XCommand::CanonCheck => canon::canon_check(),
+        XCommand::RecordsCheck => records::records_check(),
+        XCommand::VersionSync => version_sync::version_sync(),
         XCommand::Audit => audit::audit(),
         XCommand::Deny => deny::deny(),
         XCommand::Licenses {

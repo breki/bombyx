@@ -70,8 +70,6 @@ pub const CONFIG_DIR_ENV: &str = "BOMBYX_CONFIG_HOME";
 /// and serde cannot supply one because it does not know which
 /// key it is reading. `super::registry`'s parse applies the rule
 /// to every `host` in the file, and `rank` builds the winner.
-/// (Neither is linked: both are private, and rustdoc refuses a
-/// public page pointing at a private item.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostName(String);
 

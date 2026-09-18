@@ -427,10 +427,8 @@ fn state_of(line: &str) -> Option<String> {
 /// Renders the listing as an aligned table.
 ///
 /// This is where text from a VM host is made safe to print;
-/// `term::sanitize` says what that protects. (Named rather than
-/// linked because it is crate-private, so the doc build has no
-/// public page for it.) A state is the one value in the table
-/// the operator did not write.
+/// `term::sanitize` says what that protects. A state is the one
+/// value in the table the operator did not write.
 ///
 /// The `STATE` column appears only when some entry carries a
 /// state. `--offline` asked no machine anything, so a column of

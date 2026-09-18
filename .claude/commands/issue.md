@@ -1,7 +1,7 @@
 ---
 description: Work a GitHub issue end to end -- verify it is still real, settle the approach, implement with TDD, review, and open a PR that says what was not verified
 argument-hint: "<issue number>"
-allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(git merge-base:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(todo)
+allowed-tools: Bash(gh issue:*), Bash(gh pr:*), Bash(gh run:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git branch:*), Bash(git checkout:*), Bash(git fetch:*), Bash(git pull:*), Bash(git push:*), Bash(git rm:*), Bash(git merge-base:*), Bash(cargo xtask*), Bash(wc:*), Bash(grep:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review), Skill(todo)
 ---
 
 Work the GitHub issue given as the argument, from reading it to
@@ -56,10 +56,11 @@ Read enough of the code to make the question concrete. A
 question asked from the issue body alone offers the wrong
 options.
 
-Record the decision. When a planning document under
-`docs/issues/` owns the item, the decision belongs in that
-document; otherwise comment it on the issue. A decision that
-lives only in this chat is lost.
+Record the decision. A planning document under `docs/issues/`,
+if one exists, holds it while the work is in flight -- but that
+doc is removed when the item is done, so a decision meant to last
+goes in the PR body or a reference doc, not only there. A
+decision that lives only in this chat is lost.
 
 ### 3. Branch
 
@@ -90,9 +91,9 @@ same primitive needs it too. Both are easy to walk past while
 writing the guard the issue asked for.
 
 Name the primitive out loud, then list every value that reaches
-it. A `--doc` guard was written as a bare function and covered
-one argument of four; reviewers produced both rules afterwards,
-by which point two of the three unguarded siblings turned out to
+it. A guard was once written as a bare function and covered one
+argument of four; reviewers produced both rules afterwards, by
+which point two of the three unguarded siblings turned out to
 inject text into the file the guard was protecting.
 
 **Scope discipline.** Fix what the issue describes. When you
@@ -127,9 +128,9 @@ neither had been touched -- while every earlier step of that
 same series had updated both alongside the code.
 
 Grep for the old form across the repo before you finish. Leave
-the historical records alone: `docs/developer/DIARY.md`, the
-dated sections of `CHANGELOG.md` and past finding entries
-record what was true then.
+the historical records alone: the dated sections of
+`CHANGELOG.md` and past finding entries record what was true
+then.
 
 ### 6. Verify, and know what you did not verify
 
@@ -156,15 +157,11 @@ Definition of Done item 4 and no reviewer replaces it.
 ### 8. Commit
 
 Commit through `/commit`. It stages explicitly, writes the
-diary entry and the `[Unreleased]` bullet, and adds the
-`AI-Generated:` footer. It bumps no version and cuts no tag.
-Then push and open the PR, which is step 9.
+`[Unreleased]` bullet, and adds the `AI-Generated:` footer. It
+bumps no version and cuts no tag. Then push and open the PR,
+which is step 9.
 
 State in the commit body what was verified and what was not.
-
-`/commit` writes the diary entry, and this is the point in the
-work where it should be written: the decisions have settled. An
-entry written earlier records decisions that later reverse.
 
 ### 9. Keep the PR open from the first push
 
@@ -251,27 +248,26 @@ Comment on the issue with the outcome: what was fixed, the
 commit, the verification, and what remains unverified.
 
 **The operator merges the PR, so this command ends here.** Two
-things wait on that merge: closing the issue, and moving its
-entry in `docs/todo.md` to `## Done`. Say in your report that
-both are outstanding.
+things wait on that merge: closing the issue, and removing its
+entry from `docs/todo.md`. Say in your report that both are
+outstanding.
 
 The one exception is an issue step 1 established was already
 satisfied. Close that one there and then, with the evidence.
 
-Nothing moves the backlog entry on your behalf, and the command
-that does needs a date and a document:
+Nothing removes the backlog entry on your behalf:
 
 ```
-cargo xtask todo done <slug> --date <today's date> \
-  --doc issues/<the plan it belongs to>.md
+cargo xtask todo done <slug>
 ```
 
-An item worked this way usually has no `docs/issues/<slug>.md`
-of its own, so `--doc` names the plan rather than the slug.
-Omitting `--doc` altogether writes an entry with no link, which
-is right when there is no plan either. A `--doc` naming no file
-is refused, so a guessed path fails loudly instead of writing a
-dead link.
+The queue holds live work only, so this removes the entry; what
+shipped is recorded by the PR and the CHANGELOG. If a planning
+doc existed for this item, promote anything durable from it
+first -- a design or security decision, a non-obvious
+constraint -- into `docs/architecture.md`,
+`docs/trust-boundary.md`, a code comment, or the PR body, then
+remove it with `git rm docs/issues/<slug>.md`.
 
 ## Rules
 

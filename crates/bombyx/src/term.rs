@@ -7,8 +7,7 @@
 //!
 //! The table covers the whole module. Only `line_endings` is
 //! public; the other four are crate-private and so do not appear
-//! on this page, which is also why comments elsewhere name
-//! `sanitize` in backticks rather than linking to it.
+//! on this page.
 //!
 //! | Function | Answers |
 //! |----------|---------|

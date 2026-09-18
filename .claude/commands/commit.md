@@ -29,8 +29,8 @@ separate.
    - `git log --oneline -5` for recent commit style reference
    - `git config --get user.email` to confirm an author identity
      exists. It costs nothing when set, and when it is not,
-     `git commit` fails at step 8 with the diary and the
-     CHANGELOG already written. Cheaper to find here.
+     `git commit` fails at step 7 with the CHANGELOG already
+     written. Cheaper to find here.
 
 2. **Read the diff and decide the message** - work out what
    changed and settle on:
@@ -39,25 +39,7 @@ separate.
    - A concise subject line (imperative mood, no period)
    - A brief body explaining what and why
 
-3. **Update development diary** (for significant changes):
-   - Read `docs/developer/DIARY.md` to see format and
-     recent entries
-   - Add an entry for:
-     - `feat`, `fix`, `perf` commits (functional changes)
-     - Infrastructure/setup changes that affect developer
-       workflow
-   - Entries are in reverse chronological order (newest
-     first)
-   - Merge entries for the same day under one
-     `### YYYY-MM-DD` heading
-   - Title entries by topic only (no `(vX.Y.Z)` suffix).
-     The version is unknown at commit time -- it is
-     assigned later by `/release` when the changes ship.
-   - Use backticks for technical terms
-   - Skip diary update for: docs, style, test, refactor,
-     minor chores
-
-4. **Update CHANGELOG.md** (for user-observable
+3. **Update CHANGELOG.md** (for user-observable
    changes):
    - The trigger is the **observable effect**, not the
      commit type. If a user of the software would see
@@ -116,7 +98,7 @@ separate.
      only changes, CI/lint config tweaks invisible to
      users, docs-only edits.
 
-5. **E2E tests** -- **Not applicable to this project.**
+4. **E2E tests** -- **Not applicable to this project.**
    bombyx is CLI-only: the template's frontend, backend and
    Playwright suite were removed, and `scripts/e2e.sh` does
    not exist. Skip this step without comment.
@@ -127,10 +109,10 @@ separate.
    it, so for any change to the commands bombyx emits, say
    plainly in the summary whether that check has been done.
 
-6. **Stage files** - Add specific files by name (avoid
+5. **Stage files** - Add specific files by name (avoid
    `git add -A` or `git add .`). Never commit sensitive
-   files (.env, credentials, etc.). Include diary and
-   changelog if updated.
+   files (.env, credentials, etc.). Include the changelog
+   if updated.
 
    A `/review` run before this one leaves two things
    behind. Its edits to `docs/developer/*-log.md` are
@@ -144,11 +126,11 @@ separate.
    `git reset -- <path>` themselves; this skill has no
    `git reset` grant, deliberately.
 
-7. **Fix line endings** - `git add` prints a CRLF warning
+6. **Fix line endings** - `git add` prints a CRLF warning
    when it converts one, so check its output now that the
    files are staged. All text files must use LF endings.
 
-8. **Commit** using this exact format (use HEREDOC):
+7. **Commit** using this exact format (use HEREDOC):
 
 ```bash
 git commit -m "$(cat <<'EOF'
@@ -161,7 +143,7 @@ EOF
 )"
 ```
 
-9. **Workflow retrospective** -- delegate to `/retrospect`.
+8. **Workflow retrospective** -- delegate to `/retrospect`.
    It critiques how the work was done rather than the diff,
    so it wants the whole run to look back on, and it runs
    last so it cannot block shipping.

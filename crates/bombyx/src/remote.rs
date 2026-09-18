@@ -39,7 +39,7 @@ use crate::config::{Config, Transport};
 /// Environment variable carrying the VM host's SSH alias into
 /// the `vagrant` process on the host.
 ///
-/// The alias as bombyx knows it -- `frosti`, `my-vmhost` -- which
+/// The alias as bombyx knows it -- `homelab`, `my-vmhost` -- which
 /// is the name the operator recognises, since they chose it.
 ///
 /// # Why this exists
@@ -104,43 +104,12 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// the argument.
 ///
 /// **Every project vagrant call carries it except the
-/// teardown.** `DISARM_VAGRANT_REDIRECTS` clears the
-/// operator's own exported value in front of every script, so
-/// a verb that did not write the configured one back would
-/// leave vagrant choosing for itself. On a host where the
-/// other provider cannot even answer a usability probe -- a
-/// WSL2 distribution with no PowerShell for the Hyper-V
-/// provider to call -- vagrant then refuses the command.
-/// `docs/vm-host-wsl2.md` describes that host. Not a doc link:
-/// the constant is private, and rustdoc rejects a public page
-/// pointing at a private item.
-///
-/// **`is_teardown` holds the exception**, and three facts
-/// measured on a libvirt host are why. With a machine already
-/// created, vagrant reads the provider it recorded and ignores
-/// this variable. With no machine yet, an unusable provider
-/// makes it refuse `status`, `halt` and `destroy` as readily
-/// as `up`. And with nothing set at all, `destroy` in a
-/// directory holding a Vagrantfile and no machine reports
-/// "Domain is not created" and exits 0.
-///
-/// Put together: naming a provider on `destroy` can only ever
-/// refuse it, and `execute` stops at the first failing step,
-/// so the directory removal behind it never runs. Omitting it
-/// is safe because a refusal implies no machine exists, and a
-/// machine that exists carries its own recorded provider.
-///
-/// **A WSL2 host inverts that, and the gap is carried rather
-/// than closed.** There vagrant needs a provider named before
-/// it will load a project at all, so the teardown that names
-/// none is the one refused. `docs/vm-host-wsl2.md` holds the
-/// gap, the recovery and the command that would settle it.
-///
-/// The first measured fact is also a limit worth knowing:
-/// editing `provider` and re-running `up` on a project that
-/// already has a VM keeps the old one, silently.
-/// `provider-change-on-existing-vm` in `docs/todo.md` holds
-/// that.
+/// teardown.** `docs/architecture.md` under **`bombyx up`, end to
+/// end** holds why the teardown is the exception (three facts
+/// measured on a libvirt host) and how a WSL2 host inverts it.
+/// Editing `provider` on a project that already has a VM keeps the
+/// old one silently -- `provider-change-on-existing-vm` in
+/// `docs/todo.md`.
 pub const PROVIDER_ENV: &str = "VAGRANT_DEFAULT_PROVIDER";
 
 /// The environment prefix that tells the guest which machine it
@@ -216,8 +185,9 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
 /// callers hand `vagrant` its arguments, so a rule derived from
 /// those arguments cannot disagree with the command that gets
 /// run, while a separate flag could be set wrongly on a new
-/// call site. [`PROVIDER_ENV`] holds why the teardown is the
-/// one verb that names no provider.
+/// call site. `docs/architecture.md` under **`bombyx up`, end to
+/// end** holds why the teardown is the one verb that names no
+/// provider.
 fn is_teardown(args: &[&str]) -> bool {
     args.first() == Some(&"destroy")
 }
@@ -352,8 +322,9 @@ impl Tty {
 /// the pair costs those calls nothing.
 ///
 /// It is not free for the teardown, which writes nothing back.
-/// [`PROVIDER_ENV`] holds why that is the right trade on a
-/// libvirt host and a known gap on a WSL2 one.
+/// `docs/architecture.md` under **`bombyx up`, end to end** holds
+/// why that is the right trade on a libvirt host and a known gap
+/// on a WSL2 one.
 ///
 /// **Both routes need it, for different reasons.** `sh -c` is a
 /// child of bombyx and inherits everything the operator
@@ -1282,13 +1253,12 @@ mod tests {
 
     #[test]
     fn vagrant_names_the_provider_the_config_asks_for() {
-        // The defect this closes: the generated Vagrantfile
-        // *configures* a provider, and configuring one does
-        // nothing unless vagrant independently picks it. A
-        // hyperv project on a libvirt-only host booted a libvirt
-        // machine at vagrant's defaults, because the `:hyperv`
-        // settings block never applied and nothing reported the
-        // substitution.
+        // The generated Vagrantfile *configures* a provider, and
+        // configuring one does nothing unless vagrant independently
+        // picks it -- so bombyx names it. Without that, a hyperv
+        // project on a libvirt-only host boots a libvirt machine at
+        // vagrant's defaults, the `:hyperv` settings block never
+        // applying and nothing reporting the substitution.
         let mut cfg = cfg();
         cfg.vm.provider = crate::config::Provider::Hyperv;
         let script = remote_script(&vagrant(&cfg, &["up"], Tty::NoPty));

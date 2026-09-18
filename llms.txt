@@ -315,9 +315,9 @@ person has their own hardware on their own network, so a
 committed value would be wrong for everyone but its author --
 and `destroy` runs `rm -rf` on whatever host is in force. Two
 keys can name it, the project entry's own `host` and the
-file-wide one, and the entry wins. See "Where bombyx looks for
-the host" in `README.md` for the authoritative statement, and
-`config::host::rank` for the code.
+file-wide one, and the entry wins. `docs/architecture.md`'s "The
+host rule runs in two places, and this is the owner" is the
+authoritative statement, and `config::host::rank` is the code.
 
 Every `host` in the registry is checked while the file is being
 read, by `config::registry::parse` -- the file-wide key and
@@ -407,25 +407,13 @@ whose values passed.
 
 ## Build Commands
 
-```
-cargo xtask validate          # the umbrella gate; see CLAUDE.md for the steps
-cargo xtask check             # type-check all targets, run none
-cargo xtask test [filter]     # tests only
-cargo xtask clippy            # lint only
-cargo xtask doc               # doc build + doc-link check
-cargo xtask fmt               # format code
-cargo xtask coverage          # coverage check (>=90% workspace, >=85% per module)
-cargo xtask dupes             # duplication check (<=6%)
-cargo xtask audit             # RUSTSEC advisories
-```
-
-`cargo xtask validate` is the canonical gate (`CLAUDE.md`
-under Definition of Done lists the steps in run order);
-`/release` runs it as the release gate; `/commit` does not run
-it at all. A Claude Code Stop hook
-(`.claude/hooks/stop-check.sh`) runs a faster subset -- fmt,
-clippy, doc, test -- skipping coverage and duplication. Never use raw
-`cargo test` / `cargo clippy`.
+`CLAUDE.md` owns the full command list (under **Build
+Commands**) and the gate order (under **Definition of Done**).
+In short: `cargo xtask validate` is the umbrella gate; `/release`
+runs it as the release gate; `/commit` does not run it at all. A
+Claude Code Stop hook (`.claude/hooks/stop-check.sh`) runs a
+faster subset -- fmt, clippy, doc, test -- skipping coverage and
+duplication. Never use raw `cargo test` / `cargo clippy`.
 
 ## Conventions
 
@@ -454,22 +442,8 @@ clippy, doc, test -- skipping coverage and duplication. Never use raw
 
 ## Claude Code Skills
 
-| Skill | Purpose |
-|-------|---------|
-| `/check` | Type-check all targets, running none |
-| `/test` | Run tests with agent-friendly output |
-| `/validate` | Full quality pipeline |
-| `/commit` | Commit with diary and CHANGELOG (no reviewing) |
-| `/review` | Review the work with the three reviewers, one at a time; commits nothing |
-| `/release` | Cut a SemVer release |
-| `/retrospect` | Workflow retrospective |
-| `/todo` | Capture a work item into `docs/todo.md` |
-| `/implement` | Plan + execute a captured item |
-| `/issue` | Work a GitHub issue end to end |
-| `/architect` | Architecture guide |
-| `/short` | Restate the reply above in under 40 words |
-| `/template-sync` | Pull upstream rustbase improvements |
-| `/template-improve` | Log feedback about the template |
+`CLAUDE.md` owns the skills table (under **Skills**): every
+`/`-command and what it does.
 
 ## Origin
 

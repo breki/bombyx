@@ -1,3 +1,7 @@
+---
+description: Code reviewers -- which run and how; the reference /review follows
+---
+
 # Code reviewers (which run, and how)
 
 Three reviewers are available to `/review`. Their personas live
@@ -43,11 +47,6 @@ it does from the files alone. The third catches a class the
 other two are constitutionally blind to: both of them already
 know what the change is for, so neither can notice that the code
 never says.
-
-`fresh-reader` is also the only one asked what **worked**. Its
-report ends with the two or three explanations worth keeping,
-which is what stops them being edited away by somebody who
-cannot tell a comment that carries a reason from padding.
 
 This file defines *which* reviewers run, *when*, and *how* to
 spawn them. The review criteria themselves live in the agent
@@ -109,12 +108,10 @@ follow is a real defect -- `artisan.md` has a category for
 exactly this, and the reviewers have found false claims in
 these files that no gate could catch.
 
-Two kinds of file are exempt even then, because their content
-is not prose anybody reads to learn the project: the reviewers'
-own backlogs (`docs/developer/*-log.md`) and the diary
-(`docs/developer/DIARY.md`). `/review` under **Snapshot**
-subtracts both with a pathspec, so neither reaches a reviewer
-and no reviewer has to remember the exemption.
+One kind of file is exempt even then, because its content is
+not prose anybody reads to learn the project: the reviewers'
+own backlogs (`docs/developer/*-log.md`). `/review` under
+**Snapshot** already subtracts them.
 
 ## How to spawn
 
