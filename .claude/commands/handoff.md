@@ -15,13 +15,13 @@ itself. It makes no other edit, no commit, and runs no gate.
 ## Usage
 
 ```
-/handoff                       # write bombyx-handoff.md in your home dir
+/handoff                       # write handoff.md at the repo root
 /handoff <path>                # write it somewhere else
 ```
 
-The default output is `bombyx-handoff.md` in your home directory
-(`~` on Linux and macOS, `%USERPROFILE%` on Windows) -- outside the
-repository, so the handoff is never placed under source control.
+The default output is `handoff.md` at the repository root. It is
+git-ignored (an anchored `/handoff.md` in `.gitignore`), so it lives
+inside the repo for a fresh session to read but is never committed.
 
 ## Instructions
 
@@ -79,10 +79,10 @@ rather than dropping it silently.
 ### 4. Hand it over
 
 Print the output path and one line: start the new session, have it
-read the file, and delete the file once it has. Keep it outside the
-repository (the default home-directory path does this): the handoff
-is throwaway session state, not a durable record, and must not land
-under source control.
+read the file, and delete the file once it has. The default path is
+git-ignored, so the handoff stays out of source control while
+living inside the repo; it is throwaway session state, not a
+durable record.
 
 ## Rules
 
