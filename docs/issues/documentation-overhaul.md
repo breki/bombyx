@@ -335,8 +335,14 @@ starting.
 5. **Trim the long `docs/todo.md` bodies** (e.g.
    `self-update-resolves-tar-late`, `config-home-env-provenance`)
    to the fact and the open decision, and fix the wrapped
-   `**Summary:**` line in `config-tests-own-file`. (Not yet
-   tracked.)
+   `**Summary:**` line in `config-tests-own-file`. DONE
+   2026-09-18: seven entries trimmed (the two named, plus
+   `config-tests-own-file`, `validate-resume-from-step`,
+   `backlog-ids-dangle-in-docs`, `bootstrap-harness-runs-the-
+   script`, `deploy-key-path-names-vagrant`), keeping every
+   file/line detail and dropping review-provenance narration to a
+   clause; the wrapped Summary fixed; a header clause added noting
+   a body may be edited directly.
 
 6. **Trim `architecture.md` and CLAUDE.md's mannered residue.**
    DONE 2026-09-18: the two `architecture.md` anecdotes (the

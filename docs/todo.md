@@ -16,8 +16,11 @@ into the reference docs first -- see the `/implement` skill.
 Each item is a headed entry: an `### <slug>` heading, a
 `**Summary:**` line, optional `**Depends on:**` naming another
 live slug, then any prose body. `cargo xtask records-check`
-validates the ids and cross-references, so go through
-`cargo xtask todo` rather than hand-editing.
+validates the ids and cross-references, so add and remove entries
+through `cargo xtask todo` rather than hand-editing those fields.
+A body may be edited directly, as long as the heading, Summary
+and Depends-on lines are left intact and `records-check` still
+passes.
 
 ### wire-vm-host
 
@@ -141,33 +144,26 @@ possible afterwards.
 
 **Summary:** two downloads before it notices no tar
 
-Found by the red-team review of 92c2e74 (RT-7), verified by reading the call
-sites rather than by running it. bombyx resolves every program a plan needs up
-front, so a missing binary stops the run before anything changes state. That
-covers VM plans, which are a single program throughout. It does not cover
-self-update: ran_ok calls execute with one command at a time, and self_update
-calls ran_ok three separate times. So tar is resolved at the extraction step,
-after curl has already fetched the checksums and the archive. On a machine
-with git and curl but no tar, bombyx self-update does two network round trips
-and then fails. The comment above the resolution loop now says plainly that
-the loop does not cover self-update, so the code and the prose agree; closing
-the gap means resolving git, curl and tar before the first fetch. Worth fixing
-in the same pass: git is the first program self-update runs, and it was
-missing from the lists that name its tools.
+self-update resolves each program as it runs, not up front:
+`self_update` calls `ran_ok` three times, so `tar` is resolved
+only at the extraction step, after `curl` has already fetched the
+checksums and the archive. On a machine with git and curl but no
+tar, `bombyx self-update` does two network round trips and then
+fails. Fix: resolve git, curl and tar before the first fetch, and
+add git to the tool lists, where it is currently missing. Found
+by red-team (RT-7).
 
 ### validate-resume-from-step
 
 **Summary:** let validate resume at the gate that failed
 
-`cargo xtask validate` prints `-> iterate with: cargo xtask <cmd>` on a
-failure, and CLAUDE.md records that ignoring that hint four times in one
-sitting is what prompted the rule to re-run the step rather than the pipeline.
-It happened again while canon-check was being built: three full ten-gate runs,
-roughly 15s each, where fmt, clippy and a test had each failed alone.
-Re-running one gate is a different command from re-running the pipeline, which
-is the friction. A `--from <step>` flag would make the resume as cheap to type
-as the restart, and the step names already exist in `validate.rs`'s step list.
-Raised by the workflow retrospective, 2026-09-03.
+`cargo xtask validate` prints `-> iterate with: cargo xtask
+<cmd>` on a failure, but re-running one gate is a different
+command from re-running the pipeline -- that is the friction, and
+it costs a full multi-gate run each time the hint is skipped. A
+`--from <step>` flag would make the resume as cheap to type as
+the restart, and the step names already exist in `validate.rs`'s
+step list. Raised by the workflow retrospective, 2026-09-03.
 
 ### destroy-confirmation-shape
 
@@ -178,48 +174,38 @@ question, undecided.
 
 ### config-tests-own-file
 
-**Summary:** config.rs and registry.rs tests into their own
+**Summary:** config.rs and registry.rs tests into their own files
 
-files
-`mod tests` is most of config.rs -- by a wide margin -- and that is what makes
-the file unreadable in one pass.
-No exact figure here: it moves every commit and a stale one costs a reader a
-check. CLAUDE.md records
-that reading it whole overflowed a session. Move it with `#[cfg(test)] #[path
-= "config/tests.rs"] mod tests;`. Raised by artisan during the /review2 on #23
-and kept out of that change as unrelated scope.
-Carry the module-scope fixtures out with the tests: TABLE_FIELDS,
-required_tables, test_entry, test_entry_with and test_registry all sit above
-the pub use block, because two sibling test modules share them, so a reader
-scanning the top of config.rs for its public surface hits test scaffolding
-first. Raised by red-team during the /review2 on #26.
-config/registry.rs wants the same move and should land with it: it is around
-900 lines, roughly 440 of them mod tests, and after #18 it is the file that
-owns the whole config format, so it is the first file a new reader opens.
-`#[cfg(test)] #[path = "registry/tests.rs"] mod tests;` moves no code. Raised
-by artisan as AQ-9 during the /review2 on #18.
+`mod tests` is most of `config.rs` by a wide margin, which makes
+the file unreadable in one pass. No line count is given here on
+purpose: the file grows every commit, and a stale figure costs
+the next reader a check. Move it with `#[cfg(test)]
+#[path = "config/tests.rs"] mod tests;`, and carry the
+module-scope fixtures out with it -- `TABLE_FIELDS`,
+`required_tables`, `test_entry`, `test_entry_with` and
+`test_registry` -- since they sit above the `pub use` block and a
+reader scanning for the public surface hits test scaffolding
+first. `config/registry.rs` wants the same move and should land
+with it: roughly 900 lines, ~440 of them `mod tests`, and after
+#18 it owns the whole config format, so it is the first file a
+new reader opens; `#[cfg(test)] #[path = "registry/tests.rs"]
+mod tests;` moves no code. Raised by artisan (AQ-9) and red-team.
 
 ### config-home-env-provenance
 
 **Summary:** say when the environment picked the config
 
-A repo-set BOMBYX_CONFIG_HOME redirects bombyx to another config.toml, and the
-winning origin is then HostOrigin::UserFile, which main.rs deliberately stays
-silent about -- so bombyx runs against a host the operator never configured
-and prints nothing. Demonstrated live during the /review2 on #23: an anchored
-value such as /tmp/pwn passes is_anchored_dir, and a per-directory environment
-tool (direnv reading an .envrc in a clone, mise, a CI job) can set it.
-This was captured as two halves and one of them has landed. #18 passes the
-registry path into HostOrigin::describe from main.rs, so a notice that prints
-names the file bombyx read rather than a bare config.toml, and the Display
-impl that rendered the bare name is deleted. What remains is the printing
-half: print the provenance line for UserFile too whenever CONFIG_DIR_ENV
-supplied the directory, which needs a failing test first.
-Raised as red-team finding RT-1; the prose claiming otherwise was corrected in
-that change, the code was not. The second half was added during the /review2
-on #25, where a doc comment cited this item as the work that gives the notice
-the path and the item did not yet say so; it landed in #18, which the /review2
-there found still described as pending.
+An env-set `BOMBYX_CONFIG_HOME` redirects bombyx to another
+`config.toml`, giving the winning origin `HostOrigin::UserFile`,
+which `main.rs` stays silent about -- so bombyx runs against a
+host the operator never configured and prints nothing. An
+anchored value such as `/tmp/pwn` passes `is_anchored_dir`, and a
+per-directory tool (`direnv` reading an `.envrc` in a clone,
+`mise`, a CI job) can set it. The first half landed in #18: the
+notice names the file bombyx read rather than a bare
+`config.toml`. What remains: print the provenance line for
+`UserFile` too whenever `CONFIG_DIR_ENV` supplied the directory,
+which needs a failing test first. Red-team RT-1.
 
 ### vm-disk-size-unset
 
@@ -364,20 +350,16 @@ on registry-config-load (#26).
 
 **Summary:** canon-check never reads docs for cited IDs
 
-cargo xtask canon-check fails on a cited backlog ID that is in no backlog, but
-it reads only .claude/, CLAUDE.md and llms.txt. Files under docs/ cite those
-IDs too and no gate sees them. Deleting 47 entries from the three reviewer
-logs on 2026-09-06 left four dangling citations in
-docs/issues/project-config-off-repo.md, and validate passed the whole time;
-they were found by hand and repaired. A fifth,
-aq-2026-08-10-doctor-module-size in docs/developer/template-feedback.md, has
-been dangling since the 2026-08-18 sweep and nothing reported it either. Fix:
-give the unknown-ids check the same file set the other checks get plus docs/,
-or a second pass over docs/. Watch for the two files that are meant to cite
-closed IDs: an issue record and template-feedback.md both name entries on
-purpose after they are closed, so the check may need to accept a citation that
-says the entry was closed. Found by the artifact walk of the backlog sweep,
-before any reviewer was spawned.
+`cargo xtask canon-check` fails on a cited backlog ID that is in
+no backlog, but it reads only `.claude/`, `CLAUDE.md` and
+`llms.txt`. Files under `docs/` cite those IDs too and no gate
+sees them, so a citation left dangling by a backlog sweep passes
+`validate`. Fix: give the unknown-ids check the same file set the
+other checks get plus `docs/`, or a second pass over `docs/`.
+Watch the two files that cite closed IDs on purpose -- an issue
+record and `template-feedback.md` both name entries after they
+are closed -- so the check may need to accept a citation that
+says the entry was closed.
 
 ### comment-claims-have-no-gate
 
@@ -434,26 +416,24 @@ rejected there for that reason.
 **Summary:** run the script, do not match its text
 
 The tests in `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
-assert over the text of `bootstrap.sh`, and keeping them working has taken
-three flattening helpers, a comment stripper, a word splitter and two
-allowance lists -- which is the parser `CLAUDE.md` under **Test-Driven
-Development** says such a test ends up being. Four assertions turned out to be
-satisfied by the script's own comments rather than its code, each found one at
-a time: AQ-1, RT-1 and RT-2 on PR #66, over two review runs. The replacement
-is a harness that runs the script: a fake `git` on `PATH`, a temporary `HOME`,
-a fake deploy key, and assertions on what it refuses, what it removes, where
-it clones and what it exits with. That is a contract, and it would have caught
-all four comment-satisfied assertions by construction rather than singly. It
-also covers shapes text matching cannot see at all -- an `mv` on the key, a
-refusal spelled `exit 2`, an unquoted $HOME above the guard -- each of which
-had to be added to a list by hand after a reviewer found it. Unix-only, so it
-needs `#[cfg(unix)]` or an `#[ignore]` on Windows, where CI runs the suite.
-The two cross-file agreement tests stay as they are: their subject is that the
-Rust half and the shell half agree about a name, which is not a behavioural
-question. Seven comment findings on PR #66 were escalated and left unfixed
-because they turn on this decision rather than on seven separate defects:
-FR-1, FR-2, FR-5, FR-7, FR-12, FR-13 and FR-15 in that PR's review record.
-FR-12 is the argument itself.
+assert over the text of `bootstrap.sh`, and keeping them working
+has taken three flattening helpers, a comment stripper, a word
+splitter and two allowance lists -- the parser `CLAUDE.md` under
+**Test-Driven Development** says such a test becomes. Four
+assertions turned out to be satisfied by the script's comments
+rather than its code (AQ-1, RT-1, RT-2 on PR #66). Replace them
+with a harness that runs the script: a fake `git` on `PATH`, a
+temporary `HOME`, a fake deploy key, and assertions on what it
+refuses, what it removes, where it clones and what it exits with.
+That is a contract, and it also covers shapes text matching
+cannot see -- an `mv` on the key, a refusal spelled `exit 2`, an
+unquoted `$HOME` above the guard. Unix-only, so it needs
+`#[cfg(unix)]` or an `#[ignore]` on Windows, where CI runs the
+suite. The two cross-file agreement tests stay: their subject is
+that the Rust and shell halves agree about a name, which is not a
+behavioural question. Seven comment findings on PR #66 turn on
+this decision and are left unfixed until it is made: FR-1, FR-2,
+FR-5, FR-7, FR-12, FR-13, FR-15 (FR-12 is the argument itself).
 
 ### guest-branch-state-differs
 
@@ -532,21 +512,21 @@ disagree.
 **Summary:** the guest path hard-codes the account
 
 The deploy key's guest path is hard-coded as
-/home/vagrant/.ssh/bombyx-deploy-key, which assumes the box's SSH account is
-called `vagrant`. Vagrant's default for config.ssh.username is `vagrant`, but
-a box is free to set another, and some do; on such a box the upload fails
-inside Vagrant, a long way from `box` in the config. DEPLOY_KEY_GUEST_PATH in
-crates/bombyx/src/vagrantfile.rs and the matching literal in
-crates/bombyx/templates/bootstrap.sh both carry the assumption. The env_file
-work on branch feat/env-file-delivery shows the way out: Vagrant expands an
-upload's `destination:` by running `printf <destination>` through a shell
-inside the guest as the SSH account (verified in vagrant 2.4.9,
-plugins/provisioners/file/provisioner.rb expand_guest_path and
-plugins/guests/linux/cap/shell_expand_guest_path.rb), so a destination written
-`~/.ssh/bombyx-deploy-key` lands in the real home whatever the account is
-called. bootstrap.sh cannot then use $HOME, because a project's [env] table
-may set it; it reads the passwd entry instead, which is what ENV_FILE already
-does. Found while working issue #78, deliberately left out of that change.
+`/home/vagrant/.ssh/bombyx-deploy-key`, which assumes the box's
+SSH account is `vagrant`. That is Vagrant's default for
+`config.ssh.username`, but a box may set another, and some do; on
+such a box the upload fails inside Vagrant, a long way from `box`
+in the config. `DEPLOY_KEY_GUEST_PATH` in
+`crates/bombyx/src/vagrantfile.rs` and the matching literal in
+`crates/bombyx/templates/bootstrap.sh` both carry the assumption.
+The way out: Vagrant expands an upload's `destination:` by
+running `printf <destination>` through a shell inside the guest
+as the SSH account (verified in vagrant 2.4.9, file provisioner's
+`expand_guest_path`), so `~/.ssh/bombyx-deploy-key` lands in the
+real home whatever the account is called. `bootstrap.sh` cannot
+then use `$HOME`, because a project's `[env]` table may set it;
+it reads the passwd entry instead, as `ENV_FILE` already does.
+Found while working issue #78, left out of that change.
 
 ### record-files-typed-header
 
@@ -595,13 +575,4 @@ was deleted in 5da163a, so the reference dangles. The which-probe detail it
 pointed at is lost, so reword to state the uncertainty without the diary (e.g.
 'Neither run recorded which probe it used'). Part of the stale-record cleanup;
 surfaced during documentation-overhaul move 3.
-
-### trim-todo-entry-bodies
-
-**Summary:** trim long todo.md bodies to fact and open decision
-
-Several entries (self-update-resolves-tar-late, config-home-env-provenance,
-others) still carry re-derived rationale. Cut to the fact and the open decision,
-and fix the wrapped Summary line in config-tests-own-file. From the 2026-09-17
-docs-audit.
 
