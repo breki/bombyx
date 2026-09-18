@@ -467,6 +467,60 @@ fn ids_in_backlog(content: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Files and subtrees under `docs/` the dangling-citation scan
+/// skips: the record files and the working issue docs.
+///
+/// These cite IDs as data and provenance -- a finding *about* an ID
+/// that does not grep, a closed entry named on purpose, a plan
+/// discussing an ID -- so a citation there is not a live pointer,
+/// and their structural `Depends on` / `Supersedes` refs are
+/// `records-check`'s job. The scan reads the reference docs, where a
+/// citation is a pointer meant to resolve. A trailing `/` exempts a
+/// whole subtree.
+const CITATION_EXEMPT: &[&str] = &[
+    "docs/developer/redteam-log.md",
+    "docs/developer/artisan-log.md",
+    "docs/developer/fresh-reader-log.md",
+    "docs/developer/template-feedback.md",
+    "docs/issues/",
+];
+
+/// True for a repo-relative path the citation scan reads.
+fn not_citation_exempt(rel: &str) -> bool {
+    !CITATION_EXEMPT
+        .iter()
+        .any(|e| rel == *e || rel.starts_with(e))
+}
+
+/// Markdown files under `docs/`, repo-relative and sorted, that the
+/// dangling-ID citation scan reads -- every `.md` under `docs/`
+/// minus [`CITATION_EXEMPT`], so the reference docs but not the
+/// record or working files.
+fn doc_citation_files(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_docs_md(&root.join("docs"), root, &mut out);
+    out.retain(|f| not_citation_exempt(f));
+    out.sort();
+    out
+}
+
+/// Append every `.md` file under `dir`, repo-relative, recursively.
+fn collect_docs_md(dir: &Path, root: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_docs_md(&path, root, out);
+        } else if path.extension().is_some_and(|x| x == "md")
+            && let Ok(rel) = path.strip_prefix(root)
+        {
+            out.push(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
+}
+
 /// Canon files, repo-relative, in a stable order.
 fn canon_files(root: &Path) -> Vec<String> {
     let mut out = vec!["CLAUDE.md".to_string(), "llms.txt".to_string()];
@@ -538,8 +592,22 @@ fn collect() -> Result<(Vec<Finding>, usize), String> {
         findings.extend(over_wide(f, text));
         findings.extend(unknown_ids(f, text, &known_ids));
     }
+
+    // The dangling-ID citation check alone widens to docs/, so a
+    // citation left dangling by a backlog sweep is caught wherever
+    // it lives, not only in canon. The other four checks stay
+    // canon-only.
+    let mut files_read = sources.len();
+    for f in doc_citation_files(&root) {
+        let Ok(text) = std::fs::read_to_string(root.join(&f)) else {
+            continue;
+        };
+        findings.extend(unknown_ids(&f, &text, &known_ids));
+        files_read += 1;
+    }
+
     findings.sort();
-    Ok((findings, sources.len()))
+    Ok((findings, files_read))
 }
 
 /// The findings rendered one per line, for an error message.
@@ -879,5 +947,30 @@ mod tests {
             ids_in_backlog("# Log\n\n### rt-2026-09-03-one\n\n### Not an id\n");
         assert_eq!(ids.len(), 1);
         assert!(ids.contains("rt-2026-09-03-one"));
+    }
+
+    #[test]
+    fn record_and_working_files_are_exempt_from_the_citation_scan() {
+        // Record files and issue docs cite IDs as data/provenance;
+        // reference docs are read.
+        assert!(!not_citation_exempt("docs/developer/template-feedback.md"));
+        assert!(!not_citation_exempt("docs/developer/redteam-log.md"));
+        assert!(!not_citation_exempt("docs/issues/anything.md"));
+        assert!(not_citation_exempt("docs/architecture.md"));
+        assert!(not_citation_exempt("docs/developer/supply-chain.md"));
+    }
+
+    #[test]
+    fn a_dangling_citation_in_a_docs_file_is_reported() {
+        // The scan is path-agnostic, so a docs/ file is checked the
+        // same as a canon file once collect() feeds it in.
+        let known = BTreeSet::new();
+        let f = unknown_ids(
+            "docs/architecture.md",
+            "see rt-2026-09-03-ghost",
+            &known,
+        );
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].file, "docs/architecture.md");
     }
 }

@@ -533,13 +533,15 @@ order they execute** so the numbers match what the run prints:
    `cargo fmt --all -- --check` (use in CI or before partial
    staging, so an in-place rewrite does not sweep unrelated
    drift into the working tree)
-3. **Canon claims** (`cargo xtask canon-check`) -- reads four
-   inputs and only these four: `CLAUDE.md`, `llms.txt`,
-   `.claude/commands/` and `.claude/agents/`. So `.claude/skills/`
-   and everything under `docs/` are unchecked, and a green gate
-   says nothing about them (`backlog-ids-dangle-in-docs` in
-   `docs/todo.md`). It fails on five kinds of claim the tree does
-   not support: a bold cross-reference introduced by "under" that
+3. **Canon claims** (`cargo xtask canon-check`) -- reads
+   `CLAUDE.md`, `llms.txt`, `.claude/commands/` and
+   `.claude/agents/` for its checks, and additionally scans the
+   reference docs under `docs/` for the dangling-ID citation check
+   below, skipping the record files and the working issue docs,
+   which cite IDs as provenance rather than as live pointers.
+   `.claude/skills/` and the non-citation content of `docs/` stay
+   unchecked. It fails on five kinds of claim the tree does not
+   support: a bold cross-reference introduced by "under" that
    names no heading in canon, a backticked repo path that does
    not exist, a command file telling the agent to run a `git`
    subcommand its own `allowed-tools` does not grant, prose past

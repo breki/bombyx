@@ -346,21 +346,6 @@ comment claims the opposite, that the message says both. Changing what bombyx
 prints wants a failing test first. Raised by red-team as RT-11 in the /review2
 on registry-config-load (#26).
 
-### backlog-ids-dangle-in-docs
-
-**Summary:** canon-check never reads docs for cited IDs
-
-`cargo xtask canon-check` fails on a cited backlog ID that is in
-no backlog, but it reads only `.claude/`, `CLAUDE.md` and
-`llms.txt`. Files under `docs/` cite those IDs too and no gate
-sees them, so a citation left dangling by a backlog sweep passes
-`validate`. Fix: give the unknown-ids check the same file set the
-other checks get plus `docs/`, or a second pass over `docs/`.
-Watch the two files that cite closed IDs on purpose -- an issue
-record and `template-feedback.md` both name entries after they
-are closed -- so the check may need to accept a citation that
-says the entry was closed.
-
 ### comment-claims-have-no-gate
 
 **Summary:** no gate checks a claim against the code
