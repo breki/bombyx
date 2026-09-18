@@ -122,8 +122,7 @@ const NOT_A_COMMAND: &[&str] = &[
 /// past it, and `sudo mkdir -p "$d"` reads as read-only. That is
 /// worse than a gap: `sudo` in front of `systemctl`, `apt` or
 /// `mkdir` is exactly what a probe author reaches for, so the
-/// blind spot sat precisely where the command list was aimed. The
-/// substring version this replaced did catch these.
+/// blind spot sits precisely where the command list is aimed.
 const TRANSPARENT_PREFIX: &[&str] = &[
     "sudo", "doas", "env", "command", "nohup", "nice", "ionice", "setsid",
     "stdbuf", "xargs", "timeout",
@@ -365,10 +364,9 @@ mod tests {
 
     #[test]
     fn mutating_token_catches_the_whole_family_not_one_spelling() {
-        // The guard is only worth having if it fires, and the
-        // earlier substring version fired on exactly the
-        // spellings it happened to list. Each line below is a
-        // form that slipped past it.
+        // The guard is only worth having if it fires. Each line
+        // below is a form a fixed-spelling match would miss and
+        // the token scanner catches.
         for (script, want) in [
             // Trailing-space matching missed every one of these.
             ("printf x >out", "redirection >out"),
@@ -384,7 +382,7 @@ mod tests {
             ("if true; then rm -rf x; fi", "rm"),
             ("LC_ALL=C rm -rf x", "rm"),
             ("out=$(mkdir -p y)", "mkdir"),
-            // vagrant subcommands beyond the four once listed.
+            // vagrant subcommands the mutating list must cover.
             ("vagrant init", "vagrant init"),
             ("vagrant box add x", "vagrant box"),
             ("vagrant plugin uninstall x", "vagrant plugin uninstall"),
@@ -393,8 +391,8 @@ mod tests {
             // an arbitrary command inside the guest.
             ("vagrant ssh -c 'rm -rf /vagrant'", "vagrant ssh -c"),
             ("cd x && mkdir -p y", "mkdir"),
-            // A wrapper that runs another command. Stopping at
-            // the wrapper made `sudo mkdir` read as read-only --
+            // A wrapper that runs another command; the guard must
+            // look past it, or `sudo mkdir` reads as read-only --
             // and `sudo` in front of `mkdir`, `apt` or `systemctl`
             // is exactly what a probe author reaches for.
             ("sudo mkdir -p \"$d\"", "mkdir"),
@@ -458,9 +456,9 @@ mod tests {
     #[test]
     fn mutating_token_answers_rather_than_panicking() {
         // It is a `pub` function reading script text that can
-        // carry a non-ASCII path. Taking eight *bytes* of context
-        // after the `>` panicked when a character straddled the
-        // boundary; eight characters cannot.
+        // carry a non-ASCII path. It takes eight *characters* of
+        // context after the `>`, not bytes, so a multibyte
+        // character on the boundary cannot make it panic.
         assert!(mutating_token(">\u{3b1}\u{3b1}\u{3b1}\u{3b1}").is_some());
         assert!(mutating_token("echo \u{65e5}\u{672c}\u{8a9e}").is_none());
         assert_eq!(mutating_token(""), None);

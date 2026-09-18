@@ -808,12 +808,12 @@ mod tests {
 
     #[test]
     fn a_parse_error_names_the_position_and_not_the_line() {
-        // The disclosure this replaced: `toml`'s own `Display`
-        // quotes the offending source line, and bombyx printed
-        // it to stderr. `--config` takes any path at all, so a
-        // mistyped `--config ~/.ssh/id_ed25519` aims the parser
-        // at a private key and has a line echoed. Measured
-        // against the built binary before and after.
+        // `toml`'s own `Display` quotes the offending source line,
+        // so printing it would echo file contents to stderr.
+        // `--config` takes any path at all, so a mistyped
+        // `--config ~/.ssh/id_ed25519` aims the parser at a private
+        // key -- which is why bombyx reports the position, not the
+        // line.
         let key = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
                    b3BlbnNzaC1rZXktdjEAAAAA\n";
         let err = parse_whole(key).unwrap_err();
@@ -977,12 +977,11 @@ mod tests {
 
     #[test]
     fn appdata_is_consulted_only_on_windows() {
-        // Documented as the Windows location, and it was checked
-        // on every platform. `APPDATA` is routinely exported in
-        // processes that are not Windows -- under WSL via
-        // `WSLENV`, under Wine, in some CI images -- where it beat
-        // `$HOME/.config` and made bombyx read a host out of a
-        // file the docs said applied only to Windows.
+        // `APPDATA` is consulted only on Windows. It is routinely
+        // exported off Windows too -- under WSL via `WSLENV`, under
+        // Wine, in some CI images -- so consulting it elsewhere
+        // would let it beat `$HOME/.config` and point bombyx at the
+        // wrong host.
         let vars = [("APPDATA", "/app"), ("HOME", "/home/i")];
         assert_eq!(
             config_dir(&vars, true),
@@ -999,8 +998,8 @@ mod tests {
 
     #[test]
     fn a_config_dir_that_is_not_anchored_counts_as_unset() {
-        // The whole family, not just the blank case that prompted
-        // the guard. Each of these resolves against the working
+        // The whole family, not just the blank case. Each of
+        // these resolves against the working
         // directory -- which for this tool means taking the VM
         // host out of whatever repo bombyx was run in, the one
         // thing this design removes. `..` walks out of the tree,
@@ -1061,9 +1060,9 @@ mod tests {
     #[test]
     fn a_symlinked_registry_is_followed() {
         // Every ordinary dotfile manager (stow, chezmoi, a
-        // hand-made `ln -s`) symlinks exactly this file, and
-        // refusing one made bombyx fail on every subcommand with
-        // a message that never mentioned symlinks.
+        // hand-made `ln -s`) symlinks exactly this file, so
+        // refusing a symlinked registry would fail every
+        // subcommand for a common, legitimate setup.
         let (dir, link) = registry_file_in_a_dir("");
         std::fs::remove_file(&link).unwrap();
         let real = dir.path().join("real-config.toml");
@@ -1868,14 +1867,14 @@ mod load_project_tests {
         // the advice breaks every project rather than fixing
         // this one.
         //
-        // The whole family, not the case that prompted it. Each
-        // one is refused for its own reason inside
-        // `name::check_segment`, and the point here is that
-        // `load_project` consults that function at all.
+        // The whole family, not one case. Each is refused for its
+        // own reason inside `name::check_segment`, and the point
+        // here is that `load_project` consults that function at
+        // all.
         for name in ["", ".", "..", "../../etc", "-x", "a/b", "a/"] {
-            // No registry path, which is the route that had no
-            // check: with one, `Registry::project` runs the rule
-            // before the map lookup.
+            // No registry path -- the route where `load_project`
+            // is the one place the rule runs; with a path,
+            // `Registry::project` also runs it before the lookup.
             let err = Config::load_project(name, None).unwrap_err();
             let text = err.to_string();
             assert!(

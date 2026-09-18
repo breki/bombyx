@@ -894,14 +894,14 @@ out without running the rule. They can, because
 `config::registry::parse` already ran it on every `host` in the
 file, and `parse` is the only way to build a `Registry`.
 
-**Every value in an entry is now checked before any lookup.**
+**Every value in an entry is checked before any lookup.**
 The project name, because it is the table key and a
 `ProjectName`; `host`, by the pass described above; and the
 rest, because their types refuse a bad value while the table
 parses. So one project's broken table fails the whole file,
 whichever project the operator asked for. That is the price of
 the guarantee, and it is the same price a table that does not
-parse has always cost.
+parse costs.
 
 A type promises that its rules *ran*. A checking function
 promises only that they ran on the paths that call it. `Vm`,

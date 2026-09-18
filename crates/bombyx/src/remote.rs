@@ -1282,13 +1282,12 @@ mod tests {
 
     #[test]
     fn vagrant_names_the_provider_the_config_asks_for() {
-        // The defect this closes: the generated Vagrantfile
-        // *configures* a provider, and configuring one does
-        // nothing unless vagrant independently picks it. A
-        // hyperv project on a libvirt-only host booted a libvirt
-        // machine at vagrant's defaults, because the `:hyperv`
-        // settings block never applied and nothing reported the
-        // substitution.
+        // The generated Vagrantfile *configures* a provider, and
+        // configuring one does nothing unless vagrant independently
+        // picks it -- so bombyx names it. Without that, a hyperv
+        // project on a libvirt-only host boots a libvirt machine at
+        // vagrant's defaults, the `:hyperv` settings block never
+        // applying and nothing reporting the substitution.
         let mut cfg = cfg();
         cfg.vm.provider = crate::config::Provider::Hyperv;
         let script = remote_script(&vagrant(&cfg, &["up"], Tty::NoPty));

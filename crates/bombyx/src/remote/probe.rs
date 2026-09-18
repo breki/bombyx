@@ -238,12 +238,9 @@ mod tests {
 
     /// Every probe command a live run sends.
     ///
-    /// Derived from `doctor::host_probes` rather than listed here.
-    /// The listed version claimed in its own comment to prevent
-    /// "naming five and missing the sixth" while being exactly
-    /// such a list: a new builder would have been skipped by every
-    /// test below with nothing failing. Deriving it also means
-    /// these assertions cover the commands that are really sent.
+    /// Derived from `doctor::host_probes` rather than hand-listed,
+    /// so a new probe builder is covered here automatically and
+    /// these assertions test the commands that are really sent.
     fn all(cfg: &Config) -> Vec<RemoteCommand> {
         crate::doctor::probe_commands(&crate::doctor::host_probes(cfg))
     }

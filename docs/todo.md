@@ -379,29 +379,6 @@ mechanically checkable: a backticked item name in a doc comment that no longer
 exists in the crate is the cheapest candidate, and rustdoc intra-doc links
 already cover part of it. Found during the /review2 on the backlog sweep.
 
-### more-comments-narrating-the-past
-
-**Summary:** a second set of history comments
-
-comments-narrating-the-past closed on 2026-09-06 having fixed the eight
-comments it named. The /review2 on that sweep then found the class alive
-elsewhere, so the entry covered its own list rather than the tree. The
-survivors fresh-reader named: doctor/readonly.rs lines 130, 375, 391, 401 and
-466 (the substring version this replaced, the earlier substring version,
-vagrant subcommands beyond the four once listed, stopping at the wrapper made
-sudo mkdir read as read-only, taking eight bytes of context panicked);
-remote/probe.rs around 290, the doc on the test helper all, six of whose eight
-lines argue with a deleted list; plan.rs 428, 586 and 806; config.rs 527, 767,
-780 and 1317; remote.rs 828; docs/architecture.md 571;
-xtask/src/licenses/graph.rs 26. Two want judgement rather than a rewrite:
-plan.rs 407-436 argues a case against a reviewer nobody can read and states a
-hypothetical future condition, which CLAUDE.md rules out separately, and the
-invariant worth keeping there is that two tests spell out nearly the same
-script deliberately, because two independently written expectations cannot
-drift the same wrong way. Verify each rewrite against the code as you make it:
-six sharpened comments in the sweep this came from turned out false, which is
-what comment-claims-have-no-gate records.
-
 ### bootstrap-sets-own-path
 
 **Summary:** guard without a name list to keep current
