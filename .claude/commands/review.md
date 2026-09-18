@@ -266,7 +266,8 @@ reviewer. Apply the mechanical ones directly -- a stale doc, a
 tightened regex, a renamed local -- and announce the set so the
 developer can interrupt. Fix what is wrong or false, and what
 would make someone act on it wrongly -- a reader, the operator,
-or bombyx itself. That last one matters because most of what
+or bombyx itself, which each reviewer's **Consequence** field
+names. That last one matters because most of what
 this loop guards is not prose: a config value interpolated into
 Ruby without quoting misleads no reader and still hands the VM
 host a command nobody wrote. Leave what would merely read
@@ -387,8 +388,9 @@ defect and we fixed it.** So:
 **When it stops converging** below: more than one defect in an
 earlier round's fix, or one landing where an earlier round
 already fixed something. A single isolated defect in a fix is
-not that: fix it, note it, and count the note against the next
-round.
+not that: fix it, note it in this round's finding list, and carry
+the count forward -- a second such defect, this round or the next,
+is the "more than one" that stops the loop.
 
 **Three rounds is the ceiling.** One branch ran five rounds at
 60, 42, 36, 37 and 33 findings, which is a flat tail rather

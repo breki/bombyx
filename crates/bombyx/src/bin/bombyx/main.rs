@@ -48,8 +48,8 @@ struct Cli {
     #[arg(short, long, global = true)]
     project: Option<String>,
 
-    /// Path to your registry; defaults to `config.toml` in your
-    /// config directory
+    /// Path to your `config.toml`, the project registry; defaults
+    /// to the one in your config directory
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 

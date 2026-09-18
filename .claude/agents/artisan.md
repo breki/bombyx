@@ -79,7 +79,9 @@ For each finding, include:
 2. **Category**: which of the categories above
 3. **What**: the specific issue with file:line ref
 4. **Why it matters**: impact on maintainability
-5. **Better approach**: specific code change
+5. **Consequence**: who acts wrongly if it stands -- a reader,
+   the operator, or bombyx
+6. **Better approach**: specific code change
 
 Your final message is the report itself -- a plain-text list of
 findings (or "No issues found."). It is consumed by the calling

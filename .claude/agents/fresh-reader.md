@@ -93,7 +93,9 @@ For each finding:
 2. **Where it left me**: the question you could not answer,
    in one sentence. This is the part the other reviewers
    cannot produce -- be concrete about what you did not know.
-3. **What would have helped**: the sentence or example that
+3. **Consequence**: who acts wrongly if it stands -- a reader,
+   the operator, or bombyx.
+4. **What would have helped**: the sentence or example that
    would have unstuck you. Suggest the content, not the
    wording.
 

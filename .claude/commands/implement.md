@@ -1,6 +1,6 @@
 ---
 description: Plan and implement a captured issue from docs/todo.md
-allowed-tools: Bash(cargo xtask*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git rm:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit)
+allowed-tools: Bash(cargo xtask*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git rm:*), Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Skill(commit), Skill(review)
 ---
 
 Plan and implement an item captured by `/todo`. The plan lives
