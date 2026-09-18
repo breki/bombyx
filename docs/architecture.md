@@ -813,17 +813,12 @@ that could read as an option.
 **Where the key's existence is checked is deliberate.**
 `plan::write_then` puts `remote::require_file` ahead of the
 `mkdir`, so `up`, `provision` and `scratch` refuse a missing key
-before creating a directory or writing a file.
-The generated Vagrantfile could test the file itself and
-`raise`, saving a round trip, and must not: `vagrant destroy`
-loads that Vagrantfile too, so a raise there leaves a directory
-no bombyx command can remove -- teardown stops at the failing
-destroy and never reaches `remove_dir`.
-`remote::destroy_vm_if_present` records the same hazard for a
-Vagrantfile reading an environment variable with no default.
-bombyx knows which verb is running and the Vagrantfile does
-not, so the refusal lives in the plan and the upload stays
-conditional.
+before creating a directory or writing a file. The check belongs
+to the plan, not the Vagrantfile that `vagrant destroy` also
+loads; `docs/trust-boundary.md` under **What this costs** holds
+that argument, and `remote::destroy_vm_if_present` records the
+same hazard for a Vagrantfile reading an environment variable
+with no default.
 
 `cpus` and `memory` are `std::num::NonZeroU32`, which is the
 whole rule either has and makes a zero unrepresentable for a
