@@ -505,17 +505,3 @@ then use `$HOME`, because a project's `[env]` table may set it;
 it reads the passwd entry instead, as `ENV_FILE` already does.
 Found while working issue #78, left out of that change.
 
-### sync-version-sentinels
-
-**Summary:** the docs' version sentinels drift on release
-
-`/release` bumps `crates/bombyx/Cargo.toml` and the CHANGELOG but never
-rewrites the `<!-- version: X -->` sentinel and the `VERSION=X` line beneath
-it in the docs. That is how `docs/quickstart.md` drifted to 0.5.0 while the
-source of truth was 0.6.0. As of documentation-overhaul move 2, quickstart is
-the single owner of the install snippet, so there is one sentinel to keep in
-step -- but nothing keeps it. Fix: a unit-tested `cargo xtask` step (or a
-`/release` step) that rewrites every version sentinel from `Cargo.toml`,
-ideally gated by a check like `canon-check`. Surfaced during
-documentation-overhaul move 2.
-

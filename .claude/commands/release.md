@@ -1,6 +1,6 @@
 ---
 description: Cut a SemVer release from accumulated [Unreleased] CHANGELOG entries
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git tag:*), Bash(git describe:*), Bash(cargo xtask validate*), Bash(cargo xtask audit*), Bash(cargo clippy:*), Bash(cargo update:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git tag:*), Bash(git describe:*), Bash(cargo xtask validate*), Bash(cargo xtask audit*), Bash(cargo xtask version-sync*), Bash(cargo clippy:*), Bash(cargo update:*), Read, Edit, AskUserQuestion
 ---
 
 Cut a SemVer release: bump the version, promote the
@@ -61,7 +61,11 @@ step for a release to gate.
      the date the system provides; do not hardcode.
 
 5. **Edit `crates/bombyx/Cargo.toml`** -- update the
-   `version = "X.Y.Z"` line.
+   `version = "X.Y.Z"` line, then run
+   `cargo xtask version-sync` to rewrite the docs' version
+   sentinels (the `docs/quickstart.md` install snippet) from it.
+   It prints the file it changed, if any; stage that file with the
+   bookkeeping commit below.
 
 6. **Sync `Cargo.lock`** -- run `cargo update -p bombyx`
    (updates only that package's entry). Do **not** use
@@ -149,7 +153,8 @@ step for a release to gate.
 
 11. **Stage and commit:**
     - Stage `crates/bombyx/Cargo.toml`, `Cargo.lock`,
-      `CHANGELOG.md` (and nothing else).
+      `CHANGELOG.md`, and any file `version-sync` rewrote
+      (`docs/quickstart.md`) -- and nothing else.
     - Commit directly with `git commit` (do **not** route
       through `/commit` -- the underlying changes were
       reviewed at their own commit time, and a release

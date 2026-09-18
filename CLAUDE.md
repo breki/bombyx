@@ -110,6 +110,7 @@ cargo xtask feedback-add --section <s> --title <t>  # append feedback entry
 cargo xtask sync-candidates <last-synced>  # categorized sync delta, filtered
 cargo xtask changelog add --kind <k> [--breaking] "text"  # insert [Unreleased] bullet
 cargo xtask todo <list|add|done> ...       # mechanical docs/todo.md edits
+cargo xtask version-sync   # sync docs version sentinels from Cargo.toml (run by /release)
 ```
 
 Never use raw `cargo test` or `cargo clippy` -- always

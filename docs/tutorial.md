@@ -131,7 +131,7 @@ Check it landed:
 
 ```console
 $ bombyx --version
-bombyx 0.6.0        # whatever you installed
+bombyx <version>    # whatever you installed
 ```
 
 ### Give the VM host an SSH alias
