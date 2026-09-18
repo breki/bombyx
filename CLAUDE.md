@@ -664,6 +664,7 @@ a fresh empty `[Unreleased]` above it.
 | `/simplify` | Review changed code for quality |
 | `/architect` | Project overview and architecture guide |
 | `/short` | Restate the reply above, or answer an instruction, in under 40 words |
+| `/ask` | Re-put the last decision the assistant raised in prose as a structured `AskUserQuestion`, recommendation first |
 | `/html-report` | Produce a self-contained local HTML report from the in-repo template (never a cloud Artifact) |
 | `/template-improve` | Log feedback for the rustbase template |
 | `/template-sync` | Sync upstream template changes |
