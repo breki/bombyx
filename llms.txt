@@ -312,9 +312,9 @@ person has their own hardware on their own network, so a
 committed value would be wrong for everyone but its author --
 and `destroy` runs `rm -rf` on whatever host is in force. Two
 keys can name it, the project entry's own `host` and the
-file-wide one, and the entry wins. See "Where bombyx looks for
-the host" in `README.md` for the authoritative statement, and
-`config::host::rank` for the code.
+file-wide one, and the entry wins. `docs/architecture.md`'s "The
+host rule runs in two places, and this is the owner" is the
+authoritative statement, and `config::host::rank` is the code.
 
 Every `host` in the registry is checked while the file is being
 read, by `config::registry::parse` -- the file-wide key and

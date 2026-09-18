@@ -565,14 +565,3 @@ step -- but nothing keeps it. Fix: a unit-tested `cargo xtask` step (or a
 ideally gated by a check like `canon-check`. Surfaced during
 documentation-overhaul move 2.
 
-### wsl2-doc-diary-ref
-
-**Summary:** vm-host-wsl2.md still names the removed DIARY.md
-
-docs/vm-host-wsl2.md, in the probe note under 'What this arrangement does not
-solve', says 'The diary does not say which probe either run used.' DIARY.md
-was deleted in 5da163a, so the reference dangles. The which-probe detail it
-pointed at is lost, so reword to state the uncertainty without the diary (e.g.
-'Neither run recorded which probe it used'). Part of the stale-record cleanup;
-surfaced during documentation-overhaul move 3.
-

@@ -375,8 +375,10 @@ holds only the script, because bombyx opens no file in a
 project's directory: everything describing the VM, this host's
 name included, sits in your `config.toml` --
 `~/.config/bombyx/config.toml`, or
-`%APPDATA%\bombyx\config.toml` on Windows. **Where bombyx looks for the host** in `README.md` is
-the authoritative statement of which `host` key wins.
+`%APPDATA%\bombyx\config.toml` on Windows.
+`docs/architecture.md`'s "The host rule runs in two places, and
+this is the owner" is the authoritative statement of which `host`
+key wins.
 
 ## Other distributions
 

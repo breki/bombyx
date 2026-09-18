@@ -24,9 +24,7 @@ otherwise spend an afternoon diagnosing.
 ## Whether to do this at all
 
 A WSL2 host gives up the property bombyx exists to provide, and
-it is worth being precise about which one, because the loss is
-smaller than it first appears and larger than it is comfortable
-to admit.
+it is worth being precise about which one.
 
 The agent does **not** run in WSL. It runs in a QEMU guest
 *inside* WSL, a genuine second virtual machine with its own
@@ -39,7 +37,8 @@ What changes is what waits behind that enclosure. On a dedicated
 host, code that escapes the guest lands on a spare Linux box
 holding nothing. Here it lands on the machine holding your
 password manager, your SSH keys and your browser profiles. The
-containment is equally strong; the consequence of failure is not.
+containment is as strong as on a dedicated host. The difference
+is the cost when it fails.
 
 That makes a WSL2 host a good way to exercise bombyx, to develop
 a Vagrantfile, or to work on code you have reason to trust. It is
@@ -388,8 +387,8 @@ the reason is worth knowing rather than assuming either way.
 *(unverified)*. The probe `docs/vm-host-firewall.md` published at
 the time read from the socket after connecting, and that times
 out on any port which waits for the client to speak first, so it
-reported a blocked path for a port that had answered. The diary
-does not say which probe either run used. If they used that one,
+reported a blocked path for a port that had answered. Neither
+run recorded which probe it used. If they used that one,
 the error runs toward more exposure than this section describes
 rather than less. Both results below are therefore open
 questions, and the corrected helper is under "Checking that it
