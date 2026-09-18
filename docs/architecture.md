@@ -72,11 +72,11 @@ because it cannot run libvirt. The route would still get far
 enough to write files into the MSYS home and later delete them,
 which is worse than failing.
 
-One thing both routes share is worth knowing, because it looks
-at first like a difference. Three vagrant variables --
-`VAGRANT_CWD`, `VAGRANT_VAGRANTFILE` and `VAGRANT_DOTFILE_PATH`
--- override the directory every script bounds itself with, and
-two more decide the provider. An operator with `VAGRANT_CWD`
+Both routes share one hazard that looks at first like a
+difference. Three vagrant variables -- `VAGRANT_CWD`,
+`VAGRANT_VAGRANTFILE` and `VAGRANT_DOTFILE_PATH` -- override the
+directory every script bounds itself with, and two more decide
+the provider. An operator with `VAGRANT_CWD`
 exported would have `destroy` check one project and destroy
 another. So `remote::transport` writes an `unset` of all five
 in front of every script, on both routes.
@@ -102,8 +102,8 @@ string and `sh -c` starts the same shell `ssh` would have
 started on the host. `config::transport` holds the comparison
 and `remote::transport` holds the one wrapper that acts on it.
 
-Two consequences are worth stating plainly. The first is that
-one `config.toml` now behaves differently depending on which
+The local route has two consequences. The first is that one
+`config.toml` now behaves differently depending on which
 machine reads it, so bombyx prints a line naming the route
 whenever the local one is in force, and `bombyx doctor` shows
 its `ssh` and `login shell` rows as skips rather than passes --
@@ -475,7 +475,7 @@ sequenceDiagram
   guest-->>op: VM ready
 ```
 
-Three things matter about the order. The directory is created
+The order matters in three places. The directory is created
 first, because the two writes redirect into it. `vagrant up` runs
 after them, because it reads the Vagrantfile they just wrote.
 And the snapshot is saved after the boot, so it records a
@@ -526,9 +526,9 @@ cd <project dir> && {
 }
 ```
 
-Three parts of that carry weight. Capturing the listing rather
-than piping it into `grep` is what stops a listing vagrant could
-not produce being read as an empty one, because a pipeline
+Three parts of that script carry weight. Capturing the listing
+rather than piping it into `grep` is what stops a listing vagrant
+could not produce being read as an empty one, because a pipeline
 reports only its last command's status. The braces keep the `cd`
 outside the `||`, so a project directory that has gone away
 still fails the step. And the `||` itself makes the snapshot
@@ -577,11 +577,11 @@ project's own script calls it. So bombyx never learns a package
 manager, and `git` stays the box's own requirement, which is
 what `bootstrap.sh` tells the operator when it refuses.
 
-Where the `[env]` table lands is worth being exact about,
-because it is not where the name suggests. Vagrant renders the
-provisioner's `env:` as an assignment prefix on the command it
-runs, so every name in that table is in `bootstrap.sh`'s own
-environment and not only the project script's. This was
+The `[env]` table does not land where its name suggests. Vagrant
+renders the provisioner's `env:` as an assignment prefix on the
+command it runs, so every name in that table is in
+`bootstrap.sh`'s own environment and not only the project
+script's. This was
 measured against a real VM host: an `[env]` entry setting
 `PATH` to a directory holding no `bash` fails the provision at
 the `#!/usr/bin/env bash` line, so `/etc/profile` does not
@@ -630,11 +630,8 @@ directory.
 That `HOME` moves the clone is measured rather than reasoned
 from the `PATH` result, because `HOME` is the one variable a
 login shell also sets and the two could have disagreed. A
-provision against the real VM host with
-`HOME = "/home/vagrant/homedirtest"` cloned into
-`/home/vagrant/homedirtest/project`, and the project's own
-script then cloned its own checkout beside it in the same
-directory.
+provision against a real VM host confirmed the clone follows
+`HOME`.
 
 `USER`, `LOGNAME` and `SHELL` are accepted and take effect as
 written. *(Unverified: no run has put `USER`, `LOGNAME` or
@@ -653,11 +650,7 @@ toolchain where the agent never looks. Whatever the script
 installs -- a language toolchain, an agent's own configuration,
 a shell profile -- lands in `/root` rather than in the home
 directory of the account the agent logs in as, and nothing
-fails while that happens.
-
-That is what the first real run against a project did. The
-symptom was a `/root/.rustup` and a second clone at
-`/root/jutro`, in a VM whose agent works as `vagrant`.
+fails while that happens. Measured against a real VM host.
 
 ## What config values are checked
 
@@ -817,10 +810,10 @@ out the leading-dash rule, because no program is handed the
 value as an argument and anchoring already refuses every value
 that could read as an option.
 
-**Where the key's existence is checked is a decision, not an
-accident.** `plan::write_then` puts `remote::require_file`
-ahead of the `mkdir`, so `up`, `provision` and `scratch` refuse
-a missing key before creating a directory or writing a file.
+**Where the key's existence is checked is deliberate.**
+`plan::write_then` puts `remote::require_file` ahead of the
+`mkdir`, so `up`, `provision` and `scratch` refuse a missing key
+before creating a directory or writing a file.
 The generated Vagrantfile could test the file itself and
 `raise`, saving a round trip, and must not: `vagrant destroy`
 loads that Vagrantfile too, so a raise there leaves a directory

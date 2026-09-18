@@ -605,14 +605,6 @@ others) still carry re-derived rationale. Cut to the fact and the open decision,
 and fix the wrapped Summary line in config-tests-own-file. From the 2026-09-17
 docs-audit.
 
-### trim-architecture-claude-mannered-prose
-
-**Summary:** cut mannered residue in architecture.md and CLAUDE.md
-
-architecture.md's design-rationale essays cut to mechanism plus the owning test
-name; CLAUDE.md's Environment Constraints war-stories cut to the rule. Both rate
-mannered Heavy or Some-to-Heavy in the audit. From the 2026-09-17 docs-audit.
-
 ### guidelines-commands-table-drifts
 
 **Summary:** ai-agents guidelines commands table contradicts canon

@@ -339,9 +339,13 @@ starting.
    tracked.)
 
 6. **Trim `architecture.md` and CLAUDE.md's mannered residue.**
-   `architecture.md`'s design-rationale essays cut to mechanism
-   plus the owning test name; CLAUDE.md's "Environment Constraints"
-   war-stories cut to the rule. (Not yet tracked.)
+   DONE 2026-09-18: the two `architecture.md` anecdotes (the
+   `/root` toolchain run and the `homedirtest` provision) cut to a
+   one-clause verification note, and six counting/throat-clear
+   openers rewritten to lead with the concrete subject; CLAUDE.md's
+   Environment Constraints lost the canon-check "once broke"
+   incident and the "each sibling produced a false statement"
+   clause. Mechanism kept throughout. `validate` green.
 
 7. **Drop the drifted commands table in
    `docs/ai-agents/guidelines.md`** and point at CLAUDE.md's Skills

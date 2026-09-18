@@ -175,10 +175,7 @@ for tools that are not present:
 - **Do not grep canon prose for a phrase.** Every markdown
   file here wraps at 80 columns, so a phrase you remember as
   one line is usually split across two and `grep` matches
-  neither. The same wrap once broke a check inside
-  `cargo xtask canon-check`, which now matches against the
-  text with every whitespace run collapsed. Search for one
-  distinctive word, or flatten first:
+  neither. Search for one distinctive word, or flatten first:
   `tr '\n' ' ' < FILE | grep -o 'the phrase'`.
 - **Read a large file in pieces.** Over roughly 500 lines,
   `grep -n` for the item you want and then `sed -n` the range
@@ -240,8 +237,7 @@ for tools that are not present:
   text contains `$`.
 - **The same mistake has three other shapes. Check all four
   when a value crosses a shell boundary.** The rule above
-  protects who expands the text, not the `$` character, and each
-  sibling produced a false statement before it was noticed:
+  protects who expands the text, not the `$` character:
   - **`$(...)` inside a nested remote command runs on the near
     side.** In `ssh host "vagrant ssh -c \"$(uname -srm)\""` the
     substitution is expanded by the *host* shell, so a guest
