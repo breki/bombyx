@@ -893,8 +893,6 @@ fn the_project_script_runs_as_the_agent_not_as_root() {
     // script rather than starting a second process beside
     // it, so the project's script inherits the process and
     // its exit status is what Vagrant sees.
-    // `docs/architecture.md` under **Who runs the
-    // project's script** holds the argument.
     //
     // The needle is the whole `exec` line, because a call
     // that started the script as a child would still

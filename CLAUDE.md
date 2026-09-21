@@ -36,7 +36,7 @@ regrown the manner this corpus was cut free of.
 This manual is always loaded, so every line costs each session.
 Keep it near 900 lines: when a section grows past its rule into
 reference detail or a retold incident, move that detail to
-`docs/` or `llms.txt` and leave the rule. Run `wc -l CLAUDE.md`
+`docs/` and leave the rule. Run `wc -l CLAUDE.md`
 to check.
 
 Begin every chat reply with a summary under forty words,
@@ -356,8 +356,8 @@ everything here as well.
   long line per paragraph. GitHub renders the markdown, so a
   hard wrap there buys the reader nothing and makes the text
   harder to edit afterwards. Wrap in `docs/`, `README.md`, this
-  file, `llms.txt`, `.claude/` and code comments; do not wrap in
-  anything handed to `gh`.
+  file, `.claude/` and code comments; do not wrap in anything
+  handed to `gh`.
 - **Fixing an over-long line means reflowing its whole
   paragraph.** Patching the one line pushes the overflow onto
   the next and leaves half-empty lines mid-paragraph, which a
@@ -552,9 +552,9 @@ order they execute** so the numbers match what the run prints:
    staging, so an in-place rewrite does not sweep unrelated
    drift into the working tree)
 3. **Canon claims** (`cargo xtask canon-check`) -- reads
-   `CLAUDE.md`, `llms.txt`, `.claude/commands/` and
-   `.claude/agents/` for its checks, and additionally scans the
-   reference docs under `docs/` for the dangling-ID citation check
+   `CLAUDE.md`, `.claude/commands/` and `.claude/agents/` for
+   its checks, and additionally scans the reference docs under
+   `docs/` for the dangling-ID citation check
    below, skipping the record files and the working issue docs,
    which cite IDs as provenance rather than as live pointers.
    `.claude/skills/` and the non-citation content of `docs/` stay

@@ -76,10 +76,10 @@ fn parse_package_version(toml: &str) -> Option<String> {
     None
 }
 
-/// Files a version sentinel might live in: `README.md`, `llms.txt`,
-/// and every markdown file under `docs/`.
+/// Files a version sentinel might live in: `README.md` and every
+/// markdown file under `docs/`.
 fn candidate_files(root: &Path) -> Vec<PathBuf> {
-    let mut out = vec![root.join("README.md"), root.join("llms.txt")];
+    let mut out = vec![root.join("README.md")];
     collect_md(&root.join("docs"), &mut out);
     out.retain(|p| p.is_file());
     out

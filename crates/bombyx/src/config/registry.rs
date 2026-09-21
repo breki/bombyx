@@ -393,9 +393,8 @@ impl Registry {
 /// `[projects."x"]` and `".vm"` gives `[projects."x".vm]`.
 ///
 /// The name is quoted because it may contain a `.`, which TOML
-/// reads as nesting. `docs/architecture.md` under **The heading
-/// spelling has one owner** says why every message asks this
-/// rather than spelling it.
+/// reads as nesting, so every message calls this one function
+/// rather than spelling the heading itself and risking drift.
 pub(super) fn heading(name: &str, tail: &str) -> String {
     format!("[projects.{name:?}{tail}]")
 }
@@ -421,7 +420,7 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
     // Every `host` in the file, not only the one a later
     // command turns out to want: a typo in a project nobody
     // asked about is reported while the operator has the file
-    // open. `docs/architecture.md` carries the argument.
+    // open.
     if let Some(host) = &file.host {
         super::host::refuse_if_bad(
             host,

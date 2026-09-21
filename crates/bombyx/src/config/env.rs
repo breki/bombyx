@@ -93,9 +93,8 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 ///
 /// `HOME` is deliberately absent: `bootstrap.sh` derives the
 /// clone directory from it, so writing it here moves the clone,
-/// and that is a recorded decision rather than an accident.
-/// `docs/architecture.md` under **Who runs the project's
-/// script** holds the argument.
+/// and that is a recorded decision rather than an accident: the
+/// script checks the value before using it.
 ///
 /// Keeping a list is a maintenance cost, and `docs/todo.md`
 /// holds the alternative to it as `bootstrap-sets-own-path`.
@@ -380,8 +379,6 @@ mod tests {
         // `$HOME`, so writing it here moves the clone -- the
         // operator's own line in their own config, and the
         // script checks the value before using it.
-        // `docs/architecture.md` under **Who runs the project's
-        // script** holds the argument.
         assert!(EnvName::parse("HOME").is_ok());
     }
 

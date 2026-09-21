@@ -8,9 +8,10 @@
 //!
 //! `super::registry` reads the file; [`rank`] picks between the
 //! two keys in a copy it is handed, and builds the winner into a
-//! [`HostName`]. The rule runs in both places, and
-//! `docs/architecture.md` under **The host rule runs in two
-//! places, and this is the owner** says why.
+//! [`HostName`]. The rule runs in both places: `super::registry`
+//! checks every host as the file parses, and [`rank`] re-checks
+//! the winner so it can build a [`HostName`] without depending on
+//! where the value came from.
 //!
 //! What a host value may be is decided in one place, the
 //! private `check` below, so the message an operator gets does
@@ -353,9 +354,9 @@ impl HostOrigin {
 /// a file-wide host that never coexisted.
 ///
 /// This is where the winner becomes a [`HostName`], and the rule
-/// runs here as well as in `super::registry`'s parse.
-/// `docs/architecture.md` under **The host rule runs in two
-/// places, and this is the owner** holds the argument for both.
+/// runs here as well as in `super::registry`'s parse: the parse
+/// reports a bad host anywhere in the file, and this pass builds
+/// the winner into a type.
 ///
 /// # Errors
 ///

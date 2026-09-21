@@ -654,8 +654,8 @@ fn a_host_cannot_smuggle_an_ssh_option() {
 /// is a compile error rather than a test that quietly stops
 /// checking anything. No directory walk and no fence parsing:
 /// the sample is one named file, and it is the only one --
-/// `README.md`, `docs/tutorial.md` and `llms.txt` point at it
-/// instead of restating it, so there is nothing else to drift.
+/// `README.md` and `docs/tutorial.md` point at it instead of
+/// restating it, so there is nothing else to drift.
 #[test]
 fn the_sample_config_loads_as_shipped() {
     let sample = include_str!("../../../config.toml.sample");

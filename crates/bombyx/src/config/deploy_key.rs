@@ -13,9 +13,8 @@
 //! What refuses a path the VM host does not have is
 //! `crate::remote::require_file`, before bombyx writes the
 //! Vagrantfile at all. The upload in the Vagrantfile is
-//! conditional and carries no `raise` of its own.
-//! `crate::vagrantfile` records why, and `docs/architecture.md`
-//! under **What config values are checked** holds the argument.
+//! conditional and carries no `raise` of its own;
+//! `crate::vagrantfile` records why.
 //!
 //! Every rule is enforced in one function, the private `check`
 //! below, and [`DeployKeyPath`] is the only thing that calls
@@ -178,8 +177,8 @@ fn check(value: &str) -> Result<(), FieldError> {
     // into the guest rather than deleting anything, so a
     // config naming the wrong path leaks a file instead of
     // destroying one -- and no rule here restricts which file
-    // it names. `docs/architecture.md` under **What config
-    // values are checked** holds that.
+    // it names, so a `--config` inside a repository you did not
+    // write is what carries this case.
     //
     // What the rule buys is that the path says plainly which
     // directory it reads, because the VM host expands it and

@@ -76,7 +76,7 @@ fn categorize(path: &str) -> &'static str {
     // Boilerplate bucket and into the fallback.
     const BOILERPLATE_PREFIXES: &[&str] = &["crates/", "frontend/", "e2e/"];
     const DOC_PREFIXES: &[&str] = &["docs/"];
-    const DOC_FILES: &[&str] = &["README.md", "llms.txt"];
+    const DOC_FILES: &[&str] = &["README.md"];
     const PROJECT_FILES: &[&str] =
         &["Cargo.toml", "Cargo.lock", ".gitignore", ".editorconfig"];
 

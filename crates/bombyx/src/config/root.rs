@@ -288,10 +288,9 @@ mod tests {
 
     #[test]
     fn the_depth_message_says_the_same_thing_as_the_constant() {
-        // The rule is stated in three places: this constant,
-        // the message an operator reads, and
-        // `docs/architecture.md`. Asserting the whole sentence
-        // here is what keeps the three from drifting.
+        // The rule is stated in two places: this constant and
+        // the message an operator reads. Asserting the whole
+        // sentence here is what keeps the two from drifting.
         let err = check("/").expect_err("must be refused").to_string();
         assert_eq!(
             err,

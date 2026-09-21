@@ -22,14 +22,18 @@ mislead an AI agent. That is this command.
 ```
 /docs-audit                 # the whole documentation set
 /docs-audit docs/developer  # a subdirectory or glob only
-/docs-audit --report        # also render an HTML report
+/docs-audit --no-report     # skip the HTML report, print inline only
 ```
+
+Every run prints the report inline **and** renders it through
+`/html-report`, so the operator always gets a saved page to keep.
+Pass `--no-report` when you want the inline text alone.
 
 ## The documentation set
 
 Unless the argument narrows it, the set is:
 
-- `README.md`, `CLAUDE.md`, `llms.txt`
+- `README.md`, `CLAUDE.md`
 - everything under `docs/`
 
 `.claude/` command, skill and agent prose is canon too; include it
@@ -108,8 +112,9 @@ Synthesise the assessor output into one report. It has four parts:
    that are the house style to copy, and the two or three that are
    actively misleading and should be fixed first.
 
-With `--report`, render it through `/html-report`; otherwise print
-it inline.
+Print the report inline, then render it through `/html-report` so
+the operator keeps a saved page as well. Skip the render only when
+the argument is `--no-report`.
 
 ## Rules
 

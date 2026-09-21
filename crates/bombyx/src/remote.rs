@@ -104,9 +104,9 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// the argument.
 ///
 /// **Every project vagrant call carries it except the
-/// teardown.** `docs/architecture.md` under **`bombyx up`, end to
-/// end** holds why the teardown is the exception (three facts
-/// measured on a libvirt host) and how a WSL2 host inverts it.
+/// teardown.** `is_teardown` holds why the teardown names no
+/// provider, and a WSL2 host inverts the trade
+/// (`vm-host-wsl2.md`).
 /// Editing `provider` on a project that already has a VM keeps the
 /// old one silently -- `provider-change-on-existing-vm` in
 /// `docs/todo.md`.
@@ -185,9 +185,11 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
 /// callers hand `vagrant` its arguments, so a rule derived from
 /// those arguments cannot disagree with the command that gets
 /// run, while a separate flag could be set wrongly on a new
-/// call site. `docs/architecture.md` under **`bombyx up`, end to
-/// end** holds why the teardown is the one verb that names no
-/// provider.
+/// call site. The teardown names no provider because vagrant
+/// ignores the variable once a machine exists, and with no
+/// machine an unusable provider would refuse the destroy -- so
+/// naming one there can only ever break it, while omitting it is
+/// safe because a refusal implies no machine to tear down.
 fn is_teardown(args: &[&str]) -> bool {
     args.first() == Some(&"destroy")
 }
@@ -322,9 +324,9 @@ impl Tty {
 /// the pair costs those calls nothing.
 ///
 /// It is not free for the teardown, which writes nothing back.
-/// `docs/architecture.md` under **`bombyx up`, end to end** holds
-/// why that is the right trade on a libvirt host and a known gap
-/// on a WSL2 one.
+/// `is_teardown` holds why omitting the provider there is the
+/// right trade on a libvirt host; a WSL2 host is a known gap
+/// (`vm-host-wsl2.md`).
 ///
 /// **Both routes need it, for different reasons.** `sh -c` is a
 /// child of bombyx and inherits everything the operator

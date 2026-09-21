@@ -622,9 +622,8 @@ Because `deploy_key` is checked here and expanded on a machine
 you may not be sitting at, its rules are stricter than they
 look: the value must be an anchored path (`/` or `~/`) naming a
 file below that anchor, spelled from a limited character set, so
-a path with a space in it is refused. `docs/architecture.md`
-under **What config values are checked** holds the exact rule
-and why it is shaped that way.
+a path with a space in it is refused. `config/deploy_key.rs`
+holds the exact rule and why it is shaped that way.
 
 Before `up`, `provision` or `scratch` creates anything, bombyx
 checks on the VM host that the file is there and readable, and
@@ -645,9 +644,9 @@ VM host first.
 `env_file`'s rule is shorter, because bombyx opens the file
 itself and hands the path to no shell: the value has to be a
 `~/`-anchored or absolute path naming a file, and a space or a
-quote in the name is accepted. `docs/architecture.md` under
-**What config values are checked** lists exactly what is refused
-and why this rule is shorter than `deploy_key`'s.
+quote in the name is accepted. `config/env_file.rs` lists
+exactly what is refused and why this rule is shorter than
+`deploy_key`'s.
 
 A config you did not write can point `env_file` at any file
 your account can read, and bombyx will deliver it into a VM

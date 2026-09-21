@@ -1,8 +1,8 @@
 //! Checks the claims canon prose makes about this repository.
 //!
-//! Canon is the reviewed, shared guidance -- `CLAUDE.md`,
-//! `llms.txt`, and the `.claude/` commands and agents -- plus, for
-//! the dangling-ID check alone, the reference docs under `docs/`.
+//! Canon is the reviewed, shared guidance -- `CLAUDE.md` and the
+//! `.claude/` commands and agents -- plus, for the dangling-ID
+//! check alone, the reference docs under `docs/`.
 //!
 //! Some of what a canon review looks for is decidable by a
 //! command: does this cross-reference resolve, does this path
@@ -531,7 +531,7 @@ fn collect_docs_md(dir: &Path, root: &Path, out: &mut Vec<String>) {
 
 /// Canon files, repo-relative, in a stable order.
 fn canon_files(root: &Path) -> Vec<String> {
-    let mut out = vec!["CLAUDE.md".to_string(), "llms.txt".to_string()];
+    let mut out = vec!["CLAUDE.md".to_string()];
     for dir in [".claude/commands", ".claude/agents"] {
         let Ok(entries) = std::fs::read_dir(root.join(dir)) else {
             continue;

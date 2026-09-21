@@ -449,9 +449,9 @@ that makes the reader work backwards, a comment narrating
 history instead of giving the reason.
 
 **Its fixes touch prose that only a person reads.** Code
-comments, doc comments, files under `docs/`, `README.md` and
-`llms.txt`. Three kinds of prose are outside that, because the
-program reads them too:
+comments, doc comments, files under `docs/` and `README.md`.
+Three kinds of prose are outside that, because the program
+reads them too:
 
 - **clap `///` help.** It is what `bombyx --help` prints, so
   editing it changes the program's output.

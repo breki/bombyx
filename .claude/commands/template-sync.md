@@ -87,7 +87,7 @@ this project.
      - **Infrastructure**: CI, xtask, build.ps1, scripts/,
        .github/, toolchain / rustfmt / clippy config
      - **Claude config**: CLAUDE.md, .claude/
-     - **Docs**: docs/, README.md, llms.txt
+     - **Docs**: docs/, README.md
      - **Boilerplate**: sample code in crates/, frontend/,
        e2e/
      - **Project config**: Cargo.toml/lock, .gitignore,
