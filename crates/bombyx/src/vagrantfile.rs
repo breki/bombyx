@@ -23,7 +23,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::config::{Config, DeployKeyPath, Disk, EnvName, EnvValue, Staged};
+use crate::config::{
+    Config, CpuMode, DeployKeyPath, Disk, EnvName, EnvValue, Provider, Staged,
+};
 use crate::hostkeys;
 
 /// The provisioning script, shipped to the host unchanged.
@@ -417,6 +419,27 @@ fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
     out
 }
 
+/// Panics unless `staged` was built from `cfg`.
+///
+/// A mispaired call would otherwise fail in the guest, where it is
+/// quiet: told `0` for a secrets file, the guest deletes the file an
+/// earlier provision left and provisions on without it. So [`render`]
+/// checks the pairing here instead. See [`render`]'s `# Panics`.
+fn assert_staged_matches(cfg: &Config, staged: &Staged) {
+    assert_eq!(
+        cfg.source.env_file.is_some(),
+        staged.secrets().is_some(),
+        "a config naming an env_file must be rendered against \
+         the secrets read from it"
+    );
+    assert_eq!(
+        cfg.source.repo_token.is_some(),
+        staged.credential().is_some(),
+        "a config naming a repo_token must be rendered against \
+         the credential built from it"
+    );
+}
+
 /// Builds the text of the Vagrantfile for `cfg`.
 ///
 /// Returns a `String`. Nothing is written to disk here, and
@@ -436,8 +459,7 @@ fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
 /// Be careful with that convenience: the Hyper-V version was
 /// written from Hyper-V's documentation and **has never started
 /// a real machine**. If you are the first person to try it,
-/// expect to fix something. See
-/// [`Provider`](crate::config::Provider).
+/// expect to fix something. See [`Provider`].
 ///
 /// `staged` decides whether the guest is told a secrets file and
 /// a git credential are coming, and it is the same value
@@ -456,21 +478,7 @@ fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
 /// builds a pair that cannot fail this.
 #[must_use]
 pub fn render(cfg: &Config, staged: &Staged) -> String {
-    // A mispaired call fails here rather than in the guest,
-    // where it is quiet: the guest told `0` deletes the file an
-    // earlier provision left and provisions on without it.
-    assert_eq!(
-        cfg.source.env_file.is_some(),
-        staged.secrets().is_some(),
-        "a config naming an env_file must be rendered against \
-         the secrets read from it"
-    );
-    assert_eq!(
-        cfg.source.repo_token.is_some(),
-        staged.credential().is_some(),
-        "a config naming a repo_token must be rendered against \
-         the credential built from it"
-    );
+    assert_staged_matches(cfg, staged);
 
     let vm = &cfg.vm;
     let source = &cfg.source;
@@ -496,7 +504,7 @@ Vagrant.configure(\"2\") do |config|
 
   config.vm.provider :{provider} do |v|
     v.cpus = {cpus}
-    v.memory = {memory}{disk}
+    v.memory = {memory}{disk}{cpu_mode}
   end
 
 {deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
@@ -558,6 +566,7 @@ end
         cpus = vm.cpus,
         memory = vm.memory.mib(),
         disk = disk_setting(vm.disk),
+        cpu_mode = cpu_mode_setting(vm.provider, vm.cpu_mode),
         bootstrap = ruby_string(BOOTSTRAP_NAME),
         project_env = project_env_block(&cfg.env),
         repo = ruby_string(source.repo.as_str()),
@@ -589,6 +598,28 @@ fn deploy_key_env(key: Option<&DeployKeyPath>) -> &'static str {
 fn disk_setting(disk: Option<Disk>) -> String {
     disk.map(|d| format!("\n    v.machine_virtual_size = {}", d.gib()))
         .unwrap_or_default()
+}
+
+/// The libvirt CPU-mode line for the provider block, or nothing.
+///
+/// `v.cpu_mode` selects the guest CPU. It is a libvirt setting, so
+/// this renders only for the libvirt provider; a non-libvirt guest
+/// gets no line, and [`Vm`](crate::config::Vm) refuses an explicit
+/// `cpu_mode` on one. When a libvirt project sets none, `mode` is
+/// `None` and bombyx defaults to [`CpuMode::HostPassthrough`], which
+/// exposes the host CPU's full feature set -- a free win for compile
+/// times on a machine that never migrates.
+///
+/// The value is a compile-time constant from [`CpuMode::as_str`], so
+/// no operator string reaches the rendered Ruby.
+fn cpu_mode_setting(provider: Provider, mode: Option<CpuMode>) -> String {
+    if provider != Provider::Libvirt {
+        return String::new();
+    }
+    format!(
+        "\n    v.cpu_mode = \"{}\"",
+        mode.unwrap_or_default().as_str()
+    )
 }
 
 /// The Ruby that uploads the deploy key, or nothing at all.
@@ -779,9 +810,9 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::config::{
-        BoxName, DeployKeyPath, EnvFilePath, EnvName, EnvValue, GitRef,
-        Hostname, Memory, Provider, RESERVED_PREFIX, RepoUrl, ScriptPath,
-        Source, Vm,
+        BoxName, CpuMode, DeployKeyPath, EnvFilePath, EnvName, EnvValue,
+        GitRef, Hostname, Memory, Provider, RESERVED_PREFIX, RepoUrl,
+        ScriptPath, Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
@@ -804,6 +835,7 @@ mod tests {
                 NonZeroU32::new(8192).expect("a positive fixture size"),
             ),
             disk: None,
+            cpu_mode: None,
             hostname: None,
         };
         cfg.source = Source {
@@ -1088,6 +1120,37 @@ mod tests {
         assert!(
             out.contains("v.machine_virtual_size = 40"),
             "the disk line is missing from:\n{out}"
+        );
+    }
+
+    #[test]
+    fn a_libvirt_guest_gets_host_passthrough_by_default() {
+        // No cpu_mode set: bombyx renders its default, passthrough,
+        // rather than leaving vagrant's slower host-model.
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
+        assert!(
+            out.contains("v.cpu_mode = \"host-passthrough\""),
+            "the default cpu_mode line is missing from:\n{out}"
+        );
+
+        // An explicit host-model overrides that default.
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.vm.cpu_mode = Some(CpuMode::HostModel);
+        let out = rendered_for(&cfg);
+        assert!(
+            out.contains("v.cpu_mode = \"host-model\""),
+            "the explicit cpu_mode line is missing from:\n{out}"
+        );
+    }
+
+    #[test]
+    fn a_non_libvirt_guest_gets_no_cpu_mode_line() {
+        // cpu_mode is a libvirt setting; a hyperv block must not
+        // carry it, even though bombyx defaults libvirt to one.
+        let out = rendered_for(&cfg_with(Provider::Hyperv));
+        assert!(
+            !out.contains("cpu_mode"),
+            "a hyperv block must carry no cpu_mode line:\n{out}"
         );
     }
 

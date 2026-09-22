@@ -157,6 +157,25 @@ memory = "8GB"
 #
 # disk = "40GB"
 
+# Optional. The guest CPU model, written into the Vagrantfile as
+# the libvirt provider's `cpu_mode`. Two values:
+#
+#   host-passthrough  the guest sees the host CPU's full feature
+#                     set -- faster compiles, but the VM is pinned
+#                     to this host's CPU (bombyx VMs never migrate
+#                     anyway)
+#   host-model        a sanitised, migratable CPU definition
+#
+# Left out, bombyx uses host-passthrough: every VM it builds is a
+# local machine that never migrates, so the speed is free. Set
+# host-model if you need a migratable CPU definition instead. (This
+# differs from vagrant-libvirt's own default, which is host-model.)
+#
+# Only the libvirt provider takes a CPU mode. Setting `cpu_mode`
+# with `provider = "hyperv"` is refused when the config is read.
+#
+# cpu_mode = "host-passthrough"
+
 # Optional. The name the guest answers to, written into the
 # generated Vagrantfile as its hostname. Left out, bombyx derives
 # `<project>-agent` from this table's project name, so several
