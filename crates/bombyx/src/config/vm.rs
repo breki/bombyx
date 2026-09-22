@@ -107,9 +107,10 @@ impl fmt::Display for Provider {
 ///
 /// [`CpuMode::HostPassthrough`] is the default bombyx renders when a
 /// libvirt project sets no `cpu_mode`. Every VM bombyx builds is a
-/// local machine that never migrates -- the case passthrough is for
-/// -- and exposing the host's full instruction set is a large, free
-/// win for compile times. vagrant's own default is `host-model`.
+/// local machine that never migrates, which is exactly when
+/// passthrough is safe, and exposing the host's full instruction set
+/// is a large, free win for compile times. vagrant-libvirt's own
+/// default is `host-model`.
 ///
 /// `#[serde(rename_all = "kebab-case")]` is what lets
 /// `cpu_mode = "host-passthrough"` in the TOML select
@@ -210,9 +211,9 @@ pub struct Vm {
     /// libvirt guest bombyx renders [`CpuMode::HostPassthrough`], its
     /// default, so an operator gets the host CPU's full feature set
     /// and faster compiles without asking. Set the key to
-    /// `host-model` for vagrant's migratable definition instead. Like
-    /// `disk`, this is a libvirt setting; an explicit `cpu_mode` on
-    /// any other provider is refused by [`Vm::try_from`] while the
+    /// `host-model` for a sanitised, migratable definition instead.
+    /// Like `disk`, this is a libvirt setting; an explicit `cpu_mode`
+    /// on any other provider is refused by [`Vm::try_from`] while the
     /// config is read.
     pub cpu_mode: Option<CpuMode>,
 

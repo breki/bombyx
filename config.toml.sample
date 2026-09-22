@@ -162,13 +162,13 @@ memory = "8GB"
 #
 #   host-passthrough  the guest sees the host CPU's full feature
 #                     set -- faster compiles, but the VM is pinned
-#                     to this host's CPU (it never migrates, which
-#                     is what bombyx VMs do anyway)
-#   host-model        a sanitised, portable CPU definition
+#                     to this host's CPU (bombyx VMs never migrate
+#                     anyway)
+#   host-model        a sanitised, migratable CPU definition
 #
 # Left out, bombyx uses host-passthrough: every VM it builds is a
 # local machine that never migrates, so the speed is free. Set
-# host-model if you need a portable CPU definition instead. (This
+# host-model if you need a migratable CPU definition instead. (This
 # differs from vagrant-libvirt's own default, which is host-model.)
 #
 # Only the libvirt provider takes a CPU mode. Setting `cpu_mode`
