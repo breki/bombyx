@@ -545,8 +545,8 @@ fn the_clone_sits_in_the_home_the_provisioner_was_given() {
     // that mentions it.
     //
     // The last component is the project's name, sent as
-    // `BOMBYX_PROJECT`, falling back to `project` for a directory
-    // an older bombyx wrote whose Vagrantfile does not set it.
+    // `BOMBYX_PROJECT`, defaulting to `project` when it is unset.
+    // `bootstrap.sh` holds why that default is the right one.
     let flat = flat_bootstrap();
     assert!(
         flat.contains(

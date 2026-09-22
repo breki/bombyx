@@ -332,10 +332,12 @@ fi
 # environment variable, not pasted into this file, so the script
 # stays byte-identical for every project -- see the header.
 #
-# It falls back to `project` when the variable is unset, which is
-# the one directory an older bombyx wrote whose Vagrantfile does
-# not set it. That keeps `vagrant provision` run by hand there
-# cloning where it always did, rather than aborting under `set -u`.
+# It falls back to `project` when the variable is unset. An older
+# bombyx always cloned into a fixed `$HOME/project`, and the
+# Vagrantfile it wrote on the VM host never sets `BOMBYX_PROJECT`.
+# So a `vagrant provision` run there by hand arrives with the
+# variable unset, and this fallback clones into the old fixed
+# location rather than aborting under `set -u`.
 readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
