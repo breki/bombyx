@@ -63,7 +63,7 @@ downstream, where it would be far harder to trace.
   - [The project's table in `config.toml`](#the-projects-table-in-configtoml)
   - [`.gitignore`](#gitignore)
   - [The Vagrantfile: bombyx writes it](#the-vagrantfile-bombyx-writes-it)
-  - [`vagrant/provision.sh`](#vagrantprovisionsh)
+  - [`.bombyx/provision.sh`](#bombyxprovisionsh)
   - [Push it, or the guest has nothing to clone](#push-it-or-the-guest-has-nothing-to-clone)
 - [Part 4: the first boot](#part-4-the-first-boot)
   - [Check the preconditions](#check-the-preconditions)
@@ -87,7 +87,8 @@ workstation                     VM host
          and bootstrap.sh          clones the repo itself
 
   the project repo:
-    vagrant/           the provisioning script the guest runs
+    .bombyx/           holds the provisioning script the guest runs
+      provision.sh
 
   your own machine, outside any repo:
     config.toml        which VM host is yours, and one table
@@ -116,7 +117,7 @@ what each one does and, just as importantly, what it does not:
   `[projects.<name>]` table per project. Part 1 creates the file
   and Part 3 adds a table to it.
 
-Note that bombyx ships neither that file nor the `vagrant/`
+Note that bombyx ships neither that file nor the `.bombyx/`
 directory on your behalf. Parts 1 and 3 write both by hand, once.
 
 ## Before you start
@@ -324,7 +325,7 @@ out of that clone. A directory that was never pushed leaves the
 guest failing at clone time, which is both late and confusing.
 
 An empty repository will not do, for the same reason. By the end
-of this part the repository must hold `vagrant/provision.sh`, on
+of this part the repository must hold `.bombyx/provision.sh`, on
 the branch you name in `ref`, and pushed. Part 3 writes that file
 and ends with the step that pushes it.
 
@@ -353,7 +354,7 @@ The layout, in the two places it occupies:
 ```
 myproject/                  your project repo
   .gitignore
-  vagrant/              the guest runs this from its own clone
+  .bombyx/              the guest runs this from its own clone
     provision.sh
 
 ~/.config/bombyx/
@@ -460,13 +461,13 @@ whichever host wins.
 ### `.gitignore`
 
 ```gitignore
-vagrant/.vagrant/
+.vagrant/
 ```
 
-The directory `vagrant/.vagrant/` holds a VM's identity, written
-by `vagrant` if you ever run it here yourself. bombyx neither
-reads nor sends it; ignoring it prevents a stale copy from
-entering the repository and confusing the next reader.
+The directory `.vagrant/` holds a VM's identity, written by
+`vagrant` if you ever run it in this repository yourself. bombyx
+neither reads nor sends it; ignoring it prevents a stale copy
+from entering the repository and confusing the next reader.
 
 ### The Vagrantfile: bombyx writes it
 
@@ -494,14 +495,14 @@ Two things the generated file does are worth knowing:
   [../README.md](../README.md).
 
 Neither bombyx nor Vagrant reads a `Vagrantfile` you commit in
-`vagrant/`: bombyx does not send it, and the guest's own clone is
-not what Vagrant boots from. Delete such a file rather than
-maintaining it.
+your repository: bombyx does not send it, and the guest's own
+clone is not what Vagrant boots from. Delete such a file rather
+than maintaining it.
 
 The guest clones `[source]` itself and runs the script named
 there, which is the file the next section covers.
 
-### `vagrant/provision.sh`
+### `.bombyx/provision.sh`
 
 There are three facts about how this script runs, and they
 between them decide how you should write it.
@@ -523,6 +524,16 @@ asking which repository each one holds. `bombyx shell` leaves you
 one directory above it, in that home -- confirmed against a real
 VM rather than inferred. The clone is the only copy of your code
 in the VM.
+
+Save the script below as `.bombyx/provision.sh`, creating the
+directory as you go: `mkdir -p .bombyx`. The leading dot makes
+`.bombyx/` a hidden directory, so create it from a shell rather
+than a file manager.
+
+> **Note**: On Windows, File Explorer will not create a folder
+> whose name begins with a dot. Make the directory from a shell
+> instead -- `New-Item -ItemType Directory .bombyx` in PowerShell,
+> or `mkdir -p .bombyx` in Git Bash or WSL.
 
 Write the script so that it is re-runnable. `bombyx provision`
 runs it again on an existing VM, so every step should either be
@@ -609,7 +620,7 @@ Set `source.repo` to that same URL -- the guest clones what `repo`
 names, not whatever `origin` happens to be. Then:
 
 ```bash
-git add .gitignore vagrant/provision.sh
+git add .gitignore .bombyx/provision.sh
 git commit -m "add the provisioning script the guest runs"
 git push origin main          # the branch named in source.ref
 ```
@@ -737,7 +748,7 @@ bombyx --project myproject up      # boot again, fast, caches warm
 bombyx --project myproject reset   # roll back to the snapshot
 ```
 
-When you change `vagrant/provision.sh`, use `provision`, not `up`:
+When you change `.bombyx/provision.sh`, use `provision`, not `up`:
 
 ```bash
 bombyx provision

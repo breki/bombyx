@@ -30,6 +30,12 @@ and this project adheres to
   whose Vagrantfile an older bombyx wrote. A VM built before this keeps its old
   `~/project`; re-provisioning clones the new directory beside it without
   deleting the old one.
+- The provisioning script that the sample config, README and tutorial teach now
+  defaults to `.bombyx/provision.sh` instead of `vagrant/provision.sh`, since
+  the script has nothing to do with Vagrant, and `config.toml.sample` now says
+  the path is an example rather than a requirement. Existing configs are
+  unaffected: bombyx never checked the directory, so any path inside the
+  repository still works.
 
 ### Fixed
 

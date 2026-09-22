@@ -146,11 +146,16 @@ memory = 8192                 # MiB
 [projects.myproject.source]
 repo = "https://github.com/you/myproject"
 ref = "main"
-script = "vagrant/provision.sh"   # path inside the clone
+script = ".bombyx/provision.sh"   # path inside the clone
 #
 # `script` names a file that must exist in the repository at
-# `ref`. The guest refuses to provision without it. Part 3 of
-# bombyx's docs/tutorial.md writes a re-runnable one.
+# `ref`. The guest refuses to provision without it. The path is
+# an example, not a requirement: any path inside the repository
+# works, so a project with its own `scripts/` or `tools/` layout
+# points `script` there instead. `.bombyx/` is only bombyx's
+# suggested home for the files it runs, and the name is spelled
+# out here because a leading-dot directory is easy to miss. Part 3
+# of bombyx's docs/tutorial.md writes a re-runnable one.
 
 # Optional, and the only key in this table that is a path on
 # the VM HOST rather than something the guest hands to git.

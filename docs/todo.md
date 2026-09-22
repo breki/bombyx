@@ -404,7 +404,7 @@ line, because the host-key work moved both.
 **Summary:** bombyx modifies a tracked file every run
 
 `bootstrap.sh` runs `chmod +x "$script_real"` before `exec`ing the project's
-script, so a `vagrant/provision.sh` tracked at mode 100644 becomes 100755 and
+script, so a `.bombyx/provision.sh` tracked at mode 100644 becomes 100755 and
 git reports the tree as modified from the moment provisioning finishes. Worked
 around on jutro's side in commit `c71e2d0`, which records 100755 so bombyx's
 chmod changes nothing. The bombyx-side question survives: should bombyx modify
