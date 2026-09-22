@@ -459,8 +459,9 @@ Found while working issue #78, left out of that change.
 The single-project status path now guards a never-built project (issue #86,
 remote::status_or_never_built), but down (halt), reset, snapshot and shell still
 go through remote::vagrant/vagrant_in, which cd into a project directory that
-may not exist and print the same raw shell error status used to. Lower priority
-than status: these act on an existing VM, so running them on a never-built
-project is closer to a user error than the ordinary state status answers. A fix
-would guard each the way status and list now do, or share one guard.
+may not exist and print the raw shell cd error that the status guard now
+prevents. Lower priority than status: these act on an existing VM, so running
+them on a never-built project is closer to a user error than the ordinary state
+status answers. A fix would guard each the way status and list now do, or share
+one guard.
 
