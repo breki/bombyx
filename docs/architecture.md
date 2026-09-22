@@ -155,6 +155,7 @@ classDiagram
     +BoxName box_name
     +NonZeroU32 cpus
     +NonZeroU32 memory
+    +Option~Hostname~ hostname
   }
   class Source {
     +RepoUrl repo

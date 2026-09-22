@@ -486,6 +486,7 @@ pub fn render(cfg: &Config, staged: &Staged) -> String {
 
 Vagrant.configure(\"2\") do |config|
   config.vm.box = {box_name}
+  config.vm.hostname = {hostname}
 
   # The default share would mount the workstation's copy of the
   # project at /vagrant, which is the copy this design exists to
@@ -552,6 +553,7 @@ end
         host_keys_format =
             ruby_string(host_keys.map_or("", |k| k.format().as_str())),
         box_name = ruby_string(vm.box_name.as_str()),
+        hostname = ruby_string(cfg.vm_hostname().as_str()),
         provider = vm.provider,
         cpus = vm.cpus,
         memory = vm.memory,
@@ -763,7 +765,7 @@ mod tests {
 
     use crate::config::{
         BoxName, DeployKeyPath, EnvFilePath, EnvName, EnvValue, GitRef,
-        Provider, RESERVED_PREFIX, RepoUrl, ScriptPath, Source, Vm,
+        Hostname, Provider, RESERVED_PREFIX, RepoUrl, ScriptPath, Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
@@ -783,6 +785,7 @@ mod tests {
                 .expect("a valid fixture box name"),
             cpus: NonZeroU32::new(4).expect("a positive fixture count"),
             memory: NonZeroU32::new(8192).expect("a positive fixture size"),
+            hostname: None,
         };
         cfg.source = Source {
             repo: RepoUrl::parse("https://example.invalid/p.git")
@@ -1055,6 +1058,31 @@ mod tests {
         // key.
         let out = rendered_for(&cfg_with(Provider::Libvirt));
         assert_eq!(rendered(&out, PROJECT_ENV), "\"myproject\"");
+    }
+
+    #[test]
+    fn the_guest_is_given_a_hostname_derived_from_the_project() {
+        // With no `hostname` in `[vm]`, the guest would otherwise
+        // answer to the box's default name, so two agent VMs on
+        // one host could not be told apart. The fixture project is
+        // `myproject`, so the derived name is `myproject-agent`.
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
+        assert!(
+            out.contains("config.vm.hostname = \"myproject-agent\""),
+            "the guest must be given a hostname:\n{out}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_hostname_overrides_the_derived_one() {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.vm.hostname =
+            Some(Hostname::parse("chosen-name").expect("a valid fixture"));
+        let out = rendered_for(&cfg);
+        assert!(
+            out.contains("config.vm.hostname = \"chosen-name\""),
+            "an explicit hostname must reach the Vagrantfile:\n{out}"
+        );
     }
 
     #[test]

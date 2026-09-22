@@ -136,6 +136,19 @@ box = "generic/ubuntu2204"
 cpus = 4
 memory = 8192                 # MiB
 
+# Optional. The name the guest answers to, written into the
+# generated Vagrantfile as its hostname. Left out, bombyx derives
+# `<project>-agent` from this table's project name, so several
+# agent VMs on one host can be told apart rather than all sharing
+# the box's default name.
+#
+# One DNS label: letters, digits and hyphens, no leading or
+# trailing hyphen, at most 63 characters. This is the guest's own
+# name and is unrelated to the VM host's name, which bombyx passes
+# in separately.
+#
+# hostname = "myproject-agent"
+
 # The guest clones this repository once it is running. All
 # three keys are required. bombyx sends no project file
 # anywhere: the VM fetches the repository itself and runs

@@ -12,6 +12,11 @@ and this project adheres to
 
 ### Added
 
+- A `hostname` key in a project's `[vm]` table sets the name the guest answers
+  to, written into the generated Vagrantfile as `config.vm.hostname`. It is a
+  checked single DNS label (letters, digits and hyphens, no leading or trailing
+  hyphen, at most 63 characters).
+
 ### Changed
 
 - **BREAKING:** A bad --project value is now refused where the argument is
@@ -36,6 +41,10 @@ and this project adheres to
   the path is an example rather than a requirement. Existing configs are
   unaffected: bombyx never checked the directory, so any path inside the
   repository still works.
+- The generated Vagrantfile now always sets `config.vm.hostname`. A project that
+  names no `hostname` gets `<project>-agent` derived from its name, so a guest
+  no longer keeps the box's default name and several agent VMs on one host can
+  be told apart.
 
 ### Fixed
 
