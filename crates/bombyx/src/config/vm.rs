@@ -6,10 +6,11 @@
 //! Every value in the table is a type that checks itself:
 //! [`Provider`] is an enum, [`BoxName`] is a newtype in the
 //! shape `super::source::RepoUrl` describes, `cpus` is a
-//! `NonZeroU32`, and `memory` is a [`Memory`] newtype that reads
-//! a bare MiB count or a suffixed size like `"6GB"`. So a `Vm`
-//! that exists at all is one whose values passed, and there is
-//! no separate function to remember to call.
+//! `NonZeroU32`, and `memory` and the optional `disk` are
+//! [`Memory`] and [`Disk`] newtypes that each read a bare count or
+//! a suffixed size like `"6GB"`. So a `Vm` that exists at all is
+//! one whose values passed, and there is no separate function to
+//! remember to call.
 //!
 //! A single config value can end up in three different places,
 //! and each one can be attacked differently:
@@ -93,27 +94,34 @@ impl fmt::Display for Provider {
 
 /// The machine bombyx builds, as a project's `[vm]` table.
 ///
-/// Every field but `provider` is required. None of the other
-/// three has a defensible default: the base image is the one
-/// thing bombyx cannot invent, and a size bombyx chose would be
-/// wrong on both a laptop and a workstation.
+/// `box`, `cpus` and `memory` are required: the base image is the
+/// one thing bombyx cannot invent, and a size it chose would be
+/// wrong on both a laptop and a workstation. `provider`, `disk`
+/// and `hostname` are optional -- `provider` defaults to libvirt,
+/// and an absent `disk` or `hostname` leaves the box's own disk
+/// size and lets bombyx derive a name.
 ///
-/// `#[serde(deny_unknown_fields)]` makes a key serde does not
-/// recognise an error instead of something quietly ignored. It
-/// is what turns `cpu = 2` into a message naming `cpu`, rather
-/// than a VM built with whatever `cpus` defaults to.
+/// Serde reads the table through the private `VmFields`, whose
+/// `#[serde(deny_unknown_fields)]` turns a key it does not
+/// recognise -- `cpu = 2` for `cpus` -- into a message naming the
+/// key rather than a VM built with a default. `VmFields` then
+/// converts through [`Vm::try_from`], which enforces the one rule
+/// no single field can: a `disk` needs the libvirt provider.
+///
+/// The fields are public, so a caller can build a `Vm` by hand and
+/// skip both the field checks and that conversion. This is the same
+/// gap [`Config`](crate::config::Config)'s public fields leave, and
+/// the checks are here to run while the config file is read.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "VmFields")]
 pub struct Vm {
     /// Virtualization backend. Defaults to
     /// [`Provider::Libvirt`] when the key is absent.
-    #[serde(default)]
     pub provider: Provider,
     /// Vagrant box the VM boots from, e.g.
     /// `generic/ubuntu2204`.
     ///
     /// Named `box_name` because `box` is a Rust keyword.
-    #[serde(rename = "box")]
     pub box_name: BoxName,
     /// Virtual CPUs. Never zero.
     ///
@@ -122,7 +130,6 @@ pub struct Vm {
     /// the config file got. What the type does *not* do is name
     /// the key when it refuses one, which is why serde reads it
     /// through `positive_cpus`.
-    #[serde(deserialize_with = "positive_cpus")]
     pub cpus: NonZeroU32,
     /// Memory the machine gets, held as MiB. Never zero.
     ///
@@ -133,6 +140,18 @@ pub struct Vm {
     /// vagrant, which would report it on the VM host after bombyx
     /// had already created a directory there.
     pub memory: Memory,
+
+    /// The virtual disk size, or `None` to keep the box's own.
+    ///
+    /// A [`Disk`], held as whole GiB and written into the Vagrantfile
+    /// as the libvirt provider's `machine_virtual_size`. When the key
+    /// is absent the guest inherits the base box's disk, which ranges
+    /// widely between boxes, so a project that outgrows it -- a Rust
+    /// target directory fills a small one fast -- sets a size here.
+    /// Only the libvirt provider takes one; a `disk` on any other
+    /// provider is refused by [`Vm::try_from`] while the config is
+    /// read.
+    pub disk: Option<Disk>,
 
     /// The name the guest answers to, or `None` to derive one.
     ///
@@ -149,15 +168,71 @@ pub struct Vm {
     /// remember. This is the guest's own name, unrelated to
     /// `crate::remote::VM_HOSTNAME_ENV`, which carries the VM
     /// host's name into the guest.
-    #[serde(default)]
     pub hostname: Option<Hostname>,
 }
 
-/// The wording both size fields use to refuse a value below one.
+/// The `[vm]` table as it parses, before its one cross-field rule.
 ///
-/// `cpus` reads it through [`positive_cpus`] and `memory` through
-/// [`Memory`], two separate readers. Sharing the one string keeps
-/// their wording identical, so a zero of either reads the same.
+/// [`Vm`] is `#[serde(try_from = "VmFields")]` from this, so serde
+/// reads each field through its own type's check and then
+/// [`Vm::try_from`] enforces the rule no single field can see: a
+/// `disk` needs the libvirt provider. The fields mirror `Vm`'s, and
+/// the compiler refuses [`Vm::try_from`] if the two ever drift.
+///
+/// Every field-level serde attribute lives here rather than on `Vm`,
+/// because this is the type serde actually deserializes.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VmFields {
+    #[serde(default)]
+    provider: Provider,
+    #[serde(rename = "box")]
+    box_name: BoxName,
+    #[serde(deserialize_with = "positive_cpus")]
+    cpus: NonZeroU32,
+    memory: Memory,
+    #[serde(default)]
+    disk: Option<Disk>,
+    #[serde(default)]
+    hostname: Option<Hostname>,
+}
+
+impl TryFrom<VmFields> for Vm {
+    type Error = FieldError;
+
+    /// Enforces the disk/provider rule, then hands the checked
+    /// fields to `Vm` unchanged.
+    ///
+    /// The rule lives here, not in [`Disk`], because it needs the
+    /// `provider` sitting beside the `disk` in the same table, which
+    /// a value's own constructor cannot see. `libvirt` is the only
+    /// provider whose Vagrantfile carries a disk size, so a `disk`
+    /// on any other one would render nothing and silently leave the
+    /// box default; refusing it names the field instead.
+    fn try_from(fields: VmFields) -> Result<Self, FieldError> {
+        if fields.disk.is_some() && fields.provider != Provider::Libvirt {
+            return Err(FieldError::invalid(
+                "disk",
+                "only the libvirt provider supports a disk size",
+            ));
+        }
+        Ok(Self {
+            provider: fields.provider,
+            box_name: fields.box_name,
+            cpus: fields.cpus,
+            memory: fields.memory,
+            disk: fields.disk,
+            hostname: fields.hostname,
+        })
+    }
+}
+
+/// The wording every size field uses to refuse a value below one.
+///
+/// `cpus` reads it through [`positive_cpus`], and `memory` and
+/// `disk` through [`Memory`] and [`Disk`], each a separate reader.
+/// Sharing the one string keeps their wording identical, so a zero
+/// of any of them reads the same.
 const AT_LEAST_ONE: &str = "must be at least 1";
 
 /// Reads `cpus`, refusing anything but a positive integer with a
@@ -213,6 +288,211 @@ fn named<E: serde::de::Error>(field: &'static str, reason: &str) -> E {
     serde::de::Error::custom(FieldError::invalid(field, reason))
 }
 
+/// Reads a size written as text into whole base units.
+///
+/// The shape shared by [`Memory`] and [`Disk`]: a number, then an
+/// optional unit with optional whitespace before it,
+/// case-insensitively. `unit_multiplier` maps an uppercased unit
+/// (`""` for a bare number) to how many base units it is worth, or
+/// `None` for a unit this field does not take; `allowed` names the
+/// ones it does, for the refusal. `examples` are concrete good
+/// values shown when the text has no leading number, so the operator
+/// sees the shape rather than being sent to the sample. The base
+/// unit is whatever the caller's table treats as `1` -- MiB for
+/// memory, GiB for disk.
+///
+/// # Errors
+///
+/// Returns [`FieldError::Invalid`] naming `field` when the text has
+/// no leading number, carries a fraction, names a unit outside the
+/// caller's table, overflows `u32` base units, or works out to zero.
+fn parse_size(
+    field: &'static str,
+    raw: &str,
+    unit_multiplier: impl Fn(&str) -> Option<u64>,
+    allowed: &str,
+    examples: &str,
+) -> Result<NonZeroU32, FieldError> {
+    let text = raw.trim();
+    let split = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let (number, rest) = text.split_at(split);
+    if number.is_empty() {
+        return Err(FieldError::invalid(
+            field,
+            format!("must start with a number, e.g. {examples}"),
+        ));
+    }
+    let unit = rest.trim_start();
+    let Some(per_unit) = unit_multiplier(&unit.to_ascii_uppercase()) else {
+        // A fraction reaches here as the `.` left in the unit slot:
+        // `"1.5GB"` arrives with `rest` of `.5GB`. Naming it a
+        // whole-number rule is clearer than calling that an unknown
+        // unit.
+        if unit.starts_with('.') {
+            return Err(FieldError::invalid(field, "must be a whole number"));
+        }
+        return Err(FieldError::invalid(
+            field,
+            format!("unknown unit `{unit}` -- use {allowed}"),
+        ));
+    };
+    // A digit run too long for `u64`, the multiplication, and the
+    // narrowing to `u32` are each a way the value can be too large;
+    // all three land on the same message.
+    let too_large = || FieldError::invalid(field, "is too large");
+    let value = number
+        .parse::<u64>()
+        .map_err(|_| too_large())?
+        .checked_mul(per_unit)
+        .and_then(|m| u32::try_from(m).ok())
+        .ok_or_else(too_large)?;
+    NonZeroU32::new(value)
+        .ok_or_else(|| FieldError::invalid(field, AT_LEAST_ONE))
+}
+
+/// Reads a bare config integer as a count of base units.
+///
+/// A bare integer never carries a unit, so it is one base unit
+/// each. A value below one is refused with the same wording a
+/// `"0GB"` gets, and one past `u32::MAX` with the same wording an
+/// oversized suffixed value gets.
+fn size_from_int(
+    field: &'static str,
+    value: i64,
+) -> Result<NonZeroU32, FieldError> {
+    u32::try_from(value)
+        .ok()
+        .and_then(NonZeroU32::new)
+        .ok_or_else(|| {
+            let reason = if value > i64::from(u32::MAX) {
+                "is too large"
+            } else {
+                AT_LEAST_ONE
+            };
+            FieldError::invalid(field, reason)
+        })
+}
+
+/// Deserializes a size newtype's inner value from any TOML shape.
+///
+/// [`Memory`] and [`Disk`] both read a bare integer, a suffixed
+/// string, or the wrong type entirely, and all three answers name
+/// the key rather than falling back on serde's keyless `invalid
+/// type` message. `from_text` is the field's own text reader, and
+/// `shape` describes what it accepts -- used both for serde's
+/// `expecting` and for the refusal of a boolean, array, table or
+/// datetime.
+fn deserialize_size<'de, D>(
+    d: D,
+    field: &'static str,
+    from_text: fn(&str) -> Result<NonZeroU32, FieldError>,
+    shape: &'static str,
+) -> Result<NonZeroU32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct SizeVisitor {
+        field: &'static str,
+        from_text: fn(&str) -> Result<NonZeroU32, FieldError>,
+        shape: &'static str,
+    }
+
+    impl SizeVisitor {
+        /// The refusal for a value of the wrong TOML type, naming
+        /// the field and the shapes it does take.
+        fn wrong_type(&self) -> FieldError {
+            FieldError::invalid(self.field, format!("must be {}", self.shape))
+        }
+    }
+
+    impl<'de> serde::de::Visitor<'de> for SizeVisitor {
+        type Value = NonZeroU32;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(self.shape)
+        }
+
+        fn visit_i64<E: serde::de::Error>(
+            self,
+            v: i64,
+        ) -> Result<NonZeroU32, E> {
+            size_from_int(self.field, v).map_err(E::custom)
+        }
+
+        // A TOML integer arrives through `visit_i64`; this catches a
+        // value past `i64::MAX` from any other deserializer before
+        // it wraps negative.
+        fn visit_u64<E: serde::de::Error>(
+            self,
+            v: u64,
+        ) -> Result<NonZeroU32, E> {
+            let v = i64::try_from(v).map_err(|_| {
+                E::custom(FieldError::invalid(self.field, "is too large"))
+            })?;
+            size_from_int(self.field, v).map_err(E::custom)
+        }
+
+        fn visit_str<E: serde::de::Error>(
+            self,
+            v: &str,
+        ) -> Result<NonZeroU32, E> {
+            (self.from_text)(v).map_err(E::custom)
+        }
+
+        fn visit_f64<E: serde::de::Error>(
+            self,
+            _v: f64,
+        ) -> Result<NonZeroU32, E> {
+            Err(E::custom(FieldError::invalid(
+                self.field,
+                "must be a whole number",
+            )))
+        }
+
+        // A boolean, an array, a table or a datetime is the wrong
+        // TOML type entirely. serde's own message for these names no
+        // key, and `cpus` names its key for the same mistakes, so
+        // these arms keep the refusal in the house style. A datetime
+        // reaches `visit_map`.
+        fn visit_bool<E: serde::de::Error>(
+            self,
+            _v: bool,
+        ) -> Result<NonZeroU32, E> {
+            Err(E::custom(self.wrong_type()))
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            _seq: A,
+        ) -> Result<NonZeroU32, A::Error> {
+            Err(serde::de::Error::custom(self.wrong_type()))
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            _map: A,
+        ) -> Result<NonZeroU32, A::Error> {
+            Err(serde::de::Error::custom(self.wrong_type()))
+        }
+    }
+
+    d.deserialize_any(SizeVisitor {
+        field,
+        from_text,
+        shape,
+    })
+}
+
+/// What [`Memory`] accepts, for `expecting` and the wrong-type
+/// refusal.
+const MEMORY_SHAPE: &str = "a number of MiB, or a string like \"6GB\"";
+
+/// What [`Disk`] accepts, for `expecting` and the wrong-type
+/// refusal.
+const DISK_SHAPE: &str = "a number of GiB, or a string like \"40GB\"";
+
 /// The memory a project's machine gets, held as MiB.
 ///
 /// A *newtype* wrapping one private [`NonZeroU32`], the MiB count
@@ -234,8 +514,9 @@ fn named<E: serde::de::Error>(field: &'static str, reason: &str) -> E {
 /// fractional size, an unknown unit and a zero are each refused
 /// while the config is read.
 ///
-/// A suffix carries the unit in the value itself, so the sample
-/// needs no comment to say what a bare number means.
+/// A suffixed value describes itself, which is why the sample can
+/// lead with `memory = "8GB"` rather than a bare number and a
+/// comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Memory(NonZeroU32);
 
@@ -271,73 +552,26 @@ impl Memory {
     /// unit other than MB or GB, overflows `u32` MiB, or works out
     /// to zero.
     pub fn parse(raw: &str) -> Result<Self, FieldError> {
-        let text = raw.trim();
-        let split = text
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(text.len());
-        let (number, rest) = text.split_at(split);
-        if number.is_empty() {
-            return Err(FieldError::invalid(
-                "memory",
-                "must start with a number, e.g. 6144, 512MB or 6GB",
-            ));
-        }
-        let unit = rest.trim_start();
-        let per_unit: u64 = match unit.to_ascii_uppercase().as_str() {
-            "" | "MB" | "MIB" => 1,
-            "GB" | "GIB" => 1024,
-            // A fraction reaches here as the `.` left in the unit
-            // slot: `"1.5GB"` arrives with `rest` of `.5GB`. Naming
-            // it a whole-number rule is clearer than calling that
-            // an unknown unit.
-            _ if unit.starts_with('.') => {
-                return Err(FieldError::invalid(
-                    "memory",
-                    "must be a whole number",
-                ));
-            }
-            _ => {
-                return Err(FieldError::invalid(
-                    "memory",
-                    format!("unknown unit `{unit}` -- use MB or GB"),
-                ));
-            }
-        };
-        // A digit run too long for `u64`, the multiplication, and
-        // the narrowing to `u32` are each a way the value can be
-        // too large; all three land on the same message.
-        let too_large = || FieldError::invalid("memory", "is too large");
-        let mib = number
-            .parse::<u64>()
-            .map_err(|_| too_large())?
-            .checked_mul(per_unit)
-            .and_then(|m| u32::try_from(m).ok())
-            .ok_or_else(too_large)?;
-        NonZeroU32::new(mib)
-            .map(Self)
-            .ok_or_else(|| FieldError::invalid("memory", AT_LEAST_ONE))
+        memory_mib(raw).map(Self)
     }
+}
 
-    /// A `Memory` from a bare config integer, which is MiB.
-    ///
-    /// Separate from [`Memory::parse`] because a bare integer
-    /// never carries a unit. A value below one is refused with the
-    /// same wording a `"0GB"` gets, and one past `u32::MAX` with
-    /// the same wording an oversized suffixed value gets.
-    fn from_config_int(mib: i64) -> Result<Self, FieldError> {
-        u32::try_from(mib)
-            .ok()
-            .and_then(NonZeroU32::new)
-            .map(Self)
-            .ok_or_else(|| {
-                let reason = if mib > i64::from(u32::MAX) {
-                    "is too large"
-                } else {
-                    AT_LEAST_ONE
-                };
-                FieldError::invalid("memory", reason)
-            })
-    }
+/// Every rule a `memory` value's text must pass, converting to MiB.
+///
+/// One function so [`Memory::parse`] and its serde reader run the
+/// identical unit table; `GB`/`GiB` are 1024 MiB, `MB`/`MiB` one.
+fn memory_mib(raw: &str) -> Result<NonZeroU32, FieldError> {
+    parse_size(
+        "memory",
+        raw,
+        |unit| match unit {
+            "" | "MB" | "MIB" => Some(1),
+            "GB" | "GIB" => Some(1024),
+            _ => None,
+        },
+        "MB or GB",
+        "6144, 512MB or 6GB",
+    )
 }
 
 impl<'de> serde::Deserialize<'de> for Memory {
@@ -345,96 +579,89 @@ impl<'de> serde::Deserialize<'de> for Memory {
     where
         D: serde::Deserializer<'de>,
     {
-        /// Reads the value however TOML typed it: an integer is a
-        /// MiB count, a string carries a unit, and a float is a
-        /// fraction bombyx refuses.
-        struct MemoryVisitor;
+        deserialize_size(d, "memory", memory_mib, MEMORY_SHAPE).map(Self)
+    }
+}
 
-        impl<'de> serde::de::Visitor<'de> for MemoryVisitor {
-            type Value = Memory;
+/// The virtual disk a project's machine gets, held as whole GiB.
+///
+/// A *newtype* wrapping one private [`NonZeroU32`], the GiB count
+/// bombyx writes into the Vagrantfile as the libvirt provider's
+/// `machine_virtual_size`, which sizes the disk in whole GiB. It is
+/// built only through [`Disk::parse`], [`Disk::from_gib`] or serde,
+/// each of which guarantees the value is at least one.
+///
+/// Like [`Memory`], the config may write it as a bare integer
+/// (`disk = 40`) or a suffixed string (`disk = "40GB"`). The unit
+/// is whole GiB, so only `GB` and `GiB` are accepted -- both mean
+/// one GiB -- and a sub-GiB unit like `MB` is refused, because the
+/// provider setting cannot express a fraction of a GiB.
+///
+/// The field is optional. When a project sets no `disk`, the guest
+/// keeps the base box's own disk size, which is what
+/// `config.toml.sample` says. Only the libvirt provider takes a
+/// disk size; [`Vm`] refuses a `disk` on any other provider while
+/// the config is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Disk(NonZeroU32);
 
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a memory size in MiB, or a string like \"6GB\"")
-            }
+impl Disk {
+    /// A `Disk` from a GiB count already known to be nonzero.
+    ///
+    /// Total, because [`NonZeroU32`] already carries the one rule
+    /// the type has, matching [`Memory::from_mib`].
+    #[must_use]
+    pub fn from_gib(gib: NonZeroU32) -> Self {
+        Self(gib)
+    }
 
-            fn visit_i64<E: serde::de::Error>(
-                self,
-                v: i64,
-            ) -> Result<Memory, E> {
-                Memory::from_config_int(v).map_err(E::custom)
-            }
+    /// The size in GiB, as bombyx writes it into the Vagrantfile.
+    #[must_use]
+    pub fn gib(&self) -> u32 {
+        self.0.get()
+    }
 
-            // A TOML integer arrives through `visit_i64`; this
-            // catches a value past `i64::MAX` from any other
-            // deserializer before it wraps negative.
-            fn visit_u64<E: serde::de::Error>(
-                self,
-                v: u64,
-            ) -> Result<Memory, E> {
-                let mib = i64::try_from(v).map_err(|_| {
-                    E::custom(FieldError::invalid("memory", "is too large"))
-                })?;
-                Memory::from_config_int(mib).map_err(E::custom)
-            }
+    /// Reads a size written as text, in whole GiB.
+    ///
+    /// Accepts a bare number (`"40"`), or a number and a `GB`/`GiB`
+    /// unit with optional whitespace between them (`"40GB"`,
+    /// `"40 GiB"`), case-insensitively. Both units mean one GiB.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError::Invalid`] naming `disk` when the text
+    /// has no leading number, carries a fraction, names a unit other
+    /// than GB (a sub-GiB unit included), overflows `u32` GiB, or
+    /// works out to zero.
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        disk_gib(raw).map(Self)
+    }
+}
 
-            fn visit_str<E: serde::de::Error>(
-                self,
-                v: &str,
-            ) -> Result<Memory, E> {
-                Memory::parse(v).map_err(E::custom)
-            }
+/// Every rule a `disk` value's text must pass, in whole GiB.
+///
+/// One function so [`Disk::parse`] and its serde reader run the
+/// identical unit table; `GB` and `GiB` are one GiB, and nothing
+/// smaller is accepted.
+fn disk_gib(raw: &str) -> Result<NonZeroU32, FieldError> {
+    parse_size(
+        "disk",
+        raw,
+        |unit| match unit {
+            "" | "GB" | "GIB" => Some(1),
+            _ => None,
+        },
+        "GB or GiB",
+        "40 or \"40GB\"",
+    )
+}
 
-            fn visit_f64<E: serde::de::Error>(
-                self,
-                _v: f64,
-            ) -> Result<Memory, E> {
-                Err(E::custom(FieldError::invalid(
-                    "memory",
-                    "must be a whole number",
-                )))
-            }
-
-            // A boolean, an array, a table or a datetime is the
-            // wrong TOML type entirely. serde's own message for
-            // these names no key, and `cpus` names its key for the
-            // same mistakes, so these arms keep memory's refusal in
-            // the house style rather than leaving the one field
-            // whose error does not say what to edit. A datetime
-            // reaches `visit_map`.
-            fn visit_bool<E: serde::de::Error>(
-                self,
-                _v: bool,
-            ) -> Result<Memory, E> {
-                Err(E::custom(Self::wrong_type()))
-            }
-
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                _seq: A,
-            ) -> Result<Memory, A::Error> {
-                Err(serde::de::Error::custom(Self::wrong_type()))
-            }
-
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                _map: A,
-            ) -> Result<Memory, A::Error> {
-                Err(serde::de::Error::custom(Self::wrong_type()))
-            }
-        }
-
-        impl MemoryVisitor {
-            /// The refusal for a value of the wrong TOML type,
-            /// naming `memory` and the two shapes it does accept.
-            fn wrong_type() -> FieldError {
-                FieldError::invalid(
-                    "memory",
-                    "must be a number of MiB, or a string like \"6GB\"",
-                )
-            }
-        }
-
-        d.deserialize_any(MemoryVisitor)
+impl<'de> serde::Deserialize<'de> for Disk {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_size(d, "disk", disk_gib, DISK_SHAPE).map(Self)
     }
 }
 
@@ -879,6 +1106,13 @@ mod tests {
             ("memory = 1.5", "must be a whole number"),
             ("memory = \"6TB\"", "unknown unit `TB` -- use MB or GB"),
             ("memory = \"9999999GB\"", "is too large"),
+            // A value with no leading number shows concrete good
+            // ones, so the operator sees the shape here rather than
+            // being sent to the sample.
+            (
+                "memory = \"GB\"",
+                "must start with a number, e.g. 6144, 512MB or 6GB",
+            ),
         ] {
             let src = format!("box = \"b\"\ncpus = 2\n{bad}\n");
             let err = toml::from_str::<Vm>(&src).expect_err("must be refused");
@@ -918,5 +1152,137 @@ mod tests {
                 err.message()
             );
         }
+    }
+
+    /// A `[vm]` table with a valid `disk` line, parsed to a `Vm`.
+    fn vm_with_disk(disk: &str) -> Result<Vm, toml::de::Error> {
+        let src =
+            format!("box = \"b\"\ncpus = 2\nmemory = 2048\ndisk = {disk}\n");
+        toml::from_str::<Vm>(&src)
+    }
+
+    #[test]
+    fn disk_defaults_to_none_when_the_key_is_absent() {
+        // No `disk` means the guest keeps the box's own size, so the
+        // field is `None` rather than a number bombyx invented.
+        let vm = toml::from_str::<Vm>("box = \"b\"\ncpus = 2\nmemory = 2048\n")
+            .expect("a table without disk is valid");
+        assert_eq!(vm.disk, None);
+    }
+
+    #[test]
+    fn disk_reads_a_bare_integer_and_a_suffix_as_gib() {
+        // The left value is what the config may write; the right is
+        // the GiB it holds. A bare integer is GiB, GB and GiB both
+        // mean one GiB, and case and a space before the unit do not
+        // matter.
+        for (written, gib) in [
+            ("40", 40),
+            ("\"40GB\"", 40),
+            ("\"40GiB\"", 40),
+            ("\"40 GB\"", 40),
+            ("\"40gb\"", 40),
+            ("\"128GB\"", 128),
+        ] {
+            let vm = vm_with_disk(written)
+                .unwrap_or_else(|e| panic!("{written} must pass: {e}"));
+            assert_eq!(
+                vm.disk.expect("disk was set").gib(),
+                gib,
+                "from {written}"
+            );
+        }
+    }
+
+    #[test]
+    fn disk_refuses_the_whole_family_of_bad_values() {
+        // The same family `memory` refuses, plus a sub-GiB unit,
+        // which `disk` cannot express. Each names `disk`.
+        for bad in [
+            "\"\"",             // empty string
+            "0",                // bare zero
+            "\"0GB\"",          // zero with a unit
+            "-5",               // negative
+            "\"1.5GB\"",        // a suffixed fraction
+            "1.5",              // a bare fraction
+            "\"512MB\"",        // sub-GiB: not expressible in whole GiB
+            "\"40TB\"",         // a unit outside GB/GiB
+            "\"GB\"",           // a unit with no number
+            "\"lots\"",         // not a number at all
+            "true",             // the wrong TOML type
+            "99999999999",      // past u32 GiB on its own
+            "\"9999999999GB\"", // past u32 GiB once read as a size
+        ] {
+            let err = vm_with_disk(bad)
+                .err()
+                .unwrap_or_else(|| panic!("{bad} must be refused"));
+            assert!(
+                err.message().starts_with("invalid `disk`: "),
+                "{bad}: {}",
+                err.message()
+            );
+        }
+    }
+
+    #[test]
+    fn a_sub_gib_disk_unit_says_what_to_use() {
+        // `MB` is a real unit, just not one a whole-GiB disk takes,
+        // so the message points at the units that work.
+        let err = vm_with_disk("\"512MB\"").expect_err("must be refused");
+        assert_eq!(
+            err.message(),
+            "invalid `disk`: unknown unit `MB` -- use GB or GiB"
+        );
+    }
+
+    #[test]
+    fn a_disk_on_a_non_libvirt_provider_is_refused() {
+        // Only libvirt's Vagrantfile carries a disk size. A `disk`
+        // on any other provider would render nothing and silently
+        // leave the box default, so the config is refused instead,
+        // naming the field.
+        let src = "box = \"b\"\ncpus = 2\nmemory = 2048\n\
+                   provider = \"hyperv\"\ndisk = \"40GB\"\n";
+        let err = toml::from_str::<Vm>(src).expect_err("must be refused");
+        assert_eq!(
+            err.message(),
+            "invalid `disk`: only the libvirt provider supports a disk size"
+        );
+    }
+
+    #[test]
+    fn a_disk_is_accepted_on_libvirt_named_or_defaulted() {
+        // libvirt is the default provider, so a `disk` is fine both
+        // when the key is absent and when it names libvirt.
+        for provider in ["", "provider = \"libvirt\"\n"] {
+            let src = format!(
+                "box = \"b\"\ncpus = 2\nmemory = 2048\n{provider}\
+                 disk = \"40GB\"\n"
+            );
+            let vm = toml::from_str::<Vm>(&src).unwrap_or_else(|e| {
+                panic!("{provider:?} + disk must pass: {e}")
+            });
+            assert_eq!(vm.disk.expect("disk was set").gib(), 40);
+            assert_eq!(vm.provider, Provider::Libvirt);
+        }
+    }
+
+    #[test]
+    fn hyperv_without_a_disk_is_still_accepted() {
+        // The rule refuses a disk on hyperv, not hyperv itself.
+        let src =
+            "box = \"b\"\ncpus = 2\nmemory = 2048\nprovider = \"hyperv\"\n";
+        let vm =
+            toml::from_str::<Vm>(src).expect("hyperv without disk is fine");
+        assert_eq!(vm.provider, Provider::Hyperv);
+        assert_eq!(vm.disk, None);
+    }
+
+    #[test]
+    fn disk_from_gib_and_parse_reach_the_same_value() {
+        let built =
+            Disk::from_gib(NonZeroU32::new(40).expect("a positive fixture"));
+        assert_eq!(built.gib(), 40);
+        assert_eq!(Disk::parse("40GiB").expect("40GiB is valid"), built);
     }
 }

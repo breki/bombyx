@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::config::{Config, DeployKeyPath, EnvName, EnvValue, Staged};
+use crate::config::{Config, DeployKeyPath, Disk, EnvName, EnvValue, Staged};
 use crate::hostkeys;
 
 /// The provisioning script, shipped to the host unchanged.
@@ -496,7 +496,7 @@ Vagrant.configure(\"2\") do |config|
 
   config.vm.provider :{provider} do |v|
     v.cpus = {cpus}
-    v.memory = {memory}
+    v.memory = {memory}{disk}
   end
 
 {deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
@@ -557,6 +557,7 @@ end
         provider = vm.provider,
         cpus = vm.cpus,
         memory = vm.memory.mib(),
+        disk = disk_setting(vm.disk),
         bootstrap = ruby_string(BOOTSTRAP_NAME),
         project_env = project_env_block(&cfg.env),
         repo = ruby_string(source.repo.as_str()),
@@ -574,6 +575,20 @@ end
 /// [`DEPLOY_KEY_ENV`] says why it is never simply left out.
 fn deploy_key_env(key: Option<&DeployKeyPath>) -> &'static str {
     if key.is_some() { "1" } else { "0" }
+}
+
+/// The libvirt disk-size line for the provider block, or nothing.
+///
+/// `v.machine_virtual_size` sizes the disk in whole GiB. It is a
+/// libvirt setting, and [`Vm`](crate::config::Vm) refuses a `disk`
+/// on any other provider, so this renders for libvirt alone. `None`
+/// leaves the box's own disk size and adds no line.
+///
+/// The leading newline places the line inside the `do |v|` block,
+/// after `v.memory`.
+fn disk_setting(disk: Option<Disk>) -> String {
+    disk.map(|d| format!("\n    v.machine_virtual_size = {}", d.gib()))
+        .unwrap_or_default()
 }
 
 /// The Ruby that uploads the deploy key, or nothing at all.
@@ -788,6 +803,7 @@ mod tests {
             memory: Memory::from_mib(
                 NonZeroU32::new(8192).expect("a positive fixture size"),
             ),
+            disk: None,
             hostname: None,
         };
         cfg.source = Source {
@@ -1050,6 +1066,29 @@ mod tests {
         ] {
             assert!(out.contains(needle), "{needle} missing from:\n{out}");
         }
+    }
+
+    #[test]
+    fn a_disk_size_renders_only_when_set() {
+        // With no disk the provider block carries no size line, so
+        // the guest keeps the base box's own disk.
+        let none = rendered_for(&cfg_with(Provider::Libvirt));
+        assert!(
+            !none.contains("machine_virtual_size"),
+            "an unset disk must add no line:\n{none}"
+        );
+
+        // With a disk the line sizes it in whole GiB, inside the
+        // provider block.
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.vm.disk = Some(Disk::from_gib(
+            NonZeroU32::new(40).expect("a positive size"),
+        ));
+        let out = rendered_for(&cfg);
+        assert!(
+            out.contains("v.machine_virtual_size = 40"),
+            "the disk line is missing from:\n{out}"
+        );
     }
 
     #[test]

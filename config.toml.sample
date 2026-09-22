@@ -142,6 +142,21 @@ cpus = 4
 # exactly `8192`. Whole numbers only.
 memory = "8GB"
 
+# Optional. The virtual disk the machine gets. Left out, the guest
+# keeps the base box's own disk, which varies a lot between boxes --
+# some ship under 10 GB, too small for a Rust target directory and a
+# coverage run. Set a size here when the box's own is not enough.
+#
+# Whole GiB. A bare integer is GiB, and a quoted value may carry a
+# `GB` or `GiB` unit -- both mean one GiB, so `40` and `"40GB"` are
+# the same. There is no sub-GiB unit: the disk setting cannot express
+# a fraction of a GiB.
+#
+# Only the libvirt provider takes a disk size. Setting `disk` with
+# `provider = "hyperv"` is refused when the config is read.
+#
+# disk = "40GB"
+
 # Optional. The name the guest answers to, written into the
 # generated Vagrantfile as its hostname. Left out, bombyx derives
 # `<project>-agent` from this table's project name, so several
