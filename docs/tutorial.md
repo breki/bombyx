@@ -87,7 +87,8 @@ workstation                     VM host
          and bootstrap.sh          clones the repo itself
 
   the project repo:
-    .bombyx/           the provisioning script the guest runs
+    .bombyx/           holds the provisioning script the guest runs
+      provision.sh
 
   your own machine, outside any repo:
     config.toml        which VM host is yours, and one table
@@ -523,6 +524,16 @@ asking which repository each one holds. `bombyx shell` leaves you
 one directory above it, in that home -- confirmed against a real
 VM rather than inferred. The clone is the only copy of your code
 in the VM.
+
+Save the script below as `.bombyx/provision.sh`, creating the
+directory as you go: `mkdir -p .bombyx`. The leading dot makes
+`.bombyx/` a hidden directory, so create it from a shell rather
+than a file manager.
+
+> **Note**: On Windows, File Explorer will not create a folder
+> whose name begins with a dot. Make the directory from a shell
+> instead -- `New-Item -ItemType Directory .bombyx` in PowerShell,
+> or `mkdir -p .bombyx` in Git Bash or WSL.
 
 Write the script so that it is re-runnable. `bombyx provision`
 runs it again on an existing VM, so every step should either be
