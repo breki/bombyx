@@ -34,7 +34,7 @@ flowchart LR
   end
 
   subgraph guest["agent VM (guest)"]
-    clone["~/project<br/>in the agent's home"]
+    clone["~/{project}<br/>in the agent's home"]
     agent["agent"]
   end
 

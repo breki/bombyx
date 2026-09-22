@@ -326,10 +326,19 @@ if [ ! -O "$HOME" ]; then
         "account the agent works as."
 fi
 
-# The last component is fixed rather than the project's name, so
-# nothing about the operator's config is pasted into this file --
-# see the header.
-readonly CLONE_DIR="$HOME/project"
+# The last component is the project's name, so several agent VMs
+# can be told apart by their clone directory rather than by asking
+# git which repository each one holds. The name arrives as an
+# environment variable, not pasted into this file, so the script
+# stays byte-identical for every project -- see the header.
+#
+# It falls back to `project` when the variable is unset. An older
+# bombyx always cloned into a fixed `$HOME/project`, and the
+# Vagrantfile it wrote on the VM host never sets `BOMBYX_PROJECT`.
+# So a `vagrant provision` run there by hand arrives with the
+# variable unset, and this fallback clones into the old fixed
+# location rather than aborting under `set -u`.
+readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
 # distinction, and the two are easy to run together.

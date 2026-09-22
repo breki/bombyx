@@ -23,6 +23,13 @@ and this project adheres to
 - **BREAKING:** ConfigError::HostMissing carries its place as a PathBuf rather
   than a String. It has one construction site and the value is always the
   registry's own path.
+- **BREAKING:** The guest now clones into a directory named after the project
+  (`$HOME/<project>`) instead of the fixed `$HOME/project`, so several agent VMs
+  can be told apart by their clone directory. The directory name arrives as a
+  new `BOMBYX_PROJECT` provisioner variable and falls back to `project` for a VM
+  whose Vagrantfile an older bombyx wrote. A VM built before this keeps its old
+  `~/project`; re-provisioning clones the new directory beside it without
+  deleting the old one.
 
 ### Fixed
 

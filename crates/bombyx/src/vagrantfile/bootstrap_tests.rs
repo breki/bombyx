@@ -340,20 +340,30 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
         "BOMBYX_GIT_HOST",
         "BOMBYX_HOST_KEYS_URL",
         "BOMBYX_HOST_KEYS_FORMAT",
+        "BOMBYX_PROJECT",
     ] {
-        let guarded = format!("${{{name}:-}}");
+        // The legal spelling is `${NAME:-<default>}` for any
+        // default: `BOMBYX_PROJECT` falls back to `project` and
+        // the rest fall back to nothing. Strip every such form
+        // first -- whatever its default -- and then no bare
+        // mention of the variable may be left.
+        let open = format!("${{{name}:-");
         for line in flat_bootstrap_lines() {
             if line.starts_with('#') || !line.contains(name) {
                 continue;
             }
-            // Take the legal spelling out first, then nothing
-            // naming the variable may be left.
-            let rest = line.replace(&guarded, "");
+            let mut rest = line.clone();
+            while let Some(start) = rest.find(&open) {
+                let Some(end_rel) = rest[start..].find('}') else {
+                    break;
+                };
+                rest.replace_range(start..=start + end_rel, "");
+            }
             for bad in [format!("${name}"), format!("${{{name}")] {
                 assert!(
                     !rest.contains(&bad),
-                    "{name} is expanded as `{bad}` rather than \
-                     `{guarded}`, so an unset one aborts before \
+                    "{name} is expanded bare as `{bad}` rather than \
+                     `{open}...}}`, so an unset one aborts before \
                      `refuse` can run:\n  {line}"
                 );
             }
@@ -533,9 +543,15 @@ fn the_clone_sits_in_the_home_the_provisioner_was_given() {
     // that `$HOME` appears somewhere would pass with
     // `CLONE_DIR=/srv/project` written underneath a comment
     // that mentions it.
+    //
+    // The last component is the project's name, sent as
+    // `BOMBYX_PROJECT`, defaulting to `project` when it is unset.
+    // `bootstrap.sh` holds why that default is the right one.
     let flat = flat_bootstrap();
     assert!(
-        flat.contains("readonly CLONE_DIR=\"$HOME/project\""),
+        flat.contains(
+            "readonly CLONE_DIR=\"$HOME/${BOMBYX_PROJECT:-project}\""
+        ),
         "the clone must sit in the account's own home"
     );
 }

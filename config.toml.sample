@@ -418,14 +418,14 @@ script = "vagrant/provision.sh"   # path inside the clone
 # config bombyx writes on your checkout.
 #
 # `HOME` is accepted and is the one to think about before
-# writing. bombyx clones into `$HOME/project`, so setting
-# `HOME` here moves the clone, and your script's working
-# directory with it. That is measured rather than assumed: a
-# provision with `HOME` pointing at a second directory cloned
-# into that directory instead. The value has to be absolute,
-# exist, be writable and searchable, and be owned by the
-# guest's own account, or bombyx refuses the provision and says
-# which of those failed.
+# writing. bombyx clones into `$HOME/<project>`, the directory
+# named after this table's project, so setting `HOME` here moves
+# the clone, and your script's working directory with it. That is
+# measured rather than assumed: a provision with `HOME` pointing
+# at a second directory cloned into that directory instead. The
+# value has to be absolute, exist, be writable and searchable,
+# and be owned by the guest's own account, or bombyx refuses the
+# provision and says which of those failed.
 #
 # Values carry the same rule as `box`, `repo`, `ref`, `script`
 # and `deploy_key`: no quote, no backslash, no control
