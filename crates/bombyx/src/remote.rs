@@ -733,6 +733,46 @@ fn status_fragment(cfg: &Config) -> String {
     )
 }
 
+/// Builds the `status` command for one project, reporting a
+/// never-built project cleanly rather than failing on it.
+///
+/// `vagrant status` needs a Vagrantfile. Run in a directory that
+/// holds none -- or that a first `up` never created -- it exits
+/// non-zero and prints a raw `cd` failure naming a path the operator
+/// never typed. A project bombyx has not built yet is an ordinary
+/// state, not a fault: it is what every project is in before the
+/// first `up`, and the state an operator most often runs `status` in
+/// first. So the guard answers it in bombyx's own words and exits
+/// zero, the way `bombyx list` reports the same project as "not
+/// created". `status` already exits zero for a built-but-halted VM,
+/// so zero here keeps its contract that a reachable machine answers
+/// successfully whatever state it is in.
+///
+/// The Vagrantfile is tested at its full path rather than after a
+/// `cd`, because the directory itself may not exist and a `cd` into a
+/// missing one is the failure this exists to avoid.
+/// `vagrant_status_many` guards each project the same way for the
+/// listing; this is the single-project twin, printing a message a
+/// person reads rather than the `NEVER_BUILT` marker a parser does.
+///
+/// The message names the project as a `printf` argument, not inside
+/// the format string, so a `%` or `'` in the name cannot be read as
+/// a conversion or end the string early -- the reason
+/// `status_fragment` does the same.
+#[must_use]
+pub fn status_or_never_built(cfg: &Config, tty: Tty) -> RemoteCommand {
+    let dir = cfg.remote_project_dir();
+    let script = format!(
+        "if [ -f {vagrantfile} ]; then {run}; \
+         else printf 'bombyx: %s has no VM yet; run bombyx up to \
+         create it\\n' {name}; fi",
+        vagrantfile = quote_remote_path(&format!("{dir}/Vagrantfile")),
+        run = vagrant_script(cfg, &dir, &["status"]),
+        name = shell_quote(cfg.project.as_str()),
+    );
+    transport(cfg, &script, tty)
+}
+
 /// Builds the command that creates `dir` on the VM host if it
 /// does not yet exist.
 #[must_use]
@@ -1028,8 +1068,11 @@ mod tests {
         /// One builder, named for the error message.
         type Builder = (&'static str, fn(&Config) -> RemoteCommand);
 
-        let builders: [Builder; 9] = [
+        let builders: [Builder; 10] = [
             ("vagrant", |c| vagrant(c, &["status"], Tty::NoPty)),
+            ("status_or_never_built", |c| {
+                status_or_never_built(c, Tty::NoPty)
+            }),
             // A row because this builder does not go through
             // `transport`: `unattended` matches on the route
             // itself, so a script made conditional there is
@@ -1659,6 +1702,25 @@ mod tests {
         assert_eq!(
             remote_script(&c),
             format!("cd '/srv/x' && {env} vagrant 'halt'")
+        );
+    }
+
+    #[test]
+    fn status_guards_a_never_built_project_and_says_run_up() {
+        // The Vagrantfile is tested at its full path, before any
+        // `cd`, so a directory that does not exist yet is answered
+        // rather than `cd`-ed into; the else branch is a plain
+        // message and a zero exit, not vagrant's raw failure.
+        let c = status_or_never_built(&cfg(), Tty::NoPty);
+        let env = vagrant_env();
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "if [ -f ~/'vms/myproject/Vagrantfile' ]; then \
+                 cd ~/'vms/myproject' && {env} vagrant 'status'; \
+                 else printf 'bombyx: %s has no VM yet; run bombyx up \
+                 to create it\\n' 'myproject'; fi"
+            )
         );
     }
 

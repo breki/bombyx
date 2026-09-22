@@ -197,7 +197,7 @@ pub fn plan(
         ),
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
         Action::Shell => vec![remote::shell_into_vm(cfg)],
-        Action::Status => vec![remote::vagrant(cfg, &["status"], tty)],
+        Action::Status => vec![remote::status_or_never_built(cfg, tty)],
         Action::Reset => {
             let dir = cfg.remote_project_dir();
             vec![remote::restore_snapshot(cfg, &dir, tty)]
@@ -910,13 +910,15 @@ mod tests {
     }
 
     #[test]
-    fn status_queries_the_project_dir() {
+    fn status_guards_a_never_built_project() {
+        // Status maps to the guarded builder, so a project whose VM
+        // was never built is answered rather than `cd`-ed into.
+        // `remote` owns the exact script; here we confirm the wiring.
         let cmds = run(&Action::Status);
-        let env = vagrant_env();
-        assert_eq!(
-            script(&cmds[0]),
-            format!("cd ~/'vms/myproject' && {env} vagrant 'status'")
-        );
+        let s = script(&cmds[0]);
+        assert!(s.contains("if [ -f ~/'vms/myproject/Vagrantfile' ]"), "{s}");
+        assert!(s.contains("vagrant 'status'"), "{s}");
+        assert!(s.contains("has no VM yet"), "{s}");
     }
 
     #[test]
