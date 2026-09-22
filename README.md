@@ -98,7 +98,7 @@ memory = 8192
 [projects.myproject.source]
 repo = "https://github.com/you/myproject"
 ref = "main"
-script = "vagrant/provision.sh"
+script = ".bombyx/provision.sh"
 ```
 
 `[vm]` describes the machine to boot; `[source]` is the repository the
