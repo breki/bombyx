@@ -156,6 +156,7 @@ classDiagram
     +NonZeroU32 cpus
     +Memory memory
     +Option~Disk~ disk
+    +Option~CpuMode~ cpu_mode
     +Option~Hostname~ hostname
   }
   class Source {

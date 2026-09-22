@@ -27,6 +27,13 @@ and this project adheres to
   `"40GB"`/`"40GiB"` string (both units mean one GiB). Optional -- an absent
   `disk` keeps the base box's own size. libvirt only: a `disk` set with the
   Hyper-V provider is refused when the config is read.
+- A `cpu_mode` key in a project's `[vm]` table selects the guest CPU model,
+  written into the generated Vagrantfile as the libvirt provider's `cpu_mode`:
+  `host-passthrough` or `host-model`. Optional -- when a libvirt project sets
+  none, bombyx now defaults to `host-passthrough` (the host CPU's full feature
+  set, for faster compiles on a VM that never migrates), which differs from
+  vagrant-libvirt's own `host-model` default. libvirt only: a `cpu_mode` set
+  with the Hyper-V provider is refused when the config is read.
 
 ### Changed
 

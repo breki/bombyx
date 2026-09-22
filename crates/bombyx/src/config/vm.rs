@@ -4,8 +4,8 @@
 //! table, in `super::source`.
 //!
 //! Every value in the table is a type that checks itself:
-//! [`Provider`] is an enum, [`BoxName`] is a newtype in the
-//! shape `super::source::RepoUrl` describes, `cpus` is a
+//! [`Provider`] and [`CpuMode`] are enums, [`BoxName`] is a newtype
+//! in the shape `super::source::RepoUrl` describes, `cpus` is a
 //! `NonZeroU32`, and `memory` and the optional `disk` are
 //! [`Memory`] and [`Disk`] newtypes that each read a bare count or
 //! a suffixed size like `"6GB"`. So a `Vm` that exists at all is
@@ -92,21 +92,71 @@ impl fmt::Display for Provider {
     }
 }
 
+/// The guest CPU model the generated Vagrantfile selects.
+///
+/// A closed set rather than a free string, for the same reason
+/// [`Provider`] is one: the value reaches the Vagrantfile and so the
+/// libvirt config, and an unknown mode would render a file vagrant
+/// refuses only on the VM host.
+///
+/// Two modes, which is what this project needs. `host-passthrough`
+/// hands the guest the host CPU's actual feature set; `host-model`
+/// gives it a sanitised, migratable definition. vagrant-libvirt's own
+/// `custom` mode pulls in a CPU model name and is not carried until
+/// something needs it.
+///
+/// [`CpuMode::HostPassthrough`] is the default bombyx renders when a
+/// libvirt project sets no `cpu_mode`. Every VM bombyx builds is a
+/// local machine that never migrates -- the case passthrough is for
+/// -- and exposing the host's full instruction set is a large, free
+/// win for compile times. vagrant's own default is `host-model`.
+///
+/// `#[serde(rename_all = "kebab-case")]` is what lets
+/// `cpu_mode = "host-passthrough"` in the TOML select
+/// [`CpuMode::HostPassthrough`]: without it serde matches the Rust
+/// spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CpuMode {
+    /// The host CPU's actual feature set, exposed to the guest.
+    #[default]
+    HostPassthrough,
+    /// A sanitised, migratable CPU definition.
+    HostModel,
+}
+
+impl CpuMode {
+    /// The libvirt spelling, as written into the Vagrantfile and as
+    /// serde parses it from the config.
+    ///
+    /// One method for both readers, matching [`Provider::as_str`], so
+    /// the config spelling and the rendered value cannot drift.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::HostPassthrough => "host-passthrough",
+            Self::HostModel => "host-model",
+        }
+    }
+}
+
 /// The machine bombyx builds, as a project's `[vm]` table.
 ///
 /// `box`, `cpus` and `memory` are required: the base image is the
 /// one thing bombyx cannot invent, and a size it chose would be
-/// wrong on both a laptop and a workstation. `provider`, `disk`
-/// and `hostname` are optional -- `provider` defaults to libvirt,
-/// and an absent `disk` or `hostname` leaves the box's own disk
-/// size and lets bombyx derive a name.
+/// wrong on both a laptop and a workstation. `provider`, `disk`,
+/// `cpu_mode` and `hostname` are optional -- `provider` defaults to
+/// libvirt, an absent `disk` leaves the box's own disk size, an
+/// absent `cpu_mode` takes bombyx's default, and an absent
+/// `hostname` lets bombyx derive a name.
 ///
 /// Serde reads the table through the private `VmFields`, whose
 /// `#[serde(deny_unknown_fields)]` turns a key it does not
 /// recognise -- `cpu = 2` for `cpus` -- into a message naming the
 /// key rather than a VM built with a default. `VmFields` then
-/// converts through [`Vm::try_from`], which enforces the one rule
-/// no single field can: a `disk` needs the libvirt provider.
+/// converts through [`Vm::try_from`], which enforces the rules no
+/// single field can see: `disk` and `cpu_mode` each need the libvirt
+/// provider.
 ///
 /// The fields are public, so a caller can build a `Vm` by hand and
 /// skip both the field checks and that conversion. This is the same
@@ -153,6 +203,19 @@ pub struct Vm {
     /// read.
     pub disk: Option<Disk>,
 
+    /// The guest CPU model, or `None` for bombyx's default.
+    ///
+    /// A [`CpuMode`], written into the Vagrantfile as the libvirt
+    /// provider's `cpu_mode`. `None` is not "no CPU mode": for a
+    /// libvirt guest bombyx renders [`CpuMode::HostPassthrough`], its
+    /// default, so an operator gets the host CPU's full feature set
+    /// and faster compiles without asking. Set the key to
+    /// `host-model` for vagrant's migratable definition instead. Like
+    /// `disk`, this is a libvirt setting; an explicit `cpu_mode` on
+    /// any other provider is refused by [`Vm::try_from`] while the
+    /// config is read.
+    pub cpu_mode: Option<CpuMode>,
+
     /// The name the guest answers to, or `None` to derive one.
     ///
     /// Written into the generated Vagrantfile as
@@ -194,34 +257,63 @@ struct VmFields {
     #[serde(default)]
     disk: Option<Disk>,
     #[serde(default)]
+    cpu_mode: Option<CpuMode>,
+    #[serde(default)]
     hostname: Option<Hostname>,
+}
+
+/// Refuses a libvirt-only field set on another provider.
+///
+/// `disk` and `cpu_mode` are both vagrant-libvirt settings with no
+/// exercised equivalent elsewhere, so an explicit value on another
+/// provider would render nothing and silently leave the provider's
+/// own default. `is_set` is whether the operator wrote the key, so
+/// an absent one -- the common case -- passes on every provider;
+/// `what` completes the message, e.g. "a disk size".
+///
+/// The rule lives beside `provider` rather than in [`Disk`] or
+/// [`CpuMode`], because a value's own constructor cannot see the
+/// provider sitting next to it in the same table.
+fn libvirt_only(
+    provider: Provider,
+    is_set: bool,
+    field: &'static str,
+    what: &str,
+) -> Result<(), FieldError> {
+    if is_set && provider != Provider::Libvirt {
+        return Err(FieldError::invalid(
+            field,
+            format!("only the libvirt provider supports {what}"),
+        ));
+    }
+    Ok(())
 }
 
 impl TryFrom<VmFields> for Vm {
     type Error = FieldError;
 
-    /// Enforces the disk/provider rule, then hands the checked
+    /// Enforces the libvirt-only rules, then hands the checked
     /// fields to `Vm` unchanged.
-    ///
-    /// The rule lives here, not in [`Disk`], because it needs the
-    /// `provider` sitting beside the `disk` in the same table, which
-    /// a value's own constructor cannot see. `libvirt` is the only
-    /// provider whose Vagrantfile carries a disk size, so a `disk`
-    /// on any other one would render nothing and silently leave the
-    /// box default; refusing it names the field instead.
     fn try_from(fields: VmFields) -> Result<Self, FieldError> {
-        if fields.disk.is_some() && fields.provider != Provider::Libvirt {
-            return Err(FieldError::invalid(
-                "disk",
-                "only the libvirt provider supports a disk size",
-            ));
-        }
+        libvirt_only(
+            fields.provider,
+            fields.disk.is_some(),
+            "disk",
+            "a disk size",
+        )?;
+        libvirt_only(
+            fields.provider,
+            fields.cpu_mode.is_some(),
+            "cpu_mode",
+            "a CPU mode",
+        )?;
         Ok(Self {
             provider: fields.provider,
             box_name: fields.box_name,
             cpus: fields.cpus,
             memory: fields.memory,
             disk: fields.disk,
+            cpu_mode: fields.cpu_mode,
             hostname: fields.hostname,
         })
     }
@@ -1284,5 +1376,79 @@ mod tests {
             Disk::from_gib(NonZeroU32::new(40).expect("a positive fixture"));
         assert_eq!(built.gib(), 40);
         assert_eq!(Disk::parse("40GiB").expect("40GiB is valid"), built);
+    }
+
+    /// A `[vm]` table with a `provider` and a `cpu_mode` line.
+    fn vm_with(provider: &str, cpu_mode: &str) -> Result<Vm, toml::de::Error> {
+        let src = format!(
+            "box = \"b\"\ncpus = 2\nmemory = 2048\n\
+             provider = \"{provider}\"\ncpu_mode = \"{cpu_mode}\"\n"
+        );
+        toml::from_str::<Vm>(&src)
+    }
+
+    #[test]
+    fn cpu_mode_parses_its_two_values_and_nothing_else() {
+        assert_eq!(
+            vm_with("libvirt", "host-passthrough").unwrap().cpu_mode,
+            Some(CpuMode::HostPassthrough)
+        );
+        assert_eq!(
+            vm_with("libvirt", "host-model").unwrap().cpu_mode,
+            Some(CpuMode::HostModel)
+        );
+        // A closed set: an unknown mode is refused while the config
+        // is read, not carried to the VM host. Like `provider`, the
+        // enum error names the bad variant and the valid ones (toml
+        // adds the line); it does not repeat the key.
+        let err = vm_with("libvirt", "custom").expect_err("must be refused");
+        let msg = err.message();
+        assert!(msg.contains("unknown variant `custom`"), "{msg}");
+        assert!(msg.contains("host-passthrough"), "{msg}");
+    }
+
+    #[test]
+    fn cpu_mode_defaults_to_none_when_the_key_is_absent() {
+        // `None` means "bombyx's default", which the renderer turns
+        // into host-passthrough for a libvirt guest.
+        let vm = toml::from_str::<Vm>("box = \"b\"\ncpus = 2\nmemory = 2048\n")
+            .expect("a table without cpu_mode is valid");
+        assert_eq!(vm.cpu_mode, None);
+    }
+
+    #[test]
+    fn a_cpu_mode_on_a_non_libvirt_provider_is_refused() {
+        // Like `disk`, `cpu_mode` is a libvirt setting; an explicit
+        // one on another provider would render nothing and silently
+        // take that provider's default, so it is refused, naming the
+        // field.
+        let err =
+            vm_with("hyperv", "host-passthrough").expect_err("must be refused");
+        assert_eq!(
+            err.message(),
+            "invalid `cpu_mode`: only the libvirt provider supports a CPU mode"
+        );
+    }
+
+    #[test]
+    fn a_cpu_mode_is_accepted_on_libvirt_and_hyperv_without_one_is_fine() {
+        // The rule refuses an explicit cpu_mode on hyperv, not hyperv
+        // itself, and libvirt (named here) takes one.
+        assert_eq!(
+            vm_with("libvirt", "host-model").unwrap().cpu_mode,
+            Some(CpuMode::HostModel)
+        );
+        let src =
+            "box = \"b\"\ncpus = 2\nmemory = 2048\nprovider = \"hyperv\"\n";
+        let vm = toml::from_str::<Vm>(src).expect("hyperv without cpu_mode");
+        assert_eq!(vm.cpu_mode, None);
+    }
+
+    #[test]
+    fn cpu_mode_as_str_is_the_libvirt_spelling() {
+        assert_eq!(CpuMode::HostPassthrough.as_str(), "host-passthrough");
+        assert_eq!(CpuMode::HostModel.as_str(), "host-model");
+        // The default bombyx renders when a libvirt project sets none.
+        assert_eq!(CpuMode::default(), CpuMode::HostPassthrough);
     }
 }
