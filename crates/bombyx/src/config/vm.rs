@@ -143,14 +143,14 @@ pub struct Vm {
 
     /// The virtual disk size, or `None` to keep the box's own.
     ///
-    /// A [`Disk`], held as whole GiB and written into the
-    /// Vagrantfile as `libvirt.machine_virtual_size`. When the key
-    /// is absent the guest inherits the base box's disk, which
-    /// ranges widely between boxes, so a project that outgrows it
-    /// -- a Rust target directory fills a small one fast -- sets a
-    /// size here. Only the libvirt provider takes one; a `disk` on
-    /// any other provider is refused by [`Vm::try_from`] while the
-    /// config is read.
+    /// A [`Disk`], held as whole GiB and written into the Vagrantfile
+    /// as the libvirt provider's `machine_virtual_size`. When the key
+    /// is absent the guest inherits the base box's disk, which ranges
+    /// widely between boxes, so a project that outgrows it -- a Rust
+    /// target directory fills a small one fast -- sets a size here.
+    /// Only the libvirt provider takes one; a `disk` on any other
+    /// provider is refused by [`Vm::try_from`] while the config is
+    /// read.
     pub disk: Option<Disk>,
 
     /// The name the guest answers to, or `None` to derive one.
@@ -227,11 +227,12 @@ impl TryFrom<VmFields> for Vm {
     }
 }
 
-/// The wording both size fields use to refuse a value below one.
+/// The wording every size field uses to refuse a value below one.
 ///
-/// `cpus` reads it through [`positive_cpus`] and `memory` through
-/// [`Memory`], two separate readers. Sharing the one string keeps
-/// their wording identical, so a zero of either reads the same.
+/// `cpus` reads it through [`positive_cpus`], and `memory` and
+/// `disk` through [`Memory`] and [`Disk`], each a separate reader.
+/// Sharing the one string keeps their wording identical, so a zero
+/// of any of them reads the same.
 const AT_LEAST_ONE: &str = "must be at least 1";
 
 /// Reads `cpus`, refusing anything but a positive integer with a
@@ -294,8 +295,11 @@ fn named<E: serde::de::Error>(field: &'static str, reason: &str) -> E {
 /// case-insensitively. `unit_multiplier` maps an uppercased unit
 /// (`""` for a bare number) to how many base units it is worth, or
 /// `None` for a unit this field does not take; `allowed` names the
-/// ones it does, for the refusal. The base unit is whatever the
-/// caller's table treats as `1` -- MiB for memory, GiB for disk.
+/// ones it does, for the refusal. `examples` are concrete good
+/// values shown when the text has no leading number, so the operator
+/// sees the shape rather than being sent to the sample. The base
+/// unit is whatever the caller's table treats as `1` -- MiB for
+/// memory, GiB for disk.
 ///
 /// # Errors
 ///
@@ -307,6 +311,7 @@ fn parse_size(
     raw: &str,
     unit_multiplier: impl Fn(&str) -> Option<u64>,
     allowed: &str,
+    examples: &str,
 ) -> Result<NonZeroU32, FieldError> {
     let text = raw.trim();
     let split = text
@@ -316,7 +321,7 @@ fn parse_size(
     if number.is_empty() {
         return Err(FieldError::invalid(
             field,
-            "must start with a number, optionally followed by a unit",
+            format!("must start with a number, e.g. {examples}"),
         ));
     }
     let unit = rest.trim_start();
@@ -509,8 +514,9 @@ const DISK_SHAPE: &str = "a number of GiB, or a string like \"40GB\"";
 /// fractional size, an unknown unit and a zero are each refused
 /// while the config is read.
 ///
-/// A suffix carries the unit in the value itself, so the sample
-/// needs no comment to say what a bare number means.
+/// A suffixed value describes itself, which is why the sample can
+/// lead with `memory = "8GB"` rather than a bare number and a
+/// comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Memory(NonZeroU32);
 
@@ -564,6 +570,7 @@ fn memory_mib(raw: &str) -> Result<NonZeroU32, FieldError> {
             _ => None,
         },
         "MB or GB",
+        "6144, 512MB or 6GB",
     )
 }
 
@@ -579,10 +586,10 @@ impl<'de> serde::Deserialize<'de> for Memory {
 /// The virtual disk a project's machine gets, held as whole GiB.
 ///
 /// A *newtype* wrapping one private [`NonZeroU32`], the GiB count
-/// bombyx writes into the Vagrantfile as
-/// `libvirt.machine_virtual_size`, which sizes the disk in whole
-/// GiB. It is built only through [`Disk::parse`], [`Disk::from_gib`]
-/// or serde, each of which guarantees the value is at least one.
+/// bombyx writes into the Vagrantfile as the libvirt provider's
+/// `machine_virtual_size`, which sizes the disk in whole GiB. It is
+/// built only through [`Disk::parse`], [`Disk::from_gib`] or serde,
+/// each of which guarantees the value is at least one.
 ///
 /// Like [`Memory`], the config may write it as a bare integer
 /// (`disk = 40`) or a suffixed string (`disk = "40GB"`). The unit
@@ -645,6 +652,7 @@ fn disk_gib(raw: &str) -> Result<NonZeroU32, FieldError> {
             _ => None,
         },
         "GB or GiB",
+        "40 or \"40GB\"",
     )
 }
 
@@ -1098,6 +1106,13 @@ mod tests {
             ("memory = 1.5", "must be a whole number"),
             ("memory = \"6TB\"", "unknown unit `TB` -- use MB or GB"),
             ("memory = \"9999999GB\"", "is too large"),
+            // A value with no leading number shows concrete good
+            // ones, so the operator sees the shape here rather than
+            // being sent to the sample.
+            (
+                "memory = \"GB\"",
+                "must start with a number, e.g. 6144, 512MB or 6GB",
+            ),
         ] {
             let src = format!("box = \"b\"\ncpus = 2\n{bad}\n");
             let err = toml::from_str::<Vm>(&src).expect_err("must be refused");

@@ -22,11 +22,11 @@ and this project adheres to
   and `GiB` mean 1024 MiB), and a bare integer is still MiB, so existing configs
   are unchanged.
 - A `disk` key in a project's `[vm]` table sets the machine's virtual disk size,
-  written into the generated Vagrantfile as `libvirt.machine_virtual_size`. It
-  takes whole GiB, as a bare integer or a `"40GB"`/`"40GiB"` string (both units
-  mean one GiB). Optional -- an absent `disk` keeps the base box's own size.
-  libvirt only: a `disk` set with the Hyper-V provider is refused when the
-  config is read.
+  written into the generated Vagrantfile as the libvirt provider's
+  `machine_virtual_size`. It takes whole GiB, as a bare integer or a
+  `"40GB"`/`"40GiB"` string (both units mean one GiB). Optional -- an absent
+  `disk` keeps the base box's own size. libvirt only: a `disk` set with the
+  Hyper-V provider is refused when the config is read.
 
 ### Changed
 
