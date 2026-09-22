@@ -92,6 +92,10 @@ and this project adheres to
   it, reporting success. vagrantfile::render and vagrantfile::files now take
   the same Staged value the plan writes from, and both panic when the pair did
   not come from one config.
+- `bombyx status` on a project whose VM was never built now prints a plain "has
+  no VM yet; run bombyx up to create it" and exits 0, instead of a raw `cd`
+  shell error and a non-zero exit. It matches how `bombyx list` reports the same
+  project as "not created".
 
 ### Removed
 

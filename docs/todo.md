@@ -452,3 +452,15 @@ then use `$HOME`, because a project's `[env]` table may set it;
 it reads the passwd entry instead, as `ENV_FILE` already does.
 Found while working issue #78, left out of that change.
 
+### never-built-non-status-verbs
+
+**Summary:** down/reset/snapshot/shell print a raw cd error on a never-built VM
+
+The single-project status path now guards a never-built project (issue #86,
+remote::status_or_never_built), but down (halt), reset, snapshot and shell still
+go through remote::vagrant/vagrant_in, which cd into a project directory that
+may not exist and print the same raw shell error status used to. Lower priority
+than status: these act on an existing VM, so running them on a never-built
+project is closer to a user error than the ordinary state status answers. A fix
+would guard each the way status and list now do, or share one guard.
+
