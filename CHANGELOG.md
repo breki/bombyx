@@ -96,6 +96,11 @@ and this project adheres to
   no VM yet; run bombyx up to create it" and exits 0, instead of a raw `cd`
   shell error and a non-zero exit. It matches how `bombyx list` reports the same
   project as "not created".
+- `bombyx up` on a VM that is already running now reports it and stops, exiting
+  0, instead of rewriting the generated files, re-staging the secrets, and
+  taking a `fresh-install` snapshot that mislabels a machine already in use.
+  `up` probes the machine state first; a machine that is stopped or never built
+  is booted as before.
 
 ### Removed
 

@@ -233,21 +233,30 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // even if the boot ran before the writes.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "up"]);
-    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh", "ssh"]);
-    assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
+    // `up` probes the machine's state before it acts, so line 0 is
+    // the status check and the boot plan follows it. Booting a
+    // machine that is already running would rewrite files and stage
+    // secrets for a run vagrant no-ops -- issue #89.
+    assert_eq!(
+        programs(&lines),
+        vec!["ssh", "ssh", "ssh", "ssh", "ssh", "ssh"]
+    );
+    assert!(lines[0].contains("##bombyx"), "{}", lines[0]);
+    assert!(lines[0].contains("vagrant 'status'"), "{}", lines[0]);
+    assert!(lines[1].contains("mkdir -p ~/'vms/myproject'"));
     // Each generated file prints as one line naming only its
     // size: the file travels on standard input, so there is
     // nothing of it in the command for a plan to print.
-    assert!(lines[1].contains("cat > ~/'vms/myproject/Vagrantfile'"));
-    assert!(lines[1].contains("bytes on stdin"), "{}", lines[1]);
-    assert!(lines[2].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
+    assert!(lines[2].contains("cat > ~/'vms/myproject/Vagrantfile'"));
+    assert!(lines[2].contains("bytes on stdin"), "{}", lines[2]);
+    assert!(lines[3].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
     assert!(
-        lines[3].contains(&format!(
+        lines[4].contains(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'up';",
             vagrant_env()
         )),
         "{}",
-        lines[3]
+        lines[4]
     );
     // The snapshot save comes last, so it records a machine that
     // has finished booting -- and it is the guarded save, not the
@@ -255,12 +264,12 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // either, which is the one difference that decides whether
     // `up` overwrites the operator's return point every run.
     assert!(
-        lines[4].contains("vagrant 'snapshot' 'save' 'fresh-install'"),
+        lines[5].contains("vagrant 'snapshot' 'save' 'fresh-install'"),
         "{}",
-        lines[4]
+        lines[5]
     );
-    assert!(lines[4].contains("if ! printf"), "{}", lines[4]);
-    assert!(!lines[4].contains("'-f'"), "{}", lines[4]);
+    assert!(lines[5].contains("if ! printf"), "{}", lines[5]);
+    assert!(!lines[5].contains("'-f'"), "{}", lines[5]);
 }
 
 #[test]

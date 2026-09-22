@@ -441,7 +441,15 @@ fn run() -> Result<Ran> {
         Staged::default()
     };
 
-    // Every action renders its dry run the same way, through
+    // `up` is the one action that decides on the machine's live
+    // state before it acts, so it owns both its dry run and its
+    // live run -- see `up_run`. It handles `dry_run` itself, so it
+    // comes before the generic dry-run line below.
+    if matches!(action, Action::Up) {
+        return up_run(&cfg, tty, &staged, cli.dry_run);
+    }
+
+    // Every other action renders its dry run the same way, through
     // `plan`, so no subcommand can describe a run it would not
     // perform -- doctor included. Ordered so the two doctor
     // paths are exclusive: a dry run never builds the probe
@@ -811,6 +819,52 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
         }
     }
     Ok(Ran::Ok)
+}
+
+/// Runs `up`, but reports and stops if the VM is already running.
+///
+/// `up` on a running machine used to rewrite the generated files,
+/// stage the project's secrets and take a mislabeled `fresh-install`
+/// snapshot, while `vagrant up` itself did nothing (it does not
+/// re-provision a running machine) -- issue #89. So `up` asks the
+/// host what the machine is doing first, and when it is already
+/// running it prints a note and exits 0 without touching anything.
+///
+/// The probe is one `vagrant status` round trip, cheap beside a
+/// boot. The "is it running" test is
+/// [`listing::VmState::is_running`], in the tested library because
+/// this file is outside the coverage gate, and the state join is
+/// [`listing::entries`] -- the same one `bombyx list` uses -- so
+/// `up` and `list` cannot disagree about whether a machine is up.
+///
+/// A dry run contacts nothing, so it cannot know the state. It
+/// prints the probe `up` would run first and then the plan `up`
+/// would run when the machine is not already up -- the honest
+/// description of both halves.
+fn up_run(
+    cfg: &Config,
+    tty: Tty,
+    staged: &Staged,
+    dry_run: bool,
+) -> Result<Ran> {
+    let boot = plan(&Action::Up, cfg, tty, staged);
+    if dry_run {
+        let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
+        cmds.extend(boot);
+        return execute(&cmds, true);
+    }
+    let running = listing::entries(vec![cfg.clone()], run_command)
+        .first()
+        .and_then(|entry| entry.state.as_ref())
+        .is_some_and(listing::VmState::is_running);
+    if running {
+        eprint_lines(&format!(
+            "bombyx: {} is already running; up did nothing\n",
+            cfg.project.as_str()
+        ));
+        return Ok(Ran::Ok);
+    }
+    execute(&boot, false)
 }
 
 /// Runs every precondition probe and prints the report.
