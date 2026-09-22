@@ -556,7 +556,7 @@ end
         hostname = ruby_string(cfg.vm_hostname().as_str()),
         provider = vm.provider,
         cpus = vm.cpus,
-        memory = vm.memory,
+        memory = vm.memory.mib(),
         bootstrap = ruby_string(BOOTSTRAP_NAME),
         project_env = project_env_block(&cfg.env),
         repo = ruby_string(source.repo.as_str()),
@@ -765,7 +765,8 @@ mod tests {
 
     use crate::config::{
         BoxName, DeployKeyPath, EnvFilePath, EnvName, EnvValue, GitRef,
-        Hostname, Provider, RESERVED_PREFIX, RepoUrl, ScriptPath, Source, Vm,
+        Hostname, Memory, Provider, RESERVED_PREFIX, RepoUrl, ScriptPath,
+        Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
@@ -784,7 +785,9 @@ mod tests {
             box_name: BoxName::parse("generic/ubuntu2204")
                 .expect("a valid fixture box name"),
             cpus: NonZeroU32::new(4).expect("a positive fixture count"),
-            memory: NonZeroU32::new(8192).expect("a positive fixture size"),
+            memory: Memory::from_mib(
+                NonZeroU32::new(8192).expect("a positive fixture size"),
+            ),
             hostname: None,
         };
         cfg.source = Source {

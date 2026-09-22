@@ -555,7 +555,7 @@ mod tests {
         assert_eq!(project.remote_root.as_str(), "~/vms");
         assert_eq!(project.vm.provider, Provider::Libvirt);
         assert_eq!(project.vm.cpus.get(), 4);
-        assert_eq!(project.vm.memory.get(), 8192);
+        assert_eq!(project.vm.memory.mib(), 8192);
         assert_eq!(project.source.git_ref.as_str(), "main");
         assert_eq!(project.source.script.as_str(), "vagrant/provision.sh");
     }

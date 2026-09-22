@@ -254,7 +254,7 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
-pub use vm::{BoxName, Hostname, Provider, Vm};
+pub use vm::{BoxName, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
@@ -1276,7 +1276,7 @@ mod tests {
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
         assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus.get(), 4);
-        assert_eq!(cfg.vm.memory.get(), 8192);
+        assert_eq!(cfg.vm.memory.mib(), 8192);
         assert_eq!(
             cfg.source.repo.as_str(),
             "https://example.invalid/myproject.git"
@@ -1671,7 +1671,7 @@ mod load_project_tests {
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
         assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus.get(), 2);
-        assert_eq!(cfg.vm.memory.get(), 2048);
+        assert_eq!(cfg.vm.memory.mib(), 2048);
         assert_eq!(cfg.source.git_ref.as_str(), "main");
         assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
         // The entry names no host of its own, so the file-wide

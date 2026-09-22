@@ -488,7 +488,7 @@ impl Row {
             host: entry.config.host.as_str().to_owned(),
             box_name: vm.box_name.as_str().to_owned(),
             cpus: vm.cpus.to_string(),
-            memory: vm.memory.to_string(),
+            memory: vm.memory.mib().to_string(),
             state: entry.state.as_ref().map(describe).unwrap_or_default(),
         }
     }

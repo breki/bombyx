@@ -16,6 +16,11 @@ and this project adheres to
   to, written into the generated Vagrantfile as `config.vm.hostname`. It is a
   checked single DNS label (letters, digits and hyphens, no leading or trailing
   hyphen, at most 63 characters).
+- The `memory` value in a project's `[vm]` table now accepts a unit suffix --
+  `memory = "6GB"` or `memory = "512MB"` -- alongside the bare MiB integer it
+  has always taken. Units are powers of two (`MB` and `MiB` mean one MiB, `GB`
+  and `GiB` mean 1024 MiB), and a bare integer is still MiB, so existing configs
+  are unchanged.
 
 ### Changed
 
