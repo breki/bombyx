@@ -104,8 +104,9 @@ script = "vagrant/provision.sh"
 `[vm]` describes the machine to boot; `[source]` is the repository the
 guest clones and the script it runs. Both are required. Optional keys
 handle private repositories and secrets --
-[docs/usage.md](docs/usage.md) covers `deploy_key`, `env_file`,
-`repo_token`, and where bombyx looks for this file.
+`config.toml.sample` documents `deploy_key`, `env_file` and
+`repo_token`, and [docs/trust-boundary.md](docs/trust-boundary.md)
+explains what putting a credential in the VM costs.
 
 Name the project on every command but `list`: `bombyx --project
 myproject up`.
@@ -153,7 +154,8 @@ platform, checks it against the release's `SHA256SUMS`, and only then
 replaces the installed binary. Verification fails closed: a missing or
 mismatched checksum refuses the update, and there is no flag to skip
 it. It never installs a pre-release and never downgrades.
-[docs/usage.md](docs/usage.md) covers the rest.
+[docs/quickstart.md](docs/quickstart.md) shows the manual
+download-and-verify that `self-update` automates.
 
 ## Development
 

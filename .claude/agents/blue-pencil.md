@@ -51,6 +51,15 @@ follow its six habits: a named subject, a concrete verb, a term
 defined where it appears, the mechanism before the conclusion,
 an explicit relationship, and a short core sentence.
 
+That section also sets out two registers. The habits are the
+default, but the narrative guides it names -- `docs/tutorial.md`,
+`docs/local-host.md` and `docs/quickstart.md` -- use a fuller,
+python.org-style register on purpose: orientation before the
+first step, "you" and "we", longer measured sentences, and asides
+in a Note or Warning block. In those three files the register is
+the point, not a fault. See **What NOT to flag** for what that
+changes.
+
 ## What you are looking for
 
 The **Writing** section states the habits; these are the faults
@@ -91,6 +100,14 @@ that break them, with the tell for each:
 - Length on its own. A long document a reader follows is not a
   fault; comprehension is worth the words. You flag density, not
   word count.
+- The register of the three narrative guides -- `docs/tutorial.md`,
+  `docs/local-host.md` and `docs/quickstart.md`. Do not flag a
+  sentence there for length, pacing, a measured period, the "you"
+  and "we" address, or an "it is worth noting" opener. That is the
+  register CLAUDE.md grants them. You still flag genuinely opaque
+  prose in them -- a sentence you cannot parse on any reading, a
+  metaphor that hides the fact, an abstract noun standing in for a
+  named actor -- because those hurt every register.
 - The **[short]** summary rules, the 80-column wrap, or
   anything about mechanics. Those belong to `canon-check` and
   the other reviewers.

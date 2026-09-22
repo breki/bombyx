@@ -1,10 +1,10 @@
 # bombyx quickstart
 
-The short path: install bombyx, register a project, boot its VM,
-work in it. [tutorial.md](tutorial.md) is the long version, which
-builds a sample project from nothing and explains why each piece
-is shaped the way it is. This page assumes you have a repository
-already and want a VM for it.
+This is the short path: install bombyx, register a project, boot
+its VM, and work in it. If you would rather build a sample project
+from nothing and see why each piece is shaped as it is,
+[tutorial.md](tutorial.md) is the long version. This page assumes
+you already have a repository and want a VM for it.
 
 You need a VM host with libvirt, Vagrant and the `vagrant-libvirt`
 provider. That can be another machine or the one you are sitting
@@ -52,9 +52,9 @@ Other platforms: swap the target in the file name for
 `x86_64-apple-darwin`, `aarch64-apple-darwin` or
 `x86_64-pc-windows-msvc`. Windows also has a `.zip`.
 
-**If the version is wrong**, something earlier on your `PATH` is
-winning. A previous `cargo install` puts one in `~/.cargo/bin`;
-`cargo uninstall bombyx` removes it.
+> **Note.** If the version is wrong, something earlier on your
+> `PATH` is winning. A previous `cargo install` leaves one in
+> `~/.cargo/bin`, and `cargo uninstall bombyx` removes it.
 
 After this first install, `bombyx self-update` does the same
 download-and-verify for you.
@@ -90,10 +90,10 @@ runs `vagrant` directly instead of over `ssh`.
 The table key is the project name. Nothing inside repeats it,
 and it is what you pass as `--project`.
 
-**`remote_root` must sit above the two sub-tables.** TOML binds
-a bare key to the header above it, so written below
-`[...source]` it becomes `source.remote_root` and the whole file
-is refused.
+> **Warning.** `remote_root` must sit above the two sub-tables.
+> TOML binds a bare key to the header above it, so written below
+> `[...source]` it becomes `source.remote_root`, and the whole
+> file is refused.
 
 Sizing: the VM competes with whatever else runs on the host, and
 that may be the machine you are typing on. Start small.

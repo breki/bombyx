@@ -26,6 +26,18 @@ reason the code is the way it is, not its history -- bombyx is
 pre-release, so "this used to" and "an earlier version" are
 defects, not context.
 
+Two registers. The habits above are the default and govern this
+file, `.claude/`, code comments, and the reference docs under
+`docs/`. The narrative guides -- currently `docs/tutorial.md`,
+`docs/local-host.md` and `docs/quickstart.md` -- use a fuller,
+python.org-style register instead: they orient the reader before
+the first step, address them as "you" and "we", allow longer
+measured sentences, and mark asides with a `> **Note**` or
+`> **Warning**` block. Do not flatten those guides to the terse
+default, and do not let the fuller register leak into reference or
+internal prose. `quickstart.md` takes the lightest touch of the
+three, because a quickstart earns its keep by being short.
+
 State the rule, not the war-story that taught it. Where the
 reasoning prevents a real mistake, keep it to one clause and
 drop the incident -- git history holds that. The model is
