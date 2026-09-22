@@ -29,7 +29,7 @@ use bombyx::doctor::{
 use bombyx::listing;
 use bombyx::name::{ProjectName, ScratchName};
 use bombyx::plan::{Action, plan};
-use bombyx::remote::{RemoteCommand, Tty};
+use bombyx::remote::{self, RemoteCommand, Tty};
 use bombyx::term;
 use bombyx::update::{self, asset};
 use clap::{Parser, Subcommand};
@@ -830,6 +830,16 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// what the machine is doing first, and when it is already running
 /// it prints a note and exits 0 without touching anything.
 ///
+/// The same probe decides the `fresh-install` snapshot. That
+/// snapshot names a clean install, so it is taken only when this
+/// `up` creates the machine -- an absent one
+/// ([`listing::VmState::is_absent`]) or an unconfirmed state that
+/// might be a first boot. A machine the probe reports as present but
+/// stopped is only being booted, so snapshotting its in-use disk
+/// would mislabel it (`snapshot-precondition-on-halt`). The snapshot
+/// lives here rather than in `plan` for the same reason the running
+/// check does: `plan` cannot see the machine's state.
+///
 /// The probe is one `vagrant status` round trip, cheap beside a
 /// boot. The "is it running" test is
 /// [`listing::VmState::is_running`], in the tested library because
@@ -839,9 +849,9 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// about whether a machine is up.
 ///
 /// A dry run contacts nothing, so it cannot know the state. It
-/// prints the probe `up` would run first and then the plan `up`
-/// would run when the machine is not already up -- the honest
-/// description of both halves.
+/// prints the probe `up` would run first, then the boot, then the
+/// snapshot -- the shape of a first `up`, which is the honest
+/// description when the state is unknown ahead of time.
 fn up_run(
     cfg: &Config,
     tty: Tty,
@@ -849,9 +859,15 @@ fn up_run(
     dry_run: bool,
 ) -> Result<Ran> {
     let boot = plan(&Action::Up, cfg, tty, staged);
+    // Built here rather than in `plan`, and appended below only when
+    // this `up` is creating the machine. `plan` cannot make that call
+    // because it cannot see the machine's state.
+    let snapshot =
+        remote::save_snapshot_if_absent(cfg, &cfg.remote_project_dir(), tty);
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(boot);
+        cmds.push(snapshot);
         return execute(&cmds, true);
     }
     let state = listing::entries(vec![cfg.clone()], run_command)
@@ -878,7 +894,20 @@ fn up_run(
             cfg.project.as_str()
         ));
     }
-    execute(&boot, false)
+    // The `fresh-install` snapshot is taken only when this `up`
+    // creates the machine, or cannot tell -- never when the probe
+    // reports a present but stopped machine, whose in-use disk the
+    // name would mislabel. The policy is `listing::takes_fresh_snapshot`,
+    // in the tested library because this branch is otherwise
+    // uncovered; see its doc. This guard turns on the machine's
+    // state; the `_if_absent` inside the command is a different test
+    // -- it skips the save when the `fresh-install` name already
+    // exists -- so the two do not overlap.
+    let mut cmds = boot;
+    if listing::takes_fresh_snapshot(state.as_ref()) {
+        cmds.push(snapshot);
+    }
+    execute(&cmds, false)
 }
 
 /// Runs every precondition probe and prints the report.

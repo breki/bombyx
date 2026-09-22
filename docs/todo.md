@@ -465,17 +465,3 @@ them on a never-built project is closer to a user error than the ordinary state
 status answers. A fix would guard each the way status and list now do, or share
 one guard.
 
-### snapshot-precondition-on-halt
-
-**Summary:** up may snapshot a halted-created VM as fresh-install when unclean
-
-save_snapshot_if_absent asks "does a fresh-install snapshot exist?" when it
-means "did this run create the machine?". Issue #89 closed the common path -- up
-now stops when the VM is already running, which is how a failed first boot
-leaves it. The gap left: if the machine is halted between a failed boot and the
-retry, up proceeds (not running), boots it, and save_snapshot_if_absent names
-whatever is on the disk fresh-install -- a non-clean working tree, possibly
-carrying a token, under a name bombyx reset trusts. Fix: decide the snapshot on
-the pre-up state (the binary already probes it for #89) rather than on whether a
-snapshot exists. Related to #57 (snapshot-outlives-config), not the same.
-

@@ -101,6 +101,11 @@ and this project adheres to
   taking a `fresh-install` snapshot that mislabels a machine already in use.
   `up` probes the machine state first; a machine that is stopped or never built
   is booted as before.
+- `bombyx up` takes the `fresh-install` snapshot only when it is creating the
+  machine, not when it is booting an existing stopped one. Booting a machine
+  that already had a domain no longer overwrites its `fresh-install` snapshot
+  with the in-use disk -- a working tree, possibly carrying a live token, that
+  `bombyx reset` would otherwise return to.
 
 ### Removed
 

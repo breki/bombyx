@@ -157,39 +157,18 @@ pub fn plan(
     staged: &Staged,
 ) -> Vec<RemoteCommand> {
     match action {
-        // The snapshot save is here rather than inside
-        // `write_then` because `provision` and `scratch` share
-        // that helper and neither wants one: `provision` runs on
-        // a machine already in arbitrary use, and a scratch VM is
-        // discarded rather than reset.
-        //
-        // **The save can be skipped, and that is the chosen
-        // answer rather than an oversight.** The step before it
-        // removes the staged secrets file and reports a removal
-        // it could not make by failing, which
-        // `remote::vagrant_in_then_remove` argues for. `execute`
-        // stops at the first failure, so a VM that booted on a
-        // host bombyx cannot write to ends up with no
-        // `fresh-install` snapshot and `Action::Reset` has
-        // nothing to return to. The operator chose that over a
-        // cleanup failure the exit status does not report: a
-        // secrets file left on a shared machine is the worse of
-        // the two.
-        //
-        // A machine left running by a failed boot does not reach this
-        // step again: the binary's `up` probes the state first and
-        // stops when the VM is already running (issue #89), the state
-        // a failed boot leaves it in. One gap remains -- a machine
-        // halted between the failed boot and the retry. `up` then proceeds, and
-        // `remote::save_snapshot_if_absent` names whatever is on the
-        // disk `fresh-install`, a working tree under a name that says
-        // otherwise. `snapshot-precondition-on-halt` in `docs/todo.md`
-        // tracks closing that.
+        // The `fresh-install` snapshot is *not* appended here. It is
+        // taken only when this `up` creates the machine -- a clean
+        // install is what the name promises -- and `plan` cannot see
+        // whether the machine already exists, because it returns the
+        // whole list before anything runs. So the binary's `up_run`,
+        // which probes the state for issue #89, owns that decision and
+        // appends `remote::save_snapshot_if_absent` when the machine
+        // is absent. `provision` and `scratch` share `write_then` and
+        // want no snapshot at all, the other reason it is not in the
+        // helper.
         Action::Up => {
-            let dir = cfg.remote_project_dir();
-            let mut cmds = write_then(cfg, &dir, &["up"], tty, staged);
-            cmds.push(remote::save_snapshot_if_absent(cfg, &dir, tty));
-            cmds
+            write_then(cfg, &cfg.remote_project_dir(), &["up"], tty, staged)
         }
         Action::Provision => write_then(
             cfg,
@@ -592,14 +571,12 @@ mod tests {
         // have to be written before the boot, into a directory
         // that already exists.
         //
-        // The snapshot save that follows the boot is not spelled
-        // out here. Its shell is pinned twice already -- in
-        // `remote` for what the builder emits, and by
-        // `up_takes_the_snapshot_after_booting` for the fact that
-        // `up` ends with that builder. The length assertion below
-        // is what catches a step that goes missing.
+        // The `fresh-install` snapshot is not part of this plan: the
+        // binary's `up_run` appends it, and only when it is creating
+        // the machine. So `plan(Up)` is the four boot steps, and the
+        // length assertion catches one going missing.
         let s = scripts_without_payloads(&Action::Up);
-        assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
+        assert_eq!(s.len(), 4, "up lost or gained a step: {s:?}");
         assert_eq!(
             s[..4],
             vec![
@@ -655,9 +632,9 @@ mod tests {
         // happens to appear inside a file being written by one
         // of these very commands.
         //
-        // The boot is found by its own vagrant verb rather than
-        // taken as the last step, because `up` has one step after
-        // it: the snapshot save.
+        // The boot is found by its own vagrant verb rather than by
+        // position, so the one loop covers all three actions
+        // whatever else their plans carry.
         for (action, verb) in [
             (Action::Up, "vagrant 'up'"),
             (Action::Provision, "vagrant 'provision'"),
@@ -827,18 +804,18 @@ mod tests {
     #[test]
     fn provision_and_up_take_the_same_shape() {
         // The invariant the shared helper exists to keep: the two
-        // write the same three commands, and differ only in the
-        // vagrant call that follows them. A `provision` that grew
-        // its own file-writing logic could boot against a stale
-        // Vagrantfile on the host.
+        // write the same commands and differ only in the vagrant
+        // call that follows them. A `provision` that grew its own
+        // file-writing logic could boot against a stale Vagrantfile
+        // on the host.
         //
-        // `up` then has one step neither shares, the snapshot
-        // save, so the comparison stops at the vagrant call
-        // rather than at the end of the plan.
+        // `up`'s snapshot is not part of the plan -- the binary
+        // appends it -- so the two plans are the same length and the
+        // comparison runs to the last step.
         let up = run(&Action::Up);
         let pr = run(&Action::Provision);
-        assert_eq!(up.len(), pr.len() + 1);
-        let writes = pr.len() - 1;
+        assert_eq!(up.len(), pr.len());
+        let writes = up.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
         // One prefix on both, which
         // `every_other_project_vagrant_call_names_the_provider`
@@ -853,7 +830,7 @@ mod tests {
         // `provision_writes_the_files_then_reprovisions` above
         // pins the whole line.
         for (script, verb) in [
-            (script(&up[writes]), "vagrant 'up'"),
+            (script(up.last().unwrap()), "vagrant 'up'"),
             (script(pr.last().unwrap()), "vagrant 'provision'"),
         ] {
             assert_eq!(
@@ -873,21 +850,20 @@ mod tests {
 
     #[test]
     fn scratch_and_up_take_the_same_shape() {
-        // The two lifecycles must not drift apart in how they
-        // write and boot. They differ in one step and the
-        // difference is deliberate: `up` ends by saving the
-        // snapshot `reset` restores, and a scratch VM has no
-        // `reset` -- it is discarded instead.
+        // The two lifecycles must not drift apart in how they write
+        // and boot. `up`'s snapshot is not in the plan -- the binary
+        // appends it -- and a scratch VM never gets one anyway (it is
+        // discarded, not reset), so the two plans match step for step
+        // and both end at the boot.
         let up = run(&Action::Up);
         let sc = run(&Action::Scratch(scratch("x")));
         let names = |cmds: &[RemoteCommand]| -> Vec<String> {
             cmds.iter().map(|c| c.program.clone()).collect()
         };
-        assert_eq!(up.len(), sc.len() + 1);
-        assert_eq!(names(&up[..sc.len()]), names(&sc));
+        assert_eq!(names(&up), names(&sc));
         assert!(
-            script(up.last().unwrap()).contains("vagrant 'snapshot' 'save'"),
-            "{:?}",
+            script(up.last().unwrap()).contains("vagrant 'up';"),
+            "up must end at the boot, not a snapshot: {:?}",
             up.last().unwrap().args
         );
     }
@@ -924,29 +900,11 @@ mod tests {
         assert!(s.contains("has no VM yet"), "{s}");
     }
 
-    #[test]
-    fn up_takes_the_snapshot_after_booting() {
-        // Order is the assertion. The snapshot has to record a
-        // machine that has finished booting, so the save is the
-        // last step and never an earlier one.
-        let cmds = run(&Action::Up);
-        // Compared against the builder rather than a third copy
-        // of the shell. What this test owns is which builder ends
-        // the plan; `remote` owns what that builder emits.
-        assert_eq!(
-            cmds.last().unwrap(),
-            &remote::save_snapshot_if_absent(
-                &cfg(),
-                &cfg().remote_project_dir(),
-                Tty::NoPty
-            )
-        );
-        assert!(
-            script(&cmds[cmds.len() - 2]).contains("vagrant 'up';"),
-            "the boot should come directly before the save: {:?}",
-            cmds[cmds.len() - 2].args
-        );
-    }
+    // The snapshot is not part of `plan(Up)`: the binary's `up_run`
+    // appends it, and only when it is creating the machine
+    // (`snapshot-precondition-on-halt`). The boot-then-snapshot order
+    // is pinned end-to-end by the `up --dry-run` integration test, and
+    // "snapshot only when absent" by `VmState::is_absent`'s unit test.
 
     #[test]
     fn snapshot_replaces_the_snapshot_without_consulting_the_listing() {
@@ -966,22 +924,19 @@ mod tests {
     }
 
     #[test]
-    fn reset_restores_the_name_the_two_saves_write() {
-        // The pairing this action set exists for. Asserted across
-        // the plans rather than inside `remote`, because `plan`
-        // chooses which builder each action gets and could hand
-        // `reset` a different one.
+    fn reset_restores_the_name_snapshot_writes() {
+        // The pairing this action set exists for: `reset` returns to
+        // the name `snapshot` writes. Asserted across the plans rather
+        // than inside `remote`, because `plan` chooses which builder
+        // each action gets and could hand `reset` a different one.
+        // `up` writes that same snapshot too, but the binary's
+        // `up_run` appends it, not `plan` (`snapshot-precondition-on-halt`).
         let restored = script(&run(&Action::Reset)[0]);
         assert!(restored.contains("'fresh-install'"), "{restored}");
-        for action in [Action::Up, Action::Snapshot] {
-            let saved = scripts(&action);
-            let save = saved.last().unwrap();
-            assert!(
-                save.contains("vagrant 'snapshot' 'save'"),
-                "{action:?} should end by saving: {save}"
-            );
-            assert!(save.contains("'fresh-install'"), "{action:?}: {save}");
-        }
+        let saved = scripts(&Action::Snapshot);
+        let save = saved.last().unwrap();
+        assert!(save.contains("vagrant 'snapshot' 'save'"), "{save}");
+        assert!(save.contains("'fresh-install'"), "{save}");
     }
 
     #[test]
