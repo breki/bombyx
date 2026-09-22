@@ -207,27 +207,6 @@ notice names the file bombyx read rather than a bare
 `UserFile` too whenever `CONFIG_DIR_ENV` supplied the directory,
 which needs a failing test first. Red-team RT-1.
 
-### vm-disk-size-unset
-
-**Summary:** no disk key, so the guest gets the box's own size
-
-Found by the local-route verification run (#37), driving the CLI against the
-VM host.
-The generated Vagrantfile's provider block carries cpus and memory only, and
-no disk setting appears anywhere in the template
-(crates/bombyx/src/vagrantfile.rs, render). There is no disk key in
-config.toml, so the guest inherits the box's own partitioning. That is a wide
-range in practice. cloud-image/debian-13 gave the guest a 9.7 GB root;
-generic/ubuntu2204 gave a 128 GiB disk whose root logical volume is 63 GB,
-with another 63 GB unallocated in the volume group. kozmotic's own
-hand-written Vagrantfile carries DISK_GB = 30 with the comment that the box
-default of about 10 GB is too small for a Rust target directory plus two
-cargo-installed tools and a coverage run, so a project that needs a size has
-no way to ask bombyx for one. Options: add an optional disk key under the vm
-table that the Vagrantfile writes as the provider's disk setting, or state in
-config.toml.sample that the box's own disk is what you get and that choosing
-the box is how you choose the size.
-
 ### scratch-domain-name-collides
 
 **Summary:** one libvirt domain for two scratches
