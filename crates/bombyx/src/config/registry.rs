@@ -80,10 +80,10 @@ pub const USER_CONFIG_FILE: &str = "config.toml";
 /// [`super::GitRef`] and `deploy_key` a
 /// [`super::DeployKeyPath`]. Each `[env]` entry is checked on
 /// both halves, an [`super::EnvName`] keying an
-/// [`super::EnvValue`]. `cpus` and `memory` are read through
-/// `super::vm`'s `positive_cpus` and `positive_memory` (named
-/// rather than linked: both are private). A bad one fails the
-/// parse and names the line.
+/// [`super::EnvValue`]. `cpus` is read through `super::vm`'s
+/// `positive_cpus` (named rather than linked: it is private), and
+/// `memory` is a [`super::Memory`] with its own reader. A bad one
+/// fails the parse and names the line.
 ///
 /// The optional `host` is the exception. It is checked by this
 /// module's `parse`, once the table has parsed and before any

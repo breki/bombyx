@@ -135,11 +135,11 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 box = "generic/ubuntu2204"
 cpus = 4
 
-# Memory the machine gets. A bare integer is MiB, so `8192` is the
-# same 8 GiB it always was. A quoted value may carry a unit
-# instead: `"8GB"`, `"512MB"`. The units are powers of two -- `MB`
-# and `MiB` both mean one MiB, `GB` and `GiB` both mean 1024 MiB --
-# so `"8GB"` is exactly `8192`. Whole numbers only.
+# Memory the machine gets. A bare integer is MiB, so `8192` is
+# 8 GiB. A quoted value may carry a unit instead: `"8GB"`,
+# `"512MB"`. The units are powers of two -- `MB` and `MiB` both
+# mean one MiB, `GB` and `GiB` both mean 1024 MiB -- so `"8GB"` is
+# exactly `8192`. Whole numbers only.
 memory = "8GB"
 
 # Optional. The name the guest answers to, written into the

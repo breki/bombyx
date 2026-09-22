@@ -156,9 +156,8 @@ pub struct Vm {
 /// The wording both size fields use to refuse a value below one.
 ///
 /// `cpus` reads it through [`positive_cpus`] and `memory` through
-/// [`Memory`]. Sharing the one string is what keeps the two from
-/// wording an identical rule differently, now that they no longer
-/// run the same code.
+/// [`Memory`], two separate readers. Sharing the one string keeps
+/// their wording identical, so a zero of either reads the same.
 const AT_LEAST_ONE: &str = "must be at least 1";
 
 /// Reads `cpus`, refusing anything but a positive integer with a
@@ -235,9 +234,8 @@ fn named<E: serde::de::Error>(field: &'static str, reason: &str) -> E {
 /// fractional size, an unknown unit and a zero are each refused
 /// while the config is read.
 ///
-/// `memory` is the one size field that used to keep its unit in a
-/// comment in `config.toml.sample`; a suffix moves that meaning
-/// into the value itself.
+/// A suffix carries the unit in the value itself, so the sample
+/// needs no comment to say what a bare number means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Memory(NonZeroU32);
 
@@ -288,9 +286,10 @@ impl Memory {
         let per_unit: u64 = match unit.to_ascii_uppercase().as_str() {
             "" | "MB" | "MIB" => 1,
             "GB" | "GIB" => 1024,
-            // A fraction reaches here as a `.` where a unit
-            // belongs; naming it a whole-number rule is clearer
-            // than calling `.5GB` an unknown unit.
+            // A fraction reaches here as the `.` left in the unit
+            // slot: `"1.5GB"` arrives with `rest` of `.5GB`. Naming
+            // it a whole-number rule is clearer than calling that
+            // an unknown unit.
             _ if unit.starts_with('.') => {
                 return Err(FieldError::invalid(
                     "memory",
@@ -351,7 +350,7 @@ impl<'de> serde::Deserialize<'de> for Memory {
         /// fraction bombyx refuses.
         struct MemoryVisitor;
 
-        impl serde::de::Visitor<'_> for MemoryVisitor {
+        impl<'de> serde::de::Visitor<'de> for MemoryVisitor {
             type Value = Memory;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -393,6 +392,45 @@ impl<'de> serde::Deserialize<'de> for Memory {
                     "memory",
                     "must be a whole number",
                 )))
+            }
+
+            // A boolean, an array, a table or a datetime is the
+            // wrong TOML type entirely. serde's own message for
+            // these names no key, and `cpus` names its key for the
+            // same mistakes, so these arms keep memory's refusal in
+            // the house style rather than leaving the one field
+            // whose error does not say what to edit. A datetime
+            // reaches `visit_map`.
+            fn visit_bool<E: serde::de::Error>(
+                self,
+                _v: bool,
+            ) -> Result<Memory, E> {
+                Err(E::custom(Self::wrong_type()))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                _seq: A,
+            ) -> Result<Memory, A::Error> {
+                Err(serde::de::Error::custom(Self::wrong_type()))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                _map: A,
+            ) -> Result<Memory, A::Error> {
+                Err(serde::de::Error::custom(Self::wrong_type()))
+            }
+        }
+
+        impl MemoryVisitor {
+            /// The refusal for a value of the wrong TOML type,
+            /// naming `memory` and the two shapes it does accept.
+            fn wrong_type() -> FieldError {
+                FieldError::invalid(
+                    "memory",
+                    "must be a number of MiB, or a string like \"6GB\"",
+                )
             }
         }
 
@@ -856,5 +894,29 @@ mod tests {
         assert_eq!(built.mib(), 8192);
         // 8 GiB is 8192 MiB, so the two constructors agree.
         assert_eq!(Memory::parse("8GB").expect("8GB is a valid size"), built);
+    }
+
+    #[test]
+    fn a_wrong_typed_memory_still_names_the_key() {
+        // `memory` given the wrong TOML type -- a boolean, an
+        // array, a table, a datetime -- must name the key like
+        // every other refused value, the way `cpus` does. The
+        // visitor handles integers, strings and floats; without an
+        // arm for these, serde's own `invalid type` message names
+        // no key.
+        for bad in [
+            "memory = true",
+            "memory = [8192]",
+            "memory = {a = 1}",
+            "memory = 2020-01-01",
+        ] {
+            let src = format!("box = \"b\"\ncpus = 2\n{bad}\n");
+            let err = toml::from_str::<Vm>(&src).expect_err("must be refused");
+            assert!(
+                err.message().starts_with("invalid `memory`: "),
+                "{bad}: {}",
+                err.message()
+            );
+        }
     }
 }
