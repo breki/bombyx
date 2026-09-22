@@ -813,7 +813,7 @@ impl Config {
         self.vm
             .hostname
             .clone()
-            .unwrap_or_else(|| Hostname::derived_from(self.project.as_str()))
+            .unwrap_or_else(|| Hostname::derived_from(&self.project))
     }
 
     /// Returns the directory on the VM host used for an

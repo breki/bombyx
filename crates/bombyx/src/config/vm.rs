@@ -30,6 +30,7 @@ use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards::check_renderable;
+use crate::name::ProjectName;
 use crate::newtype::{
     checked_str_newtype, checked_str_parse, checked_str_try_from,
 };
@@ -301,6 +302,12 @@ const HOSTNAME_SUFFIX: &str = "-agent";
 
 /// A validated guest hostname.
 ///
+/// This is the guest's own name, and a different type from
+/// `super::host::HostName`, which is the VM host bombyx connects
+/// to. The two are one letter's case apart on purpose: `HostName`
+/// is the machine that runs the VMs, `Hostname` is what one of
+/// those VMs answers to.
+///
 /// A *newtype* in the shape `super::source::RepoUrl` describes: a
 /// struct wrapping one private `String`, buildable only through
 /// [`Hostname::parse`], which checks the value first. Holding one
@@ -354,20 +361,30 @@ impl Hostname {
     /// default, so several agent VMs on one host become
     /// indistinguishable.
     ///
-    /// A project name may hold characters and lengths a hostname
-    /// may not -- `super::super::name::ProjectName` allows `.`,
-    /// `_` and up to 64 characters. So the name is sanitized
-    /// rather than used raw: each character that is not a letter
-    /// or digit becomes a hyphen, letters are lowercased, the
-    /// result is truncated to leave room for `-agent` within
-    /// `MAX_HOSTNAME_LEN`, and any hyphen left at either end is
-    /// trimmed before the suffix is joined on. That is what keeps
-    /// the result a valid label for every name
-    /// [`ProjectName`](crate::name::ProjectName) admits, so the
-    /// final [`Hostname::parse`] cannot fail.
+    /// The parameter is a [`ProjectName`] rather than a `&str`
+    /// because the derivation is total only for what that type
+    /// guarantees: a non-empty value whose first character is a
+    /// letter or digit. A project name may still hold characters
+    /// and lengths a hostname may not -- `.`, `_`, and up to 64
+    /// characters -- so it is sanitized rather than used raw. Each
+    /// character that is not a letter or digit becomes a hyphen,
+    /// letters are lowercased, the result is truncated to leave
+    /// room for `-agent` within `MAX_HOSTNAME_LEN`, and any hyphen
+    /// left at either end is trimmed before the suffix is joined
+    /// on. The first character maps to a letter or digit, so it
+    /// survives trimming and the base is never empty, which is why
+    /// the final [`Hostname::parse`] cannot fail.
+    ///
+    /// The mapping is not injective: two project names differing
+    /// only in case or in which non-alphanumeric character they
+    /// use derive the same hostname. bombyx keys nothing on the
+    /// hostname -- directories and ssh use the project name -- so
+    /// the only cost is a human seeing two guests with one name,
+    /// which an explicit `hostname` on one of them resolves.
     #[must_use]
-    pub fn derived_from(project: &str) -> Self {
+    pub fn derived_from(project: &ProjectName) -> Self {
         let mut base: String = project
+            .as_str()
             .chars()
             .map(|c| {
                 if c.is_ascii_alphanumeric() {
@@ -380,18 +397,14 @@ impl Hostname {
         // Every mapped character is one ASCII byte, so a byte
         // truncation cannot split a character here.
         base.truncate(MAX_HOSTNAME_LEN - HOSTNAME_SUFFIX.len());
+        // A `ProjectName`'s first character is a letter or digit,
+        // which maps to itself, so it is never a hyphen and `trim`
+        // cannot empty the base.
         let base = base.trim_matches('-');
 
-        let name = if base.is_empty() {
-            // Unreachable for a `ProjectName`, whose first
-            // character is always a letter or digit, but a bare
-            // suffix is still a valid label.
-            "agent".to_owned()
-        } else {
-            format!("{base}{HOSTNAME_SUFFIX}")
-        };
+        let name = format!("{base}{HOSTNAME_SUFFIX}");
         Self::parse(&name)
-            .expect("a hostname derived this way is a valid label")
+            .expect("a hostname derived from a project name is a valid label")
     }
 }
 
@@ -509,8 +522,10 @@ mod tests {
             // against the suffix; it is trimmed first.
             ("foo.", "foo-agent"),
         ] {
+            let name = ProjectName::parse(project)
+                .unwrap_or_else(|e| panic!("{project:?} is a valid name: {e}"));
             assert_eq!(
-                Hostname::derived_from(project).as_str(),
+                Hostname::derived_from(&name).as_str(),
                 want,
                 "derived from {project:?}"
             );
@@ -522,7 +537,8 @@ mod tests {
         // A project name may be up to 64 characters, longer than a
         // hostname label, so the derivation truncates rather than
         // producing a value its own type would refuse.
-        let long = "a".repeat(64);
+        let long = ProjectName::parse(&"a".repeat(64))
+            .expect("64 characters is the maximum a project name allows");
         let derived = Hostname::derived_from(&long);
         assert!(
             derived.as_str().len() <= MAX_HOSTNAME_LEN,

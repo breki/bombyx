@@ -147,6 +147,12 @@ memory = 8192                 # MiB
 # name and is unrelated to the VM host's name, which bombyx passes
 # in separately.
 #
+# The derived name lowercases the project name and turns every
+# character that is not a letter or digit into a hyphen, so two
+# projects whose names differ only in case or punctuation --
+# `web_app` and `web-app` -- derive the same hostname. Set this
+# key on one of them to tell the two guests apart.
+#
 # hostname = "myproject-agent"
 
 # The guest clones this repository once it is running. All
