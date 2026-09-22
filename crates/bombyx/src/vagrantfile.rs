@@ -127,6 +127,21 @@ const REF_ENV: &str = "BOMBYX_REF";
 /// Provisioning script the guest runs out of the clone.
 const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
 
+/// The project's name, which the guest uses as the last component
+/// of its clone directory.
+///
+/// This is the `[projects.<name>]` table key, a
+/// `crate::name::ProjectName` -- one benign path segment, already
+/// checked -- so the guest can join it onto `$HOME` without a
+/// parser of its own. Naming the clone after the project is what
+/// lets several agent VMs be told apart by the directory alone,
+/// rather than by asking `git` which repository each one holds.
+///
+/// [`BOOTSTRAP`] falls back to `project` when this is unset, so a
+/// directory an older bombyx wrote -- whose Vagrantfile does not
+/// set this name -- still clones where it always did.
+const PROJECT_ENV: &str = "BOMBYX_PROJECT";
+
 /// The secrets file's name in the project directory on the VM
 /// host.
 ///
@@ -280,10 +295,11 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// without it would fall outside the reservation with every
 /// test still green.
 #[cfg(test)]
-const BOMBYX_ENV_NAMES: [&str; 11] = [
+const BOMBYX_ENV_NAMES: [&str; 12] = [
     REPO_ENV,
     REF_ENV,
     SCRIPT_ENV,
+    PROJECT_ENV,
     DEPLOY_KEY_ENV,
     ENV_FILE_PRESENT_ENV,
     CREDENTIAL_PRESENT_ENV,
@@ -493,6 +509,7 @@ Vagrant.configure(\"2\") do |config|
       \"{repo_env}\" => {repo},
       \"{ref_env}\" => {git_ref},
       \"{script_env}\" => {script},
+      \"{project_name_env}\" => {project_name},
       \"{deploy_key_env_name}\" => \"{deploy_key_env}\",
       \"{env_file_env_name}\" => \"{env_file_env}\",
       \"{credential_env_name}\" => \"{credential_env}\",
@@ -519,6 +536,7 @@ end
         repo_env = REPO_ENV,
         ref_env = REF_ENV,
         script_env = SCRIPT_ENV,
+        project_name_env = PROJECT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
         deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
         env_file_env_name = ENV_FILE_PRESENT_ENV,
@@ -542,6 +560,7 @@ end
         repo = ruby_string(source.repo.as_str()),
         git_ref = ruby_string(source.git_ref.as_str()),
         script = ruby_string(source.script.as_str()),
+        project_name = ruby_string(cfg.project.as_str()),
         host_env = crate::remote::VM_HOST_ENV,
         hostname_env = crate::remote::VM_HOSTNAME_ENV,
     )
@@ -1025,6 +1044,17 @@ mod tests {
         ] {
             assert!(out.contains(needle), "{needle} missing from:\n{out}");
         }
+    }
+
+    #[test]
+    fn the_clone_directory_is_named_after_the_project() {
+        // The guest joins this onto `$HOME`, so an operator with
+        // several VMs in flight tells them apart by the directory
+        // rather than by asking each one which repository it
+        // holds. `myproject` is the fixture's `[projects.<name>]`
+        // key.
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
+        assert_eq!(rendered(&out, PROJECT_ENV), "\"myproject\"");
     }
 
     #[test]
