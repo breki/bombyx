@@ -176,12 +176,11 @@ pub fn plan(
         // secrets file left on a shared machine is the worse of
         // the two.
         //
-        // A machine left running by the failed run no longer reaches
-        // this step a second time: the binary's `up` probes the
-        // state first and stops when the VM is already running
-        // (issue #89), which is the state a failed boot leaves it in.
-        // One gap remains -- a machine halted between the failed boot
-        // and the retry. `up` then proceeds, and
+        // A machine left running by a failed boot does not reach this
+        // step again: the binary's `up` probes the state first and
+        // stops when the VM is already running (issue #89), the state
+        // a failed boot leaves it in. One gap remains -- a machine
+        // halted between the failed boot and the retry. `up` then proceeds, and
         // `remote::save_snapshot_if_absent` names whatever is on the
         // disk `fresh-install`, a working tree under a name that says
         // otherwise. `snapshot-precondition-on-halt` in `docs/todo.md`

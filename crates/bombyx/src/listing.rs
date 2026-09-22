@@ -96,6 +96,21 @@ impl VmState {
     pub fn is_running(&self) -> bool {
         matches!(self, Self::Reported(word) if word == "running")
     }
+
+    /// Whether no state could be established.
+    ///
+    /// The other half of what `bombyx up` needs: a machine reported
+    /// as stopped or never built is a positive "not running", so `up`
+    /// boots it quietly, but an [`VmState::Unknown`] means the probe
+    /// could not tell -- an unreachable host, a missing vagrant, a
+    /// reply that did not parse. `up` still boots (a probe bombyx
+    /// cannot complete must not block the command), but it says so,
+    /// because a machine that is in fact running would otherwise be
+    /// re-staged and re-snapshotted without a word.
+    #[must_use]
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown(_))
+    }
 }
 
 impl std::fmt::Display for VmState {
@@ -1084,6 +1099,23 @@ mod tests {
             VmState::Unknown("the host said nothing".into()),
         ] {
             assert!(!not.is_running(), "{not:?} must not count as running");
+        }
+    }
+
+    #[test]
+    fn only_an_unknown_state_reads_as_unconfirmed() {
+        // `up` boots on both "not running" and "unknown", but warns
+        // only on unknown. So a positive stopped state must not read
+        // as unknown, or every boot of a stopped machine grows a
+        // spurious "could not confirm" note.
+        assert!(VmState::Unknown("unreachable".into()).is_unknown());
+        for known in [
+            VmState::Reported("running".into()),
+            VmState::Reported("shutoff".into()),
+            VmState::Reported("not created".into()),
+            VmState::NotCreated,
+        ] {
+            assert!(!known.is_unknown(), "{known:?} is a known state");
         }
     }
 }

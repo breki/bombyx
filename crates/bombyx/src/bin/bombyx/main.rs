@@ -823,19 +823,20 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 
 /// Runs `up`, but reports and stops if the VM is already running.
 ///
-/// `up` on a running machine used to rewrite the generated files,
+/// `up` on a running machine would rewrite the generated files,
 /// stage the project's secrets and take a mislabeled `fresh-install`
-/// snapshot, while `vagrant up` itself did nothing (it does not
-/// re-provision a running machine) -- issue #89. So `up` asks the
-/// host what the machine is doing first, and when it is already
-/// running it prints a note and exits 0 without touching anything.
+/// snapshot, while `vagrant up` itself does nothing -- it does not
+/// re-provision a running machine (issue #89). So `up` asks the host
+/// what the machine is doing first, and when it is already running
+/// it prints a note and exits 0 without touching anything.
 ///
 /// The probe is one `vagrant status` round trip, cheap beside a
 /// boot. The "is it running" test is
 /// [`listing::VmState::is_running`], in the tested library because
-/// this file is outside the coverage gate, and the state join is
-/// [`listing::entries`] -- the same one `bombyx list` uses -- so
-/// `up` and `list` cannot disagree about whether a machine is up.
+/// this file is outside the coverage gate, and the step that pairs
+/// each project with its live state ([`listing::entries`]) is the
+/// same one `bombyx list` uses -- so `up` and `list` cannot disagree
+/// about whether a machine is up.
 ///
 /// A dry run contacts nothing, so it cannot know the state. It
 /// prints the probe `up` would run first and then the plan `up`
@@ -853,16 +854,29 @@ fn up_run(
         cmds.extend(boot);
         return execute(&cmds, true);
     }
-    let running = listing::entries(vec![cfg.clone()], run_command)
-        .first()
-        .and_then(|entry| entry.state.as_ref())
-        .is_some_and(listing::VmState::is_running);
-    if running {
+    let state = listing::entries(vec![cfg.clone()], run_command)
+        .into_iter()
+        .next()
+        .and_then(|entry| entry.state);
+    if state.as_ref().is_some_and(listing::VmState::is_running) {
         eprint_lines(&format!(
             "bombyx: {} is already running; up did nothing\n",
             cfg.project.as_str()
         ));
         return Ok(Ran::Ok);
+    }
+    // A probe bombyx could not complete -- an unreachable host, a
+    // reply that did not parse -- must not block the boot, but it is
+    // said out loud: the machine might in fact be running, and then
+    // this boot would re-stage its secrets and re-snapshot it, the
+    // harm this command exists to prevent. A positive stopped state
+    // boots without the note.
+    if state.as_ref().is_none_or(listing::VmState::is_unknown) {
+        eprint_lines(&format!(
+            "bombyx: could not confirm whether {} is running; \
+             running up anyway\n",
+            cfg.project.as_str()
+        ));
     }
     execute(&boot, false)
 }
