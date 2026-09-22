@@ -154,7 +154,7 @@ classDiagram
     +Provider provider
     +BoxName box_name
     +NonZeroU32 cpus
-    +NonZeroU32 memory
+    +Memory memory
     +Option~Hostname~ hostname
   }
   class Source {

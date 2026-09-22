@@ -5,10 +5,11 @@
 //!
 //! Every value in the table is a type that checks itself:
 //! [`Provider`] is an enum, [`BoxName`] is a newtype in the
-//! shape `super::source::RepoUrl` describes, and `cpus` and
-//! `memory` are `NonZeroU32`. So a `Vm` that exists at all is
-//! one whose values passed, and there is no separate function
-//! to remember to call.
+//! shape `super::source::RepoUrl` describes, `cpus` is a
+//! `NonZeroU32`, and `memory` is a [`Memory`] newtype that reads
+//! a bare MiB count or a suffixed size like `"6GB"`. So a `Vm`
+//! that exists at all is one whose values passed, and there is
+//! no separate function to remember to call.
 //!
 //! A single config value can end up in three different places,
 //! and each one can be attacked differently:
@@ -123,14 +124,15 @@ pub struct Vm {
     /// through `positive_cpus`.
     #[serde(deserialize_with = "positive_cpus")]
     pub cpus: NonZeroU32,
-    /// Memory in MiB. Never zero.
+    /// Memory the machine gets, held as MiB. Never zero.
     ///
-    /// A machine with no memory is refused while the config is
-    /// read rather than by vagrant, which would report it on the
-    /// VM host after bombyx had already created a directory
-    /// there.
-    #[serde(deserialize_with = "positive_memory")]
-    pub memory: NonZeroU32,
+    /// A [`Memory`], so the value is checked while the config is
+    /// read: a bare integer is MiB, and a suffixed string like
+    /// `"6GB"` or `"512MB"` is converted to MiB first. A zero, a
+    /// fraction or an unknown unit is refused there rather than by
+    /// vagrant, which would report it on the VM host after bombyx
+    /// had already created a directory there.
+    pub memory: Memory,
 
     /// The name the guest answers to, or `None` to derive one.
     ///
@@ -151,7 +153,15 @@ pub struct Vm {
     pub hostname: Option<Hostname>,
 }
 
-/// Reads `cpus`, refusing a zero with a message naming the key.
+/// The wording both size fields use to refuse a value below one.
+///
+/// `cpus` reads it through [`positive_cpus`] and `memory` through
+/// [`Memory`], two separate readers. Sharing the one string keeps
+/// their wording identical, so a zero of either reads the same.
+const AT_LEAST_ONE: &str = "must be at least 1";
+
+/// Reads `cpus`, refusing anything but a positive integer with a
+/// message naming the key.
 ///
 /// `NonZeroU32` refuses a zero on its own, and the guarantee
 /// rests on the type rather than on this function. What the
@@ -159,52 +169,25 @@ pub struct Vm {
 /// produces `invalid value: integer 0, expected a nonzero u32`
 /// for it. bombyx prints `toml`'s `message()` rather than its
 /// `Display`, because `Display` quotes the source line into the
-/// output, and the key appears only in that quoted line. So the
-/// two size fields would have been the only config values whose
-/// refusal did not say which key to edit.
+/// output, and the key appears only in that quoted line. So
+/// `cpus` would have been the one config value whose refusal did
+/// not say which key to edit.
 ///
 /// Reading a `u32` and rejecting the zero here is what puts the
 /// name back. Taking `u32` and not `NonZeroU32` is the whole
 /// trick: serde has to be handed the value that may be wrong,
 /// or it refuses the zero itself and this code never runs.
 ///
+/// `memory` does not come through here. It accepts a unit suffix,
+/// so it is a [`Memory`] with its own reader; the two share only
+/// [`AT_LEAST_ONE`], so a zero of either kind reads the same.
+///
 /// # Errors
 ///
 /// Returns a deserializer error when the value is zero,
 /// negative, larger than `u32::MAX`, or not an integer at all.
-/// Every one of those names `cpus`; see `at_least_one`.
+/// Every one of those names `cpus`.
 fn positive_cpus<'de, D>(d: D) -> Result<NonZeroU32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    at_least_one("cpus", d)
-}
-
-/// Reads `memory`, refusing a zero with a message naming the
-/// key. See [`positive_cpus`].
-///
-/// # Errors
-///
-/// Returns a deserializer error for the same values
-/// [`positive_cpus`] refuses, naming `memory`.
-fn positive_memory<'de, D>(d: D) -> Result<NonZeroU32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    at_least_one("memory", d)
-}
-
-/// The rule both size fields share, naming the field that broke
-/// it.
-///
-/// One function rather than the same body twice, so `cpus` and
-/// `memory` cannot come to word their refusal differently. The
-/// two wrappers above exist only because a serde attribute
-/// names a function and cannot pass it an argument.
-fn at_least_one<'de, D>(
-    field: &'static str,
-    d: D,
-) -> Result<NonZeroU32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -216,8 +199,8 @@ where
     // and serde's text for those says what is wrong without
     // saying which key carried it. Re-wrapping keeps serde's
     // explanation and puts the field name in front of it.
-    let raw = u32::deserialize(d).map_err(|e| named(field, &e.to_string()))?;
-    NonZeroU32::new(raw).ok_or_else(|| named(field, "must be at least 1"))
+    let raw = u32::deserialize(d).map_err(|e| named("cpus", &e.to_string()))?;
+    NonZeroU32::new(raw).ok_or_else(|| named("cpus", AT_LEAST_ONE))
 }
 
 /// A deserializer error naming the field, in the wording every
@@ -228,6 +211,231 @@ where
 /// position it would have attached anyway.
 fn named<E: serde::de::Error>(field: &'static str, reason: &str) -> E {
     serde::de::Error::custom(FieldError::invalid(field, reason))
+}
+
+/// The memory a project's machine gets, held as MiB.
+///
+/// A *newtype* wrapping one private [`NonZeroU32`], the MiB count
+/// vagrant writes into the Vagrantfile. It is built only through
+/// [`Memory::parse`], [`Memory::from_mib`] or serde, each of
+/// which guarantees the value is at least one.
+///
+/// The config file may write the value two ways, and both mean
+/// MiB in the end:
+///
+/// - a bare integer, e.g. `memory = 6144`, which is MiB unchanged;
+/// - a quoted size with a unit, e.g. `memory = "6GB"` or
+///   `memory = "512MB"`.
+///
+/// The units are powers of two: `MB` and `MiB` both mean one MiB,
+/// `GB` and `GiB` both mean 1024 MiB. That is what an operator
+/// sizing a machine means by `6GB`, and it is the unit vagrant
+/// itself reads, so the round numbers survive the conversion. A
+/// fractional size, an unknown unit and a zero are each refused
+/// while the config is read.
+///
+/// A suffix carries the unit in the value itself, so the sample
+/// needs no comment to say what a bare number means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Memory(NonZeroU32);
+
+impl Memory {
+    /// A `Memory` from a MiB count already known to be nonzero.
+    ///
+    /// Total, because [`NonZeroU32`] already carries the one rule
+    /// the type has. This is the constructor a caller with a fixed
+    /// size uses; a value read from text goes through
+    /// [`Memory::parse`] instead.
+    #[must_use]
+    pub fn from_mib(mib: NonZeroU32) -> Self {
+        Self(mib)
+    }
+
+    /// The size in MiB, as vagrant writes it into the Vagrantfile.
+    #[must_use]
+    pub fn mib(&self) -> u32 {
+        self.0.get()
+    }
+
+    /// Reads a size written as text, converting any unit to MiB.
+    ///
+    /// Accepts a bare number (`"6144"`), or a number and a unit
+    /// with optional whitespace between them (`"6GB"`, `"512 MB"`),
+    /// case-insensitively. `MB`/`MiB` are one MiB each and
+    /// `GB`/`GiB` are 1024 MiB each.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError::Invalid`] naming `memory` when the
+    /// text has no leading number, carries a fraction, names a
+    /// unit other than MB or GB, overflows `u32` MiB, or works out
+    /// to zero.
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        let text = raw.trim();
+        let split = text
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(text.len());
+        let (number, rest) = text.split_at(split);
+        if number.is_empty() {
+            return Err(FieldError::invalid(
+                "memory",
+                "must start with a number, e.g. 6144, 512MB or 6GB",
+            ));
+        }
+        let unit = rest.trim_start();
+        let per_unit: u64 = match unit.to_ascii_uppercase().as_str() {
+            "" | "MB" | "MIB" => 1,
+            "GB" | "GIB" => 1024,
+            // A fraction reaches here as the `.` left in the unit
+            // slot: `"1.5GB"` arrives with `rest` of `.5GB`. Naming
+            // it a whole-number rule is clearer than calling that
+            // an unknown unit.
+            _ if unit.starts_with('.') => {
+                return Err(FieldError::invalid(
+                    "memory",
+                    "must be a whole number",
+                ));
+            }
+            _ => {
+                return Err(FieldError::invalid(
+                    "memory",
+                    format!("unknown unit `{unit}` -- use MB or GB"),
+                ));
+            }
+        };
+        // A digit run too long for `u64`, the multiplication, and
+        // the narrowing to `u32` are each a way the value can be
+        // too large; all three land on the same message.
+        let too_large = || FieldError::invalid("memory", "is too large");
+        let mib = number
+            .parse::<u64>()
+            .map_err(|_| too_large())?
+            .checked_mul(per_unit)
+            .and_then(|m| u32::try_from(m).ok())
+            .ok_or_else(too_large)?;
+        NonZeroU32::new(mib)
+            .map(Self)
+            .ok_or_else(|| FieldError::invalid("memory", AT_LEAST_ONE))
+    }
+
+    /// A `Memory` from a bare config integer, which is MiB.
+    ///
+    /// Separate from [`Memory::parse`] because a bare integer
+    /// never carries a unit. A value below one is refused with the
+    /// same wording a `"0GB"` gets, and one past `u32::MAX` with
+    /// the same wording an oversized suffixed value gets.
+    fn from_config_int(mib: i64) -> Result<Self, FieldError> {
+        u32::try_from(mib)
+            .ok()
+            .and_then(NonZeroU32::new)
+            .map(Self)
+            .ok_or_else(|| {
+                let reason = if mib > i64::from(u32::MAX) {
+                    "is too large"
+                } else {
+                    AT_LEAST_ONE
+                };
+                FieldError::invalid("memory", reason)
+            })
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Memory {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// Reads the value however TOML typed it: an integer is a
+        /// MiB count, a string carries a unit, and a float is a
+        /// fraction bombyx refuses.
+        struct MemoryVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for MemoryVisitor {
+            type Value = Memory;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a memory size in MiB, or a string like \"6GB\"")
+            }
+
+            fn visit_i64<E: serde::de::Error>(
+                self,
+                v: i64,
+            ) -> Result<Memory, E> {
+                Memory::from_config_int(v).map_err(E::custom)
+            }
+
+            // A TOML integer arrives through `visit_i64`; this
+            // catches a value past `i64::MAX` from any other
+            // deserializer before it wraps negative.
+            fn visit_u64<E: serde::de::Error>(
+                self,
+                v: u64,
+            ) -> Result<Memory, E> {
+                let mib = i64::try_from(v).map_err(|_| {
+                    E::custom(FieldError::invalid("memory", "is too large"))
+                })?;
+                Memory::from_config_int(mib).map_err(E::custom)
+            }
+
+            fn visit_str<E: serde::de::Error>(
+                self,
+                v: &str,
+            ) -> Result<Memory, E> {
+                Memory::parse(v).map_err(E::custom)
+            }
+
+            fn visit_f64<E: serde::de::Error>(
+                self,
+                _v: f64,
+            ) -> Result<Memory, E> {
+                Err(E::custom(FieldError::invalid(
+                    "memory",
+                    "must be a whole number",
+                )))
+            }
+
+            // A boolean, an array, a table or a datetime is the
+            // wrong TOML type entirely. serde's own message for
+            // these names no key, and `cpus` names its key for the
+            // same mistakes, so these arms keep memory's refusal in
+            // the house style rather than leaving the one field
+            // whose error does not say what to edit. A datetime
+            // reaches `visit_map`.
+            fn visit_bool<E: serde::de::Error>(
+                self,
+                _v: bool,
+            ) -> Result<Memory, E> {
+                Err(E::custom(Self::wrong_type()))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                _seq: A,
+            ) -> Result<Memory, A::Error> {
+                Err(serde::de::Error::custom(Self::wrong_type()))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                _map: A,
+            ) -> Result<Memory, A::Error> {
+                Err(serde::de::Error::custom(Self::wrong_type()))
+            }
+        }
+
+        impl MemoryVisitor {
+            /// The refusal for a value of the wrong TOML type,
+            /// naming `memory` and the two shapes it does accept.
+            fn wrong_type() -> FieldError {
+                FieldError::invalid(
+                    "memory",
+                    "must be a number of MiB, or a string like \"6GB\"",
+                )
+            }
+        }
+
+        d.deserialize_any(MemoryVisitor)
+    }
 }
 
 /// A Vagrant box name that will not break the Vagrantfile.
@@ -589,10 +797,126 @@ mod tests {
         for (bad, key) in [
             ("box = \"b\"\ncpus = 0\nmemory = 2048\n", "cpus"),
             ("box = \"b\"\ncpus = 2\nmemory = 0\n", "memory"),
+            // A zero reads the same whether it arrives bare or with
+            // a unit; `AT_LEAST_ONE` is what keeps the wording one.
+            ("box = \"b\"\ncpus = 2\nmemory = \"0GB\"\n", "memory"),
         ] {
             let err = toml::from_str::<Vm>(bad).expect_err("must be refused");
             let msg = err.message();
             assert_eq!(msg, format!("invalid `{key}`: must be at least 1"));
+        }
+    }
+
+    #[test]
+    fn memory_reads_a_bare_integer_as_mib() {
+        // The historical form: a bare integer is MiB, unchanged, so
+        // no config written before this feature shifts meaning.
+        let vm = toml::from_str::<Vm>("box = \"b\"\ncpus = 2\nmemory = 6144\n")
+            .expect("a bare integer is a valid size");
+        assert_eq!(vm.memory.mib(), 6144);
+    }
+
+    #[test]
+    fn memory_reads_a_suffixed_size_in_powers_of_two() {
+        // The left value is what the config file may write; the
+        // right is the MiB it converts to. MB and MiB are one MiB,
+        // GB and GiB are 1024, case and a space before the unit do
+        // not matter, and a bare numeric string is MiB.
+        for (written, mib) in [
+            ("\"512MB\"", 512),
+            ("\"6GB\"", 6144),
+            ("\"6GiB\"", 6144),
+            ("\"6MiB\"", 6),
+            ("\"6 GB\"", 6144),
+            ("\"6gb\"", 6144),
+            ("\"2048\"", 2048),
+        ] {
+            let src = format!("box = \"b\"\ncpus = 2\nmemory = {written}\n");
+            let vm = toml::from_str::<Vm>(&src)
+                .unwrap_or_else(|e| panic!("{written} must pass: {e}"));
+            assert_eq!(vm.memory.mib(), mib, "from {written}");
+        }
+    }
+
+    #[test]
+    fn memory_refuses_the_whole_family_of_bad_values() {
+        // Enumerated before the reader was written: every shape a
+        // size can be wrong, each refused while the config parses
+        // and each naming `memory`.
+        for bad in [
+            "\"\"",          // empty string
+            "0",             // bare zero
+            "\"0GB\"",       // zero with a unit
+            "-5",            // negative
+            "\"1.5GB\"",     // a suffixed fraction
+            "1.5",           // a bare fraction
+            "\"6TB\"",       // a unit outside MB/GB
+            "\"6KB\"",       // KB is not accepted either
+            "\"GB\"",        // a unit with no number
+            "\"lots\"",      // not a number at all
+            "999999999999",  // past u32 MiB on its own
+            "\"9999999GB\"", // overflows once multiplied out
+        ] {
+            let src = format!("box = \"b\"\ncpus = 2\nmemory = {bad}\n");
+            let err = toml::from_str::<Vm>(&src)
+                .err()
+                .unwrap_or_else(|| panic!("{bad} must be refused"));
+            assert!(
+                err.message().starts_with("invalid `memory`: "),
+                "{bad}: {}",
+                err.message()
+            );
+        }
+    }
+
+    #[test]
+    fn a_bad_memory_size_gives_the_reason_that_fits_it() {
+        // The family test proves each is refused; this pins the
+        // wording, so a fraction is not called an unknown unit and
+        // an overflow is not called a zero.
+        for (bad, reason) in [
+            ("memory = \"1.5GB\"", "must be a whole number"),
+            ("memory = 1.5", "must be a whole number"),
+            ("memory = \"6TB\"", "unknown unit `TB` -- use MB or GB"),
+            ("memory = \"9999999GB\"", "is too large"),
+        ] {
+            let src = format!("box = \"b\"\ncpus = 2\n{bad}\n");
+            let err = toml::from_str::<Vm>(&src).expect_err("must be refused");
+            assert_eq!(err.message(), format!("invalid `memory`: {reason}"));
+        }
+    }
+
+    #[test]
+    fn memory_from_mib_and_parse_reach_the_same_value() {
+        let built = Memory::from_mib(
+            NonZeroU32::new(8192).expect("a positive fixture size"),
+        );
+        assert_eq!(built.mib(), 8192);
+        // 8 GiB is 8192 MiB, so the two constructors agree.
+        assert_eq!(Memory::parse("8GB").expect("8GB is a valid size"), built);
+    }
+
+    #[test]
+    fn a_wrong_typed_memory_still_names_the_key() {
+        // `memory` given the wrong TOML type -- a boolean, an
+        // array, a table, a datetime -- must name the key like
+        // every other refused value, the way `cpus` does. The
+        // visitor handles integers, strings and floats; without an
+        // arm for these, serde's own `invalid type` message names
+        // no key.
+        for bad in [
+            "memory = true",
+            "memory = [8192]",
+            "memory = {a = 1}",
+            "memory = 2020-01-01",
+        ] {
+            let src = format!("box = \"b\"\ncpus = 2\n{bad}\n");
+            let err = toml::from_str::<Vm>(&src).expect_err("must be refused");
+            assert!(
+                err.message().starts_with("invalid `memory`: "),
+                "{bad}: {}",
+                err.message()
+            );
         }
     }
 }

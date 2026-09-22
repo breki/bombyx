@@ -30,12 +30,13 @@
 //! prose costs the next reader a recount. See [`RepoUrl`] for
 //! how the pattern works.
 //!
-//! `cpus` and `memory` are `std::num::NonZeroU32`, which is the
-//! whole rule either has. That standard type follows none of
-//! that pattern -- no `parse`, no [`FieldError`] -- so serde
-//! reads the two through `vm::positive_cpus` and
-//! `positive_memory`, which is what makes a refusal name the
-//! key.
+//! `cpus` is a `std::num::NonZeroU32`, which is the whole rule it
+//! has. That standard type follows none of that pattern -- no
+//! `parse`, no [`FieldError`] -- so serde reads it through
+//! `vm::positive_cpus`, which is what makes a refusal name the
+//! key. `memory` is a [`Memory`], a newtype reading either a bare
+//! MiB integer or a suffixed size like `"6GB"`; it names the key
+//! through its own reader.
 //!
 //! All of them but `host` run their rules as serde reads the
 //! file. `host` runs its own as the two `host` keys are ranked,
@@ -254,7 +255,7 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
-pub use vm::{BoxName, Hostname, Provider, Vm};
+pub use vm::{BoxName, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
@@ -1276,7 +1277,7 @@ mod tests {
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
         assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus.get(), 4);
-        assert_eq!(cfg.vm.memory.get(), 8192);
+        assert_eq!(cfg.vm.memory.mib(), 8192);
         assert_eq!(
             cfg.source.repo.as_str(),
             "https://example.invalid/myproject.git"
@@ -1372,10 +1373,10 @@ mod tests {
         // One field at a time, so a type on `cpus` alone cannot
         // pass by way of the `memory` case.
         //
-        // serde reads both fields through `vm::positive_cpus`
-        // and `positive_memory`, so the error arrives as
-        // `Parse`, carrying the position as well as the field
-        // and the rule. Both halves are asserted: the position
+        // serde reads `cpus` through `vm::positive_cpus` and
+        // `memory` through its own `Memory` reader, so the error
+        // arrives as `Parse`, carrying the position as well as the
+        // field and the rule. Both halves are asserted: the position
         // is what sends the operator to the line, and the key is
         // what tells them which of the two to change.
         for (field, from, to) in [
@@ -1671,7 +1672,7 @@ mod load_project_tests {
         assert_eq!(cfg.vm.provider, Provider::Libvirt);
         assert_eq!(cfg.vm.box_name.as_str(), "generic/ubuntu2204");
         assert_eq!(cfg.vm.cpus.get(), 2);
-        assert_eq!(cfg.vm.memory.get(), 2048);
+        assert_eq!(cfg.vm.memory.mib(), 2048);
         assert_eq!(cfg.source.git_ref.as_str(), "main");
         assert_eq!(cfg.source.script.as_str(), "vagrant/provision.sh");
         // The entry names no host of its own, so the file-wide
