@@ -155,6 +155,7 @@ classDiagram
     +BoxName box_name
     +NonZeroU32 cpus
     +Memory memory
+    +Option~Disk~ disk
     +Option~Hostname~ hostname
   }
   class Source {

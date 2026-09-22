@@ -255,7 +255,7 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
-pub use vm::{BoxName, Hostname, Memory, Provider, Vm};
+pub use vm::{BoxName, Disk, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
