@@ -155,6 +155,7 @@ classDiagram
     +BoxName box_name
     +NonZeroU32 cpus
     +NonZeroU32 memory
+    +Option~Hostname~ hostname
   }
   class Source {
     +RepoUrl repo
@@ -210,6 +211,11 @@ parse the file it comes from: a file-wide `host`, and one
 builds one `Config` from one entry. It reads the file once, so a
 mid-run edit cannot combine a project host and a file-wide host
 that never existed together.
+
+`Config.host` is a `HostName`, the VM host bombyx connects to;
+`Vm.hostname` is a `Hostname`, the guest's own name. The two types
+are one letter's case apart because they name machines at
+different layers, not by accident.
 
 `transport` is the only private field. bombyx derives it from the
 winning `host` and this machine's name rather than reading it from

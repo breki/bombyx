@@ -254,7 +254,7 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
-pub use vm::{BoxName, Provider, Vm};
+pub use vm::{BoxName, Hostname, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
@@ -798,6 +798,22 @@ impl Config {
     #[must_use]
     pub fn remote_project_dir(&self) -> String {
         format!("{}/{}", self.root(), self.project)
+    }
+
+    /// Returns the name the guest should answer to.
+    ///
+    /// The project's own `[vm]` `hostname` when it sets one, and
+    /// `<project>-agent` derived from the project name otherwise.
+    /// The derivation lives on [`Hostname`] because it is what
+    /// keeps a project name that is not a valid label from
+    /// producing an invalid hostname; see
+    /// [`Hostname::derived_from`](crate::config::Hostname::derived_from).
+    #[must_use]
+    pub fn vm_hostname(&self) -> Hostname {
+        self.vm
+            .hostname
+            .clone()
+            .unwrap_or_else(|| Hostname::derived_from(&self.project))
     }
 
     /// Returns the directory on the VM host used for an
