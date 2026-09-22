@@ -56,8 +56,17 @@ separate.
 
      ```
      cargo xtask changelog add --kind <added|changed|fixed|removed> \
-       [--breaking] "<entry text>"
+       [--breaking] '<entry text>'
      ```
+
+     **Single-quote the entry text.** It almost always
+     holds backticks (`` `memory` ``, `` `[vm]` ``) and
+     sometimes a `$`, both of which a double-quoted bash
+     string expands: the backticked words run as commands
+     and vanish, leaving a mangled entry. A single-quoted
+     string passes them through literally. For a `'`
+     inside the text, close and reopen the quote
+     (`'"'"'`) or write the entry with `Edit` afterwards.
 
      The command finds the right `### <kind>` heading
      under `[Unreleased]` (creating it in canonical
