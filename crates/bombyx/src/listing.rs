@@ -76,6 +76,43 @@ pub enum VmState {
     Unknown(String),
 }
 
+impl VmState {
+    /// Whether the VM is running right now.
+    ///
+    /// The one state `bombyx up` treats specially: booting a
+    /// machine that is already up rewrites files and stages secrets
+    /// for a run vagrant would no-op, so `up` checks this and stops.
+    /// The decision lives here, in the tested library, rather than
+    /// in `src/bin`, because getting it wrong would have `up` skip a
+    /// machine that is actually down -- and `src/bin` is outside the
+    /// coverage gate.
+    ///
+    /// Only [`VmState::Reported`] with vagrant's own `running` word
+    /// counts. `not created`, `shutoff`, `poweroff`, a never-built
+    /// project and an unknown state are all "not running", so `up`
+    /// proceeds -- booting a stopped or absent machine is exactly
+    /// its job.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        matches!(self, Self::Reported(word) if word == "running")
+    }
+
+    /// Whether no state could be established.
+    ///
+    /// The other half of what `bombyx up` needs: a machine reported
+    /// as stopped or never built is a positive "not running", so `up`
+    /// boots it quietly, but an [`VmState::Unknown`] means the probe
+    /// could not tell -- an unreachable host, a missing vagrant, a
+    /// reply that did not parse. `up` still boots (a probe bombyx
+    /// cannot complete must not block the command), but it says so,
+    /// because a machine that is in fact running would otherwise be
+    /// re-staged and re-snapshotted without a word.
+    #[must_use]
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown(_))
+    }
+}
+
 impl std::fmt::Display for VmState {
     /// The word an operator reads, safe to put on a terminal.
     ///
@@ -1043,5 +1080,42 @@ mod tests {
             state: Some(VmState::Reported("run\u{1b}[2Jning".into())),
         }]);
         assert!(!table.contains('\u{1b}'), "{table}");
+    }
+
+    #[test]
+    fn only_a_reported_running_counts_as_running() {
+        // `up` skips the boot only for this exact state. Every other
+        // one -- a stopped machine, a never-built project, an
+        // unknown -- means "not running", so `up` proceeds and boots
+        // it. A false positive here would make `up` refuse to start
+        // a machine that is actually down.
+        assert!(VmState::Reported("running".into()).is_running());
+        for not in [
+            VmState::Reported("shutoff".into()),
+            VmState::Reported("poweroff".into()),
+            VmState::Reported("paused".into()),
+            VmState::Reported("not created".into()),
+            VmState::NotCreated,
+            VmState::Unknown("the host said nothing".into()),
+        ] {
+            assert!(!not.is_running(), "{not:?} must not count as running");
+        }
+    }
+
+    #[test]
+    fn only_an_unknown_state_reads_as_unconfirmed() {
+        // `up` boots on both "not running" and "unknown", but warns
+        // only on unknown. So a positive stopped state must not read
+        // as unknown, or every boot of a stopped machine grows a
+        // spurious "could not confirm" note.
+        assert!(VmState::Unknown("unreachable".into()).is_unknown());
+        for known in [
+            VmState::Reported("running".into()),
+            VmState::Reported("shutoff".into()),
+            VmState::Reported("not created".into()),
+            VmState::NotCreated,
+        ] {
+            assert!(!known.is_unknown(), "{known:?} is a known state");
+        }
     }
 }
