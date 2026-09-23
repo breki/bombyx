@@ -178,7 +178,10 @@ ones use:
 5. Set up the one-shot sshd and the second key ("Reaching the
    host without opening a port").
 6. Last: restrict the first key and turn password logins off. From
-   then on the workstation reaches WSL only as the Linux user.
+   then on the workstation reaches WSL only as the Linux user. The
+   restricted line replaces the plain key, so never add the plain
+   key to that file again: a plain copy gives the key back an
+   unrestricted shell.
 
 **Every `sudo` on these pages means root through `wsl -u root`**
 in the second arrangement, because the Linux user has no sudo.
