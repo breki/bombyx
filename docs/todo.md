@@ -55,8 +55,9 @@ confirmed any other way and it fails silently, so run
 `sudo agent-vm-firewall status` after a restart and only then drop the
 *(unverified)* marker from the heading in docs/vm-host-setup.md.
 Three things stay unexercised whatever the reboot says. The IPv6 rule,
-because the guest has no IPv6 route at all. The WSL host, which nobody has
-re-checked since the probe was corrected. And the pinned DHCP and DNS
+because the guest has no IPv6 route at all. The first WSL host, which
+nobody has re-checked since the probe was corrected; a second WSL host
+(#99) passed the corrected probe. And the pinned DHCP and DNS
 accepts: issue #92 records that the guest resolves through public resolvers
 baked into the box image, so the `dns: ok` line answered through those and
 never asked the gateway. Deleting those accepts would leave every check we

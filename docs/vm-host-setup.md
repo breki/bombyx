@@ -24,11 +24,12 @@ end, which explains what changes.
 > 2.4.9 in August 2026. Steps marked *(unverified)* have not
 > yet been run from start to finish.
 
-If the host you have in mind is a WSL2 distribution on your own
-Windows workstation, read this page first and then
+If the host you have in mind is a WSL2 distribution on a Windows
+machine -- your own workstation, or a separate machine reached
+over the network -- read this page first and then
 [vm-host-wsl2.md](vm-host-wsl2.md). Everything here still
-applies; that page covers five failures particular to WSL, and
-is honest about the isolation such a host gives up.
+applies; that page covers the failures particular to WSL, and is
+honest about the isolation such a host gives up.
 
 ## What has to be true
 

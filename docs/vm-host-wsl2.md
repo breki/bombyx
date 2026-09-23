@@ -1,12 +1,21 @@
 # Running the VM host in WSL2
 
-This describes how to use a WSL2 distribution on your Windows
-workstation as a bombyx VM host, and the five ways it behaves
-differently from the dedicated Linux host that
+This describes how to use a WSL2 distribution on a Windows
+machine as a bombyx VM host, and the ways it behaves differently
+from the dedicated Linux host that
 [vm-host-setup.md](vm-host-setup.md) describes: nested
-virtualization, the guest bridge surviving a restart, Vagrant
-treating WSL as Windows, WSL stopping idle distributions, and
-reaching the host without opening a port.
+virtualization, installing the distribution, the guest bridge
+surviving a restart, Vagrant treating WSL as Windows, WSL
+stopping idle distributions, and reaching the host without
+opening a port.
+
+Two arrangements are covered. In the first, the Windows machine
+is also the workstation: bombyx runs on Windows and drives WSL on
+the same machine. In the second, the Windows machine is only the
+VM host, and bombyx runs on another workstation that reaches it
+over the network. The sections apply to both unless they say
+otherwise; "Reaching the host without opening a port" is where
+the two part ways.
 
 Read that page first. Everything in it applies here: the same
 packages, the same Vagrant repository, the same provider plugin,
@@ -25,6 +34,15 @@ trimmed for length.
 > vagrant-libvirt 0.12.2, on an Intel i7-1260P. Every command
 > here was run, and a Debian 13 guest was booted, provisioned and
 > compiled inside it. Steps marked *(unverified)* were not.
+>
+> **The second arrangement was verified on 23 September 2026**
+> against a separate Windows 11 machine (build 26200.9457), WSL
+> 2.7.14 with kernel 6.18.33.2, Ubuntu 24.04 imported from
+> Canonical's WSL image, and the same libvirt, QEMU, Vagrant and
+> vagrant-libvirt versions, driven from a Linux workstation with
+> bombyx 0.7.0. `bombyx doctor` passed, and `bombyx up` built,
+> provisioned and snapshotted a guest that kept running with no
+> client connected.
 
 ## Whether to do this at all
 
@@ -116,6 +134,59 @@ grep -oE 'vmx|svm' /proc/cpuinfo | sort -u
 
 `/dev/kvm` is group `kvm`, so the login user needs to be in that
 group exactly as on a dedicated host.
+
+## Installing the distribution
+
+A WSL distribution belongs to one Windows account: another
+account, an administrator included, cannot list it or start it.
+That makes the owning account part of the design, not a detail.
+
+When the Windows machine is only the VM host, create a dedicated
+**standard** (non-administrator) account to own the distribution,
+and let the workstation log in as that account. A stolen
+workstation key then reaches a standard account and the
+distribution it owns, never an administrator. Installing WSL
+itself needs an administrator once; running a distribution does
+not.
+
+`wsl --install -d Ubuntu-24.04` does not work for that account
+over SSH. Run from a standard account's SSH session, it fails
+with:
+
+```
+The requested operation requires elevation.
+This operation requires an interactive window station.
+Error code: Wsl/0x800705b3
+```
+
+`wsl --import` needs neither elevation nor a desktop, so install
+from Canonical's WSL image instead, and check it against the
+published checksum before importing:
+
+```powershell
+$base = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current'
+$name = 'ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz'
+$dir  = "$env:USERPROFILE\wsl"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Invoke-WebRequest -UseBasicParsing "$base/$name" -OutFile "$dir\$name"
+(Get-FileHash -Algorithm SHA256 "$dir\$name").Hash  # vs $base/SHA256SUMS
+wsl --import Ubuntu-24.04 "$dir\Ubuntu-24.04" "$dir\$name" --version 2
+```
+
+An imported distribution has no first-run prompt, so create the
+Linux user yourself as root and name it as the default in
+`/etc/wsl.conf` (see "Hardening the distribution"). That user
+needs `kvm` and `libvirt` and nothing more: package installs go
+through `wsl -u root`, which only the owning Windows account can
+run. Canonical's image also ships an `ubuntu` account in the
+`sudo` group with its password locked; take it out of `sudo`
+(`deluser ubuntu sudo`) so no unused account can gain root.
+
+`wsl.exe` did not run from an SSH session at all in early Store
+releases of WSL ("Store WSL isn't accessible from Session 0",
+microsoft/WSL#9231). WSL 2.x runs it, called by its full path,
+`C:\Program Files\WSL\wsl.exe`. Update with `wsl --update` before
+anything else if `wsl --version` shows an older release.
 
 ## The guest bridge survives a distribution restart
 
@@ -223,18 +294,27 @@ project's own `provider` back in front of each project
 `vagrant` call except the teardown, so vagrant is named a
 provider on all of them but `bombyx destroy`.
 
-**`bombyx destroy` is not covered on this host, and that is a
-known gap.** The teardown is the one project call bombyx sends
-without a provider, because naming one that a host cannot
-supply makes vagrant refuse the destroy, and the directory
-removal runs only after it. On a libvirt host that exemption is
-what keeps a misconfigured project removable, and it was
-measured. Here it works the other way: the `unset` clears the
-`/etc/environment` value and the teardown writes none back, so
-vagrant reaches the Hyper-V usability probe with nothing named,
-and `bombyx destroy` is expected to fail with the `cmd.exe`
-error above -- leaving the project directory and the two files
-bombyx generated, with no bombyx command able to clear them.
+**`bombyx destroy` fails on this host (issue #111).** The
+teardown is the one project call bombyx sends without a
+provider, because naming one that a host cannot supply makes
+vagrant refuse the destroy, and the directory removal runs only
+after it. On a libvirt host that exemption keeps a misconfigured
+project removable. Here it works the other way: the `unset`
+clears the `/etc/environment` value and the teardown writes none
+back, so vagrant loads with no provider named, falls back to
+VirtualBox, and VirtualBox refuses under WSL:
+
+```
+Vagrant is unable to use the VirtualBox provider from the Windows Subsystem for
+Linux without access to the Windows environment.
+```
+
+That was measured with bombyx 0.7.0 against a project whose
+machine existed and was shut off, so on this host a refusal does
+not mean there was no machine. bombyx stops at the failed step,
+so the domain, its snapshot, the project directory and the two
+generated files all stay behind, and no bombyx command can clear
+them.
 
 Clean up by hand in this order, and not the other way round.
 The project directory is `<remote_root>/<project>` from your
@@ -243,7 +323,7 @@ it:
 
 ```bash
 ssh <host> "cd ~/vms/<project> && vagrant destroy -f"
-rm -rf ~/vms/<project>          # only after the destroy
+ssh <host> "rm -rf ~/vms/<project>"   # only after the destroy
 ```
 
 The destroy over `ssh` succeeds where bombyx's fails, and the
@@ -254,34 +334,11 @@ delete the Vagrantfile while the libvirt domain is still
 defined, which leaves a machine running with nothing left to
 point `vagrant` at.
 
-That whole expectation is *(unverified)*. No WSL2 host was
-available, and this is the command that settles it:
-
-```bash
-ssh <host> "cd ~/vms/<project> && unset VAGRANT_DEFAULT_PROVIDER \
-  && vagrant destroy -f"
-```
-
-Run it against a directory holding a Vagrantfile and no created
-machine, which is the state the libvirt measurement used. An
-exit status of 0 means the gap is not real and the exemption is
-safe here too.
-
-`bombyx doctor` is a separate question and carries no provider
-at all. Its only vagrant call is `vagrant plugin list`, which
-printed the same list under `hyperv` on Linux, under a name no
-provider has, and with the variable absent.
-
-Whether that command reaches the usability probe described
-above is *(unverified)*, and this is the gap to know about on a
-WSL2 host. The measurements were taken on a Linux machine with
-a working libvirt, where a probe that did run would have
-succeeded anyway. If `vagrant plugin list` does probe, then
-`bombyx doctor` fails on a WSL2 host that has no PowerShell,
-because bombyx clears the `/etc/environment` value and the
-probe writes none back. The experiment that settles it is
-`ssh <host> "unset VAGRANT_DEFAULT_PROVIDER; vagrant plugin
-list"` on such a host.
+`bombyx doctor` works on this host. It carries no provider at
+all: its only vagrant call is `vagrant plugin list`, and on the
+host above that call listed `vagrant-libvirt` with the variable
+cleared, so every row passed. The command does not reach the
+usability probe that breaks the teardown.
 
 Confirm it the way bombyx will see it, not from a login shell:
 
@@ -320,30 +377,43 @@ time rather than the distribution's, so it cheerfully claims an
 uptime spanning a restart that did happen. Trust
 `journalctl -b` and look for a systemd startup sequence instead.
 
-**`vmIdleTimeout` in `.wslconfig` does not prevent this.** It was
-measured at 24 hours and the distribution was gone within 100
-seconds of the last client detaching, with no warning that the
-setting had been ignored. Do not rely on it.
+**WSL has two idle timers, and both have to be off.** Both live in
+`.wslconfig` in the owning account's profile
+(`%UserProfile%\.wslconfig`); the file is per Windows user.
 
-What works is holding a WSL client open for as long as you want
-guests to live:
+- `instanceIdleTimeout`, under `[general]`, stops a distribution
+  a set time after its last client leaves. The default is 15
+  seconds. This is the timer that kills the guests.
+- `vmIdleTimeout`, under `[wsl2]`, stops the whole WSL VM a set
+  time after every distribution has stopped. The default is 60
+  seconds.
 
-```powershell
-wsl -d <distro> --exec /usr/bin/sleep infinity
+Setting `vmIdleTimeout` alone changes nothing, because the
+distribution timer fires first and the VM timer only starts
+after it. `-1` disables each:
+
+```ini
+[general]
+instanceIdleTimeout=-1
+
+[wsl2]
+vmIdleTimeout=-1
 ```
 
-Run it in a window you leave open, or from a shortcut in the
-Startup folder if you want it at logon.
+WSL reads the file when its VM starts, so the change applies from
+the next start. Measured on the second arrangement: before the
+change, the distribution restarted within about two minutes of
+the last client leaving and the guest was shut off; after it, the
+same boot survived three idle minutes.
 
-**A warning about automating that.** A scheduled task created
-with `schtasks /SC ONLOGON` that launches a hidden `.vbs` through
-`wscript.exe` is, in shape, exactly how malware persists, and
-Microsoft Defender flags it as `Trojan:Win32/Commando.A!ml` on
-the command line alone. The script's contents are never the
-issue. If you want this automatic, prefer a plain shortcut in the
-Startup folder that runs `wsl.exe` directly: no scripting host,
-no persistence-entry command line, and it is removed by deleting
-one file.
+Neither setting starts WSL after Windows restarts, and neither
+needs to. Guests do not start on their own either, and the next
+`bombyx up` starts the distribution by connecting to it.
+
+Holding a client open also works --
+`wsl -d <distro> --exec /usr/bin/sleep infinity` in a window left
+open -- but it needs someone signed in as the owning account, so
+it does not suit the second arrangement.
 
 ## Reaching the host without opening a port
 
@@ -379,6 +449,99 @@ separation directory" until a tmpfiles rule recreates it:
 ```bash
 echo 'd /run/sshd 0755 root root -' | sudo tee /etc/tmpfiles.d/sshd.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/sshd.conf
+```
+
+On Ubuntu 24.04 disable `ssh.socket` as well as `ssh.service`.
+The socket unit is what listens on port 22, so disabling the
+service alone leaves the port open. Check with `ss -ltn`.
+
+### When bombyx runs on another machine
+
+The `ProxyCommand` above runs `wsl.exe` on the workstation, so it
+works only when the workstation is the Windows machine. From
+another workstation, go through the Windows machine's own OpenSSH
+server and have it run the same command:
+
+```
+Host wsl-win
+    HostName <windows machine>
+    User bombyx
+    IdentityFile ~/.ssh/wsl-win
+    IdentitiesOnly yes
+
+Host bombyx-wsl
+    HostName bombyx-wsl
+    User bombyx
+    IdentityFile ~/.ssh/bombyx-wsl
+    IdentitiesOnly yes
+    ProxyCommand ssh -T -o BatchMode=yes wsl-win
+```
+
+The first hop logs in as the dedicated standard account from
+"Installing the distribution". On the Windows side, its key is
+restricted to one command, so the proxy sends no command of its
+own:
+
+```
+restrict,command="& 'C:\Program Files\WSL\wsl.exe' -d Ubuntu-24.04 -u root --exec /usr/sbin/sshd -i" ssh-ed25519 AAAA...
+```
+
+`restrict` turns off forwarding and the pty, and `command=`
+replaces whatever the client asks to run. So the key can start
+WSL's one-shot sshd and nothing else, and that sshd still demands
+the second key. Measured on the verified machine: `whoami` sent
+with the first key printed WSL sshd's protocol banner rather than
+a user name, and a port forward was refused as "administratively
+prohibited". Both keys need no passphrase, because bombyx connects
+unattended; the restriction is what limits the first one.
+
+The `& '...'` form is PowerShell's. Windows OpenSSH runs commands
+through the shell named by `DefaultShell` under
+`HKLM:\SOFTWARE\OpenSSH`, which was Windows PowerShell 5.1 on the
+verified machine; adjust the command for `cmd` *(unverified)*.
+
+Keep that key in a file only administrators can change, so the
+account cannot lift its own restriction. In
+`%ProgramData%\ssh\sshd_config`:
+
+```
+PasswordAuthentication no     # a global setting: above the first Match
+
+Match User bombyx
+       AuthorizedKeysFile __PROGRAMDATA__/ssh/bombyx_authorized_keys
+```
+
+The key file is owned by Administrators and writable only by
+SYSTEM and Administrators. It also avoids creating
+`C:\Users\bombyx\.ssh` by hand, which before the account's first
+logon makes Windows give the account a second, suffixed profile
+directory. Run `sshd -t` before restarting the service, so a
+config error cannot take the server down.
+
+Then narrow the firewall rule that installing OpenSSH Server
+creates, which admits any address, to the machines that need it:
+
+```powershell
+Set-NetFirewallRule -Name OpenSSH-Server-In-TCP `
+    -RemoteAddress <workstation>,<other machines>
+```
+
+The scope shuts the agent guests out as well, since their traffic
+reaches Windows from WSL's address. Name every machine that
+already uses the server; `sshd -t` catches a config error, not an
+address left off this list.
+
+Inside WSL, sshd gets its own lockdown in a file under
+`/etc/ssh/sshd_config.d/`: `PasswordAuthentication no`,
+`PermitRootLogin no` and `AllowUsers` naming the Linux user.
+
+With the first key restricted, the workstation reaches WSL only
+as the Linux user, which has no sudo. Root inside WSL, for a
+package or the host firewall, goes through `wsl -u root` run as
+the owning Windows account, for example on the Windows machine:
+
+```powershell
+runas /user:bombyx "wsl.exe -d Ubuntu-24.04 -u root --exec sh <script>"
 ```
 
 ## What this arrangement does not solve
@@ -419,6 +582,16 @@ guest keeps internet and DNS, and the LAN and host-gateway paths
 stay closed. Treat it as defence in depth here rather than the
 primary barrier — which is a better position to be in than
 relying on a NAT behaviour that a settings change would remove.
+
+On the second arrangement the script was installed as a
+root-owned `/usr/local/sbin/agent-vm-firewall`, then applied and
+persisted, and probed from inside a guest with the corrected
+probe: internet and DNS worked, the host gateway's sshd timed out
+(exit 124, the input chain's drop), and the router, the Windows
+machine's own sshd and the workstation were each refused (exit 1,
+"Connection refused", the forward chain's reject). Reading the
+rule counters needs root, so this rests on the replies rather than
+on the counters.
 
 One caveat carried over unchanged: `conntrack` is not installed
 by default, so the script warns that connections opened before

@@ -9,13 +9,14 @@ explains what it can reach and how to cut that down.
 
 What has actually been done, since the *(unverified)* in the
 heading is doing real work. The rules have been applied and
-persisted on a Linux host and on a WSL host. The guest checks
-below have been run in their corrected form on the Linux host
-only; the WSL results predate the correction and
-[vm-host-wsl2.md](vm-host-wsl2.md) marks them suspect. Nobody
-has confirmed the rules come back after a reboot on either
-host, and persistence is the part that fails silently, so read
-"Making it survive a reboot" below before relying on this.
+persisted on a Linux host and on two WSL hosts. The guest checks
+below have been run in their corrected form on the Linux host and
+on the second WSL host; the first WSL host's results predate the
+correction and [vm-host-wsl2.md](vm-host-wsl2.md) marks them
+suspect. Nobody has confirmed the rules come back after a reboot
+on any of them, and persistence is the part that fails silently,
+so read "Making it survive a reboot" below before relying on
+this.
 Three further gaps are listed at the end of the section.
 
 ## What a VM can reach by default

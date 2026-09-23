@@ -65,7 +65,7 @@ That installs the CLI on your workstation. The VM host needs libvirt,
 Vagrant and its `libvirt` provider --
 [docs/vm-host-setup.md](docs/vm-host-setup.md) covers preparing one,
 and [docs/vm-host-wsl2.md](docs/vm-host-wsl2.md) covers using a WSL2
-distribution on your own Windows machine instead.
+distribution on a Windows machine instead.
 
 New here? [docs/tutorial.md](docs/tutorial.md) builds a working setup
 from nothing; [docs/quickstart.md](docs/quickstart.md) is the short
