@@ -14,10 +14,10 @@ at. [vm-host-setup.md](vm-host-setup.md) covers preparing one.
 
 No Rust toolchain needed -- the releases carry prebuilt binaries.
 
-<!-- version: 0.6.0 -->
+<!-- version: 0.7.0 -->
 
 ```bash
-VERSION=0.6.0
+VERSION=0.7.0
 BASE=https://github.com/breki/bombyx/releases/download/v$VERSION
 
 cd /tmp

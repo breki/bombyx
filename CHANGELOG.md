@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.7.0] - 2026-09-23
+
+### Added
+
 - A `hostname` key in a project's `[vm]` table sets the name the guest answers
   to, written into the generated Vagrantfile as `config.vm.hostname`. It is a
   checked single DNS label (letters, digits and hyphens, no leading or trailing
