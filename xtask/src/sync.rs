@@ -3,7 +3,8 @@
 //!
 //! `/template-sync` works from a SHA delta, and a raw delta
 //! carries template-internal bookkeeping files (CHANGELOG, the
-//! feedback file, the diary and review logs, per-issue docs).
+//! feedback file, the diary and review logs, per-issue docs,
+//! the todo list).
 //! Those change on every commit and each project owns its own,
 //! so an upstream change to one is never worth pulling and
 //! reading the list costs the reviewer for nothing. This
@@ -30,6 +31,7 @@ const NEVER_SYNC: &[&str] = &[
     "docs/developer/DIARY.md",
     "docs/developer/*-log.md",
     "docs/issues/",
+    "docs/todo.md",
 ];
 
 /// True when `path` is in the never-sync set: an exact match, a
@@ -166,7 +168,7 @@ fn format_candidates(candidates: &[Candidate]) -> String {
     }
     candidates
         .iter()
-        .map(|c| format!("{:<3} {:<15} {}", c.status, c.category, c.path))
+        .map(|c| format!("{:<4} {:<15} {}", c.status, c.category, c.path))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -244,6 +246,11 @@ mod tests {
         assert!(is_excluded("docs/developer/template-feedback.md"));
         assert!(is_excluded("docs/developer/backfeed-ledger.toml"));
         assert!(is_excluded("docs/issues/some-issue.md")); // prefix
+        // Each project's own pending items. `cargo xtask todo`
+        // writes this file per project, and upstream keeps its
+        // own, so a sync would offer upstream's backlog as
+        // something to merge into ours.
+        assert!(is_excluded("docs/todo.md"));
         // Not excluded: other docs, code.
         assert!(!is_excluded("docs/deployment.md"));
         assert!(!is_excluded("docs/developer/architecture.md"));
@@ -312,6 +319,25 @@ M\tCLAUDE.md
     #[test]
     fn format_candidates_notes_empty_set() {
         assert!(format_candidates(&[]).contains("no sync candidates"));
+    }
+
+    /// `R100` is four characters and every other status is
+    /// one, so the status column has to be four wide or the
+    /// rename row pushes the category across and the table
+    /// misaligns from that row on.
+    #[test]
+    fn format_candidates_aligns_a_rename_with_a_modify() {
+        let out = format_candidates(&candidates(
+            "M\tCLAUDE.md\nR100\tdocs/old.md\tdocs/new.md\n",
+        ));
+        let mut lines = out.lines();
+        let modified = lines.next().expect("a modify row");
+        let renamed = lines.next().expect("a rename row");
+        assert_eq!(
+            modified.find("Claude config"),
+            renamed.find("Docs"),
+            "category column moved:\n{out}"
+        );
     }
 
     #[test]

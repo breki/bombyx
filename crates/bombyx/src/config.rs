@@ -681,19 +681,47 @@ impl Config {
     /// names one.
     pub fn load_project(
         name: &ProjectName,
-        registry: Option<&Path>,
+        registry: &Path,
     ) -> Result<(Self, HostOrigin), ConfigError> {
-        let missing = || ConfigError::RegistryNotFound {
-            name: name.as_str().to_owned(),
-            place: registry_place(registry),
-        };
-        let path = registry.ok_or_else(missing)?;
-        let registry = Registry::read(path)?.ok_or_else(missing)?;
+        let registry = Registry::read(registry)?.ok_or_else(|| {
+            ConfigError::RegistryNotFound {
+                name: name.as_str().to_owned(),
+                place: registry_place(Some(registry)),
+            }
+        })?;
         Self::from_registry(
             &registry,
             name,
             transport::this_machine().as_deref(),
         )
+    }
+
+    /// The error for a machine whose environment names no
+    /// config directory at all.
+    ///
+    /// [`Config::load_project`] takes a path, so it cannot
+    /// raise this one: there is no path to give it. The binary
+    /// asks the environment for the registry file, gets
+    /// nothing, and calls this instead -- so the wording stays
+    /// beside the wording for a registry that is merely absent.
+    #[must_use]
+    pub fn no_config_directory(name: &ProjectName) -> ConfigError {
+        ConfigError::RegistryNotFound {
+            name: name.as_str().to_owned(),
+            place: registry_place(None),
+        }
+    }
+
+    /// [`Config::no_config_directory`], for a caller that asked
+    /// for every project rather than one.
+    ///
+    /// A separate variant because the message cannot quote a
+    /// project name it was never given.
+    #[must_use]
+    pub fn no_config_directory_for_all() -> ConfigError {
+        ConfigError::NoRegistry {
+            place: registry_place(None),
+        }
     }
 
     /// Loads every project in the registry, sorted by name.
@@ -731,12 +759,12 @@ impl Config {
     /// was checked by its own type while the file parsed -- and
     /// it is a property of the file, since the file-wide `host`
     /// is what every entry without one falls back to.
-    pub fn load_all(registry: Option<&Path>) -> Result<Vec<Self>, ConfigError> {
-        let missing = || ConfigError::NoRegistry {
-            place: registry_place(registry),
-        };
-        let path = registry.ok_or_else(missing)?;
-        let registry = Registry::read(path)?.ok_or_else(missing)?;
+    pub fn load_all(registry: &Path) -> Result<Vec<Self>, ConfigError> {
+        let registry = Registry::read(registry)?.ok_or_else(|| {
+            ConfigError::NoRegistry {
+                place: registry_place(Some(registry)),
+            }
+        })?;
         Self::all_from_registry(&registry, transport::this_machine().as_deref())
     }
 
@@ -1114,8 +1142,7 @@ mod tests {
         // 32-bit target.
         let over = usize::try_from(MAX_CONFIG_BYTES).unwrap() + 1;
         let (_dir, path) = registry_file_in_a_dir(&"#".repeat(over));
-        let err =
-            Config::load_project(&named("myproject"), Some(&path)).unwrap_err();
+        let err = Config::load_project(&named("myproject"), &path).unwrap_err();
         assert!(matches!(err, ConfigError::TooLarge(_)), "{err:?}");
     }
 
@@ -1127,8 +1154,8 @@ mod tests {
         // denied" on Windows -- and neither says what is
         // actually wrong.
         let dir = tempfile::tempdir().unwrap();
-        let err = Config::load_project(&named("myproject"), Some(dir.path()))
-            .unwrap_err();
+        let err =
+            Config::load_project(&named("myproject"), dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::NotAFile(_)), "{err:?}");
     }
 
@@ -1149,7 +1176,7 @@ mod tests {
         }
 
         let (cfg, _origin) =
-            Config::load_project(&named("myproject"), Some(&link)).unwrap();
+            Config::load_project(&named("myproject"), &link).unwrap();
         assert_eq!(cfg.host.as_str(), "vmhost");
     }
 
@@ -1742,7 +1769,7 @@ mod load_project_tests {
         // file -- and the file is the path bombyx read, not the
         // default name, because `--config` takes any path.
         let path = Path::new("/home/dev/elsewhere.toml");
-        let text = entry_origin().describe(Some(path));
+        let text = entry_origin().describe(path);
         assert!(text.contains("myproject"), "{text}");
         assert!(text.contains("/home/dev/elsewhere.toml"), "{text}");
         assert!(!text.contains(USER_CONFIG_FILE), "{text}");
@@ -1869,10 +1896,22 @@ mod load_project_tests {
         let path = dir.path().join("elsewhere.toml");
         std::fs::write(&path, plain()).unwrap();
         let (cfg, origin) =
-            Config::load_project(&named("myproject"), Some(&path)).unwrap();
+            Config::load_project(&named("myproject"), &path).unwrap();
         assert_eq!(cfg.project.as_str(), "myproject");
         assert_eq!(cfg.host.as_str(), "vmhost");
         assert_eq!(origin, HostOrigin::UserFile);
+    }
+
+    #[test]
+    fn no_config_directory_for_a_listing_quotes_no_project() {
+        // `bombyx list` asks for every project, so the message
+        // has nothing to quote and describes the file instead.
+        // The project route's message is the one above.
+        let err = Config::no_config_directory_for_all();
+        assert!(matches!(err, ConfigError::NoRegistry { .. }), "{err}");
+        let text = err.to_string();
+        assert!(text.contains("config directory"), "{text}");
+        assert!(text.contains("[projects.<name>]"), "{text}");
     }
 
     #[test]
@@ -1881,8 +1920,7 @@ mod load_project_tests {
         // every machine bombyx has never run on.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(USER_CONFIG_FILE);
-        let err =
-            Config::load_project(&named("myproject"), Some(&path)).unwrap_err();
+        let err = Config::load_project(&named("myproject"), &path).unwrap_err();
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         // The path to create, and what goes in it. A message
@@ -1895,10 +1933,11 @@ mod load_project_tests {
     #[test]
     fn no_config_directory_describes_the_file_instead() {
         // Nothing in the environment names a config directory,
-        // so `registry_file` produced no path, and the message
-        // describes the file rather than naming one.
+        // so `registry_file` produced no path and the binary
+        // called this instead of the loader. The message
+        // describes the file rather than naming one;
         // `registry_place` decides both wordings.
-        let err = Config::load_project(&named("myproject"), None).unwrap_err();
+        let err = Config::no_config_directory(&named("myproject"));
         assert!(matches!(err, ConfigError::RegistryNotFound { .. }), "{err}");
         let text = err.to_string();
         assert!(text.contains("config directory"), "{text}");
@@ -1922,7 +1961,7 @@ mod load_project_tests {
         // name `check_segment` accepts.
         for name in ["a.b", "a-b.c", "myproject"] {
             for err in [
-                Config::load_project(&named(name), None).unwrap_err(),
+                Config::no_config_directory(&named(name)),
                 load("host = \"vmhost\"\n", name).unwrap_err(),
             ] {
                 let text = err.to_string();

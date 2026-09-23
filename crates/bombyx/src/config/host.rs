@@ -133,7 +133,7 @@ fn check(value: &str) -> Result<(), FieldError> {
 fn with_origin(
     err: FieldError,
     origin: &HostOrigin,
-    path: Option<&Path>,
+    path: &Path,
 ) -> ConfigError {
     ConfigError::InvalidHost {
         origin: origin.describe(path),
@@ -154,7 +154,7 @@ fn with_origin(
 pub(crate) fn checked(
     value: &str,
     origin: &HostOrigin,
-    path: Option<&Path>,
+    path: &Path,
 ) -> Result<HostName, ConfigError> {
     HostName::parse(value).map_err(|err| with_origin(err, origin, path))
 }
@@ -174,7 +174,7 @@ pub(crate) fn checked(
 pub(crate) fn refuse_if_bad(
     value: &str,
     origin: &HostOrigin,
-    path: Option<&Path>,
+    path: &Path,
 ) -> Result<(), ConfigError> {
     check(value).map_err(|err| with_origin(err, origin, path))
 }
@@ -304,13 +304,9 @@ impl HostOrigin {
     /// Names this source, in the words every message and the
     /// startup notice print.
     ///
-    /// `path` is the registry file, and every caller with one
-    /// passes it: the operator is being sent to that file to fix
-    /// or check a value, and `--config` means the name alone
-    /// does not identify it.
-    ///
-    /// `None` renders the bare [`USER_CONFIG_FILE`], for a
-    /// caller that has no path at all.
+    /// `path` is the registry file bombyx read. The operator is
+    /// being sent to that file to fix or check a value, and
+    /// `--config` means the name alone does not identify it.
     ///
     /// **There is deliberately no `Display` impl.** `--config`
     /// means the winning key can sit at any path, so no default
@@ -321,11 +317,8 @@ impl HostOrigin {
     /// cannot come to describe the same source differently. The
     /// wording for a project entry names its table, and that
     /// spelling existing twice is how the two drift apart.
-    pub fn describe(&self, path: Option<&Path>) -> String {
-        let file = path.map_or_else(
-            || USER_CONFIG_FILE.to_owned(),
-            super::read::path_display,
-        );
+    pub fn describe(&self, path: &Path) -> String {
+        let file = super::read::path_display(path);
         let file = file.as_str();
         match self {
             Self::ProjectEntry(name) => {
@@ -373,7 +366,7 @@ pub(crate) fn rank(
     registry: &registry::Registry,
     name: &ProjectName,
 ) -> Result<(HostName, HostOrigin), ConfigError> {
-    let path = Some(registry.path());
+    let path = registry.path();
     if let Some((key, host)) = registry.project_host(name) {
         let origin = HostOrigin::ProjectEntry(key.clone());
         return Ok((checked(host, &origin, path)?, origin));

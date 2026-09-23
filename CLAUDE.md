@@ -357,7 +357,9 @@ everything here as well.
   checked `String` rather than a `PathBuf` for a written-down
   reason -- the path is resolved on the guest, and `PathBuf`
   answers for the machine bombyx was compiled for.
-- All public items must have doc comments
+- All public items must have doc comments. `missing_docs = "deny"`
+  in the workspace lint block enforces it, so `cargo xtask check`
+  refuses a public item without one.
 - **Reference a private item by a backticked name, not an intra-doc
   `[link]`.** The public rustdoc pass rejects a link from a public
   page to a private item, so a doc comment that mentions one names

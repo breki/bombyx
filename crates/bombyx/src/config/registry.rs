@@ -422,18 +422,14 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
     // asked about is reported while the operator has the file
     // open.
     if let Some(host) = &file.host {
-        super::host::refuse_if_bad(
-            host,
-            &super::HostOrigin::UserFile,
-            Some(path),
-        )?;
+        super::host::refuse_if_bad(host, &super::HostOrigin::UserFile, path)?;
     }
     for (key, project) in &file.projects {
         if let Some(host) = &project.host {
             super::host::refuse_if_bad(
                 host,
                 &super::HostOrigin::ProjectEntry(key.clone()),
-                Some(path),
+                path,
             )?;
         }
     }
@@ -898,7 +894,7 @@ mod tests {
             }
             .to_string(),
             super::super::HostOrigin::ProjectEntry(key)
-                .describe(Some(Path::new("/home/dev/config.toml"))),
+                .describe(Path::new("/home/dev/config.toml")),
         ];
         for text in messages {
             assert!(text.contains(want), "want {want} in: {text}");

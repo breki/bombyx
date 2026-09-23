@@ -4,6 +4,8 @@
 //! assert the commands bombyx *would* run without needing a
 //! VM host.
 
+use std::path::PathBuf;
+
 use assert_cmd::Command;
 use bombyx::config::{CONFIG_DIR_ENV, USER_CONFIG_FILE};
 use bombyx::remote::{PROVIDER_ENV, VM_HOST_ENV, VM_HOSTNAME_ENV};
@@ -97,7 +99,7 @@ fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     std::fs::write(&path, registry("host = \"vmhost.invalid\"\n", "")).unwrap();
     let (cfg, _) = bombyx::config::Config::load_project(
         &bombyx::name::ProjectName::parse("myproject").unwrap(),
-        Some(&path),
+        &path,
     )
     .unwrap();
     cfg
@@ -139,6 +141,55 @@ const REQUIRED_TABLES: &str = "\n[vm]\n\
 fn write_user_config(dir: &TempDir, source: &str) {
     std::fs::write(dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE), source)
         .unwrap();
+}
+
+/// Writes a stub `ssh` into `dir` and returns the directory to
+/// put first on `PATH`, or `None` where there is nothing to
+/// write it with.
+///
+/// The stub answers the two things `doctor` asks of `ssh`: `-V`
+/// reports a version, so the local-tool row passes, and
+/// anything else fails, which is what the unreachable host must
+/// produce. A real `ssh` would answer both from the operator's
+/// own configuration and the network.
+///
+/// `None` on Windows, where there is no `/bin/sh`. The caller
+/// sets `USERPROFILE` there instead, which the Windows port of
+/// OpenSSH does read.
+fn stub_ssh_dir(dir: &TempDir) -> Option<PathBuf> {
+    if cfg!(windows) {
+        return None;
+    }
+    let bin = dir.path().join("stub-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let ssh = bin.join("ssh");
+    std::fs::write(
+        &ssh,
+        r#"#!/bin/sh
+if [ "$1" = "-V" ]; then
+    echo 'OpenSSH_9.6p1, stub' >&2
+    exit 0
+fi
+echo 'stub ssh: no such host' >&2
+exit 255
+"#,
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    Some(bin)
+}
+
+/// This process's `PATH` with `first` in front of it.
+fn path_with(first: &std::path::Path) -> std::ffi::OsString {
+    let existing = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![first.to_path_buf()];
+    entries.extend(std::env::split_paths(&existing));
+    std::env::join_paths(entries).unwrap()
 }
 
 /// The binary, pointed at a fixture's registry and asked for
@@ -217,7 +268,7 @@ fn no_value_from_the_config_reaches_the_printed_plan() {
     let path = dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE);
     let (cfg, _) = bombyx::config::Config::load_project(
         &bombyx::name::ProjectName::parse("myproject").unwrap(),
-        Some(&path),
+        &path,
     )
     .unwrap();
     // No `env_file` in this fixture, so nothing is staged and
@@ -473,18 +524,28 @@ fn doctor_fails_and_says_which_check_failed() {
     let dir = project_dir();
     write_user_config(&dir, &registry("host = \"nosuchhost.invalid\"\n", ""));
 
-    // `~/.ssh/config` is not consulted. A `Host *` block with a
-    // `ProxyCommand` is common on a work laptop, and
-    // `ConnectTimeout` is not inherited by one, so a proxy that
-    // accepts the connection and then goes quiet would hang this
-    // test. Pointing HOME at the fixture is the same precaution
-    // `-F /dev/null` gives a hand-run `ssh`.
-    let out = bombyx_in(&dir)
-        .env("HOME", dir.path())
-        .env("USERPROFILE", dir.path())
-        .args(["doctor"])
-        .assert()
-        .failure();
+    // The operator's own `~/.ssh/config` must not reach this
+    // run. A `Host *` block with a `ProxyCommand` is common on
+    // a work laptop, and `ConnectTimeout` does not apply to
+    // one, so a proxy that accepts the connection and then goes
+    // quiet would hang the test.
+    //
+    // Two different levers, because one platform each answers
+    // to them. OpenSSH on Unix takes the home directory from
+    // the passwd entry rather than from `$HOME` -- measured:
+    // with `HOME` pointed at a fixture whose `ssh_config`
+    // rewrites an alias, `ssh -G <alias>` ignores it -- so the
+    // environment cannot move it and a stub `ssh` first on
+    // `PATH` is what works. The Windows port does read
+    // `$USERPROFILE`, and it has no `/bin/sh` to run a stub
+    // with, so there the environment is the lever.
+    let mut cmd = bombyx_in(&dir);
+    cmd.env("HOME", dir.path()).env("USERPROFILE", dir.path());
+    let stub = stub_ssh_dir(&dir);
+    if let Some(stub) = &stub {
+        cmd.env("PATH", path_with(stub));
+    }
+    let out = cmd.args(["doctor"]).assert().failure();
     let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
 
     // Exactly one check failed, and it is the host one. The
@@ -924,7 +985,7 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
     .unwrap();
     let (cfg, _) = bombyx::config::Config::load_project(
         &bombyx::name::ProjectName::parse("myproject").unwrap(),
-        Some(&path),
+        &path,
     )
     .unwrap();
     std::fs::write(
@@ -1073,7 +1134,7 @@ mod snapshot_guard_states {
             .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
         let (cfg, _) = Config::load_project(
             &bombyx::name::ProjectName::parse("myproject").unwrap(),
-            Some(&cfg_path),
+            &cfg_path,
         )
         .unwrap();
         let cmd = save_snapshot_if_absent(
