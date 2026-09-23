@@ -162,7 +162,16 @@ accepts are what keep the VM addressable and able to resolve
 names at all. They are pinned to that one address rather than
 written by port alone, so they do not also expose every other
 resolver the host happens to run -- a container publishing port
-53, for instance.
+53, for instance. DHCP gets one more address, the broadcast
+`255.255.255.255`: a guest without a lease cannot address the
+gateway yet, so its first DISCOVER and REQUEST are broadcasts,
+and without that exception it never gets an address. Only lease
+renewals are unicast to the gateway, which is why a guest that
+already holds a lease hides the problem. The exception exposes no
+DHCP server the gateway rule did not already reach: a broadcast
+arrives only at a server listening on every address (which
+includes the gateway's) or on the broadcast address itself, and
+`ss -ulpn 'sport = :67'` on the host lists what is listening.
 
 **Rules do not apply to connections that are already open.**
 Both chains accept established traffic, so a guest that already
@@ -331,9 +340,9 @@ resolver it uses before reading that line as evidence about the
 pinned DNS accept.
 
 If the host runs another resolver -- a second libvirt network,
-or a container publishing port 53 -- check that one too, since
-the accepts are pinned to the gateway address and no other
-resolver on the host should answer. Do not use `chk` for it:
+or a container publishing port 53 -- check that one too. The DNS
+accepts are pinned to the gateway address, so no other resolver
+on the host should answer. Do not use `chk` for it:
 `chk` opens a TCP connection, and a resolver published on UDP
 alone is silent over TCP whether or not any rules are loaded.
 Ask over UDP instead, before `apply` as well as after. The
