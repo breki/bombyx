@@ -256,7 +256,7 @@ for tools that are not present:
   Backtick escapes `$` in PowerShell and backslash does not, so
   use a single-quoted string, or a Bash heredoc, whenever the
   text contains `$`.
-- **The same mistake has three other shapes. Check all four
+- **The same mistake has four other shapes. Check all five
   when a value crosses a shell boundary.** The rule above
   protects who expands the text, not the `$` character:
   - **`$(...)` inside a nested remote command runs on the near
@@ -273,6 +273,18 @@ for tools that are not present:
   - **`pgrep -f <pattern>` matches its own invocation**, so a
     count is inflated and a dead process looks alive. Count with
     `ps -eo comm | grep -c '^name'` instead.
+  - **A Windows OpenSSH host may run the command under
+    PowerShell**, whichever shell you wrote it for: the server
+    uses the shell named by `DefaultShell` under
+    `HKLM:\SOFTWARE\OpenSSH`, and `cmd.exe` when that is unset.
+    PowerShell does not treat `\"` as an escape, so the `"`
+    still closes the string. Reaching `sh` inside WSL from a
+    Linux workstation,
+    `ssh win "wsl -d D -- sh -c \"grep -E 'a|b' f\""` splits at
+    the `|`. Send the inner script base64-encoded instead --
+    `ssh win "wsl -d D -- sh -c 'echo <b64> | base64 -d | sh'"`
+    -- because base64 holds no character any of the three shells
+    reads.
 - **A Windows command needing elevation blocks on a dialog
   you cannot see.** A UAC prompt waits off-screen while the
   command reads as a hang with an empty log. Run anything that

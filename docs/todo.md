@@ -43,27 +43,30 @@ Enforced at the router.
 
 **Summary:** confirm the nftables rules survive a reboot
 
-`apply` and `persist` have run on the VM host, and the in-VM checks pass: the
-guest keeps its outbound internet access, the router is rejected by the
-forward chain, and the VM host's own addresses are dropped by the input
-chain.
+`apply` and `persist` have run on the Linux VM host, and the in-VM checks
+pass: the guest keeps its outbound internet access, the router is rejected
+by the forward chain, and the VM host's own addresses are dropped by the
+input chain.
 `nft -c` accepts the generated ruleset on nftables 1.0.9, and a fresh
 host-into-guest connection still works, so the input drop does not break
 bombyx.
-What is left is the reboot. Persistence is the one part that cannot be
-confirmed any other way and it fails silently, so run
+What is left is the reboot of the Linux VM host. Persistence is the one part
+that cannot be confirmed any other way and it fails silently, so run
 `sudo agent-vm-firewall status` after a restart and only then drop the
-*(unverified)* marker from the heading in docs/vm-host-setup.md.
+*(unverified)* marker from the heading in docs/vm-host-firewall.md. The
+second WSL host (#99) has passed its reboot: the unit came back active and
+the guest probes held.
 Three things stay unexercised whatever the reboot says. The IPv6 rule,
-because the guest has no IPv6 route at all. The WSL host, which nobody has
-re-checked since the probe was corrected. The DNS accepts: issue #92
-records that the guest resolves through public resolvers baked into the box
-image, so the `dns: ok` line answered through those and never asked the
-gateway. And the DHCP rule for renewals, which a leased guest sends straight
-to the gateway: no run has lasted long enough to watch one. Deleting either
-accept would leave every check we ran still passing. The broadcast DHCP rule
-is exercised: issue #113 stranded a lease-less guest without it and leased
-the guest with it. This is a host-level stopgap for agent-vlan, not a
+because the guest has no IPv6 route at all. The first WSL host, which
+nobody has re-checked since the probe was corrected; a second WSL host
+(#99) passed the corrected probe. The DNS accepts: issue #92 records that
+the guest resolves through public resolvers baked into the box image, so the
+`dns: ok` line answered through those and never asked the gateway. And the
+DHCP rule for renewals, which a leased guest sends straight to the gateway:
+no run has lasted long enough to watch one. Deleting either accept would
+leave every check we ran still passing. The broadcast DHCP rule is
+exercised: issue #113 stranded a lease-less guest without it and leased the
+guest with it. This is a host-level stopgap for agent-vlan, not a
 replacement: enforcement sits on the machine being protected.
 
 ### suspend-resume-commands
