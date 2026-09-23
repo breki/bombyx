@@ -246,7 +246,17 @@ table inet $TABLE {
     # DHCP and DNS from libvirt's dnsmasq, pinned to the
     # gateway address so this does not expose every other
     # resolver the host happens to run.
-    iifname "$BRIDGE" ip daddr $GATEWAY udp dport { 53, 67 } accept
+    #
+    # DHCP also needs the broadcast address. A guest without a
+    # lease cannot address the gateway yet: its DISCOVER and its
+    # first REQUEST go from 0.0.0.0 to 255.255.255.255, and the
+    # final drop below would take them, so a guest booting with
+    # no lease would never get an address. Only renewals are
+    # unicast to the gateway. Port 67 is dnsmasq's DHCP server
+    # alone, so the broadcast exposes no other service.
+    iifname "$BRIDGE" ip daddr { $GATEWAY, 255.255.255.255 } \
+      udp dport 67 accept
+    iifname "$BRIDGE" ip daddr $GATEWAY udp dport 53 accept
     iifname "$BRIDGE" ip daddr $GATEWAY tcp dport 53 accept
 
     # Nothing else on this host is reachable from a guest:

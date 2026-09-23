@@ -162,7 +162,12 @@ accepts are what keep the VM addressable and able to resolve
 names at all. They are pinned to that one address rather than
 written by port alone, so they do not also expose every other
 resolver the host happens to run -- a container publishing port
-53, for instance.
+53, for instance. DHCP gets one more address, the broadcast
+`255.255.255.255`: a guest without a lease cannot address the
+gateway yet, so its first DISCOVER and REQUEST are broadcasts,
+and without that exception it never gets an address. Only lease
+renewals are unicast to the gateway, which is why a guest that
+already holds a lease hides the problem.
 
 **Rules do not apply to connections that are already open.**
 Both chains accept established traffic, so a guest that already
