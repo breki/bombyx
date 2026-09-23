@@ -20,8 +20,9 @@ and this project adheres to
   sends, so a guest booting with the rules loaded -- after a host reboot, as a
   new VM, or after its lease expired -- never got an address and `vagrant up`
   looped on "Host unreachable". The input chain now accepts DHCP to
-  `255.255.255.255` as well as to the gateway; port 67 is dnsmasq alone, so
-  nothing else is exposed (issue #113).
+  `255.255.255.255` as well as to the gateway. This exposes no DHCP server the
+  gateway rule did not already reach, unless one listens on the broadcast
+  address itself (issue #113).
 
 ### Removed
 
