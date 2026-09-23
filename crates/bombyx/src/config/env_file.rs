@@ -18,6 +18,7 @@
 //! quoting.
 
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -100,6 +101,18 @@ impl fmt::Debug for Secrets {
     }
 }
 
+/// Largest secrets file that will be read.
+///
+/// A secrets file holds a handful of `NAME=value` lines, so
+/// the limit costs a real one nothing. What it buys: the path
+/// is checked with `metadata` and opened afterwards, and
+/// whoever can write the containing directory can swap a
+/// regular file for something that never ends between those
+/// two calls. The cap bounds what bombyx holds in memory
+/// either way. `super::read::MAX_CONFIG_BYTES` is the same
+/// number for the same reason.
+const MAX_ENV_FILE_BYTES: u64 = 64 * 1024;
+
 /// Why bombyx could not read the file `env_file` names.
 ///
 /// Separate from [`FieldError`], which belongs to a value's
@@ -144,6 +157,24 @@ pub enum EnvFileError {
         field: &'static str,
         /// The path bombyx tried, after expanding `~`.
         path: PathBuf,
+    },
+
+    /// The file is larger than `MAX_ENV_FILE_BYTES`.
+    ///
+    /// The limit is in the message because the operator cannot
+    /// otherwise tell how far over the file is, and the number
+    /// is the one thing they can act on.
+    #[error(
+        "`{field}` names {path}, which is larger than the \
+         {limit} byte limit on a secrets file"
+    )]
+    TooLarge {
+        /// Name of the offending field.
+        field: &'static str,
+        /// The path bombyx tried, after expanding `~`.
+        path: PathBuf,
+        /// The limit, in bytes.
+        limit: u64,
     },
 
     /// The file could not be opened.
@@ -228,7 +259,8 @@ impl EnvFilePath {
     /// expanded, [`EnvFileError::NotAFile`] when the path names
     /// something other than a regular file, and
     /// [`EnvFileError::Read`] when the file is missing or cannot
-    /// be opened.
+    /// be opened, and [`EnvFileError::TooLarge`] when it is
+    /// bigger than the cap this module sets.
     pub fn read<F>(&self, getenv: F) -> Result<Secrets, EnvFileError>
     where
         F: Fn(&str) -> Option<String>,
@@ -255,7 +287,27 @@ impl EnvFilePath {
             });
         }
 
-        let bytes = std::fs::read(&path).map_err(read_error)?;
+        // One byte past the cap, so a file *at* the limit is
+        // read whole and anything beyond it is detectable
+        // rather than silently truncated into a secrets file
+        // the guest would accept and half-understand.
+        //
+        // `take` rather than a length taken from `meta`: the
+        // path is re-opened here, so the file the read gets is
+        // not provably the file `metadata` answered about.
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)
+            .map_err(read_error)?
+            .take(MAX_ENV_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(read_error)?;
+        if bytes.len() as u64 > MAX_ENV_FILE_BYTES {
+            return Err(EnvFileError::TooLarge {
+                field: Self::FIELD,
+                path,
+                limit: MAX_ENV_FILE_BYTES,
+            });
+        }
         Ok(Secrets(bytes))
     }
 }
@@ -569,6 +621,41 @@ mod tests {
         let err = p.read(nothing).expect_err("a directory is not a file");
         assert!(matches!(err, EnvFileError::NotAFile { .. }), "{err}");
         assert!(err.to_string().contains("env_file"), "{err}");
+    }
+
+    #[test]
+    fn a_file_past_the_cap_is_refused_and_names_its_own_limit() {
+        // Without the cap bombyx reads whatever the config
+        // names into memory and copies it again into a
+        // `remote::Stdin`. A secrets file is a handful of
+        // lines, so the limit costs a real one nothing.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("x.env");
+        let over = usize::try_from(MAX_ENV_FILE_BYTES).expect("fits") + 1;
+        std::fs::write(&file, vec![b'x'; over]).expect("write");
+
+        let p = EnvFilePath::parse(&file.display().to_string())
+            .expect("a temp path is absolute");
+        let err = p.read(nothing).expect_err("the file is too large");
+        assert!(matches!(err, EnvFileError::TooLarge { .. }), "{err}");
+        let text = err.to_string();
+        assert!(text.contains("env_file"), "{text}");
+        assert!(text.contains("65536"), "{text}");
+    }
+
+    #[test]
+    fn a_file_exactly_at_the_cap_is_read_whole() {
+        // The boundary belongs in the table, and it decides
+        // which side of the comparison the cap sits on.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("x.env");
+        let at = usize::try_from(MAX_ENV_FILE_BYTES).expect("fits");
+        std::fs::write(&file, vec![b'x'; at]).expect("write");
+
+        let p = EnvFilePath::parse(&file.display().to_string())
+            .expect("a temp path is absolute");
+        let secrets = p.read(nothing).expect("a file at the cap is legal");
+        assert_eq!(secrets.as_bytes().len(), at);
     }
 
     #[test]

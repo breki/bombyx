@@ -5,6 +5,12 @@ resolver = "2"
 [workspace.lints.rust]
 warnings = "deny"
 unsafe_code = "forbid"
+# `CLAUDE.md` requires a doc comment on every public item.
+# Without this the requirement is a convention nobody checks,
+# and a scripted edit once reassigned a comment to the
+# function inserted above it and published the one below
+# undocumented.
+missing_docs = "deny"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -343,13 +343,20 @@ fn run() -> Result<Ran> {
     let project =
         ProjectName::parse(&project).context("invalid --project value")?;
 
+    // `Config::load_project` takes a path, so the machine whose
+    // environment names no config directory is answered here,
+    // where the environment was read. The message for it lives
+    // in the library beside the message for a registry file
+    // that is simply absent.
+    let registry =
+        registry.ok_or_else(|| Config::no_config_directory(&project))?;
+
     // No arm names the registry file here. Every error that
     // could want one names it already: a value breaking its
     // type's rule is refused by serde and arrives as
     // `ConfigError::Parse`, which carries the path and the
     // line.
-    let (cfg, host_origin) =
-        Config::load_project(&project, registry.as_deref())?;
+    let (cfg, host_origin) = Config::load_project(&project, &registry)?;
 
     // Say which source the host came from, using the winner
     // the library reports rather than re-testing the sources
@@ -380,7 +387,7 @@ fn run() -> Result<Ran> {
             eprintln!(
                 "bombyx: host {} from {}",
                 cfg.host,
-                host_origin.describe(registry.as_deref())
+                host_origin.describe(&registry)
             );
         }
         HostOrigin::UserFile => {}
@@ -955,6 +962,10 @@ fn list_run(
     registry: Option<&Path>,
     dry_run: bool,
 ) -> Result<Ran> {
+    // The same split the project route makes: a machine whose
+    // environment names no config directory is answered here,
+    // and `Config::load_all` is handed a path.
+    let registry = registry.ok_or_else(Config::no_config_directory_for_all)?;
     let configs = Config::load_all(registry)?;
 
     if dry_run {

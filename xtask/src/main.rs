@@ -1,3 +1,7 @@
+//! Build automation for the workspace. Every quality gate
+//! runs from here, so a gate is a Rust function with tests
+//! rather than a script that has to be written twice.
+
 mod audit;
 mod backfeed;
 mod canon;

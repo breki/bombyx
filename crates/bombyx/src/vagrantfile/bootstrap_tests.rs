@@ -80,6 +80,48 @@ fn flat_bootstrap_lines() -> Vec<String> {
         .collect()
 }
 
+// One credential the generated Vagrantfile uploads: the shell
+// variable `bootstrap.sh` keeps its guest path in, and the Rust
+// constant naming the environment variable that says the file
+// is coming.
+//
+// Adding a fourth credential to the script used to mean editing
+// three separate lists in this file, and nothing failed when one
+// was forgotten -- a review found all three lagging behind the
+// third credential at once. The lists below are built from
+// `CREDENTIALS` instead, so a new row reaches every guard.
+//
+// No guest path field. Each path is checked against its own
+// Vagrantfile constant elsewhere, and a field no guard here
+// reads would be a row nobody maintains.
+struct Credential {
+    /// The shell variable, without its `$`.
+    shell_var: &'static str,
+    /// The environment variable the Vagrantfile sets to say the
+    /// file was staged. The Rust constant rather than a copy of
+    /// its value, so renaming one follows through to here.
+    present_env: &'static str,
+}
+
+// Every credential the Vagrantfile uploads. The order is the
+// order `refuse` removes them in, which
+// `every_refusal_clears_every_uploaded_credential` builds its
+// needle from.
+const CREDENTIALS: [Credential; 3] = [
+    Credential {
+        shell_var: "DEPLOY_KEY",
+        present_env: super::DEPLOY_KEY_ENV,
+    },
+    Credential {
+        shell_var: "ENV_FILE",
+        present_env: super::ENV_FILE_PRESENT_ENV,
+    },
+    Credential {
+        shell_var: "GIT_CRED",
+        present_env: super::CREDENTIAL_PRESENT_ENV,
+    },
+];
+
 #[test]
 fn every_variable_is_declared_before_it_is_expanded() {
     // `set -u` makes expanding an unset variable fatal, so
@@ -93,14 +135,15 @@ fn every_variable_is_declared_before_it_is_expanded() {
     // Checked for the names the script declares itself.
     // `readonly` lines are the declarations; anything of
     // the form `$NAME` or `"$NAME"` before one is a use.
+    //
+    // Every uploaded credential, plus the two other paths the
+    // script builds for itself.
     let flat = flat_bootstrap_lines();
-    for name in [
-        "DEPLOY_KEY",
-        "ENV_FILE",
-        "GIT_CRED",
-        "CLONE_DIR",
-        "KNOWN_HOSTS",
-    ] {
+    let names = CREDENTIALS
+        .iter()
+        .map(|c| c.shell_var)
+        .chain(["CLONE_DIR", "KNOWN_HOSTS"]);
+    for name in names {
         let decl = flat
             .iter()
             .position(|l| l.starts_with(&format!("readonly {name}=")))
@@ -164,10 +207,15 @@ fn every_refusal_clears_every_uploaded_credential() {
              Call `refuse \"message\"` instead of exiting."
         );
     }
+    let removals = CREDENTIALS
+        .iter()
+        .map(|c| format!("\"${}\"", c.shell_var))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let needle = format!("rm -f {removals}");
     assert!(
-        flat_bootstrap()
-            .contains("rm -f \"$DEPLOY_KEY\" \"$ENV_FILE\" \"$GIT_CRED\""),
-        "refuse must remove all three uploaded credentials"
+        flat_bootstrap().contains(&needle),
+        "refuse must remove every uploaded credential: {needle}"
     );
 }
 
@@ -315,7 +363,7 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
     // no part of bombyx and any uploaded deploy key stays in
     // the guest.
     //
-    // The four names below are the ones a Vagrantfile can
+    // The names below are the ones a Vagrantfile can
     // lack. An older bombyx wrote a directory whose Vagrantfile
     // sets none of them, and `vagrant provision` run by hand
     // there reaches this script.
@@ -333,15 +381,13 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
     // has a brace where `$NAME` has a letter, so it does not
     // contain the bare form. A line carrying one of each would
     // count 1 against 1, and `${NAME}` would match neither.
-    for name in [
-        "BOMBYX_DEPLOY_KEY",
-        "BOMBYX_ENV_FILE_PRESENT",
-        "BOMBYX_GIT_CRED_PRESENT",
-        "BOMBYX_GIT_HOST",
-        "BOMBYX_HOST_KEYS_URL",
-        "BOMBYX_HOST_KEYS_FORMAT",
-        "BOMBYX_PROJECT",
-    ] {
+    let names = CREDENTIALS.iter().map(|c| c.present_env).chain([
+        super::GIT_HOST_ENV,
+        super::HOST_KEYS_URL_ENV,
+        super::HOST_KEYS_FORMAT_ENV,
+        super::PROJECT_ENV,
+    ]);
+    for name in names {
         // The legal spelling is `${NAME:-<default>}` for any
         // default: `BOMBYX_PROJECT` falls back to `project` and
         // the rest fall back to nothing. Strip every such form

@@ -38,34 +38,6 @@ section they belong to.
 
 ## Open divergences
 
-### tf-2026-09-11-todo-md-unclassified-for-never-sync -- todo.md unclassified for never-sync
-
-`cargo xtask sync-candidates` drops a never-sync set before
-showing which upstream files changed, because some files are
-per-project records that every project writes for itself and an
-upstream change to one is never worth pulling. Listing them is
-noise for whoever reads the candidates.
-
-`NEVER_SYNC` in `xtask/src/sync.rs` lists `CHANGELOG.md`, the
-feedback file, the backfeed ledger, `docs/developer/DIARY.md`,
-`docs/developer/*-log.md` and `docs/issues/`. `docs/todo.md` is
-not in it, and `cargo xtask todo` writes that file per project,
-so it is the same kind of record as the rest. A sync would
-offer us the template's own backlog as a candidate to merge
-into ours.
-
-The red team found this on 2026-09-03 and it is deferred here
-as `rt-2026-09-03-todo-md-unclassified-for-never-sync`. It was
-deferred because adding an entry changes what every future sync
-offers, which is a decision about the workflow rather than a
-defect to patch.
-
-Upstream does accumulate its own copy, so the noise is real
-rather than theoretical. `git show template/main:docs/todo.md`
-at `6528907` returns 76 lines with its own pending items in
-them, `xtask-strip-web` among them. Every future sync would
-offer that file to every downstream.
-
 ### tf-2026-08-18-skills-json-registers-a-missing-skill -- skills.json registers a missing skill
 
 `.claude/skills.json` still registers a `web-dev` skill that does not
@@ -98,6 +70,35 @@ should also name `skills.json` explicitly, since it is the one place a
 removed subsystem leaves a description behind.
 
 ## Suggestions to flow back to the template
+
+### tf-2026-09-11-todo-md-unclassified-for-never-sync -- todo.md unclassified for never-sync
+
+`cargo xtask sync-candidates` drops a never-sync set before
+showing which upstream files changed, because some files are
+per-project records that every project writes for itself and an
+upstream change to one is never worth pulling. Listing them is
+noise for whoever reads the candidates.
+
+`NEVER_SYNC` in `xtask/src/sync.rs` lists `CHANGELOG.md`, the
+feedback file, the backfeed ledger, `docs/developer/DIARY.md`,
+`docs/developer/*-log.md` and `docs/issues/`. `docs/todo.md` is
+not in it, and `cargo xtask todo` writes that file per project,
+so it is the same kind of record as the rest. A sync would
+offer us the template's own backlog as a candidate to merge
+into ours.
+
+The red team found this on 2026-09-03. bombyx deferred it,
+because adding an entry changes what every future sync offers,
+and then added it: `docs/todo.md` is in `NEVER_SYNC`, and
+`is_excluded_matches_exact_and_prefix` asserts it stays there.
+The template's own `NEVER_SYNC` still lacks the entry, which is
+why this sits here.
+
+Upstream does accumulate its own copy, so the noise is real
+rather than theoretical. `git show template/main:docs/todo.md`
+at `6528907` returns 76 lines with its own pending items in
+them, `xtask-strip-web` among them. Every future sync would
+offer that file to every downstream.
 
 ### tf-2026-09-17-make-issue-planning-docs-ephemeral -- make issue planning docs ephemeral
 

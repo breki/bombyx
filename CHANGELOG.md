@@ -63,6 +63,15 @@ and this project adheres to
   names no `hostname` gets `<project>-agent` derived from its name, so a guest
   no longer keeps the box's default name and several agent VMs on one host can
   be told apart.
+- A secrets file larger than 64 KiB is refused rather than read whole into
+  memory. The message names the path and the limit. `env_file` names a file of a
+  handful of lines, so a real one is unaffected.
+- **BREAKING:** Config::load_project and Config::load_all take the registry path
+  itself rather than an Option of one, and HostOrigin::describe does the same. A
+  machine whose environment names no config directory has no path to pass, so
+  the binary raises Config::no_config_directory or
+  Config::no_config_directory_for_all there instead. Two dead branches in the
+  binary go with the change.
 
 ### Fixed
 
