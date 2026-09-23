@@ -276,11 +276,15 @@ for tools that are not present:
   - **A Windows OpenSSH host may run the command under
     PowerShell**, whichever shell you wrote it for: the server
     uses the shell named by `DefaultShell` under
-    `HKLM:\SOFTWARE\OpenSSH`. PowerShell treats `\"` as two
-    characters and `&` as an operator, so a bash-to-PowerShell-
-    to-`sh` command splits where it should not. Send a nested
-    script base64-encoded and decode it on the far side; base64
-    holds no character any of the three shells reads.
+    `HKLM:\SOFTWARE\OpenSSH`, and `cmd.exe` when that is unset.
+    PowerShell does not treat `\"` as an escape, so the `"`
+    still closes the string. Reaching `sh` inside WSL from a
+    Linux workstation,
+    `ssh win "wsl -d D -- sh -c \"grep -E 'a|b' f\""` splits at
+    the `|`. Send the inner script base64-encoded instead --
+    `ssh win "wsl -d D -- sh -c 'echo <b64> | base64 -d | sh'"`
+    -- because base64 holds no character any of the three shells
+    reads.
 - **A Windows command needing elevation blocks on a dialog
   you cannot see.** A UAC prompt waits off-screen while the
   command reads as a hang with an empty log. Run anything that

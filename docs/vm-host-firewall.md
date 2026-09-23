@@ -13,11 +13,11 @@ persisted on a Linux host and on two WSL hosts. The guest checks
 below have been run in their corrected form on the Linux host and
 on the second WSL host; the first WSL host's results predate the
 correction and [vm-host-wsl2.md](vm-host-wsl2.md) marks them
-suspect. Nobody has confirmed the rules come back after a reboot
-on any of them, and persistence is the part that fails silently,
-so read "Making it survive a reboot" below before relying on
-this.
-Three further gaps are listed at the end of the section.
+suspect. The rules have been confirmed to come back after a
+reboot on the second WSL host only. Persistence is the part that
+fails silently, so on any other host read "Making it survive a
+reboot" below before relying on this. What the rules cannot do
+is listed at the end, under "What this does and does not buy".
 
 ## What a VM can reach by default
 
