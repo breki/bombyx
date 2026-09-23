@@ -264,9 +264,31 @@ machine as well. That is a workaround rather than a fix: WSL
 stops idle distributions on its own, so the broken state returns
 without anyone asking for it.
 
-The fix is to delete any leftover bridge before libvirtd starts.
-At that moment libvirtd is not running, so no `virbr*` interface
-can be in legitimate use:
+The fix is to delete a leftover bridge before libvirtd starts --
+but only a leftover one. libvirtd does not start only after a
+distribution restart. Ubuntu runs it with `--timeout 120`, so it
+exits after two idle minutes with no guest running and starts
+again on the next request. Its networks keep running while it is
+gone: the bridges stay up, their dnsmasq processes keep serving,
+and libvirtd picks them up again from its state files in
+`/run/libvirt/network`.
+
+Deleting every `virbr*` bridge at each start therefore breaks a
+live network. libvirtd finds the bridge gone and marks the
+network inactive, but its dnsmasq keeps running and keeps its
+socket on the gateway address. The next `vagrant up` then fails
+with:
+
+```
+dnsmasq: failed to create listening socket for 192.168.121.1: Address already in use
+```
+
+The state files tell the two cases apart. Each running network
+has a `<name>.xml` there naming its bridge, and `/run` lives
+only as long as the distribution. After `wsl --terminate` the
+directory starts empty, so a surviving bridge has no file naming
+it. After an idle exit the file is still there. The hook deletes
+a `virbr*` bridge only when no state file names it:
 
 ```bash
 sudo tee /usr/local/sbin/wsl-clear-stale-virbr >/dev/null <<'EOF'
@@ -275,7 +297,14 @@ set -e
 ip -br link show type bridge 2>/dev/null | awk '{print $1}' | cut -d@ -f1 |
 while read -r br; do
     case "$br" in
-        virbr*) ip link delete "$br" 2>/dev/null || true ;;
+        virbr*)
+            # A state file naming the bridge means the network is
+            # still running and libvirtd only idled out.
+            if ! grep -Eqs "<bridge name=['\"]$br['\"]" \
+                /run/libvirt/network/*.xml; then
+                ip link delete "$br" 2>/dev/null || true
+            fi
+            ;;
     esac
 done
 exit 0
@@ -297,6 +326,18 @@ from blocking libvirtd itself.
 Test it with `wsl --terminate <distro>` rather than
 `wsl --shutdown`. Only the first reproduces the problem, and a
 test that passes under the second proves nothing.
+
+Test the other half too: with a guest network active, restart
+libvirtd as root and check that the bridge is still there and the
+network still active:
+
+```bash
+sudo systemctl restart libvirtd
+ip -br link show type bridge
+virsh -c qemu:///system net-list --all
+```
+
+A restart runs `ExecStartPre` exactly as an idle-out start does.
 
 ## Vagrant treats WSL as Windows
 
