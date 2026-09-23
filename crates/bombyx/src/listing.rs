@@ -111,6 +111,23 @@ impl VmState {
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown(_))
     }
+
+    /// Whether the host has no domain for this machine yet.
+    ///
+    /// What `bombyx up` uses to decide the `fresh-install` snapshot:
+    /// an absent machine is one this `up` creates, so its disk is a
+    /// clean install worth snapshotting, while a machine already on
+    /// the host is only being booted and must not be renamed
+    /// `fresh-install`. Two states mean absent -- [`VmState::NotCreated`]
+    /// (no `Vagrantfile`) and `Reported("not created")` (a
+    /// `Vagrantfile` but no domain: destroyed, or a first `up`
+    /// interrupted after the write). `not created` is vagrant's own
+    /// `state-human-short` word; see `STATE_FIELD`.
+    #[must_use]
+    pub fn is_absent(&self) -> bool {
+        matches!(self, Self::NotCreated)
+            || matches!(self, Self::Reported(word) if word == "not created")
+    }
 }
 
 impl std::fmt::Display for VmState {
@@ -135,6 +152,28 @@ impl std::fmt::Display for VmState {
             Self::Unknown(_) => f.write_str("unknown"),
         }
     }
+}
+
+/// Whether `bombyx up` should take the `fresh-install` snapshot,
+/// given the machine's state before the boot.
+///
+/// The snapshot names a clean install, so it is taken only when this
+/// `up` creates the machine ([`VmState::is_absent`]) or cannot tell
+/// what state the machine is in ([`VmState::is_unknown`], and `None`
+/// when no state was probed) -- an unconfirmed state might be a first
+/// boot, and losing the `reset` baseline to a flaky check is worse
+/// than the snapshot the `if-absent` guard skips on a repeat. A
+/// machine the probe reports as present but stopped is only being
+/// booted, so snapshotting its in-use disk would mislabel it.
+///
+/// This is the decision the binary's `up_run` acts on. It lives here,
+/// in the tested library, rather than inline in `src/bin`, for the
+/// reason [`VmState::is_running`] gives: getting it wrong would
+/// mislabel an in-use disk `fresh-install`, and `src/bin` is outside
+/// the coverage gate.
+#[must_use]
+pub fn takes_fresh_snapshot(state: Option<&VmState>) -> bool {
+    state.is_none_or(|s| s.is_absent() || s.is_unknown())
 }
 
 /// One row of the listing.
@@ -1116,6 +1155,50 @@ mod tests {
             VmState::NotCreated,
         ] {
             assert!(!known.is_unknown(), "{known:?} is a known state");
+        }
+    }
+
+    #[test]
+    fn only_a_machine_with_no_domain_reads_as_absent() {
+        // `up` snapshots an absent machine (it is creating a clean
+        // install) but not one already on the host. Both no-domain
+        // states count; a stopped or running domain, and an unknown,
+        // do not -- a false "absent" would snapshot a machine in use.
+        for absent in
+            [VmState::NotCreated, VmState::Reported("not created".into())]
+        {
+            assert!(absent.is_absent(), "{absent:?} has no domain");
+        }
+        for present in [
+            VmState::Reported("running".into()),
+            VmState::Reported("shutoff".into()),
+            VmState::Reported("poweroff".into()),
+            VmState::Unknown("could not ask".into()),
+        ] {
+            assert!(!present.is_absent(), "{present:?} is not absent");
+        }
+    }
+
+    #[test]
+    fn up_snapshots_only_when_creating_or_unsure() {
+        // The policy `up_run` acts on. A machine being created, or one
+        // whose state could not be read, gets the snapshot; a present
+        // but stopped machine does not, because booting it is not a
+        // fresh install. `None` (no probe) counts as unsure.
+        assert!(takes_fresh_snapshot(None));
+        for take in [
+            VmState::NotCreated,
+            VmState::Reported("not created".into()),
+            VmState::Unknown("could not ask".into()),
+        ] {
+            assert!(takes_fresh_snapshot(Some(&take)), "{take:?} -> snapshot");
+        }
+        for skip in [
+            VmState::Reported("shutoff".into()),
+            VmState::Reported("poweroff".into()),
+            VmState::Reported("running".into()),
+        ] {
+            assert!(!takes_fresh_snapshot(Some(&skip)), "{skip:?} -> no snap");
         }
     }
 }

@@ -969,10 +969,8 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
 #[cfg(unix)]
 mod snapshot_guard_states {
     use super::{CONFIG_HOME, project_dir};
-    use bombyx::config::Staged;
     use bombyx::config::{Config, USER_CONFIG_FILE};
-    use bombyx::plan::{Action, plan};
-    use bombyx::remote::Tty;
+    use bombyx::remote::{Tty, save_snapshot_if_absent};
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
     use std::process::Command as StdCommand;
@@ -1064,8 +1062,10 @@ mod snapshot_guard_states {
         }
         let marker = home.path().join("marker");
 
-        // The script comes from the plan rather than a literal,
-        // so this table cannot pass against shell nobody emits.
+        // The script comes from the real snapshot builder rather
+        // than a literal, so this table cannot pass against shell
+        // nobody emits. It is the command the binary's `up_run`
+        // appends after the boot when it is creating the machine.
         let fixture = project_dir();
         let cfg_path = fixture
             .path()
@@ -1076,8 +1076,12 @@ mod snapshot_guard_states {
             Some(&cfg_path),
         )
         .unwrap();
-        let cmds = plan(&Action::Up, &cfg, Tty::NoPty, &Staged::default());
-        let script = cmds.last().unwrap().args.last().unwrap().clone();
+        let cmd = save_snapshot_if_absent(
+            &cfg,
+            &cfg.remote_project_dir(),
+            Tty::NoPty,
+        );
+        let script = cmd.args.last().unwrap().clone();
 
         let out = StdCommand::new("sh")
             .arg("-c")
