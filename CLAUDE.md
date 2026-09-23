@@ -634,6 +634,7 @@ a fresh empty `[Unreleased]` above it.
 | `/short` | Restate the reply above, or answer an instruction, in under 40 words |
 | `/ask` | Re-put the last decision the assistant raised in prose as a structured `AskUserQuestion`, recommendation first |
 | `/html-report` | Produce a self-contained local HTML report from the in-repo template (never a cloud Artifact) |
+| `/backlog-report` | Local HTML table of every open todo and GitHub issue: merged, grouped, described, rated for complexity and priority |
 | `/template-improve` | Log feedback for the rustbase template |
 | `/template-sync` | Sync upstream template changes |
 
