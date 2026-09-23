@@ -59,13 +59,15 @@ the guest probes held.
 Three things stay unexercised whatever the reboot says. The IPv6 rule,
 because the guest has no IPv6 route at all. The first WSL host, which
 nobody has re-checked since the probe was corrected; a second WSL host
-(#99) passed the corrected probe. And the pinned DHCP and DNS
-accepts: issue #92 records that the guest resolves through public resolvers
-baked into the box image, so the `dns: ok` line answered through those and
-never asked the gateway. Deleting those accepts would leave every check we
-ran still passing. This is a host-level stopgap for
-agent-vlan, not a replacement: enforcement sits on the machine being
-protected.
+(#99) passed the corrected probe. The DNS accepts: issue #92 records that
+the guest resolves through public resolvers baked into the box image, so the
+`dns: ok` line answered through those and never asked the gateway. And the
+DHCP rule for renewals, which a leased guest sends straight to the gateway:
+no run has lasted long enough to watch one. Deleting either accept would
+leave every check we ran still passing. The broadcast DHCP rule is
+exercised: issue #113 stranded a lease-less guest without it and leased the
+guest with it. This is a host-level stopgap for agent-vlan, not a
+replacement: enforcement sits on the machine being protected.
 
 ### suspend-resume-commands
 

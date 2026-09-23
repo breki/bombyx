@@ -183,9 +183,11 @@ resolve_target() {
     die "invalid BRIDGE name: $BRIDGE" \
       "letters, digits, dot, dash and underscore only"
 
-  # The DHCP and DNS exceptions are pinned to this address, so
-  # without it they would have to be written wide open -- every
-  # resolver on every address the host holds.
+  # The DNS exception, and the DHCP rule for renewals (which a
+  # leased guest sends straight to the gateway; see the input
+  # chain), are pinned to this address, so without it they would
+  # have to be written wide open -- every DNS or DHCP server on
+  # every address the host holds.
   [ -n "$GATEWAY" ] ||
     die "network '$NETWORK' has no IPv4 address" \
       "this script assumes an IPv4 NAT network"
@@ -243,10 +245,28 @@ table inet $TABLE {
     # into the guest and the answers arrive here.
     ct state established,related accept
 
-    # DHCP and DNS from libvirt's dnsmasq, pinned to the
-    # gateway address so this does not expose every other
-    # resolver the host happens to run.
-    iifname "$BRIDGE" ip daddr $GATEWAY udp dport { 53, 67 } accept
+    # DHCP (port 67) to libvirt's dnsmasq, addressed to the
+    # gateway or to the broadcast address. A guest without a
+    # lease cannot address the gateway yet: its DISCOVER and its
+    # first REQUEST go from 0.0.0.0 to 255.255.255.255, so
+    # without the second rule the final drop takes them and the
+    # guest never gets an address. Only renewals are unicast to
+    # the gateway.
+    #
+    # The broadcast rule is safe because of how the kernel
+    # delivers a broadcast. It reaches a socket bound to 0.0.0.0
+    # (the wildcard, which receives packets for every local
+    # address, the gateway included) and a socket bound to
+    # 255.255.255.255 itself. The gateway rule already reaches
+    # the first kind, so the second is the only listener this
+    # rule adds. ss -ulpn 'sport = :67' lists what listens.
+    iifname "$BRIDGE" ip daddr $GATEWAY udp dport 67 accept
+    iifname "$BRIDGE" ip daddr 255.255.255.255 udp dport 67 accept
+
+    # DNS (port 53) from dnsmasq, pinned to the gateway address
+    # so this does not expose every other resolver the host
+    # happens to run.
+    iifname "$BRIDGE" ip daddr $GATEWAY udp dport 53 accept
     iifname "$BRIDGE" ip daddr $GATEWAY tcp dport 53 accept
 
     # Nothing else on this host is reachable from a guest:
