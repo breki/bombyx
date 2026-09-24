@@ -34,7 +34,7 @@ pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::{write_file, write_file_of_hidden_size};
 
-use crate::config::{Config, Transport};
+use crate::config::{Config, Provider, Transport};
 
 /// Environment variable carrying the VM host's SSH alias into
 /// the `vagrant` process on the host.
@@ -103,12 +103,14 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// because the two spell the same choice and only `up` accepts
 /// the argument.
 ///
-/// **Every project vagrant call carries it except the
-/// teardown.** `is_teardown` holds why the teardown names no
-/// provider, and a WSL2 host inverts the trade
-/// (`vm-host-wsl2.md`).
-/// Editing `provider` on a project that already has a VM keeps the
-/// old one silently -- `provider-change-on-existing-vm` in
+/// **Every project vagrant call carries it but one.** All but
+/// the teardown name the configured provider. The teardown names
+/// the one vagrant recorded the machine under. Its last-resort
+/// destroy, for a recorded machine it cannot place, names none;
+/// [`destroy_vm_if_present`] holds why.
+///
+/// Editing `provider` on a project that already has a VM keeps
+/// the old one silently -- `provider-change-on-existing-vm` in
 /// `docs/todo.md`.
 pub const PROVIDER_ENV: &str = "VAGRANT_DEFAULT_PROVIDER";
 
@@ -150,25 +152,38 @@ fn vm_host_env(cfg: &Config) -> String {
 /// Split out from [`vagrant_script`] so every shape bombyx emits
 /// carries the same prefix. [`vagrant_script`] puts the command
 /// after a bare `cd`, so a builder needing it somewhere else
-/// calls this function instead. Two do:
-/// `destroy_vm_if_present` nests it inside an
-/// `if [ -f Vagrantfile ]` guard, and `save_snapshot_if_absent`
-/// puts `snapshot list` and `snapshot save` inside one `if`. A
-/// builder assembling its own string would run `vagrant` with
-/// none of the three variables set.
+/// builds it directly. Two do: `save_snapshot_if_absent` calls
+/// this function to put `snapshot list` and `snapshot save`
+/// inside one `if`, and `destroy_vm_if_present` calls
+/// [`vagrant_command_as`] inside its guards, because it names the
+/// recorded provider rather than the configured one. A builder
+/// assembling its own string would run `vagrant` with none of
+/// the three variables set: `VM_HOST_ENV`, `VM_HOSTNAME_ENV` and
+/// `PROVIDER_ENV`.
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
+    vagrant_command_as(cfg, Some(cfg.vm.provider), args)
+}
+
+/// [`vagrant_command`] naming `provider` rather than the
+/// configured one, or naming none when `provider` is `None`.
+///
+/// `destroy_vm_if_present` is the only caller that needs this: it
+/// names the provider vagrant recorded the machine under, and
+/// none for a machine it cannot place.
+fn vagrant_command_as(
+    cfg: &Config,
+    provider: Option<Provider>,
+    args: &[&str],
+) -> String {
     use std::fmt::Write as _;
     let mut cmd = vm_host_env(cfg);
-    if !is_teardown(args) {
+    if let Some(provider) = provider {
         // `Provider` renders one of two fixed lowercase words,
         // so there is no operator input here for a quote to
         // protect. It is quoted anyway, so the assignment
         // matches every other one in the script.
-        let _ = write!(
-            cmd,
-            " {PROVIDER_ENV}={}",
-            shell_quote(cfg.vm.provider.as_str())
-        );
+        let _ =
+            write!(cmd, " {PROVIDER_ENV}={}", shell_quote(provider.as_str()));
     }
     cmd.push_str(" vagrant");
     for arg in args {
@@ -176,22 +191,6 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
         cmd.push_str(&shell_quote(arg));
     }
     cmd
-}
-
-/// Whether `args` names the vagrant verb that removes a
-/// machine.
-///
-/// Read from the verb rather than passed in by the caller. The
-/// callers hand `vagrant` its arguments, so a rule derived from
-/// those arguments cannot disagree with the command that gets
-/// run, while a separate flag could be set wrongly on a new
-/// call site. The teardown names no provider because vagrant
-/// ignores the variable once a machine exists, and with no
-/// machine an unusable provider would refuse the destroy -- so
-/// naming one there can only ever break it, while omitting it is
-/// safe because a refusal implies no machine to tear down.
-fn is_teardown(args: &[&str]) -> bool {
-    args.first() == Some(&"destroy")
 }
 
 /// Builds the remote script that enters `dir` and runs
@@ -319,14 +318,13 @@ impl Tty {
 /// `hyperv` exported.
 ///
 /// bombyx writes its own [`PROVIDER_ENV`] back in front of
-/// every project vagrant call but the teardown. That
-/// assignment comes after this `unset` and wins, so clearing
-/// the pair costs those calls nothing.
-///
-/// It is not free for the teardown, which writes nothing back.
-/// `is_teardown` holds why omitting the provider there is the
-/// right trade on a libvirt host; a WSL2 host is a known gap
-/// (`vm-host-wsl2.md`).
+/// every project vagrant call but one. That assignment comes
+/// after this `unset` and wins, so clearing the pair costs those
+/// calls nothing. The teardown writes back the provider vagrant
+/// recorded. The one call with none written back is the
+/// teardown's last-resort destroy, for a recorded machine it
+/// cannot place, where leaving the value cleared is the point:
+/// vagrant then picks the provider itself.
 ///
 /// **Both routes need it, for different reasons.** `sh -c` is a
 /// child of bombyx and inherits everything the operator
@@ -843,17 +841,72 @@ pub fn require_file(
 }
 
 /// Builds the command that destroys the VM defined in `dir`,
-/// doing nothing when there is no Vagrantfile there.
+/// doing nothing when there is no Vagrantfile there or no
+/// machine recorded.
 ///
-/// The guard makes teardown idempotent. A bare
+/// The Vagrantfile guard makes teardown idempotent. A bare
 /// `vagrant destroy -f` exits non-zero in a directory with no
 /// Vagrantfile, and an `up` interrupted between the `mkdir` and
 /// the Vagrantfile write leaves exactly that behind. The failure
 /// would stop the removal step that follows.
 ///
-/// The command comes from the same private `vagrant_command`
-/// helper the other builders use, so it carries the same identity
-/// prefix as every other invocation. It matters
+/// **The script names the provider vagrant recorded the machine
+/// under.** Vagrant writes a machine's id to a file named for
+/// the provider, which `recorded_machine_id` spells out. The
+/// script tests that file for each of [`Provider::ALL`] and runs
+/// the destroy under the first one it finds.
+///
+/// The destroy needs a provider named. With none, vagrant picks a
+/// default while it loads, by asking each provider whether it is
+/// usable. On a WSL2 host VirtualBox answers with a refusal, and
+/// the refusal comes before vagrant reads the machine's record,
+/// so the destroy fails with a machine present (`vm-host-wsl2.md`
+/// under "Vagrant treats WSL as Windows").
+///
+/// The recorded provider rather than the configured one, because
+/// the two differ after an operator edits `provider` on a project
+/// that already has a VM (`provider-change-on-existing-vm` in
+/// `docs/todo.md`), and cleaning up that state is what the
+/// teardown is for. The recorded provider built the machine on
+/// this host, so it is the one sure to be usable here; whether
+/// naming the configured one would be refused in that state was
+/// not tried *(unverified)*.
+///
+/// **Any other recorded machine gets a last-resort destroy naming
+/// no provider.** Its branch fires for any id the
+/// provider-named branches did not match. For a `default` machine
+/// under a provider bombyx does not support, vagrant picks that
+/// provider from the record, where every provider's usability
+/// probe answers -- on a libvirt host, say. On a WSL2 host the
+/// probe refuses first, as above, and the refusal below keeps
+/// the directory. For a machine under another name, the destroy
+/// targets `default` alone and removes nothing, which the
+/// refusal below then catches.
+///
+/// **The script refuses when a machine is still recorded after
+/// the destroy.** Vagrant deletes a machine's id file when it
+/// destroys the machine, or finds it not created. A leftover id
+/// therefore means a machine vagrant did not remove -- one under
+/// a machine name other than `default`, which vagrant never
+/// targets because the generated Vagrantfile does not define it,
+/// or one whose destroy vagrant refused. The removal behind the
+/// teardown would delete the Vagrantfile while that machine
+/// runs, so the script exits non-zero and `execute` stops before
+/// it.
+///
+/// **With no machine recorded at all, the script runs no
+/// `vagrant`.** There is nothing to destroy, and a vagrant that
+/// cannot use the provider named would refuse and stop the
+/// directory removal behind it -- so a misconfigured project
+/// stays removable.
+///
+/// The script tests each path by name rather than with a glob. A
+/// `zsh` login shell aborts a command whose glob matches nothing,
+/// and over `ssh` the VM host's login shell runs the script.
+///
+/// Each destroy comes from `vagrant_command_as`, the private
+/// helper behind every other builder's command, so it carries the
+/// same identity prefix as every other invocation. It matters
 /// here more than it looks: teardown still *evaluates* the
 /// project's `Vagrantfile`, so one reading
 /// `ENV.fetch("BOMBYX_VM_HOST")` without a default would raise on
@@ -871,12 +924,54 @@ pub fn destroy_vm_if_present(
     dir: &str,
     tty: Tty,
 ) -> RemoteCommand {
+    let destroy = ["destroy", "-f"];
+    let mut branches: Vec<String> = Provider::ALL
+        .into_iter()
+        .map(|p| {
+            format!(
+                "[ -f {id} ]; then {cmd}; ",
+                id = shell_quote(&recorded_machine_id(p)),
+                cmd = vagrant_command_as(cfg, Some(p), &destroy),
+            )
+        })
+        .collect();
+    branches.push(format!(
+        "{ANY_RECORDED_MACHINE}; then {cmd}; ",
+        cmd = vagrant_command_as(cfg, None, &destroy),
+    ));
     let script = format!(
-        "cd {dir} && if [ -f Vagrantfile ]; then {cmd}; fi",
+        "cd {dir} && if [ -f Vagrantfile ]; then if {chain}fi; \
+         if {ANY_RECORDED_MACHINE}; then printf 'bombyx: %s still \
+         records a machine under %s/.vagrant/machines, so the \
+         directory stays; destroy that machine by hand\\n' {host} \
+         \"$PWD\" >&2; exit 1; fi; fi",
         dir = quote_remote_path(dir),
-        cmd = vagrant_command(cfg, &["destroy", "-f"]),
+        chain = branches.join("elif "),
+        host = shell_quote(cfg.host.as_str()),
     );
     transport(cfg, &script, tty)
+}
+
+/// The shell test for any machine id vagrant recorded in the
+/// project, whatever its machine name or provider.
+///
+/// `find` rather than a glob, because a `zsh` login shell aborts
+/// a command whose glob matches nothing. `2>/dev/null` covers a
+/// project with no `.vagrant/machines` at all, where `find`
+/// complains and prints nothing, so the test is false.
+pub(crate) const ANY_RECORDED_MACHINE: &str =
+    "find .vagrant/machines -name id -type f 2>/dev/null | grep -q .";
+
+/// The file vagrant writes when it creates a machine under
+/// `provider`, relative to the project directory.
+///
+/// The machine is `default` because the generated Vagrantfile
+/// defines no machine name, and the directory is `.vagrant`
+/// because `DISARM_VAGRANT_REDIRECTS` clears
+/// `VAGRANT_DOTFILE_PATH`. [`destroy_vm_if_present`] tests for
+/// it to learn which provider built the machine.
+pub(crate) fn recorded_machine_id(provider: Provider) -> String {
+    format!(".vagrant/machines/default/{provider}/id")
 }
 
 /// The snapshot name bombyx saves and restores.
@@ -1331,9 +1426,11 @@ mod tests {
     ///
     /// [`vm_env`] is the identity half alone, which is what the
     /// assertions about the guest's two names use.
-    /// `every_other_project_vagrant_call_names_the_provider`
-    /// and `the_teardown_verb_names_no_provider`, both in
-    /// `plan`, hold the provider half across the actions.
+    /// `every_other_project_vagrant_call_names_the_configured_provider`
+    /// and `every_teardown_destroys_under_the_provider_it_finds_recorded`,
+    /// both in `plan`, hold the provider half across the actions:
+    /// the configured provider everywhere but the teardown, and
+    /// the recorded one there, then one unnamed fallback.
     ///
     /// The provider is read back from the test config rather
     /// than spelled out, for the reason [`vm_env`] gives about
@@ -1400,9 +1497,9 @@ mod tests {
 
     #[test]
     fn teardown_carries_the_identity_too() {
-        // Pins one of the two builders that call
-        // `vagrant_command` directly; `vagrant_command` names
-        // both and says why neither can use `vagrant_script`.
+        // Pins the teardown builder, which builds its command
+        // with `vagrant_command_as` rather than `vagrant_script`;
+        // `vagrant_command` says why.
         //
         // It matters most here. Teardown still evaluates the
         // project's Vagrantfile, so one reading the variable
@@ -1469,18 +1566,17 @@ mod tests {
         let c = vagrant_in(
             &cfg,
             &cfg.remote_scratch_dir(&name),
-            &["destroy", "-f"],
+            &["halt"],
             Tty::NoPty,
         );
-        // The teardown names no provider; the sibling test
-        // `the_teardown_verb_names_no_provider` in `plan` holds
-        // that rule across the actions.
-        let env = vm_env();
+        // `halt` rather than `destroy`: a teardown goes through
+        // `destroy_vm_if_present`, never through `vagrant_in`.
+        let env = vagrant_env();
         assert_eq!(
             remote_script(&c),
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && {env} \
-                 vagrant 'destroy' '-f'"
+                 vagrant 'halt'"
             )
         );
     }
@@ -1602,19 +1698,200 @@ mod tests {
     }
 
     #[test]
-    fn destroy_tolerates_a_directory_with_no_vagrantfile() {
-        // An `up` interrupted before the Vagrantfile write
-        // leaves the directory made
-        // but empty. A bare `vagrant destroy -f` fails there,
-        // and would stop the removal that follows.
+    fn the_teardown_script_is_spelled_exactly() {
+        // Pins the whole teardown script: the Vagrantfile guard,
+        // the provider-named branches, the fallback and the
+        // refusal. The guard is there because an `up`
+        // interrupted before the Vagrantfile write leaves the
+        // directory made but empty, a bare `vagrant destroy -f`
+        // fails there, and the failure would stop the removal
+        // that follows. The `run_teardown` tests exercise what
+        // each part does.
         let c = destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty);
+        let env = vm_env();
+        let id = |p| shell_quote(&recorded_machine_id(p));
         assert_eq!(
             remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
-                 {} vagrant 'destroy' '-f'; fi",
-                vm_env()
+                 if [ -f {} ]; then {env} {PROVIDER_ENV}='libvirt' \
+                 vagrant 'destroy' '-f'; \
+                 elif [ -f {} ]; then {env} {PROVIDER_ENV}='hyperv' \
+                 vagrant 'destroy' '-f'; \
+                 elif {ANY_RECORDED_MACHINE}; then {env} \
+                 vagrant 'destroy' '-f'; fi; \
+                 if {ANY_RECORDED_MACHINE}; then printf 'bombyx: %s \
+                 still records a machine under %s/.vagrant/machines, \
+                 so the directory stays; destroy that machine by \
+                 hand\\n' 'vmhost' \"$PWD\" >&2; exit 1; fi; fi",
+                id(Provider::Libvirt),
+                id(Provider::Hyperv),
             )
+        );
+    }
+
+    /// Runs the teardown script under `sh` in a fresh project
+    /// directory and returns what a fake `vagrant` was called
+    /// with, one line per call: the provider it saw, then its
+    /// arguments. `Ok` when the script exited 0, `Err` when it
+    /// refused.
+    ///
+    /// The fake does to the record what vagrant does: it deletes
+    /// the id of the `default` machine under the provider named,
+    /// or under any provider when none is named. It never touches
+    /// another machine name, because vagrant targets only the
+    /// machines the Vagrantfile defines, and bombyx's defines
+    /// `default` alone.
+    ///
+    /// `vagrantfile` decides whether the directory holds a
+    /// `Vagrantfile`, and `recorded` lists where under
+    /// `.vagrant/machines` vagrant wrote a machine id, each as
+    /// `<machine>/<provider>`. The
+    /// operator's own `VAGRANT_DEFAULT_PROVIDER` is set to a
+    /// third provider, so a call that saw it proves the `unset`
+    /// was skipped.
+    #[cfg(unix)]
+    fn run_teardown(
+        vagrantfile: bool,
+        recorded: &[&str],
+    ) -> Result<String, String> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("a temp dir");
+        let bin = tmp.path().join("bin");
+        let project = tmp.path().join("project");
+        let log = tmp.path().join("calls.log");
+        std::fs::create_dir_all(&bin).expect("mkdir bin");
+        std::fs::create_dir_all(&project).expect("mkdir project");
+        let fake = bin.join("vagrant");
+        std::fs::write(
+            &fake,
+            r#"#!/bin/sh
+printf '%s %s\n' "${VAGRANT_DEFAULT_PROVIDER-none}" "$*" >> "$LOG"
+m=.vagrant/machines/default
+if [ -n "${VAGRANT_DEFAULT_PROVIDER-}" ]; then
+  rm -f "$m/$VAGRANT_DEFAULT_PROVIDER/id"
+else
+  rm -f "$m"/*/id
+fi
+"#,
+        )
+        .expect("write the fake vagrant");
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod the fake vagrant");
+        if vagrantfile {
+            std::fs::write(project.join("Vagrantfile"), "")
+                .expect("write the Vagrantfile");
+        }
+        for m in recorded {
+            // Built by hand rather than with `recorded_machine_id`,
+            // because `recorded` can name a machine or a provider
+            // bombyx does not use, which no `Provider` spells.
+            let id = project.join(format!(".vagrant/machines/{m}/id"));
+            std::fs::create_dir_all(id.parent().expect("a parent"))
+                .expect("mkdir machine");
+            std::fs::write(&id, "some-uuid").expect("write id");
+        }
+
+        let dir = project.display().to_string();
+        let c = destroy_vm_if_present(&cfg(), &dir, Tty::NoPty);
+        let path = std::env::var("PATH").unwrap_or_default();
+        let status = std::process::Command::new("sh")
+            .args(["-c", &raw_script(&c)])
+            .env("PATH", format!("{}:{path}", bin.display()))
+            .env("LOG", &log)
+            .env(PROVIDER_ENV, "virtualbox")
+            .status()
+            .expect("sh runs");
+        // No log means the fake was never called. Any other read
+        // error has to fail, or it would pass the tests that
+        // expect no call.
+        let calls = match std::fs::read_to_string(&log) {
+            Ok(calls) => calls,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => panic!("read the call log: {e}"),
+        };
+        if status.success() {
+            Ok(calls)
+        } else {
+            Err(calls)
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_teardown_names_the_provider_vagrant_recorded() {
+        // On a WSL2 host a destroy with no provider named has
+        // vagrant probe VirtualBox, which refuses before vagrant
+        // reads the machine's record (issue #111). So the
+        // teardown names a provider, and names the recorded one
+        // rather than the configured one: the test config says
+        // libvirt, and a machine recorded under hyperv is still
+        // destroyed as hyperv.
+        let ok = |calls: &str| Ok(calls.to_owned());
+        assert_eq!(
+            run_teardown(true, &["default/libvirt"]),
+            ok("libvirt destroy -f\n")
+        );
+        assert_eq!(
+            run_teardown(true, &["default/hyperv"]),
+            ok("hyperv destroy -f\n")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_default_machine_under_another_provider_gets_the_unnamed_destroy() {
+        // A `default` machine vagrant recorded under a provider
+        // bombyx does not support is still a machine. The
+        // teardown falls back to a destroy naming no provider,
+        // and vagrant reads the record.
+        //
+        // "none" is what the fake prints for an unset variable,
+        // so it also proves the operator's exported value was
+        // cleared.
+        assert_eq!(
+            run_teardown(true, &["default/virtualbox"]),
+            Ok("none destroy -f\n".to_owned())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_machine_left_recorded_refuses_the_removal() {
+        // Vagrant destroys only the machines the Vagrantfile
+        // defines, which is `default` alone. A machine recorded
+        // under another name survives every destroy, and the
+        // removal behind the teardown would then delete its
+        // Vagrantfile while it runs. So the script refuses when
+        // an id is still recorded afterwards, and `execute` stops
+        // before the removal.
+        assert_eq!(
+            run_teardown(true, &["web/libvirt"]),
+            Err("none destroy -f\n".to_owned())
+        );
+        // The same when `default` goes but a second machine
+        // stays.
+        assert_eq!(
+            run_teardown(true, &["default/libvirt", "web/libvirt"]),
+            Err("libvirt destroy -f\n".to_owned())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_teardown_skips_vagrant_when_no_machine_is_recorded() {
+        // No machine means nothing for vagrant to destroy, and
+        // a vagrant that cannot pick a usable provider would
+        // refuse and leave the directory removal behind it
+        // unrun.
+        assert_eq!(run_teardown(true, &[]), Ok(String::new()));
+        // An id with no Vagrantfile beside it is left alone
+        // too, because vagrant fails in a directory with no
+        // Vagrantfile.
+        assert_eq!(
+            run_teardown(false, &["default/libvirt"]),
+            Ok(String::new())
         );
     }
 

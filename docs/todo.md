@@ -253,11 +253,11 @@ config module inside that branch is the churn #17 itself warned about.
 
 **Summary:** a provider edit needs a destroy first
 
-Found by red-team in round 3 of the review on issue #45. bombyx sets
-VAGRANT_DEFAULT_PROVIDER on every project call but the teardown, which makes
-vagrant refuse rather than substitute -- but only for a machine that does not
-exist yet. Measured on the VM host: with a machine already created, vagrant
-reads the provider it recorded and ignores the variable, so
+Found by red-team in round 3 of the review on issue #45. bombyx sets the
+configured VAGRANT_DEFAULT_PROVIDER on every project call but the teardown,
+which makes vagrant refuse rather than substitute -- but only for a machine
+that does not exist yet. Measured on the VM host: with a machine already
+created, vagrant reads the provider it recorded and ignores the variable, so
 `VAGRANT_DEFAULT_PROVIDER=hyperv vagrant status`
 on a running libvirt machine exits 0 and reports libvirt. So an operator who
 edits `provider` and re-runs `bombyx up` on an existing project keeps the old
