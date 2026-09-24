@@ -404,10 +404,16 @@ for vagrant to destroy, and a vagrant that could not use the
 provider it was given would refuse and leave the directory
 behind.
 
-On this host, `bombyx destroy` of a shut-off libvirt machine
+On the second arrangement's host, driven from a Linux
+workstation, `bombyx destroy` of a shut-off libvirt machine
 removed the domain, its snapshot and the project directory. The
 no-machine path was run only against a stand-in `vagrant` on a
 Linux machine, not on this host *(unverified)*.
+
+A machine you built by hand in the project directory -- under
+another provider, or another machine name -- is not removed here.
+`bombyx destroy` refuses and keeps the directory rather than
+delete the Vagrantfile of a machine still running.
 
 This error differs from the `cmd.exe` one above, which a project
 command with no provider named produced on the first

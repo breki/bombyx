@@ -105,9 +105,9 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 ///
 /// **Every project vagrant call carries it but one.** All but
 /// the teardown name the configured provider. The teardown names
-/// the one vagrant recorded the machine under, and names none
-/// for a machine recorded under a provider bombyx does not
-/// support; [`destroy_vm_if_present`] holds why.
+/// the one vagrant recorded the machine under. Its last-resort
+/// destroy, for a recorded machine it cannot place, names none;
+/// [`destroy_vm_if_present`] holds why.
 ///
 /// Editing `provider` on a project that already has a VM keeps
 /// the old one silently -- `provider-change-on-existing-vm` in
@@ -158,7 +158,8 @@ fn vm_host_env(cfg: &Config) -> String {
 /// [`vagrant_command_as`] inside its guards, because it names the
 /// recorded provider rather than the configured one. A builder
 /// assembling its own string would run `vagrant` with none of
-/// the three variables set.
+/// the three variables set: `VM_HOST_ENV`, `VM_HOSTNAME_ENV` and
+/// `PROVIDER_ENV`.
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
     vagrant_command_as(cfg, Some(cfg.vm.provider), args)
 }
@@ -321,9 +322,9 @@ impl Tty {
 /// after this `unset` and wins, so clearing the pair costs those
 /// calls nothing. The teardown writes back the provider vagrant
 /// recorded. The one call with none written back is the
-/// teardown's destroy of a machine under a provider bombyx does
-/// not support, where the cleared value is the point: vagrant
-/// then reads the machine's own record.
+/// teardown's last-resort destroy, for a recorded machine it
+/// cannot place, where leaving the value cleared is the point:
+/// vagrant then picks the provider itself.
 ///
 /// **Both routes need it, for different reasons.** `sh -c` is a
 /// child of bombyx and inherits everything the operator
@@ -865,14 +866,22 @@ pub fn require_file(
 /// The recorded provider rather than the configured one, because
 /// the two differ after an operator edits `provider` on a project
 /// that already has a VM (`provider-change-on-existing-vm` in
-/// `docs/todo.md`). Cleaning up that state is what the teardown
-/// is for.
+/// `docs/todo.md`), and cleaning up that state is what the
+/// teardown is for. The recorded provider built the machine on
+/// this host, so it is the one sure to be usable here; whether
+/// naming the configured one would be refused in that state was
+/// not tried *(unverified)*.
 ///
-/// **A `default` machine under another provider gets a destroy
-/// naming no provider.** That is a machine the operator built by
-/// hand in the project directory, under a provider bombyx does
-/// not support. With no provider named, vagrant reads the
-/// machine's record.
+/// **Any other recorded machine gets a last-resort destroy naming
+/// no provider.** Its branch fires for any id the
+/// provider-named branches did not match. For a `default` machine
+/// under a provider bombyx does not support, vagrant picks that
+/// provider from the record, where every provider's usability
+/// probe answers -- on a libvirt host, say. On a WSL2 host the
+/// probe refuses first, as above, and the refusal below keeps
+/// the directory. For a machine under another name, the destroy
+/// targets `default` alone and removes nothing, which the
+/// refusal below then catches.
 ///
 /// **The script refuses when a machine is still recorded after
 /// the destroy.** Vagrant deletes a machine's id file when it
@@ -1369,9 +1378,11 @@ mod tests {
     ///
     /// [`vm_env`] is the identity half alone, which is what the
     /// assertions about the guest's two names use.
-    /// `every_other_project_vagrant_call_names_the_provider`
-    /// and `the_teardown_verb_names_no_provider`, both in
-    /// `plan`, hold the provider half across the actions.
+    /// `every_other_project_vagrant_call_names_the_configured_provider`
+    /// and `every_teardown_destroys_under_the_provider_it_finds_recorded`,
+    /// both in `plan`, hold the provider half across the actions:
+    /// the configured provider everywhere but the teardown, and
+    /// the recorded one there, then one unnamed fallback.
     ///
     /// The provider is read back from the test config rather
     /// than spelled out, for the reason [`vm_env`] gives about
@@ -1639,11 +1650,15 @@ mod tests {
     }
 
     #[test]
-    fn destroy_tolerates_a_directory_with_no_vagrantfile() {
-        // An `up` interrupted before the Vagrantfile write
-        // leaves the directory made
-        // but empty. A bare `vagrant destroy -f` fails there,
-        // and would stop the removal that follows.
+    fn the_teardown_script_is_spelled_exactly() {
+        // Pins the whole teardown script: the Vagrantfile guard,
+        // the provider-named branches, the fallback and the
+        // refusal. The guard is there because an `up`
+        // interrupted before the Vagrantfile write leaves the
+        // directory made but empty, a bare `vagrant destroy -f`
+        // fails there, and the failure would stop the removal
+        // that follows. The `run_teardown` tests exercise what
+        // each part does.
         let c = destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty);
         let env = vm_env();
         let id = |p| shell_quote(&recorded_machine_id(p));

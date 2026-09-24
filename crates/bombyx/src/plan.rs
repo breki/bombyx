@@ -218,6 +218,12 @@ pub fn plan(
 /// at the first failure the removal would never run, leaving a
 /// directory no bombyx command could clear. Skipping the
 /// destroy instead makes teardown re-runnable.
+///
+/// The destroy step is also a gate. It refuses, and so keeps the
+/// directory, when a machine is still recorded after it, because
+/// removing the Vagrantfile then would leave that machine running
+/// with nothing to point `vagrant` at.
+/// `remote::destroy_vm_if_present` holds why.
 fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
     vec![
         remote::destroy_vm_if_present(cfg, dir, tty),
@@ -1095,9 +1101,10 @@ mod tests {
         // because on a WSL2 host a destroy naming none is refused
         // while a machine exists (issue #111). Exactly one names
         // none: the last, behind the test for any recorded
-        // machine, for a machine bombyx cannot place. So no
-        // machine means no vagrant call, which keeps a
-        // misconfigured project removable.
+        // machine, for a machine bombyx cannot place. Every
+        // branch is guarded by an id test and there is no
+        // `else`, so with no id recorded no vagrant runs, which
+        // keeps a misconfigured project removable.
         //
         // Counted, not just filtered. A loop that skips every
         // script it does not recognise asserts nothing at all
