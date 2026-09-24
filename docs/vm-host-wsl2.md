@@ -381,7 +381,7 @@ Every script bombyx sends begins by unsetting the five vagrant
 variables that redirect a command, this one among them, because
 a value on the VM host would otherwise point a `destroy` at the
 wrong machine. bombyx then writes a provider back in front of
-every project `vagrant` call. Most calls get the project's
+each project `vagrant` call. Most calls get the project's
 `[vm] provider` from `config.toml`.
 
 **The teardown names the provider the machine was built with.**
@@ -404,10 +404,28 @@ for vagrant to destroy, and a vagrant that could not use the
 provider it was given would refuse and leave the directory
 behind.
 
+Two cases still fail on this host. A machine recorded under a
+provider bombyx does not support gets a destroy with no provider
+named, which VirtualBox refuses as above. A machine recorded under
+a name other than `default` is one vagrant never targets, so
+`bombyx destroy` refuses with
+`bombyx: <host> still records a machine under <dir>/.vagrant/machines`.
+In both cases bombyx keeps the directory, so the machine is not
+orphaned. You built such a machine by hand, so remove it by hand,
+naming the provider and the machine, before removing the
+directory:
+
+```bash
+ssh <host> "cd ~/vms/<project> && VAGRANT_DEFAULT_PROVIDER=<provider> vagrant destroy -f <machine>"
+ssh <host> "rm -rf ~/vms/<project>"   # only after the destroy
+```
+
 On this host, `bombyx destroy` of a shut-off libvirt machine
 removed the domain, its snapshot and the project directory. The
-no-machine path was run only against a stand-in `vagrant` on a
-Linux machine, not on this host *(unverified)*.
+no-machine path and both failing cases were run only against a
+stand-in `vagrant` on a Linux machine, not on this host
+*(unverified)*; the refusal message and the two failures above
+are read from the script and from vagrant's source.
 
 This error differs from the `cmd.exe` one above, which a project
 command with no provider named produced on the first

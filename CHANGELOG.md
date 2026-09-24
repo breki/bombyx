@@ -28,7 +28,10 @@ and this project adheres to
   VirtualBox, which refuses under WSL. The teardown now names the provider
   Vagrant recorded the machine under, found from
   `.vagrant/machines/default/<provider>/id`, and when no machine is recorded it
-  skips `vagrant` and removes the directory (issue #111).
+  skips `vagrant` and removes the directory. When a machine is still recorded
+  after the destroy -- one under another machine name, which vagrant never
+  targets -- `destroy` now refuses and keeps the directory rather than orphan
+  the VM (issue #111).
 
 ### Removed
 
