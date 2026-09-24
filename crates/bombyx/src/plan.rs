@@ -1090,12 +1090,14 @@ mod tests {
     #[test]
     fn every_teardown_destroys_under_the_provider_it_finds_recorded() {
         // `remote::destroy_vm_if_present` holds the argument.
-        // Every destroy names a provider, because on a WSL2 host
-        // one with none is refused while a machine exists (issue
-        // #111). Each destroy sits behind a test for the id file
-        // vagrant writes under that same provider, so no machine
-        // means no vagrant call, which keeps a misconfigured
-        // project removable.
+        // Each destroy that names a provider sits behind a test
+        // for the id file vagrant writes under that provider,
+        // because on a WSL2 host a destroy naming none is refused
+        // while a machine exists (issue #111). Exactly one names
+        // none: the last, behind the test for any recorded
+        // machine, for a machine bombyx cannot place. So no
+        // machine means no vagrant call, which keeps a
+        // misconfigured project removable.
         //
         // Counted, not just filtered. A loop that skips every
         // script it does not recognise asserts nothing at all
@@ -1108,12 +1110,19 @@ mod tests {
                 continue;
             }
             teardowns += 1;
-            for call in vagrant_calls(&script) {
-                assert!(
-                    call.contains(&format!("{}='", remote::PROVIDER_ENV)),
-                    "{action:?} destroys with no provider named: {call}"
-                );
-            }
+            let unnamed = vagrant_calls(&script)
+                .iter()
+                .filter(|c| !c.contains(&format!("{}='", remote::PROVIDER_ENV)))
+                .count();
+            assert_eq!(unnamed, 1, "{action:?}: {script}");
+            let fallback = format!(
+                "elif {}; then {} vagrant 'destroy'",
+                remote::ANY_RECORDED_MACHINE,
+                vm_env()
+            );
+            let fallback_at = script.find(&fallback).unwrap_or_else(|| {
+                panic!("{action:?} has no fallback destroy: {script}")
+            });
             // One contiguous substring per provider, so the id
             // test and the destroy it guards must name the same
             // provider.
@@ -1124,10 +1133,12 @@ mod tests {
                     id = remote::shell_quote(&remote::recorded_machine_id(p)),
                     env = vm_env(),
                 );
+                // Before the fallback, so a machine bombyx can
+                // place is never destroyed with no provider named.
                 assert!(
-                    script.contains(&paired),
-                    "{action:?} does not destroy a {p} machine as {p}: \
-                     {script}"
+                    script.find(&paired).is_some_and(|i| i < fallback_at),
+                    "{action:?} does not destroy a {p} machine as {p} \
+                     first: {script}"
                 );
             }
         }
