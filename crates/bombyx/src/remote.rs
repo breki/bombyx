@@ -151,16 +151,13 @@ fn vm_host_env(cfg: &Config) -> String {
 /// Split out from [`vagrant_script`] so every shape bombyx emits
 /// carries the same prefix. [`vagrant_script`] puts the command
 /// after a bare `cd`, so a builder needing it somewhere else
-/// calls this function instead. Two do:
-/// `destroy_vm_if_present` nests it inside `if` guards, and
-/// `save_snapshot_if_absent` puts `snapshot list` and
-/// `snapshot save` inside one `if`. A builder assembling its own
-/// string would run `vagrant` with none of the three variables
-/// set.
-///
-/// It names the configured provider. The teardown is the one
-/// caller that names another, so it calls [`vagrant_command_as`]
-/// directly.
+/// builds it directly. Two do: `save_snapshot_if_absent` calls
+/// this function to put `snapshot list` and `snapshot save`
+/// inside one `if`, and `destroy_vm_if_present` calls
+/// [`vagrant_command_as`] inside its guards, because it names the
+/// recorded provider rather than the configured one. A builder
+/// assembling its own string would run `vagrant` with none of
+/// the three variables set.
 fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
     vagrant_command_as(cfg, cfg.vm.provider, args)
 }
@@ -847,13 +844,10 @@ pub fn require_file(
 /// would stop the removal step that follows.
 ///
 /// **The script names the provider vagrant recorded the machine
-/// under.** Vagrant writes a machine's id to
-/// `.vagrant/machines/default/<provider>/id` when it creates the
-/// machine. The generated Vagrantfile defines no machine name, so
-/// the machine is `default`, and `DISARM_VAGRANT_REDIRECTS`
-/// clears `VAGRANT_DOTFILE_PATH`, so the directory is `.vagrant`.
-/// The script tests that path for each of [`Provider::ALL`] and
-/// runs the destroy under the first one it finds.
+/// under.** Vagrant writes a machine's id to a file named for
+/// the provider, which `recorded_machine_id` spells out. The
+/// script tests that file for each of [`Provider::ALL`] and runs
+/// the destroy under the first one it finds.
 ///
 /// The destroy needs a provider named. With none, vagrant picks a
 /// default while it loads, by asking each provider whether it is
@@ -902,10 +896,9 @@ pub fn destroy_vm_if_present(
     let branches: Vec<String> = Provider::ALL
         .into_iter()
         .map(|p| {
-            let id = format!(".vagrant/machines/default/{p}/id");
             format!(
                 "[ -f {id} ]; then {cmd}; ",
-                id = shell_quote(&id),
+                id = shell_quote(&recorded_machine_id(p)),
                 cmd = vagrant_command_as(cfg, p, &["destroy", "-f"]),
             )
         })
@@ -916,6 +909,18 @@ pub fn destroy_vm_if_present(
         chain = branches.join("elif "),
     );
     transport(cfg, &script, tty)
+}
+
+/// The file vagrant writes when it creates a machine under
+/// `provider`, relative to the project directory.
+///
+/// The machine is `default` because the generated Vagrantfile
+/// defines no machine name, and the directory is `.vagrant`
+/// because `DISARM_VAGRANT_REDIRECTS` clears
+/// `VAGRANT_DOTFILE_PATH`. [`destroy_vm_if_present`] tests for
+/// it to learn which provider built the machine.
+pub(crate) fn recorded_machine_id(provider: Provider) -> String {
+    format!(".vagrant/machines/default/{provider}/id")
 }
 
 /// The snapshot name bombyx saves and restores.
@@ -1391,9 +1396,9 @@ mod tests {
 
     #[test]
     fn teardown_carries_the_identity_too() {
-        // Pins one of the two builders that call
-        // `vagrant_command` directly; `vagrant_command` names
-        // both and says why neither can use `vagrant_script`.
+        // Pins the teardown builder, which builds its command
+        // with `vagrant_command_as` rather than `vagrant_script`;
+        // `vagrant_command` says why.
         //
         // It matters most here. Teardown still evaluates the
         // project's Vagrantfile, so one reading the variable
@@ -1460,15 +1465,17 @@ mod tests {
         let c = vagrant_in(
             &cfg,
             &cfg.remote_scratch_dir(&name),
-            &["destroy", "-f"],
+            &["halt"],
             Tty::NoPty,
         );
+        // `halt` rather than `destroy`: a teardown goes through
+        // `destroy_vm_if_present`, never through `vagrant_in`.
         let env = vagrant_env();
         assert_eq!(
             remote_script(&c),
             format!(
                 "cd ~/'vms/scratch/myproject/pr-1234' && {env} \
-                 vagrant 'destroy' '-f'"
+                 vagrant 'halt'"
             )
         );
     }
@@ -1597,7 +1604,7 @@ mod tests {
         // and would stop the removal that follows.
         let c = destroy_vm_if_present(&cfg(), "~/vms/myproject", Tty::NoPty);
         let env = vm_env();
-        let id = |p: &str| format!("'.vagrant/machines/default/{p}/id'");
+        let id = |p| shell_quote(&recorded_machine_id(p));
         assert_eq!(
             remote_script(&c),
             format!(
@@ -1606,8 +1613,8 @@ mod tests {
                  vagrant 'destroy' '-f'; \
                  elif [ -f {} ]; then {env} {PROVIDER_ENV}='hyperv' \
                  vagrant 'destroy' '-f'; fi; fi",
-                id("libvirt"),
-                id("hyperv"),
+                id(Provider::Libvirt),
+                id(Provider::Hyperv),
             )
         );
     }
@@ -1647,9 +1654,13 @@ mod tests {
                 .expect("write the Vagrantfile");
         }
         if let Some(p) = recorded {
-            let machine = project.join(".vagrant/machines/default").join(p);
-            std::fs::create_dir_all(&machine).expect("mkdir machine");
-            std::fs::write(machine.join("id"), "some-uuid").expect("write id");
+            // Built by hand rather than with `recorded_machine_id`,
+            // because `recorded` can name a provider bombyx does
+            // not support, which has no `Provider` to pass.
+            let id = project.join(format!(".vagrant/machines/default/{p}/id"));
+            std::fs::create_dir_all(id.parent().expect("a parent"))
+                .expect("mkdir machine");
+            std::fs::write(&id, "some-uuid").expect("write id");
         }
 
         let dir = project.display().to_string();
@@ -1663,7 +1674,14 @@ mod tests {
             .status()
             .expect("sh runs");
         assert!(status.success(), "the teardown script failed: {status}");
-        std::fs::read_to_string(&log).unwrap_or_default()
+        // No log means the fake was never called. Any other read
+        // error has to fail, or it would pass the tests that
+        // expect no call.
+        match std::fs::read_to_string(&log) {
+            Ok(calls) => calls,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => panic!("read the call log: {e}"),
+        }
     }
 
     #[cfg(unix)]

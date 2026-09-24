@@ -1114,16 +1114,18 @@ mod tests {
                     "{action:?} destroys with no provider named: {call}"
                 );
             }
+            // One contiguous substring per provider, so the id
+            // test and the destroy it guards must name the same
+            // provider.
             for p in Provider::ALL {
-                let guarded = format!(
-                    "[ -f '.vagrant/machines/default/{p}/id' ]; then \
-                     {}='vmhost'",
-                    remote::VM_HOST_ENV
+                let paired = format!(
+                    "[ -f {id} ]; then {env} {}='{p}' vagrant 'destroy'",
+                    remote::PROVIDER_ENV,
+                    id = remote::shell_quote(&remote::recorded_machine_id(p)),
+                    env = vm_env(),
                 );
-                let named =
-                    format!("{}='{p}' vagrant 'destroy'", remote::PROVIDER_ENV);
                 assert!(
-                    script.contains(&guarded) && script.contains(&named),
+                    script.contains(&paired),
                     "{action:?} does not destroy a {p} machine as {p}: \
                      {script}"
                 );
