@@ -27,6 +27,11 @@ and this project adheres to
   `255.255.255.255` as well as to the gateway. This exposes no DHCP server the
   gateway rule did not already reach, unless one listens on the broadcast
   address itself (issue #113).
+- `bombyx shell` checks the machine's state on the VM host first. A project with
+  no VM, or a stopped one, now gets one line naming the project, the host and
+  the `bombyx up` to run, and an exit status of 1, rather than the VM host's
+  `cd` error and the whole ssh command line. The check costs one `vagrant
+  status` round trip; when it cannot establish a state, the shell opens anyway.
 
 ### Removed
 

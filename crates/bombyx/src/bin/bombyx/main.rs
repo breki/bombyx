@@ -448,12 +448,16 @@ fn run() -> Result<Ran> {
         Staged::default()
     };
 
-    // `up` is the one action that decides on the machine's live
-    // state before it acts, so it owns both its dry run and its
-    // live run -- see `up_run`. It handles `dry_run` itself, so it
-    // comes before the generic dry-run line below.
+    // `up` and `shell` decide on the machine's live state before
+    // they act, so each owns both its dry run and its live run --
+    // see `up_run` and `shell_run`. They handle `dry_run`
+    // themselves, so they come before the generic dry-run line
+    // below.
     if matches!(action, Action::Up) {
         return up_run(&cfg, tty, &staged, cli.dry_run);
+    }
+    if matches!(action, Action::Shell) {
+        return shell_run(&cfg, tty, &staged, cli.dry_run);
     }
 
     // Every other action renders its dry run the same way, through
@@ -877,10 +881,7 @@ fn up_run(
         cmds.push(snapshot);
         return execute(&cmds, true);
     }
-    let state = listing::entries(vec![cfg.clone()], run_command)
-        .into_iter()
-        .next()
-        .and_then(|entry| entry.state);
+    let state = probe_state(cfg);
     if state.as_ref().is_some_and(listing::VmState::is_running) {
         eprint_lines(&format!(
             "bombyx: {} is already running; up did nothing\n",
@@ -915,6 +916,50 @@ fn up_run(
         cmds.push(snapshot);
     }
     execute(&cmds, false)
+}
+
+/// Asks the VM host what the project's machine is doing.
+///
+/// One `vagrant status` round trip, through the same step
+/// ([`listing::entries`]) `bombyx list` uses, so `up`, `shell` and
+/// `list` cannot disagree about a machine's state. `None` when no
+/// state could be established.
+fn probe_state(cfg: &Config) -> Option<listing::VmState> {
+    listing::entries(vec![cfg.clone()], run_command)
+        .into_iter()
+        .next()
+        .and_then(|entry| entry.state)
+}
+
+/// Runs `shell`, but reports and stops if the project has no VM or
+/// its VM is not running.
+///
+/// Without the probe, `vagrant ssh` against a missing VM fails with
+/// the VM host's `cd` error, and bombyx then prints the whole ssh
+/// command it ran. [`listing::shell_refusal`] decides, and holds
+/// why an unknown state still opens the shell.
+///
+/// A dry run contacts nothing, so it prints the probe and then the
+/// shell, as `up_run` does.
+fn shell_run(
+    cfg: &Config,
+    tty: Tty,
+    staged: &Staged,
+    dry_run: bool,
+) -> Result<Ran> {
+    let shell = plan(&Action::Shell, cfg, tty, staged);
+    if dry_run {
+        let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
+        cmds.extend(shell);
+        return execute(&cmds, true);
+    }
+    if let Some(refusal) =
+        listing::shell_refusal(cfg, probe_state(cfg).as_ref())
+    {
+        eprint_lines(&format!("{refusal}\n"));
+        return Ok(Ran::Failed(1));
+    }
+    execute(&shell, false)
 }
 
 /// Runs every precondition probe and prints the report.

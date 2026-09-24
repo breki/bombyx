@@ -130,6 +130,42 @@ impl VmState {
     }
 }
 
+/// Returns why `bombyx shell` should not open, or `None` when it
+/// should.
+///
+/// `shell` asks the VM host what the machine is doing before it
+/// runs `vagrant ssh`, with the same probe `bombyx list` and
+/// `bombyx up` use. With no VM, or a stopped one, `vagrant ssh`
+/// would fail with a shell or vagrant error instead of saying what
+/// to do. So this returns one line naming the project, the host
+/// and the command that fixes it.
+///
+/// A running machine opens. So does a state bombyx could not
+/// establish (`state` is `None`, or [`VmState::Unknown`]): the
+/// probe failing does not prove the VM is down, and when it is,
+/// `vagrant ssh` still reports that itself.
+///
+/// The decision lives here, in the tested library, because
+/// `src/bin` is outside the coverage gate.
+#[must_use]
+pub fn shell_refusal(cfg: &Config, state: Option<&VmState>) -> Option<String> {
+    let state = state?;
+    let project = cfg.project.as_str();
+    let host = cfg.host.as_str();
+    let fix = format!("run `bombyx -p {project} up` first");
+    if state.is_absent() {
+        return Some(format!("bombyx: {project} has no VM on {host}; {fix}"));
+    }
+    // Printed through `Display`, which sanitises the VM host's
+    // reply before it reaches the operator's terminal.
+    match state {
+        VmState::Reported(_) if !state.is_running() => Some(format!(
+            "bombyx: {project} is not running ({state}) on {host}; {fix}"
+        )),
+        _ => None,
+    }
+}
+
 impl std::fmt::Display for VmState {
     /// The word an operator reads, safe to put on a terminal.
     ///
@@ -1138,6 +1174,66 @@ mod tests {
             VmState::Unknown("the host said nothing".into()),
         ] {
             assert!(!not.is_running(), "{not:?} must not count as running");
+        }
+    }
+
+    #[test]
+    fn shell_refuses_a_project_with_no_vm() {
+        // Both no-VM states, the one bombyx found without running
+        // vagrant and the one vagrant reported, get the same line.
+        let c = cfg("vmtest", "fusion-wsl");
+        for absent in
+            [VmState::NotCreated, VmState::Reported("not created".into())]
+        {
+            assert_eq!(
+                shell_refusal(&c, Some(&absent)).as_deref(),
+                Some(
+                    "bombyx: vmtest has no VM on fusion-wsl; \
+                     run `bombyx -p vmtest up` first"
+                ),
+                "{absent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_refuses_a_stopped_vm_and_names_its_state() {
+        let c = cfg("vmtest", "fusion-wsl");
+        for word in ["shutoff", "poweroff", "paused"] {
+            let state = VmState::Reported(word.into());
+            assert_eq!(
+                shell_refusal(&c, Some(&state)).as_deref(),
+                Some(
+                    format!(
+                        "bombyx: vmtest is not running ({word}) on \
+                         fusion-wsl; run `bombyx -p vmtest up` first"
+                    )
+                    .as_str()
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn shell_refusal_does_not_echo_control_characters() {
+        // The state word is the VM host's reply, printed on the
+        // operator's terminal, so it is sanitised as `list` does.
+        let c = cfg("vmtest", "fusion-wsl");
+        let hostile = VmState::Reported("shut\u{1b}[2Joff".into());
+        let line = shell_refusal(&c, Some(&hostile)).unwrap();
+        assert!(!line.contains('\u{1b}'), "{line}");
+    }
+
+    #[test]
+    fn shell_opens_when_the_vm_runs_or_its_state_is_unknown() {
+        // An unanswered probe must not block the shell: the host
+        // may be slow to answer while the VM is fine, and vagrant
+        // still reports its own error if it is not.
+        let c = cfg("vmtest", "fusion-wsl");
+        let unknown = VmState::Unknown("unreachable".into());
+        let running = VmState::Reported("running".into());
+        for state in [None, Some(&unknown), Some(&running)] {
+            assert_eq!(shell_refusal(&c, state), None, "{state:?}");
         }
     }
 
