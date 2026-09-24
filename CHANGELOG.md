@@ -36,6 +36,13 @@ and this project adheres to
   after the destroy -- one under another machine name, which vagrant never
   targets -- `destroy` and `discard` now refuse and keep the directory rather
   than orphan the VM (issue #111).
+- `bombyx shell` checks the machine's state on the VM host first. A project with
+  no VM, or a stopped one, now gets one line naming the project, the host and
+  the `bombyx up` to run, and an exit status of 1. Without the check, a project
+  never brought up failed on the VM host's `cd` into the project directory, and
+  a stopped or destroyed VM with vagrant's own message, each followed by the
+  whole ssh command line. The check costs one `vagrant status` round trip; when
+  it cannot establish a state, the shell opens anyway.
 
 ### Removed
 

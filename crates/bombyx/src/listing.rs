@@ -10,6 +10,11 @@
 //! lives in the library and the binary supplies spawning. That
 //! is what [`entries`] takes its `run` argument for.
 //!
+//! The module also holds the decisions `up` and `shell` make on a
+//! probed state: `VmState::is_running`, `takes_fresh_snapshot` and
+//! `shell_refusal`. They live here because this module owns
+//! `VmState`, and because `src/bin` is outside the coverage gate.
+//!
 //! One rule shaped the module: **a state bombyx cannot support
 //! is printed as unknown.** A machine that does not answer, and
 //! a reply naming no state, both reach [`VmState::Unknown`]
@@ -127,6 +132,56 @@ impl VmState {
     pub fn is_absent(&self) -> bool {
         matches!(self, Self::NotCreated)
             || matches!(self, Self::Reported(word) if word == "not created")
+    }
+}
+
+/// Returns why `bombyx shell` should not open, or `None` when it
+/// should.
+///
+/// `shell` asks the VM host what the machine is doing before it
+/// runs `vagrant ssh`, with the same probe `bombyx list` and
+/// `bombyx up` use. With no VM, or a stopped one, the shell
+/// attempt would fail without saying what to do. For a project
+/// never brought up, the VM host's `cd` into the project
+/// directory (such as `~/vms/<project>`) fails, because `up`
+/// never made it. For a stopped or destroyed VM, vagrant prints
+/// its own message. So this returns one line naming the project,
+/// the host and the command that fixes it.
+///
+/// A running machine opens. So does a state bombyx could not
+/// establish, because the probe failing does not prove the VM is
+/// down. A failed probe arrives as [`VmState::Unknown`]; `None`
+/// means no probe row at all. The probe passes `ssh -o
+/// BatchMode=yes`, so ssh refuses to prompt, and a key that needs
+/// a passphrase typed in fails it. `shell` itself runs
+/// interactively, so it can prompt and connect. When the VM is in
+/// fact missing or stopped, the shell attempt then fails as above,
+/// and bombyx prints the ssh command line that failed.
+///
+/// The decision lives here, in the tested library, because
+/// `src/bin` is outside the coverage gate.
+#[must_use]
+pub fn shell_refusal(cfg: &Config, state: Option<&VmState>) -> Option<String> {
+    let state = state?;
+    let project = cfg.project.as_str();
+    let refuse = |what: &str| {
+        Some(format!(
+            "bombyx: {project} {what} on {}; run `bombyx -p {project} up` \
+             first",
+            cfg.host.as_str()
+        ))
+    };
+    // Every variant is named, with no wildcard arm, so a new state
+    // does not compile until somebody decides what `shell` does
+    // with it.
+    match state {
+        VmState::NotCreated => refuse("has no VM"),
+        VmState::Reported(_) if state.is_absent() => refuse("has no VM"),
+        VmState::Reported(_) if state.is_running() => None,
+        // Printed through `Display`, which sanitises the VM host's
+        // reply before it reaches the operator's terminal.
+        VmState::Reported(_) => refuse(&format!("is not running ({state})")),
+        VmState::Unknown(_) => None,
     }
 }
 
@@ -1138,6 +1193,67 @@ mod tests {
             VmState::Unknown("the host said nothing".into()),
         ] {
             assert!(!not.is_running(), "{not:?} must not count as running");
+        }
+    }
+
+    #[test]
+    fn shell_refuses_a_project_with_no_vm() {
+        // Both no-VM states, the one bombyx found without running
+        // vagrant and the one vagrant reported, get the same line.
+        let c = cfg("vmtest", "fusion-wsl");
+        for absent in
+            [VmState::NotCreated, VmState::Reported("not created".into())]
+        {
+            assert_eq!(
+                shell_refusal(&c, Some(&absent)).as_deref(),
+                Some(
+                    "bombyx: vmtest has no VM on fusion-wsl; \
+                     run `bombyx -p vmtest up` first"
+                ),
+                "{absent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_refuses_a_stopped_vm_and_names_its_state() {
+        let c = cfg("vmtest", "fusion-wsl");
+        for word in ["shutoff", "poweroff", "paused"] {
+            let state = VmState::Reported(word.into());
+            assert_eq!(
+                shell_refusal(&c, Some(&state)).as_deref(),
+                Some(
+                    format!(
+                        "bombyx: vmtest is not running ({word}) on \
+                         fusion-wsl; run `bombyx -p vmtest up` first"
+                    )
+                    .as_str()
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn shell_refusal_does_not_echo_control_characters() {
+        // The state word is the VM host's reply, printed on the
+        // operator's terminal, so it is sanitised as `list` does.
+        let c = cfg("vmtest", "fusion-wsl");
+        let hostile = VmState::Reported("shut\u{1b}[2Joff".into());
+        let line = shell_refusal(&c, Some(&hostile)).unwrap();
+        assert!(!line.contains('\u{1b}'), "{line}");
+    }
+
+    #[test]
+    fn shell_opens_when_the_vm_runs_or_its_state_is_unknown() {
+        // An unanswered probe must not block the shell: it passes
+        // `ssh -o BatchMode=yes`, so it can fail where the
+        // interactive shell would prompt and connect, and a failed
+        // probe proves nothing about the VM.
+        let c = cfg("vmtest", "fusion-wsl");
+        let unknown = VmState::Unknown("unreachable".into());
+        let running = VmState::Reported("running".into());
+        for state in [None, Some(&unknown), Some(&running)] {
+            assert_eq!(shell_refusal(&c, state), None, "{state:?}");
         }
     }
 

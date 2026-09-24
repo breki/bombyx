@@ -279,6 +279,18 @@ fn no_value_from_the_config_reaches_the_printed_plan() {
 }
 
 #[test]
+fn shell_probes_the_machine_before_it_opens() {
+    // `shell` asks the host what the machine is doing first, so it
+    // can refuse a missing or stopped VM with one plain line rather
+    // than the VM host's `cd` error. The dry run shows that order.
+    let dir = project_dir();
+    let lines = dry_run(&dir, &["--dry-run", "shell"]);
+    assert_eq!(programs(&lines), vec!["ssh", "ssh"]);
+    assert!(lines[0].contains("vagrant 'status'"), "{}", lines[0]);
+    assert!(lines[1].contains("vagrant 'ssh' '-c'"), "{}", lines[1]);
+}
+
+#[test]
 fn up_makes_the_dir_writes_the_files_then_boots() {
     // Order is the assertion: a `contains` check would pass
     // even if the boot ran before the writes.
