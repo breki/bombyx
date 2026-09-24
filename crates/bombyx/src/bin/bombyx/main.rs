@@ -922,8 +922,9 @@ fn up_run(
 ///
 /// One `vagrant status` round trip, through the same step
 /// ([`listing::entries`]) `bombyx list` uses, so `up`, `shell` and
-/// `list` cannot disagree about a machine's state. `None` when no
-/// state could be established.
+/// `list` cannot disagree about a machine's state. A probe that
+/// failed returns `Some(VmState::Unknown(reason))`; `None` only
+/// when `entries` returns no row for the project.
 fn probe_state(cfg: &Config) -> Option<listing::VmState> {
     listing::entries(vec![cfg.clone()], run_command)
         .into_iter()
@@ -934,8 +935,9 @@ fn probe_state(cfg: &Config) -> Option<listing::VmState> {
 /// Runs `shell`, but reports and stops if the project has no VM or
 /// its VM is not running.
 ///
-/// Without the probe, `vagrant ssh` against a missing VM fails with
-/// the VM host's `cd` error, and bombyx then prints the whole ssh
+/// Without the probe, a project never brought up fails with the VM
+/// host's `cd` into the project directory, a stopped VM with
+/// vagrant's own message, and bombyx then prints the whole ssh
 /// command it ran. [`listing::shell_refusal`] decides, and holds
 /// why an unknown state still opens the shell.
 ///
