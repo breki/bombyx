@@ -36,11 +36,11 @@ fn vm_env() -> String {
 ///
 /// Every project verb but the teardown carries it, and
 /// `remote::PROVIDER_ENV` in the library says why. No
-/// assertion below uses this on a `destroy`, which is the one
-/// call that carries the identity alone. `libvirt` is written out here because
-/// [`REQUIRED_TABLES`] writes it into every fixture registry,
-/// and the two have to agree for the assertion to mean
-/// anything.
+/// assertion below uses this on a `destroy`, which names the
+/// provider vagrant recorded rather than the configured one.
+/// `libvirt` is written out here because [`REQUIRED_TABLES`]
+/// writes it into every fixture registry, and the two have to
+/// agree for the assertion to mean anything.
 fn vagrant_env() -> String {
     format!("{vm} {PROVIDER_ENV}='libvirt'", vm = vm_env())
 }

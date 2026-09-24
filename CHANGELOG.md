@@ -23,6 +23,12 @@ and this project adheres to
   `255.255.255.255` as well as to the gateway. This exposes no DHCP server the
   gateway rule did not already reach, unless one listens on the broadcast
   address itself (issue #113).
+- On a WSL2 VM host `bombyx destroy` and `bombyx discard` failed and removed
+  nothing, because the teardown named no provider and Vagrant fell back to
+  VirtualBox, which refuses under WSL. The teardown now names the provider
+  Vagrant recorded the machine under, found from
+  `.vagrant/machines/default/<provider>/id`, and when no machine is recorded it
+  skips `vagrant` and removes the directory (issue #111).
 
 ### Removed
 

@@ -380,33 +380,34 @@ vagrant command you run yourself on this host fails with the
 Every script bombyx sends begins by unsetting the five vagrant
 variables that redirect a command, this one among them, because
 a value on the VM host would otherwise point a `destroy` at the
-wrong machine. bombyx then writes the project's `[vm] provider`
-from `config.toml` back in front of each project `vagrant` call
-but one.
+wrong machine. bombyx then writes a provider back in front of
+every project `vagrant` call. Most calls get the project's
+`[vm] provider` from `config.toml`.
 
-**`bombyx destroy` fails on this host (issue #111).** The
-teardown is the one call that gets no provider, because naming
-one that a host cannot supply makes vagrant refuse the destroy,
-and the directory removal runs only after it. On a libvirt host
-that exemption keeps a misconfigured project removable. Here it
-works the other way: the `unset` clears the `/etc/environment`
-value and the teardown writes none back, so vagrant loads with no
-provider named, falls back to VirtualBox, and VirtualBox refuses
-under WSL:
+**The teardown names the provider the machine was built with.**
+Vagrant records that provider in the project directory, as
+`.vagrant/machines/default/<provider>/id`. `bombyx destroy` looks
+for that file under each provider bombyx supports and runs the
+destroy under the one it finds. A provider has to be named here
+too. With none named, vagrant falls back to VirtualBox while it
+loads the project, and VirtualBox refuses under WSL before vagrant
+reads the machine's record:
 
 ```
 Vagrant is unable to use the VirtualBox provider from the Windows Subsystem for
 Linux without access to the Windows environment.
 ```
 
-That was measured with bombyx 0.7.0 against a project whose
-machine existed and was shut off. bombyx leaves the provider off
-the teardown on the reasoning that a refusal can only happen when
-no machine exists; on this host a machine existed and vagrant
-refused anyway. bombyx stops at the failed step, so the domain,
-its snapshot, the project directory and the two files bombyx
-generated there (`Vagrantfile` and `bootstrap.sh`) all stay
-behind, and no bombyx command can clear them.
+When no machine is recorded, the teardown runs no `vagrant` at
+all and goes straight to removing the directory. There is nothing
+for vagrant to destroy, and a vagrant that could not use the
+provider it was given would refuse and leave the directory
+behind.
+
+On this host, `bombyx destroy` of a shut-off libvirt machine
+removed the domain, its snapshot and the project directory. The
+no-machine path was run only against a stand-in `vagrant` on a
+Linux machine, not on this host *(unverified)*.
 
 This error differs from the `cmd.exe` one above, which a project
 command with no provider named produced on the first
@@ -414,29 +415,11 @@ arrangement's host. Both come from vagrant choosing a provider
 because none was named; why one path reached the Hyper-V check
 and the other the VirtualBox one was not worked out.
 
-Clean up by hand in this order, and not the other way round.
-The project directory is `<remote_root>/<project>` from your
-`config.toml`, which is `~/vms/<project>` unless you changed
-it:
-
-```bash
-ssh <host> "cd ~/vms/<project> && vagrant destroy -f"
-ssh <host> "rm -rf ~/vms/<project>"   # only after the destroy
-```
-
-The destroy over `ssh` succeeds where bombyx's fails, and the
-reason is the mechanism this section opened with: sshd applies
-`/etc/environment` through PAM, so that command gets the
-provider bombyx had cleared. Removing the directory first would
-delete the Vagrantfile while the libvirt domain is still
-defined, which leaves a machine running with nothing left to
-point `vagrant` at.
-
 `bombyx doctor` works on this host. It carries no provider at
 all: its only vagrant call is `vagrant plugin list`, and on the
 host above that call listed `vagrant-libvirt` with the variable
 cleared, so every row passed. The command does not reach the
-usability probe that breaks the teardown.
+usability probe that refuses a destroy with no provider named.
 
 To confirm the `/etc/environment` line took, check what a
 non-interactive SSH command sees, which is what your own
