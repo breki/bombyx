@@ -218,6 +218,12 @@ pub fn plan(
 /// at the first failure the removal would never run, leaving a
 /// directory no bombyx command could clear. Skipping the
 /// destroy instead makes teardown re-runnable.
+///
+/// The destroy step is also a gate. It refuses, and so keeps the
+/// directory, when a machine is still recorded after it, because
+/// removing the Vagrantfile then would leave that machine running
+/// with nothing to point `vagrant` at.
+/// `remote::destroy_vm_if_present` holds why.
 fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
     vec![
         remote::destroy_vm_if_present(cfg, dir, tty),
@@ -322,6 +328,7 @@ fn write_then(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Provider;
 
     fn cfg() -> Config {
         Config::for_tests()
@@ -818,7 +825,7 @@ mod tests {
         let writes = up.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
         // One prefix on both, which
-        // `every_other_project_vagrant_call_names_the_provider`
+        // `every_other_project_vagrant_call_names_the_configured_provider`
         // states as a rule across every action but the
         // teardown.
         //
@@ -963,15 +970,16 @@ mod tests {
         // Order is the assertion. `vagrant` runs *inside* the
         // directory, so removing it first would leave nothing
         // to run in.
+        //
+        // `remote`'s own tests pin the destroy's spelling, so
+        // this one asserts only where it runs and what it runs.
         let cmds = run(&Action::Discard(scratch("pr-1234")));
         assert_eq!(cmds.len(), 2);
-        assert_eq!(
-            script(&cmds[0]),
-            format!(
-                "cd ~/'vms/scratch/myproject/pr-1234' && if [ -f \
-                 Vagrantfile ]; then {} vagrant 'destroy' '-f'; fi",
-                vm_env()
-            )
+        let destroy = script(&cmds[0]);
+        assert!(
+            destroy.starts_with("cd ~/'vms/scratch/myproject/pr-1234' && ")
+                && destroy.contains("vagrant 'destroy' '-f'"),
+            "{destroy}"
         );
         assert_eq!(
             script(&cmds[1]),
@@ -981,15 +989,15 @@ mod tests {
 
     #[test]
     fn destroy_destroys_the_vm_then_removes_the_dir() {
+        // The spelling is pinned in `remote`, as in the `discard`
+        // test above.
         let cmds = run(&Action::Destroy);
         assert_eq!(cmds.len(), 2);
-        assert_eq!(
-            script(&cmds[0]),
-            format!(
-                "cd ~/'vms/myproject' && if [ -f Vagrantfile ]; then \
-                 {} vagrant 'destroy' '-f'; fi",
-                vm_env()
-            )
+        let destroy = script(&cmds[0]);
+        assert!(
+            destroy.starts_with("cd ~/'vms/myproject' && ")
+                && destroy.contains("vagrant 'destroy' '-f'"),
+            "{destroy}"
         );
         assert_eq!(script(&cmds[1]), "rm -rf ~/'vms/myproject'");
     }
@@ -1086,38 +1094,60 @@ mod tests {
     }
 
     #[test]
-    fn the_teardown_verb_names_no_provider() {
-        // Measured on a libvirt host, in a directory with a
-        // Vagrantfile and no machine: `vagrant destroy -f`
-        // under `VAGRANT_DEFAULT_PROVIDER=hyperv` is refused
-        // and exits 1, and with no such variable it reports
-        // "Domain is not created" and exits 0. `execute` stops
-        // at the first failing step, so the refused version
-        // leaves the `rm -rf` behind it unrun and nothing else
-        // clears the directory.
-        //
-        // A refusal can only happen when no machine exists,
-        // because vagrant reads an existing one's recorded
-        // provider and ignores this variable. So omitting it
-        // here cannot pick the wrong provider for a machine
-        // that is really there.
+    fn every_teardown_destroys_under_the_provider_it_finds_recorded() {
+        // `remote::destroy_vm_if_present` holds the argument.
+        // Each destroy that names a provider sits behind a test
+        // for the id file vagrant writes under that provider,
+        // because on a WSL2 host a destroy naming none is refused
+        // while a machine exists (issue #111). Exactly one names
+        // none: the last, behind the test for any recorded
+        // machine, for a machine bombyx cannot place. Every
+        // branch is guarded by an id test and there is no
+        // `else`, so with no id recorded no vagrant runs, which
+        // keeps a misconfigured project removable.
         //
         // Counted, not just filtered. A loop that skips every
         // script it does not recognise asserts nothing at all
         // once the builder stops emitting the literal it
         // matches on, and `project_vagrant_scripts` guards
         // itself the same way for the same reason.
-        let want = format!("{}='", remote::PROVIDER_ENV);
         let mut teardowns = 0;
         for (action, script) in project_vagrant_scripts() {
             if !script.contains("vagrant 'destroy'") {
                 continue;
             }
             teardowns += 1;
-            assert!(
-                !script.contains(&want),
-                "{action:?} names a provider on the teardown: {script}"
+            let unnamed = vagrant_calls(&script)
+                .iter()
+                .filter(|c| !c.contains(&format!("{}='", remote::PROVIDER_ENV)))
+                .count();
+            assert_eq!(unnamed, 1, "{action:?}: {script}");
+            let fallback = format!(
+                "elif {}; then {} vagrant 'destroy'",
+                remote::ANY_RECORDED_MACHINE,
+                vm_env()
             );
+            let fallback_at = script.find(&fallback).unwrap_or_else(|| {
+                panic!("{action:?} has no fallback destroy: {script}")
+            });
+            // One contiguous substring per provider, so the id
+            // test and the destroy it guards must name the same
+            // provider.
+            for p in Provider::ALL {
+                let paired = format!(
+                    "[ -f {id} ]; then {env} {}='{p}' vagrant 'destroy'",
+                    remote::PROVIDER_ENV,
+                    id = remote::shell_quote(&remote::recorded_machine_id(p)),
+                    env = vm_env(),
+                );
+                // Before the fallback, so a machine bombyx can
+                // place is never destroyed with no provider named.
+                assert!(
+                    script.find(&paired).is_some_and(|i| i < fallback_at),
+                    "{action:?} does not destroy a {p} machine as {p} \
+                     first: {script}"
+                );
+            }
         }
         // `destroy` and `discard`, the two actions that tear a
         // machine down.
@@ -1125,7 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn every_other_project_vagrant_call_names_the_provider() {
+    fn every_other_project_vagrant_call_names_the_configured_provider() {
         // `remote::PROVIDER_ENV` holds the argument. The short
         // version: bombyx clears the operator's exported value
         // before every script, so a verb that does not write
@@ -1138,6 +1168,11 @@ mod tests {
         // -- `save_snapshot_if_absent` already emits a listing
         // and a save in one -- and a whole-script skip would
         // then exempt the call beside a teardown.
+        //
+        // The teardown is skipped because it names the provider
+        // vagrant recorded rather than the configured one;
+        // `every_teardown_destroys_under_the_provider_it_finds_recorded`
+        // holds that.
         let want = format!("{}='{}'", remote::PROVIDER_ENV, cfg().vm.provider);
         let mut calls = 0;
         for (action, script) in project_vagrant_scripts() {

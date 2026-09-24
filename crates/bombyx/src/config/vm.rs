@@ -64,6 +64,15 @@ pub enum Provider {
 }
 
 impl Provider {
+    /// Every provider bombyx supports.
+    ///
+    /// The teardown reads it, because it has to find a machine
+    /// that vagrant recorded under a provider other than the
+    /// configured one -- `remote::destroy_vm_if_present` holds
+    /// why. A new variant stops `every_provider_is_listed`
+    /// compiling, which is the reminder to list it here.
+    pub const ALL: [Self; 2] = [Self::Libvirt, Self::Hyperv];
+
     /// The lowercase name, which is what serde parses from the
     /// config file, what `Vagrant.configure` expects, and what
     /// bombyx passes to `vagrant` in the environment.
@@ -980,6 +989,24 @@ mod tests {
         // trusted to delegate.
         assert_eq!(Provider::Libvirt.to_string(), "libvirt");
         assert_eq!(Provider::Hyperv.to_string(), "hyperv");
+    }
+
+    #[test]
+    fn every_provider_is_listed() {
+        // The `match` has no wildcard arm, so a new variant
+        // stops this test compiling until it gets an arm. Rust
+        // cannot enumerate an enum's variants, so that compile
+        // error is the reminder to list the variant in `ALL`,
+        // and `ARMS` has to be raised by hand beside the arm.
+        const ARMS: usize = 2;
+        let slot = |p: Provider| match p {
+            Provider::Libvirt => 0,
+            Provider::Hyperv => 1,
+        };
+        assert_eq!(Provider::ALL.len(), ARMS, "a provider is unlisted");
+        for (i, p) in Provider::ALL.into_iter().enumerate() {
+            assert_eq!(slot(p), i, "{p} is listed out of place");
+        }
     }
 
     #[test]
