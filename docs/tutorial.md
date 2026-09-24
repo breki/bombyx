@@ -520,10 +520,9 @@ it.
 Third, its working directory is the clone, which bombyx names
 after your project -- `~/myproject` here, in that user's home, so
 several agent VMs are told apart by their directory rather than by
-asking which repository each one holds. `bombyx shell` leaves you
-one directory above it, in that home -- confirmed against a real
-VM rather than inferred. The clone is the only copy of your code
-in the VM.
+asking which repository each one holds. `bombyx shell` opens in
+that same directory, so you land where the script runs. The clone
+is the only copy of your code in the VM.
 
 Save the script below as `.bombyx/provision.sh`, creating the
 directory as you go: `mkdir -p .bombyx`. The leading dot makes

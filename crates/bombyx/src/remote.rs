@@ -1010,9 +1010,43 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// needs a TTY when invoked through a non-interactive SSH command,
 /// and an interactive shell without one is unusable whatever the
 /// local stdio looks like. Every other vagrant call decides per run.
+/// On the guest side, `vagrant ssh -c` asks for a TTY by default.
+///
+/// **The shell opens in the project's clone**, which the guest's
+/// bootstrap script puts at `$HOME/<project>`. A bare `vagrant ssh`
+/// would open in `$HOME`. So the guest runs `cd`, then `exec`s a
+/// login shell:
+///
+/// - `$SHELL` sits inside the single quotes that wrap the whole
+///   guest command for the VM host, so the VM host passes it on
+///   unexpanded and the guest expands it to its own user's shell.
+/// - `exec` replaces the `bash -c` that vagrant started, so one
+///   `exit` leaves the VM.
+/// - `-l` makes the shell read the login profile, as the shell a
+///   bare `vagrant ssh` starts does.
+///
+/// The `cd` and the `exec` are joined by `;` rather than `&&`.
+/// So when the clone is missing, `cd` prints its error and the
+/// operator still gets a shell, in `$HOME`, to look into why.
+///
+/// **Two layers of single quotes nest here.** The clone path
+/// arrives quoted as `~/'<project>'`, and vagrant wraps the whole
+/// command in its own `bash -l -c '...'`. Left alone, the inner
+/// `'` would close vagrant's outer quote early. Vagrant rewrites
+/// each inner `'` before wrapping, which vagrant 2.4.9's
+/// `ssh_run.rb` shows and a run against a real VM host confirmed.
+/// So the path can stay quoted the way every other value in a
+/// remote script is.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
-    vagrant_in(cfg, &cfg.remote_project_dir(), &["ssh"], Tty::Allocate)
+    let clone = quote_remote_path(&cfg.guest_clone_dir());
+    let guest = format!("cd {clone}; exec \"$SHELL\" -l");
+    vagrant_in(
+        cfg,
+        &cfg.remote_project_dir(),
+        &["ssh", "-c", &guest],
+        Tty::Allocate,
+    )
 }
 
 #[cfg(test)]
@@ -1228,9 +1262,23 @@ mod tests {
         // local stdio looks like.
         let c = shell_into_vm(&cfg());
         assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
+    }
+
+    #[test]
+    fn an_interactive_shell_starts_in_the_project_clone() {
+        // The guest clones into `$HOME/<project>`, and a bare
+        // `vagrant ssh` opens in `$HOME`. The `;` keeps the shell
+        // when the `cd` fails, so a missing clone still leaves
+        // the operator a shell to look into why. The whole guest
+        // command is one argument, quoted once for the VM host.
+        let c = shell_into_vm(&cfg());
         assert_eq!(
             remote_script(&c),
-            remote_script(&vagrant(&cfg(), &["ssh"], Tty::NoPty))
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' \
+                 'cd ~/'\\''myproject'\\''; exec \"$SHELL\" -l'",
+                vagrant_env()
+            )
         );
     }
 

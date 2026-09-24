@@ -338,6 +338,10 @@ fi
 # So a `vagrant provision` run there by hand arrives with the
 # variable unset, and this fallback clones into the old fixed
 # location rather than aborting under `set -u`.
+#
+# `bombyx shell` opens in this directory, and bombyx spells the
+# path itself in `Config::guest_clone_dir`, so change the two
+# together.
 readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
