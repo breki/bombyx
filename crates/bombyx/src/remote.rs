@@ -1010,22 +1010,37 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// needs a TTY when invoked through a non-interactive SSH command,
 /// and an interactive shell without one is unusable whatever the
 /// local stdio looks like. Every other vagrant call decides per run.
+/// On the guest side, `vagrant ssh -c` asks for a TTY by default.
 ///
 /// **The shell opens in the project's clone**, which the guest's
 /// bootstrap script puts at `$HOME/<project>`. A bare `vagrant ssh`
-/// would open in `$HOME`. So the guest runs a `cd` and then
-/// `exec`s a login shell in its place. The two are joined by `;`
-/// rather than `&&`, so a missing clone prints the `cd` error
-/// and still leaves the operator a shell to look into why.
+/// would open in `$HOME`. So the guest runs `cd`, then `exec`s a
+/// login shell:
 ///
-/// `vagrant ssh -c` asks for a tty by default, and it escapes
-/// the command's single quotes before wrapping it in its own
-/// `bash -l -c '...'`. So the project name can stay quoted the
-/// way every other value in a remote script is.
+/// - `$SHELL` sits inside the single quotes that wrap the whole
+///   guest command for the VM host, so the VM host passes it on
+///   unexpanded and the guest expands it to its own user's shell.
+/// - `exec` replaces the `bash -c` that vagrant started, so one
+///   `exit` leaves the VM.
+/// - `-l` makes the shell read the login profile, as the shell a
+///   bare `vagrant ssh` starts does.
+///
+/// The `cd` and the `exec` are joined by `;` rather than `&&`.
+/// So when the clone is missing, `cd` prints its error and the
+/// operator still gets a shell, in `$HOME`, to look into why.
+///
+/// **Two layers of single quotes nest here.** The clone path
+/// arrives quoted as `~/'<project>'`, and vagrant wraps the whole
+/// command in its own `bash -l -c '...'`. Left alone, the inner
+/// `'` would close vagrant's outer quote early. Vagrant rewrites
+/// each inner `'` before wrapping, which vagrant 2.4.9's
+/// `ssh_run.rb` shows and a run against a real VM host confirmed.
+/// So the path can stay quoted the way every other value in a
+/// remote script is.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
-    let clone = format!("~/{}", cfg.project.as_str());
-    let guest = format!("cd {}; exec \"$SHELL\" -l", quote_remote_path(&clone));
+    let clone = quote_remote_path(&cfg.guest_clone_dir());
+    let guest = format!("cd {clone}; exec \"$SHELL\" -l");
     vagrant_in(
         cfg,
         &cfg.remote_project_dir(),
