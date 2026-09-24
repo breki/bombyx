@@ -14,6 +14,10 @@ and this project adheres to
 
 ### Changed
 
+- `bombyx shell` opens in the project's clone, `~/<project>` in the guest,
+  rather than in the guest home directory. When the clone is missing, the shell
+  prints the `cd` error and opens in the home directory as before.
+
 ### Fixed
 
 - agent-vm-firewall.sh dropped the DHCP broadcasts a guest without a lease

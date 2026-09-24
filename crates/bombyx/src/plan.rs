@@ -46,7 +46,7 @@ pub enum Action {
     Provision,
     /// Halt the project VM.
     Down,
-    /// Open a shell inside the project VM.
+    /// Open a shell inside the project VM, in the project clone.
     Shell,
     /// Show VM status on the host.
     Status,

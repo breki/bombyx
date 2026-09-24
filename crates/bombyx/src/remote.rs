@@ -1010,9 +1010,28 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// needs a TTY when invoked through a non-interactive SSH command,
 /// and an interactive shell without one is unusable whatever the
 /// local stdio looks like. Every other vagrant call decides per run.
+///
+/// **The shell opens in the project's clone**, which the guest's
+/// bootstrap script puts at `$HOME/<project>`. A bare `vagrant ssh`
+/// would open in `$HOME`. So the guest runs a `cd` and then
+/// `exec`s a login shell in its place. The two are joined by `;`
+/// rather than `&&`, so a missing clone prints the `cd` error
+/// and still leaves the operator a shell to look into why.
+///
+/// `vagrant ssh -c` asks for a tty by default, and it escapes
+/// the command's single quotes before wrapping it in its own
+/// `bash -l -c '...'`. So the project name can stay quoted the
+/// way every other value in a remote script is.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
-    vagrant_in(cfg, &cfg.remote_project_dir(), &["ssh"], Tty::Allocate)
+    let clone = format!("~/{}", cfg.project.as_str());
+    let guest = format!("cd {}; exec \"$SHELL\" -l", quote_remote_path(&clone));
+    vagrant_in(
+        cfg,
+        &cfg.remote_project_dir(),
+        &["ssh", "-c", &guest],
+        Tty::Allocate,
+    )
 }
 
 #[cfg(test)]
@@ -1228,9 +1247,23 @@ mod tests {
         // local stdio looks like.
         let c = shell_into_vm(&cfg());
         assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
+    }
+
+    #[test]
+    fn an_interactive_shell_starts_in_the_project_clone() {
+        // The guest clones into `$HOME/<project>`, and a bare
+        // `vagrant ssh` opens in `$HOME`. The `;` keeps the shell
+        // when the `cd` fails, so a missing clone still leaves
+        // the operator a shell to look into why. The whole guest
+        // command is one argument, quoted once for the VM host.
+        let c = shell_into_vm(&cfg());
         assert_eq!(
             remote_script(&c),
-            remote_script(&vagrant(&cfg(), &["ssh"], Tty::NoPty))
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' \
+                 'cd ~/'\\''myproject'\\''; exec \"$SHELL\" -l'",
+                vagrant_env()
+            )
         );
     }
 
