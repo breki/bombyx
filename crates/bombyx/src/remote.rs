@@ -1176,6 +1176,85 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
     )
 }
 
+/// Builds the command that writes `contents` over `name`, a path
+/// relative to the agent's home, inside the running project VM.
+///
+/// Nothing is staged on the VM host. The contents travel on the
+/// command's standard input, which `ssh` forwards to the VM host,
+/// where `vagrant ssh` forwards it again into the guest. So the
+/// file is never in a command line on any of the three machines,
+/// and it never touches the VM host's disk, which a provision's
+/// staging does for the length of the vagrant run.
+///
+/// **No terminal on either hop.** A terminal puts the pipe through
+/// a line discipline, which can echo the input back into the
+/// output and rewrite its line endings. So the `ssh` to the VM
+/// host is [`Tty::NoPty`], and `--no-tty` stops `vagrant ssh -c`
+/// asking the guest for one, which it does by default. Measured on
+/// a libvirt host: a payload holding a CR and a control byte
+/// arrives with the same SHA-256 it left with.
+///
+/// **The guest half is `account.sh`'s `place`.** The login
+/// account switches to the agent's with `sudo -u`, as
+/// [`shell_into_vm`] does, and the agent writes the file itself.
+/// So a link the agent left at that path reaches only what the
+/// agent could already reach. `-H` sets `HOME` from the passwd
+/// entry, which names the home `account.sh` wrote into. `umask
+/// 077` keeps a new file from existing at a readable mode even
+/// briefly, and `chmod` corrects a copy the agent loosened since.
+///
+/// A guest without the account was never provisioned for it, so
+/// there is no copy to refresh, and it says so and fails rather
+/// than write the file anywhere else.
+#[must_use]
+pub fn refresh_in_guest(
+    cfg: &Config,
+    name: &str,
+    contents: &[u8],
+) -> RemoteCommand {
+    refresh_command(cfg, name).with_stdin(contents)
+}
+
+/// [`refresh_in_guest`] for a payload whose size a dry run must
+/// not print.
+///
+/// The same command, so the file lands the same way. `Stdin` says
+/// which payloads those are.
+#[must_use]
+pub fn refresh_in_guest_of_hidden_size(
+    cfg: &Config,
+    name: &str,
+    contents: &[u8],
+) -> RemoteCommand {
+    refresh_command(cfg, name).with_stdin_of_hidden_size(contents)
+}
+
+/// The command both refresh builders send their payload down.
+///
+/// The name travels as `$1`, a separate argument, so the script is
+/// one text for every file, as [`shell_into_vm`]'s is for every
+/// project.
+fn refresh_command(cfg: &Config, name: &str) -> RemoteCommand {
+    let user = shell_quote(cfg.vm.guest_user.as_str());
+    let guest = format!(
+        "if id -u {user} >/dev/null 2>&1; \
+         then exec sudo -u {user} -H -- sh -c {script} sh {name}; \
+         else echo \"bombyx: this guest has no account {user}, so it \
+         was never provisioned for it; run bombyx provision.\" >&2; \
+         exit 1; fi",
+        script = shell_quote(
+            r#"umask 077 && cat > "$HOME/$1" && chmod 600 "$HOME/$1""#
+        ),
+        name = shell_quote(name),
+    );
+    vagrant_in(
+        cfg,
+        &cfg.remote_project_dir(),
+        &["ssh", "--no-tty", "-c", &guest],
+        Tty::NoPty,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1449,6 +1528,78 @@ mod tests {
             crate::config::GuestUser::parse("dev").expect("a plain name");
         let script = remote_script(&shell_into_vm(&cfg));
         assert!(script.contains("sudo -u '\\''dev'\\''"), "{script}");
+    }
+
+    #[test]
+    fn a_refresh_writes_the_file_as_the_agent_in_its_home() {
+        // The guest half is `account.sh`'s `place` again: the agent
+        // writes the file itself, under `umask 077`, so the contents
+        // never exist at a readable mode, and `chmod` corrects a copy
+        // the agent loosened since. The name travels as `$1`, so the
+        // script is one text for both files. A guest without the
+        // account says so and fails rather than writing anywhere
+        // else.
+        let guest = "if id -u 'agent' >/dev/null 2>&1; \
+                     then exec sudo -u 'agent' -H -- sh -c \
+                     'umask 077 && cat > \"$HOME/$1\" && \
+                     chmod 600 \"$HOME/$1\"' sh '.bombyx-env'; \
+                     else echo \"bombyx: this guest has no account \
+                     'agent', so it was never provisioned for it; \
+                     run bombyx provision.\" >&2; exit 1; fi";
+        let c = refresh_in_guest(&cfg(), ".bombyx-env", b"K=v\n");
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '--no-tty' \
+                 '-c' {}",
+                vagrant_env(),
+                shell_quote(guest)
+            )
+        );
+    }
+
+    #[test]
+    fn a_refresh_sends_the_file_down_a_pipe_with_no_terminal() {
+        // A terminal on either hop would put the pipe through a line
+        // discipline, which can echo the input back and rewrite its
+        // line endings. So neither `ssh` nor `vagrant ssh` asks for
+        // one, and the contents are the command's standard input,
+        // never an argument.
+        let secret = b"JIRA_TOKEN=s3cr3t-value\r\n";
+        let c = refresh_in_guest(&cfg(), ".bombyx-env", secret);
+        assert!(opts_before_host(&c).is_empty(), "{:?}", c.args);
+        assert!(raw_script(&c).contains("'--no-tty'"), "{c}");
+        let stdin = c.stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), secret);
+        assert!(stdin.size_may_be_shown());
+        assert!(
+            c.args.iter().all(|a| !a.contains("s3cr3t")),
+            "the secret reached an argument: {:?}",
+            c.args
+        );
+    }
+
+    #[test]
+    fn a_refreshed_credential_hides_its_size() {
+        // The credential is fixed text plus one token, so its
+        // length measures the token; `Stdin` says why that stays out
+        // of a dry run.
+        let c = refresh_in_guest_of_hidden_size(
+            &cfg(),
+            ".bombyx-git-credentials",
+            b"https://u:t@h\n",
+        );
+        let stdin = c.stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), b"https://u:t@h\n");
+        assert!(!stdin.size_may_be_shown());
+        assert_eq!(
+            remote_script(&c.without_payload()),
+            remote_script(&refresh_in_guest(
+                &cfg(),
+                ".bombyx-git-credentials",
+                b"",
+            ))
+        );
     }
 
     #[test]

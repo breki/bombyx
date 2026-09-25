@@ -147,7 +147,22 @@ Three secrets can reach the guest:
 
 Each takes a route that keeps it off both machines' command lines
 and out of every generated file, and the VM host holds its copy
-only for the length of the `vagrant` run. The outcome is the same
+only for the length of the `vagrant` run.
+
+`up` and `shell` also rewrite the `env_file` copy and the
+`repo_token` credential inside a guest that already exists, so a
+rotated token reaches it without a provision. That route stores
+nothing on the VM host at all. Each file travels on a pipe: from
+bombyx to `ssh`, through `vagrant ssh --no-tty` on the VM host,
+and into a `cat` that the agent's account runs in the guest. On the
+VM host the file exists only in the memory of the processes
+passing it along. Nothing in the path asks for a terminal, because
+a terminal's line discipline can echo input back into the output.
+We have not checked whether Vagrant's own debug log
+(`VAGRANT_LOG=debug`, set on the VM host) records what passes
+through; the staging route has the same unknown for its upload.
+
+The outcome is the same
 for all three and is the cost: **the agent needs the value to
 work, so code in the guest can read it.** The design changes how
 many machines hold a copy on the way, not whether one arrives.

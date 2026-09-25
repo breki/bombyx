@@ -28,7 +28,7 @@ use bombyx::doctor::{
 };
 use bombyx::listing;
 use bombyx::name::{ProjectName, ScratchName};
-use bombyx::plan::{Action, plan};
+use bombyx::plan::{self, Action, plan};
 use bombyx::remote::{self, RemoteCommand, Tty};
 use bombyx::term;
 use bombyx::update::{self, asset};
@@ -119,6 +119,13 @@ enum Cmd {
 enum VmCmd {
     /// Write the generated files on the VM host and boot the
     /// project VM
+    ///
+    /// A VM that already exists is not provisioned again, so its
+    /// copy of the `env_file` secrets, and the git credential when
+    /// `repo_token` is set, are rewritten in the guest once it is
+    /// up. On a running VM, that rewrite is all `up` does. Nothing
+    /// is fetched or checked out, so work in the guest's clone is
+    /// untouched.
     Up,
     /// Write the generated files and re-run provisioning in
     /// the guest
@@ -151,6 +158,11 @@ enum VmCmd {
     /// Halt the project VM
     Down,
     /// Open a shell inside the project VM, in the project clone
+    ///
+    /// First rewrites the guest's copy of the `env_file` secrets,
+    /// and the git credential when `repo_token` is set, as `up`
+    /// does. If that fails, bombyx warns and opens the shell
+    /// anyway.
     Shell,
     /// Show VM status on the host
     Status,
@@ -442,8 +454,24 @@ fn run() -> Result<Ran> {
     // `Action::needs_staged_files` decides and explains. The
     // verbs it excludes are the ones that must keep working
     // after the operator has deleted the file.
+    //
+    // `shell` is excluded and reads them anyway, to refresh the
+    // guest's copies before the shell opens. A failure there is a
+    // warning and an empty `Staged`, which refreshes nothing:
+    // `shell` is the command an operator reaches for when
+    // something is already wrong, so a missing secrets file must
+    // not also cost them the shell.
     let staged = if action.needs_staged_files() {
         cfg.read_staged(|k| std::env::var(k).ok())?
+    } else if matches!(action, Action::Shell) {
+        cfg.read_staged(|k| std::env::var(k).ok())
+            .unwrap_or_else(|e| {
+                eprint_lines(&format!(
+                    "bombyx: not refreshing the secrets in the guest, \
+                     which keeps the ones it has: {e}\n"
+                ));
+                Staged::default()
+            })
     } else {
         Staged::default()
     };
@@ -832,14 +860,21 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
     Ok(Ran::Ok)
 }
 
-/// Runs `up`, but reports and stops if the VM is already running.
+/// Runs `up`, but only refreshes the secrets if the VM is already
+/// running.
 ///
 /// `up` on a running machine would rewrite the generated files,
 /// stage the project's secrets and take a mislabeled `fresh-install`
 /// snapshot, while `vagrant up` itself does nothing -- it does not
 /// re-provision a running machine (issue #89). So `up` asks the host
-/// what the machine is doing first, and when it is already running
-/// it prints a note and exits 0 without touching anything.
+/// what the machine is doing first. When it is already running, `up`
+/// writes the project's secrets over the guest's copies
+/// ([`plan::refresh_secrets`]) and stops; with no secrets to send it
+/// prints a note and exits 0 without touching anything.
+///
+/// A boot that does not create the machine does not provision it
+/// either, so it is followed by the same refresh.
+/// [`listing::refreshes_secrets_after_up`] decides when.
 ///
 /// The same probe decides the `fresh-install` snapshot. That
 /// snapshot names a clean install, so it is taken only when this
@@ -862,7 +897,9 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// A dry run contacts nothing, so it cannot know the state. It
 /// prints the probe `up` would run first, then the boot, then the
 /// snapshot -- the shape of a first `up`, which is the honest
-/// description when the state is unknown ahead of time.
+/// description when the state is unknown ahead of time. A first
+/// `up` provisions, so that shape has no refresh in it; `bombyx
+/// shell --dry-run` prints the refresh commands.
 fn up_run(
     cfg: &Config,
     tty: Tty,
@@ -882,12 +919,20 @@ fn up_run(
         return execute(&cmds, true);
     }
     let state = probe_state(cfg);
+    let refresh = plan::refresh_secrets(cfg, staged);
     if state.as_ref().is_some_and(listing::VmState::is_running) {
+        if refresh.is_empty() {
+            eprint_lines(&format!(
+                "bombyx: {} is already running; up did nothing\n",
+                cfg.project.as_str()
+            ));
+            return Ok(Ran::Ok);
+        }
         eprint_lines(&format!(
-            "bombyx: {} is already running; up did nothing\n",
+            "bombyx: {} is already running; refreshing its secrets\n",
             cfg.project.as_str()
         ));
-        return Ok(Ran::Ok);
+        return execute(&refresh, false);
     }
     // A probe bombyx could not complete -- an unreachable host, a
     // reply that did not parse -- must not block the boot, but it is
@@ -915,6 +960,12 @@ fn up_run(
     if listing::takes_fresh_snapshot(state.as_ref()) {
         cmds.push(snapshot);
     }
+    // After the boot, because the guest must be up to take the
+    // files, and after the snapshot, which then holds only what
+    // provisioning wrote.
+    if listing::refreshes_secrets_after_up(state.as_ref()) {
+        cmds.extend(refresh);
+    }
     execute(&cmds, false)
 }
 
@@ -941,8 +992,15 @@ fn probe_state(cfg: &Config) -> Option<listing::VmState> {
 /// command it ran. [`listing::shell_refusal`] decides, and holds
 /// why an unknown state still opens the shell.
 ///
-/// A dry run contacts nothing, so it prints the probe and then the
-/// shell, as `up_run` does.
+/// Before the shell opens, the project's secrets are written over
+/// the guest's copies ([`plan::refresh_secrets`]), so a token
+/// rotated on the workstation reaches the guest with no provision.
+/// A refresh that fails is a warning and the shell opens anyway:
+/// the guest keeps the secrets it had, and the operator may be
+/// opening the shell to find out why.
+///
+/// A dry run contacts nothing, so it prints the probe, the
+/// refresh and then the shell, as `up_run` does.
 fn shell_run(
     cfg: &Config,
     tty: Tty,
@@ -950,8 +1008,10 @@ fn shell_run(
     dry_run: bool,
 ) -> Result<Ran> {
     let shell = plan(&Action::Shell, cfg, tty, staged);
+    let refresh = plan::refresh_secrets(cfg, staged);
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
+        cmds.extend(refresh);
         cmds.extend(shell);
         return execute(&cmds, true);
     }
@@ -960,6 +1020,17 @@ fn shell_run(
     {
         eprint_lines(&format!("{refusal}\n"));
         return Ok(Ran::Failed(1));
+    }
+    // One at a time, so a failed secrets file still lets the
+    // credential through, and neither stops the shell.
+    for cmd in refresh {
+        if !execute(std::slice::from_ref(&cmd), false)?.ok() {
+            eprint_lines(
+                "bombyx: could not refresh the secrets in the guest, \
+                 which keeps the ones it has; opening the shell \
+                 anyway\n",
+            );
+        }
     }
     execute(&shell, false)
 }

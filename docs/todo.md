@@ -449,3 +449,12 @@ them on a never-built project is closer to a user error than the ordinary state
 status answers. A fix would guard each the way status and list now do, or share
 one guard.
 
+### architecture-generated-file-count
+
+**Summary:** architecture.md says bombyx generates two files; it is three
+
+docs/architecture.md, in the paragraph after the context diagram, says the only
+files reaching the VM host are the two that bombyx generates. bombyx generates
+three: the Vagrantfile, bootstrap.sh and account.sh (the diagram above that
+paragraph lists all three). Found while working #125.
+
