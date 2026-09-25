@@ -294,10 +294,15 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # the account the agent works as, and bombyx's own provisioning
 # script sets it to mode 0600 there before your script runs.
 # bombyx puts it nowhere else. Your provisioning script is what
-# copies it into place, and the path arrives in
-# `BOMBYX_ENV_FILE`:
+# puts it into place, and the path arrives in `BOMBYX_ENV_FILE`:
 #
-#   cp "$BOMBYX_ENV_FILE" .env
+#   ln -sf "$BOMBYX_ENV_FILE" .env
+#
+# A link rather than a copy, because `bombyx up` and
+# `bombyx shell` rewrite `~/.bombyx-env` whenever the VM already
+# exists. That is how a token you rotate here reaches the guest
+# without a provision, and a copy would keep the old value.
+# docs/usage.md, under "Rotating a secret", has the rest.
 #
 # That variable is always set. It holds the path when this key
 # is present and an empty string when it is not, so a script

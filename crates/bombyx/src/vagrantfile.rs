@@ -245,17 +245,31 @@ pub(crate) const CREDENTIAL_FILE_NAME: &str = "bombyx.git-credentials";
 const CREDENTIAL_STAGED_PATH: &str =
     concat!(staging_dir!(), "/git-credentials");
 
+/// The secrets file's path in the agent's home.
+///
+/// [`ACCOUNT`] writes it there when it provisions, and
+/// `crate::remote::refresh_in_guest` writes over it on a running
+/// machine. Relative, because the home is the agent's and only
+/// the guest can name it.
+pub(crate) const GUEST_ENV_FILE: &str = ".bombyx-env";
+
+/// The git credential's path in the agent's home, written the
+/// same two ways as [`GUEST_ENV_FILE`].
+pub(crate) const GUEST_CREDENTIAL_FILE: &str = ".bombyx-git-credentials";
+
 /// The three paths [`ACCOUNT`] writes the staged credentials to,
 /// relative to the agent's home, and which [`BOOTSTRAP`] reads.
 ///
 /// Test-only: neither script is built from this list. It is what
 /// lets a test assert both scripts spell each path the same way,
-/// since neither file can see the other.
+/// since neither file can see the other. Two of the three are the
+/// constants the refresh writes to, so the same test holds the
+/// refresh to the scripts' spelling.
 #[cfg(test)]
 const GUEST_HOME_FILES: [&str; 3] = [
     ".ssh/bombyx-deploy-key",
-    ".bombyx-env",
-    ".bombyx-git-credentials",
+    GUEST_ENV_FILE,
+    GUEST_CREDENTIAL_FILE,
 ];
 
 /// Environment variable naming the account the agent works as.

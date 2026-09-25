@@ -23,6 +23,7 @@ trust, because a config can name a key to copy into the VM
 
 - [Commands](#commands)
 - [up and provision](#up-and-provision)
+- [Rotating a secret](#rotating-a-secret)
 - [reset and snapshot](#reset-and-snapshot)
 - [destroy and discard](#destroy-and-discard)
 - [list](#list)
@@ -87,6 +88,39 @@ different repository discards the clone and starts over.
 `provision` needs a VM that already exists, so run `up` first, and
 it targets the project VM only; for a scratch VM the answer is
 `discard` then `scratch`.
+
+## Rotating a secret
+
+To change a value in your `env_file`, such as an expired token,
+edit the file on your workstation and run `up` or `shell`:
+
+```bash
+bombyx up        # or: bombyx shell
+```
+
+Both commands write the file over its copy in the guest,
+`~/.bombyx-env` in the agent's home, before they do anything else
+there. When the config names a `repo_token`, they rewrite the git
+credential built from it too. Nothing is fetched or checked out,
+so the work in the guest's clone is not touched. `up` on a running
+VM does only this. A `shell` that cannot read the file, or cannot
+write the copy, warns and opens the shell anyway.
+
+bombyx sends each file down a pipe, through `ssh` and then
+`vagrant ssh`, so the VM host never stores it.
+[trust-boundary.md](trust-boundary.md) describes the route.
+
+Only those two copies change:
+
+- **A copy your provisioning script made keeps the old values.**
+  If the script ran `cp "$BOMBYX_ENV_FILE" .env`, the `.env` is
+  stale. Link it instead, with `ln -sf "$BOMBYX_ENV_FILE" .env`, or
+  read `~/.bombyx-env` directly.
+- **A running process keeps the values it read.** Restart it.
+- **Adding `env_file` or `repo_token` to a project still needs
+  `provision`**, because the provisioning script is what uses the
+  file, and `bootstrap.sh` is what tells `git` about the
+  credential.
 
 ## reset and snapshot
 

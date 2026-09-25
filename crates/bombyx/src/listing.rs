@@ -11,9 +11,10 @@
 //! is what [`entries`] takes its `run` argument for.
 //!
 //! The module also holds the decisions `up` and `shell` make on a
-//! probed state: `VmState::is_running`, `takes_fresh_snapshot` and
-//! `shell_refusal`. They live here because this module owns
-//! `VmState`, and because `src/bin` is outside the coverage gate.
+//! probed state: `VmState::is_running`, `takes_fresh_snapshot`,
+//! `refreshes_secrets_after_up` and `shell_refusal`. They live here
+//! because this module owns `VmState`, and because `src/bin` is
+//! outside the coverage gate.
 //!
 //! One rule shaped the module: **a state bombyx cannot support
 //! is printed as unknown.** A machine that does not answer, and
@@ -229,6 +230,26 @@ impl std::fmt::Display for VmState {
 #[must_use]
 pub fn takes_fresh_snapshot(state: Option<&VmState>) -> bool {
     state.is_none_or(|s| s.is_absent() || s.is_unknown())
+}
+
+/// Whether `bombyx up` should rewrite the secrets inside the
+/// guest once the machine is up, given its state before the boot.
+///
+/// Vagrant provisions a machine only when it creates it, and
+/// provisioning is what writes the secrets. So an `up` that
+/// creates the machine ([`VmState::is_absent`]) has just written
+/// them, and every other `up` -- one that boots a stopped machine,
+/// or finds it running and boots nothing -- would leave the guest
+/// with whatever an older provision wrote. An unconfirmed state
+/// refreshes: if the machine was in fact created, the refresh
+/// writes the same bytes again, which costs one round trip and
+/// nothing else.
+///
+/// This is the decision the binary's `up_run` acts on, kept here
+/// for the reason [`takes_fresh_snapshot`] gives.
+#[must_use]
+pub fn refreshes_secrets_after_up(state: Option<&VmState>) -> bool {
+    !state.is_some_and(VmState::is_absent)
 }
 
 /// One row of the listing.
@@ -1315,6 +1336,29 @@ mod tests {
             VmState::Reported("running".into()),
         ] {
             assert!(!takes_fresh_snapshot(Some(&skip)), "{skip:?} -> no snap");
+        }
+    }
+
+    #[test]
+    fn up_refreshes_the_secrets_unless_it_creates_the_machine() {
+        // Creating the machine provisions it, and provisioning just
+        // wrote both files, so a second write would only cost a
+        // round trip. Every other state boots without provisioning,
+        // or boots nothing, so the guest's copy is whatever an older
+        // provision left. `None` (no probe) counts as unsure.
+        assert!(refreshes_secrets_after_up(None));
+        for fresh in
+            [VmState::NotCreated, VmState::Reported("not created".into())]
+        {
+            assert!(!refreshes_secrets_after_up(Some(&fresh)), "{fresh:?}");
+        }
+        for stale in [
+            VmState::Reported("running".into()),
+            VmState::Reported("shutoff".into()),
+            VmState::Reported("poweroff".into()),
+            VmState::Unknown("could not ask".into()),
+        ] {
+            assert!(refreshes_secrets_after_up(Some(&stale)), "{stale:?}");
         }
     }
 }

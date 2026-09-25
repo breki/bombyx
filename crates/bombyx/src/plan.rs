@@ -19,6 +19,11 @@ use crate::vagrantfile;
 pub enum Action {
     /// Write the generated files on the VM host and boot the
     /// project VM.
+    ///
+    /// The binary follows the boot with [`refresh_secrets`] when
+    /// the machine already existed, because vagrant does not
+    /// provision it then. `plan` returns the boot alone, since it
+    /// cannot see the machine's state.
     Up,
     /// Write the generated files and re-run provisioning in the
     /// guest.
@@ -47,6 +52,12 @@ pub enum Action {
     /// Halt the project VM.
     Down,
     /// Open a shell inside the project VM, in the project clone.
+    ///
+    /// The binary runs [`refresh_secrets`] first and warns rather
+    /// than stops when it fails, so it is not part of this plan.
+    /// That is also why [`Action::needs_staged_files`] says no:
+    /// `shell` reads the files when it can and opens the shell
+    /// when it cannot.
     Shell,
     /// Show VM status on the host.
     Status,
@@ -201,6 +212,47 @@ pub fn plan(
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
     }
+}
+
+/// Returns the commands that write the staged files over their
+/// copies inside the running project VM.
+///
+/// Provisioning is the only other thing that writes them, and it
+/// also re-runs `bootstrap.sh`, whose forced checkout overwrites
+/// work in the guest's clone. So `up` and `shell` send the files
+/// this way instead: nothing but the two files changes, and a
+/// token rotated on the workstation reaches the guest without the
+/// operator committing anything first.
+///
+/// One command per file, and none for a file `staged` lacks, so a
+/// project with no `env_file` pays no round trip. The credential
+/// is refreshed alongside the secrets because it is built from
+/// one variable inside them, and a rotated repo token would leave
+/// `git` pushing with the old one otherwise. Its size is hidden
+/// for the reason `write_then` gives.
+///
+/// Only the two copies are rewritten. A project script that
+/// copied the secrets somewhere else during provisioning keeps
+/// that copy, and a process that read them keeps its values until
+/// it restarts; `docs/usage.md` says so to the operator.
+#[must_use]
+pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
+    let mut cmds = Vec::new();
+    if let Some(secrets) = staged.secrets() {
+        cmds.push(remote::refresh_in_guest(
+            cfg,
+            vagrantfile::GUEST_ENV_FILE,
+            secrets.as_bytes(),
+        ));
+    }
+    if let Some(credential) = staged.credential() {
+        cmds.push(remote::refresh_in_guest_of_hidden_size(
+            cfg,
+            vagrantfile::GUEST_CREDENTIAL_FILE,
+            credential.as_bytes(),
+        ));
+    }
+    cmds
 }
 
 /// Destroys the VM defined in `dir`, then removes `dir`.
@@ -1354,6 +1406,52 @@ mod tests {
                  status: {removing}"
             );
         }
+    }
+
+    #[test]
+    fn a_refresh_rewrites_the_secrets_file_in_the_agents_home() {
+        // One command, carrying the file exactly as the workstation
+        // holds it, aimed at the path `account.sh` writes. No token,
+        // so no credential and no second command.
+        let (cfg, staged) = staged_project(false);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        let script = script(&cmds[0]);
+        assert!(script.contains(vagrantfile::GUEST_ENV_FILE), "{script}");
+        let stdin = cmds[0].stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), b"TOKEN=hunter2\n");
+        assert!(stdin.size_may_be_shown());
+    }
+
+    #[test]
+    fn a_refresh_rewrites_the_git_credential_too_and_hides_its_size() {
+        // A rotated repo token lives in the same file, so refreshing
+        // only the file would leave `git` pushing with the old one.
+        let (cfg, staged) = staged_project(true);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 2, "{cmds:?}");
+        let script = script(&cmds[1]);
+        assert!(
+            script.contains(vagrantfile::GUEST_CREDENTIAL_FILE),
+            "{script}"
+        );
+        let stdin = cmds[1].stdin.as_ref().expect("the file is on stdin");
+        let credential = staged.credential().expect("a token was configured");
+        assert_eq!(stdin.bytes(), credential.as_bytes());
+        assert!(!stdin.size_may_be_shown());
+        for c in &cmds {
+            assert!(
+                c.args.iter().all(|a| !a.contains("hunter2")),
+                "the token reached an argument: {c}"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_refreshed_when_nothing_was_staged() {
+        // A project without an `env_file`, or a `shell` that could
+        // not read it, sends nothing and costs no round trip.
+        assert!(refresh_secrets(&cfg(), &Staged::default()).is_empty());
     }
 
     #[test]

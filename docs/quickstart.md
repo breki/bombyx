@@ -103,7 +103,7 @@ configured values against the running machine when it starts one
 and updates them, so `down` then `up` is enough -- the disk and
 everything you installed survive. It has to be stopped and
 started, though: `up` on a machine that is already running does
-nothing.
+not restart it.
 
 Check the file parses:
 
