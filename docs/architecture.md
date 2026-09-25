@@ -29,7 +29,7 @@ flowchart LR
   end
 
   subgraph host["VM host"]
-    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh<br/>bombyx.env (staged, with env_file)<br/>bombyx.git-credentials (staged, with repo_token)"]
+    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh, account.sh<br/>bombyx.env (staged, with env_file)<br/>bombyx.git-credentials (staged, with repo_token)"]
     vg["vagrant"]
   end
 
@@ -158,6 +158,7 @@ classDiagram
     +Option~Disk~ disk
     +Option~CpuMode~ cpu_mode
     +Option~Hostname~ hostname
+    +GuestUser guest_user
   }
   class Source {
     +RepoUrl repo
@@ -290,11 +291,14 @@ sequenceDiagram
   cli->>host: mkdir -p the project dir
   cli->>host: cat > Vagrantfile (file on stdin)
   cli->>host: cat > bootstrap.sh (file on stdin)
+  cli->>host: cat > account.sh (file on stdin)
   cli->>host: cd the project dir, then vagrant up
   host->>vg: vagrant up
   vg->>guest: create from box
-  vg->>guest: run bootstrap.sh
-  guest->>git: git clone repo at ref
+  vg->>guest: stage bootstrap.sh and the credentials
+  vg->>guest: run account.sh as root
+  guest->>guest: create the agent's account, hand over
+  guest->>git: git clone repo at ref, as the agent
   guest->>guest: run the script from the clone
   cli->>host: one script: list, test, save if absent
   host->>vg: vagrant snapshot list
@@ -306,7 +310,7 @@ sequenceDiagram
 ```
 
 The order matters in three places. bombyx creates the directory
-first, because the two writes redirect into it. `vagrant up` runs
+first, because the writes redirect into it. `vagrant up` runs
 next, because it reads the Vagrantfile those writes produced. The
 snapshot is saved last, so it records a machine that has finished
 provisioning.
@@ -320,13 +324,26 @@ none of the script. `bombyx provision` is the same sequence ending
 in `vagrant provision`, which vagrant runs on demand rather than
 only when it creates a machine.
 
-`bootstrap.sh` runs as the unprivileged box user, because the
-Vagrantfile marks the provisioner `privileged: false`. The clone
-and anything the project installs then land in that account's
-home, where the agent looks, rather than in `/root`; a project
-that needs root calls `sudo` itself. The `[env]` table may not set
-a name that would change what `bootstrap.sh` does. `config/env.rs`
-and `config.toml.sample` list those names, and
+Two scripts run in the guest. `account.sh` runs first, as root,
+because the Vagrantfile marks its one shell provisioner
+`privileged: true`. It creates the account `guest_user` names --
+`agent` by default -- gives it passwordless `sudo`, moves the
+staged credentials into its home, and hands `bootstrap.sh` to it
+through `sudo -u`. It reads nothing from the repository.
+`bootstrap.sh` then runs as that account, so the clone and
+anything the project installs land in its home, where the agent
+looks, rather than in `/root` or in the home of `vagrant`, the
+account Vagrant logs in with. A project that needs root calls
+`sudo` itself.
+
+Vagrant uploads as its login account, which can write only its
+own home, so every file the guest needs is staged in
+`~/.bombyx-staging` there and `account.sh` moves it on. `sudo`
+clears the environment, so `account.sh` passes
+`BOMBYX_PRESERVE_ENV`, the list of every name in the Vagrantfile's
+`env:` hash, to `sudo --preserve-env`. The `[env]` table may not
+set a name that would change what either script does.
+`config/env.rs` and `config.toml.sample` list those names, and
 `docs/trust-boundary.md` describes the isolation model this
 arrangement serves.
 

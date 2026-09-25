@@ -14,18 +14,20 @@
 # command. Keeping this file fixed means there is nothing to get
 # wrong. See docs/trust-boundary.md.
 #
-# It runs as the box's SSH user, which is the account the agent
-# works as. The generated Vagrantfile marks the provisioner
-# `privileged: false`, and without that flag Vagrant would run
-# it as root.
+# It runs as the account the agent works as, which the config's
+# `guest_user` names -- `agent` unless it says otherwise.
+# account.sh, the generated Vagrantfile's one shell provisioner,
+# runs as root first: it creates that account, moves the staged
+# credentials into its home, and hands this script to it through
+# `sudo -u`. So Vagrant's own login account, usually `vagrant`,
+# runs nothing below.
 #
-# bombyx needs no root inside the guest. The clone sits in this
-# account's own home, so this script creates the directory, owns
-# everything in it and removes it again, and it runs every git
-# command below as that same account on that account's own
-# files. A project that has to install packages calls `sudo`
-# from its own script, which every Vagrant box configures for
-# this user.
+# This script needs no root. The clone sits in this account's own
+# home, so this script creates the directory, owns everything in
+# it and removes it again, and it runs every git command below as
+# that same account on that account's own files. A project that
+# has to install packages calls `sudo` from its own script, which
+# account.sh configures for this account.
 #
 # Past the hand-over at the end of this file, everything in
 # this VM is assumed untrustworthy.
@@ -58,14 +60,33 @@ set -euo pipefail
 : "${BOMBYX_REF:?bombyx: BOMBYX_REF is not set}"
 : "${BOMBYX_SCRIPT:?bombyx: BOMBYX_SCRIPT is not set}"
 
+# THE ACCOUNT'S HOME, as account.sh made it: /home/<name>, where
+# the name is BOMBYX_GUEST_USER. account.sh refuses to hand over
+# to an account whose home is anywhere else, so this is the home
+# the credentials were written into.
+#
+# Built from the name rather than read from `$HOME`, because the
+# paths below end up inside `core.sshCommand` and
+# `credential.helper`, which `git` hands to a shell. bombyx
+# checked the name while it read the config -- lowercase letters,
+# digits, `_` and `-` -- so it gives that shell nothing to split
+# or expand, where a project's `[env]` table can set `HOME` to
+# anything. A check below, after `refuse` exists, confirms this
+# script really is that account.
+#
+# Read as `${VAR:-}` so that an unset name reaches that check
+# rather than aborting here under `set -u` before `refuse` can
+# remove anything.
+readonly ACCOUNT_HOME="/home/${BOMBYX_GUEST_USER:-}"
+
 
 # THE DEPLOY KEY, when the operator's config named one.
 #
 # A private repository needs a credential inside the guest, and
-# this is how it arrives. Before this script runs, the
-# Vagrantfile has already had Vagrant upload the key to
-# DEPLOY_KEY below. That path is fixed, so nothing about it is
-# pasted into this file -- see the header.
+# this is how it arrives. Before this script runs, account.sh has
+# written the key Vagrant staged to DEPLOY_KEY below. That path is
+# fixed, so nothing about it is pasted into this file -- see the
+# header.
 #
 # WHETHER a key was configured arrives as BOMBYX_DEPLOY_KEY,
 # which the Vagrantfile sets to `1` or `0` on every render, and
@@ -73,17 +94,18 @@ set -euo pipefail
 # config, where the two further down report what bombyx staged
 # for the run. The key is the reason: it already sits on the VM
 # host, bombyx only checks it is there, and vagrant uploads it
-# -- so there is nothing for bombyx to stage. The upload lands in the
-# `vagrant` user's own .ssh directory, and that user is the one
-# the agent works as -- so testing for the file would let the
-# guest answer a question about the operator's config. A
+# -- so there is nothing for bombyx to stage. The key lands in
+# this account's own .ssh directory, and this is the account the
+# agent works as -- so testing for the file would let the guest
+# answer a question about the operator's config. A
 # leftover from an interrupted provision, or one `touch` from
 # inside the VM, would keep reinstalling a credential the
 # operator had already removed.
 #
 # The guest cannot forge the variable either way, because a
 # provisioner's `env:` becomes a prefix on the command line and
-# is applied after any /etc/profile.d has been sourced. It is
+# is applied after any /etc/profile.d has been sourced, and
+# account.sh carries it here through `sudo --preserve-env`. It is
 # read as `${VAR:-}` all the same: `set -u` above makes an
 # unset variable fatal, and one route leaves it unset -- a
 # `vagrant provision` run on the VM host by hand, in a
@@ -94,19 +116,18 @@ set -euo pipefail
 # Defaulting to empty takes the deleting branch, which is the
 # safe answer to "these two files disagree".
 #
-# This path stays a literal and cannot come from `$HOME` the way
-# `CLONE_DIR` below does. It is the `destination:` of a `file`
-# provisioner in the generated Vagrantfile, and Vagrant
-# evaluates that before this guest exists.
+# This path is built from ACCOUNT_HOME above and not from `$HOME`
+# the way `CLONE_DIR` below is, for the reason ACCOUNT_HOME's
+# banner gives.
 #
 # Declared before anything expands it. Every refusal below
 # removes the uploaded key, and `set -u` makes expanding an
 # undeclared variable fatal: the message would never print and
 # the key would stay.
-readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
+readonly DEPLOY_KEY="$ACCOUNT_HOME/.ssh/bombyx-deploy-key"
 
-# WHERE THE GIT CREDENTIAL LANDS, and why this one is a literal
-# while ENV_FILE below is computed.
+# WHERE THE GIT CREDENTIAL LANDS, and why this one is built from
+# ACCOUNT_HOME while ENV_FILE below is read from passwd.
 #
 # The file holds one `https://user:token@host` line, and `git`
 # reads it through its `store` credential helper. That helper is
@@ -116,39 +137,31 @@ readonly DEPLOY_KEY=/home/vagrant/.ssh/bombyx-deploy-key
 # `--file=$HOME/real` found the file there, while `--file=$NOPE/real`
 # found nothing. So the path inside that string gets everything a
 # shell does to a word: a space splits it in two, and a `$` is
-# expanded. A path bombyx chose has neither; one read out of this
-# guest's passwd entry might, and a project's `[env]` table can
-# set `HOME`.
+# expanded. A path built from /home/ and a checked account name
+# has neither; one read out of this guest's passwd entry might,
+# and a project's `[env]` table can set `HOME`.
 #
-# This is the same trap KNOWN_HOSTS further down is a literal
-# for, and for the same reason: that path ends up inside
-# `core.sshCommand`, which `git` also hands to a shell.
-#
-# It shares DEPLOY_KEY's assumption that the account is
-# `vagrant`, for the same reason: this is the `destination:` of
-# a `file` provisioner, which Vagrant evaluates before this
-# guest exists.
+# This is the same trap KNOWN_HOSTS further down is built from
+# ACCOUNT_HOME for: that path ends up inside `core.sshCommand`,
+# which `git` also hands to a shell.
 #
 # Declared before anything expands it, like DEPLOY_KEY above:
 # `refuse` removes this file, and `set -u` would make the
 # refusal itself fatal otherwise.
-readonly GIT_CRED=/home/vagrant/.bombyx-git-credentials
+readonly GIT_CRED="$ACCOUNT_HOME/.bombyx-git-credentials"
 
-# WHERE THE SECRETS FILE LANDS, and why this one is computed
-# while DEPLOY_KEY above is a literal.
+# WHERE THE SECRETS FILE LANDS, and why this one is read from
+# passwd while DEPLOY_KEY above is built from ACCOUNT_HOME.
 #
-# The generated Vagrantfile uploads it with a `file` provisioner
-# whose destination is written `~/.bombyx-env`. Vagrant expands
-# that itself, before sending anything: it runs `printf` on the
-# path through a shell in this guest, as the account it logs in
-# as. So the file is in that account's real home, whatever the
-# box calls the account.
+# account.sh writes it to `.bombyx-env` in this account's home,
+# which it read from the passwd entry. The path never reaches a
+# string `git` hands to a shell, so reading the same entry here
+# is safe, and it is what the two scripts agree on.
 #
 # `$HOME` cannot name the same file. A project's `[env]` table
 # may set HOME, and this script's environment carries that value
-# while Vagrant's upload used the real home. The passwd entry is
-# what the two agree on, and `getent` is how a shell asks for
-# it.
+# while account.sh used the real home. `getent` is how a shell
+# asks for the passwd entry.
 #
 # `|| bombyx_home=""` puts the assignment in a condition, which
 # exempts it from `set -e` and `set -o pipefail`. Without it a
@@ -166,10 +179,10 @@ readonly ENV_FILE="${bombyx_home:-/nonexistent}/.bombyx-env"
 # EVERY REFUSAL IN THIS FILE GOES THROUGH HERE, and that is the
 # point.
 #
-# Vagrant uploads every credential the config named before this
-# script starts. So a refusal that exits without removing them
-# leaves credentials in the guest -- at whatever mode `scp` gave
-# them -- for the life of a VM that never finished provisioning.
+# account.sh writes every credential the config named into this
+# account's home before this script starts. So a refusal that
+# exits without removing them leaves credentials in the guest for
+# the life of a VM that never finished provisioning.
 #
 # One function removes the doubt: it clears every one of them,
 # prints what it was given, and exits. The list it clears is the
@@ -230,6 +243,29 @@ refuse() {
     echo "bombyx: $key_note" >&2
     exit 1
 }
+
+# THIS SCRIPT IS THE ACCOUNT account.sh HANDED IT TO. Every path
+# built from ACCOUNT_HOME assumes it, and so does every command
+# below that acts on those paths.
+#
+# The name is checked here as well as by bombyx, because
+# ACCOUNT_HOME reaches two strings `git` hands to a shell: the
+# pattern refuses anything that shell could split or expand.
+# `id -un` inside `[ ]` is not subject to `set -e`, so a failure
+# there reads as a mismatch and reaches the refusal.
+case "${BOMBYX_GUEST_USER:-}" in
+    "" | [!a-z_]* | *[!a-z0-9_-]*)
+        refuse "BOMBYX_GUEST_USER is \"${BOMBYX_GUEST_USER:-}\"," \
+            "which is not an account name bombyx creates. The" \
+            "generated Vagrantfile and this script came from" \
+            "different versions of bombyx."
+        ;;
+esac
+if [ "$(id -un)" != "$BOMBYX_GUEST_USER" ]; then
+    refuse "this script runs as $(id -un), and bombyx set up" \
+        "$BOMBYX_GUEST_USER for the agent. account.sh hands it" \
+        "over; run the bombyx command rather than this script."
+fi
 
 # WHERE THE CLONE GOES, and what has to be true of the
 # directory it goes in.
@@ -340,14 +376,14 @@ fi
 # location rather than aborting under `set -u`.
 #
 # `bombyx shell` opens in this directory, and bombyx spells the
-# path itself in `Config::guest_clone_dir`, so change the two
-# together.
+# path itself in `remote::shell_into_vm`, as `$HOME/<project>`
+# of this account, so change the two together.
 readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
 # distinction, and the two are easy to run together.
 #
-# Vagrant uploads whichever credentials the config named before
+# account.sh writes whichever credentials the config named before
 # this script starts: the project's secrets file, the git
 # credential, the deploy key. One block follows per credential,
 # and each tightens or removes its own. A refusal before any of
@@ -432,12 +468,10 @@ if [ "${BOMBYX_ENV_FILE_PRESENT:-}" = 1 ]; then
             "find it. Re-run the bombyx command instead."
     fi
 
-    # The upload does not decide the mode on its own. bombyx
-    # writes the staged copy on the VM host at 0600, and `scp`
-    # carries that across for a file it creates -- but it leaves
-    # an EXISTING file's mode alone, and a re-provision writes
-    # over one. So a guest whose earlier run left this file
-    # world-readable keeps that mode until this line fixes it.
+    # account.sh writes the file at 0600, and this line makes
+    # that true whatever wrote it. A copy an earlier provision
+    # left behind, or one the agent loosened since, keeps its
+    # mode until this line fixes it.
     #
     # `chmod` follows a symlink, and this path sits in a
     # directory the agent owns, so the agent could point it at
@@ -513,10 +547,8 @@ if [ "${BOMBYX_GIT_CRED_PRESENT:-}" = 1 ]; then
             "find it. Re-run the bombyx command instead."
     fi
 
-    # The upload does not decide the mode on its own, for the
-    # reason the secrets block above gives: `scp` carries the
-    # mode across for a file it creates and leaves an existing
-    # file's alone, and a re-provision writes over one.
+    # Tightened here whatever wrote the file, for the reason the
+    # secrets block above gives.
     if ! chmod 600 "$GIT_CRED"; then
         refuse "could not tighten the mode on $GIT_CRED." \
             "The error above says why."
@@ -554,16 +586,11 @@ if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # leaves this VM, and pushing needs this key.
     #
     # What tightening buys, then, is only that no *other* user
-    # in the guest can read it. Two cases make it necessary,
-    # and neither is the box's umask -- `scp` sends the source
-    # file's own mode and a umask can only clear bits, so the
-    # uploaded key is never looser than the key on the VM host:
-    #
-    #   - a loosely-permissioned key on the VM host, delivered
-    #     as-is;
-    #   - a file already at this path, whose mode `scp` does
-    #     not touch at all, so a world-readable leftover stays
-    #     world-readable until this line runs.
+    # in the guest can read it. account.sh writes the key at
+    # 0600 already, and this line makes that true whatever wrote
+    # the file: a leftover from an earlier provision, or a key
+    # the agent loosened since, keeps its mode until this line
+    # runs.
     #
     # The agent's own code can read it either way, and that is
     # deliberate -- docs/trust-boundary.md accounts for it.
@@ -573,10 +600,10 @@ if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # replace the file with a link to anything it likes. The
     # operation carries exactly the authority of the account
     # that owns the directory, which is the account running
-    # this line, so that link reaches nothing new. Vagrant's
-    # file provisioner uploads as that same user, so the file
-    # already arrives owned by it and there is nothing for a
-    # chown to do.
+    # this line, so that link reaches nothing new. account.sh
+    # writes the key as this same account, so the file already
+    # arrives owned by it and there is nothing for a chown to
+    # do.
     #
     # The message says what failed and stops there. `refuse`
     # below prints what became of the key, and claiming an
@@ -678,8 +705,8 @@ fi
 # leaves these unset. Such a guest falls back to `accept-new`,
 # which is what the bombyx that wrote its directory did.
 #
-# `KNOWN_HOSTS` IS A LITERAL, and not built from `$HOME`, for
-# two reasons.
+# `KNOWN_HOSTS` IS BUILT FROM ACCOUNT_HOME, and not from `$HOME`,
+# for two reasons.
 #
 # The first is DEPLOY_KEY's: this is bombyx's own bookkeeping
 # rather than the project's, so it belongs beside the key in the
@@ -693,8 +720,9 @@ fi
 # a quote, a backslash and `#{` but allows `$`. So a `HOME` of
 # `/home/vagrant/$WORKDIR` would reach that shell and be
 # rewritten -- measured: the argument arrived at `ssh` as
-# `/home/vagrant/EXPANDED/kh`. A literal has nothing to expand.
-readonly KNOWN_HOSTS=/home/vagrant/.ssh/bombyx-known-hosts
+# `/home/vagrant/EXPANDED/kh`. ACCOUNT_HOME holds only a checked
+# account name, so it has nothing to expand.
+readonly KNOWN_HOSTS="$ACCOUNT_HOME/.ssh/bombyx-known-hosts"
 
 git_host="${BOMBYX_GIT_HOST:-}"
 keys_url="${BOMBYX_HOST_KEYS_URL:-}"
@@ -729,34 +757,22 @@ if [ -n "$keys_url" ]; then
             "that has it."
     fi
 
-    # `/home/vagrant` is `vagrant`'s home, and that is an
-    # assumption rather than a fact about the box: the ssh user
-    # is `debian` or `ubuntu` on some images. bombyx already
-    # rests on it for `DEPLOY_KEY`, whose path is a `file`
-    # provisioner destination, so the assumption is not new --
-    # but it now applies to a verified clone with no deploy key
-    # as well.
-    #
     # Both failures are reported here rather than left to the
-    # fetch. `mkdir` fails when /home has no `vagrant` and is
-    # root-owned; it *succeeds* when the directory exists and
+    # fetch. `mkdir` fails when the home cannot hold a new
+    # directory; it *succeeds* when `.ssh` already exists and
     # belongs to another account, and then only the redirect
     # fails -- so without the second check the refusal would
     # blame the published-keys URL for a permission problem.
-    if ! mkdir -p /home/vagrant/.ssh; then
-        refuse "bombyx could not create /home/vagrant/.ssh in" \
+    if ! mkdir -p "$ACCOUNT_HOME/.ssh"; then
+        refuse "bombyx could not create $ACCOUNT_HOME/.ssh in" \
             "this guest, so there is nowhere to put" \
             "$git_host's ssh host keys. The error above says" \
-            "why. bombyx keeps them in vagrant's home, so a" \
-            "box whose ssh user is somebody else needs that" \
-            "directory to exist and be writable."
+            "why."
     fi
-    if [ ! -w /home/vagrant/.ssh ]; then
-        refuse "/home/vagrant/.ssh is not writable by this" \
+    if [ ! -w "$ACCOUNT_HOME/.ssh" ]; then
+        refuse "$ACCOUNT_HOME/.ssh is not writable by this" \
             "account, so bombyx cannot put $git_host's ssh" \
-            "host keys there. bombyx keeps them in vagrant's" \
-            "home; this guest runs the provisioner as somebody" \
-            "else."
+            "host keys there."
     fi
 
     # `--proto` and `--proto-redir` pin the request to HTTPS,
@@ -1270,20 +1286,20 @@ chmod +x "$script_real"
 # what Vagrant sees -- nothing here runs afterwards to swallow a
 # failure.
 #
-# This `exec` changes no privilege, because the whole
-# provisioner already runs as the account the agent logs in as.
-# So whatever the project's script installs -- a rust toolchain,
-# a node toolchain, an agent's own configuration -- lands in
-# that account's home, where the agent will find it.
+# This `exec` changes no privilege, because account.sh already
+# handed this script to the account the agent works as. So
+# whatever the project's script installs -- a rust toolchain, a
+# node toolchain, an agent's own configuration -- lands in that
+# account's home, where the agent will find it.
 #
 # The script also inherits this environment as it stands, which
 # is how a project's own variables reach it: the generated
 # Vagrantfile puts the `[env]` table into the provisioner
-# environment, and nothing between there and here removes any
-# of it.
+# environment, and account.sh carries every one of those names
+# across through `sudo --preserve-env`.
 #
 # Root is reachable from the project's script through `sudo`,
-# which every Vagrant box configures for this user. That is the
+# which account.sh configures for this account. That is the
 # right shape: the script asks for root at the steps that need
 # it, rather than having it throughout.
 exec -- "$script_real"

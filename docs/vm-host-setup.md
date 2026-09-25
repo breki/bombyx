@@ -337,7 +337,7 @@ advance. Vagrant works perfectly when you SSH in and type
 with a fuller `PATH`. bombyx, using the same account on the
 same machine, gets `bash: vagrant: command not found`. Worse,
 it gets it in the middle of an `up`, after it has already
-created the remote directory and written two files into it.
+created the remote directory and written three files into it.
 
 You can see the difference directly:
 

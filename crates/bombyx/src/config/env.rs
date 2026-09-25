@@ -43,8 +43,8 @@ const FIELD: &str = "env";
 /// `BOMBYX_SCRIPT` would decide which script bombyx runs.
 pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 
-/// Names that change what `bootstrap.sh` does, so a project may
-/// not set them.
+/// Names that change what `bootstrap.sh` or `account.sh` does,
+/// so a project may not set them.
 ///
 /// Not "names the script reads": most of these appear nowhere in
 /// it. `LD_PRELOAD` and `LD_LIBRARY_PATH` are read by the
@@ -91,6 +91,13 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 /// this script's behaviour could turn on, and none is a name a
 /// project needs bombyx to hand onward.
 ///
+/// `SUDO_USER` belongs to `account.sh`, the root half of the
+/// provisioning, rather than to `bootstrap.sh`. That script reads
+/// it to find the home of the account Vagrant logged in as, where
+/// the uploads were staged. `sudo` sets it, and Vagrant then
+/// applies the `env:` prefix inside the root shell, so an `[env]`
+/// value would replace the one `sudo` set.
+///
 /// `HOME` is deliberately absent: `bootstrap.sh` derives the
 /// clone directory from it, so writing it here moves the clone,
 /// and that is a recorded decision rather than an accident: the
@@ -98,7 +105,7 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 ///
 /// Keeping a list is a maintenance cost, and `docs/todo.md`
 /// holds the alternative to it as `bootstrap-sets-own-path`.
-const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 14] = [
+const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 15] = [
     "PATH",
     "IFS",
     "BASH_ENV",
@@ -113,6 +120,7 @@ const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 14] = [
     "GIT_CONFIG_SYSTEM",
     "GIT_DIR",
     "GIT_WORK_TREE",
+    "SUDO_USER",
 ];
 
 /// The name of a variable the guest's shell will carry.
@@ -363,6 +371,11 @@ mod tests {
             "GIT_CONFIG_COUNT",
             "GIT_DIR",
             "GIT_WORK_TREE",
+            // Read by `account.sh`, as root, to find the home
+            // the staged uploads landed in. Vagrant applies the
+            // `env:` prefix after `sudo` has set it, so an
+            // `[env]` value would win.
+            "SUDO_USER",
         ] {
             assert!(
                 EnvName::parse(name).is_err(),

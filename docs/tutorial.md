@@ -84,7 +84,7 @@ workstation                     VM host
   bombyx  ──── ssh ────►    vagrant ──► agent VM
      │                                     │
      └── writes Vagrantfile ───────────────┘
-         and bootstrap.sh          clones the repo itself
+         and two guest scripts     clones the repo itself
 
   the project repo:
     .bombyx/           holds the provisioning script the guest runs
@@ -414,15 +414,6 @@ do not, so expect to install it -- and note again that your own
 gives. An `https://` URL needs neither program, since it opens no
 ssh connection at all.
 
-Two later passages were written for the Debian box and will not
-match what you have, which is why they still mention it. The
-`provision.sh` below runs `chsh` because the Debian box gives its
-user `/bin/sh`; on `generic/ubuntu2204` that user already has
-`/bin/bash`, so the line does nothing and you may leave it in.
-Likewise the arrow-key entry in **When something goes wrong**
-describes the same Debian behaviour, and so will not happen to
-you.
-
 Keeping the Debian box would mean installing `git` into it and
 repackaging it, which this tutorial does not cover.
 
@@ -507,15 +498,18 @@ there, which is the file the next section covers.
 There are three facts about how this script runs, and they
 between them decide how you should write it.
 
-First, it runs as `vagrant`, the guest's ordinary user and the
-account the agent works as. Anything it installs into a home
-directory therefore lands where the agent will find it. Running it
-as root instead would put a toolchain in `/root`, which is exactly
-the mistake this arrangement exists to avoid.
+First, it runs as `agent`, an account bombyx creates in each VM
+for the agent to work as. You can choose another name with
+`guest_user` in the `[vm]` table. It is not `vagrant`: Vagrant
+keeps that account for logging in, and nothing of yours runs as
+it. Anything the script installs into a home directory therefore
+lands where the agent will find it. Running it as root instead
+would put a toolchain in `/root`, which is exactly the mistake this
+arrangement exists to avoid.
 
 Second, `sudo` is available for the steps that genuinely need
-root, which is why every privileged line in the example below has
-it.
+root: bombyx gives the agent's account passwordless `sudo`, which
+is why every privileged line in the example below has it.
 
 Third, its working directory is the clone, which bombyx names
 after your project -- `~/myproject` here, in that user's home, so
@@ -545,15 +539,6 @@ set -euo pipefail
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   build-essential ca-certificates curl git jq ripgrep tmux
-
-# Some boxes give the vagrant user /bin/sh (dash), which has no
-# line editing, so arrow keys print `^[[A` inside `bombyx shell`
-# and the prompt is a bare `$ ` instead of bash's
-# `user@host:dir$`. Switch to bash when that is the case; on a
-# box that already uses bash this check does nothing.
-if [ "$(getent passwd vagrant | cut -d: -f7)" != "/bin/bash" ]; then
-  sudo chsh -s /bin/bash vagrant
-fi
 
 # Swap space keeps a big build from getting OOM-killed. `swapon` lives
 # in /sbin, which is not on the non-interactive PATH -- calling
@@ -644,7 +629,7 @@ bombyx --project myproject doctor
 stopping at the first failure, so that a single run tells you
 everything that is wrong at once. You want every row to read `ok`,
 and you should fix anything that does not before continuing:
-because `up` creates a directory on the host and writes two files
+because `up` creates a directory on the host and writes three files
 before it runs `vagrant`, a missing piece would otherwise surface
 half-way through. [usage.md](usage.md) under **doctor** has a
 sample run and how to read it. Note that `ssh` is the only local
@@ -659,14 +644,15 @@ shell it would run and touches nothing:
 $ bombyx --project myproject --dry-run up
 ```
 
-`up` amounts to five `ssh` commands, and bombyx runs nothing on
-your workstation. It makes a directory on the host; writes the two
-files it generates -- the Vagrantfile and `bootstrap.sh` -- down a
-pipe, so that their contents never appear as command arguments;
-boots with `vagrant up`; and takes a `fresh-install` snapshot, so
-that `bombyx reset` has a state to return to. A project that sets
-`env_file` or `repo_token` gets a sixth or seventh command,
-staging that file.
+`up` amounts to seven `ssh` commands, and bombyx runs nothing on
+your workstation. It checks whether the machine is already
+running; makes a directory on the host; writes the three files it
+generates -- the Vagrantfile, `bootstrap.sh` and `account.sh` --
+down a pipe, so that their contents never appear as command
+arguments; boots with `vagrant up`; and takes a `fresh-install`
+snapshot, so that `bombyx reset` has a state to return to. A
+project that sets `env_file` or `repo_token` gets an eighth or
+ninth command, staging that file.
 
 **Read the plan; never pipe it into a shell.**
 `bombyx --dry-run up | sh` writes the two generated files empty --
@@ -701,10 +687,9 @@ Then get in:
 bombyx shell
 ```
 
-This is `ssh -t` through to `vagrant ssh` on the host. If your
-arrow keys print `^[[A`, the `chsh` step in `provision.sh` did not
-take -- log out and back in, since a shell change applies to the
-next login.
+This is `ssh -t` through to `vagrant ssh` on the host. Vagrant
+logs in as its own account, and the guest then switches to the
+agent's account with `sudo -u` and opens a shell in the clone.
 
 ### The snapshot that `reset` returns to
 
@@ -822,9 +807,11 @@ dealt with, are these:
 - **Edits to `provision.sh` appear to do nothing.** `up` skips
   provisioners once the VM exists; use `bombyx provision`. See
   Part 5.
-- **Arrow keys print `^[[A` inside the VM.** The box's user shell
-  is dash, not bash; the `chsh` step in Part 3 switches it at the
-  next login.
+- **Arrow keys print `^[[A` inside the VM.** The agent's login
+  shell is dash, not bash. bombyx creates the account with
+  `/bin/bash`, but an account the box already had under that name
+  keeps its own shell; `sudo chsh -s /bin/bash <guest_user>`
+  switches it at the next login.
 - **`reset` says the snapshot was not found.** There are two
   causes. Either the VM has no `fresh-install` snapshot because no
   `up` has saved one; or an `up` tried and could not, in which

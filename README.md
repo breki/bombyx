@@ -38,14 +38,15 @@ workstation                  vmhost (VM host)
   bombyx  ──── ssh ────►  vagrant ──► agent VM
      │                          ▲          │
      └── writes Vagrantfile ────┘          │
-         and bootstrap.sh                  │
+         and two guest scripts             │
                                   clones the repo itself
 ```
 
-bombyx sends the VM host two generated files: a Vagrantfile built from
-your VM settings, and a bootstrap script. Neither your workstation nor
-the VM host reads your project -- once the VM is up, the guest clones
-the project itself.
+bombyx sends the VM host three generated files: a Vagrantfile built
+from your VM settings, and two scripts the guest runs -- one that sets
+up the agent's own account, and one that clones and provisions as that
+account. Neither your workstation nor the VM host reads your project
+-- once the VM is up, the guest clones the project itself.
 
 [docs/architecture.md](docs/architecture.md) walks through the three
 machines and what `bombyx up` does step by step.

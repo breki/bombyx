@@ -2,7 +2,7 @@
 //!
 //! The control plane is deliberately thin: bombyx runs
 //! `vagrant` on the VM host and streams the output back. It
-//! generates the Vagrantfile and a bootstrap script from the
+//! generates the Vagrantfile and two guest scripts from the
 //! operator's own `config.toml` and writes those onto the VM
 //! host too.
 //!
