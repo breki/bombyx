@@ -1,5 +1,5 @@
-//! Builds the two files bombyx writes onto the VM host: the
-//! Vagrantfile and the bootstrap script.
+//! Builds the three files bombyx writes onto the VM host: the
+//! Vagrantfile, the account script and the bootstrap script.
 //!
 //! A Vagrantfile tells Vagrant how to build a VM. Normally a
 //! project writes its own and keeps it in its repo. bombyx
@@ -8,16 +8,17 @@
 //! VM -- and outside the VM is where we are trying not to put
 //! the project's files. `docs/trust-boundary.md` explains why.
 //!
-//! The split between the two files is worth understanding.
+//! The split between the Vagrantfile and the two scripts is worth
+//! understanding.
 //!
 //! The Vagrantfile changes per project -- different box,
 //! different memory -- so it is built here, with config values
 //! pasted into it.
 //!
-//! [`BOOTSTRAP`] is the same for every project, always. It is
-//! shipped exactly as written, and bombyx pastes nothing into
-//! it. Anything it needs to know arrives as an environment
-//! variable that Vagrant sets. That is the point: pasting
+//! [`ACCOUNT`] and [`BOOTSTRAP`] are the same for every project,
+//! always. Each is shipped exactly as written, and bombyx pastes
+//! nothing into either. Anything they need to know arrives as an
+//! environment variable that Vagrant sets. That is the point: pasting
 //! config values into a shell script is where quoting bugs and
 //! injection holes come from, so we simply never do it.
 
@@ -28,7 +29,12 @@ use crate::config::{
 };
 use crate::hostkeys;
 
-/// The provisioning script, shipped to the host unchanged.
+/// The script that clones the project and runs the project's own
+/// script, as the agent, shipped to the host unchanged.
+///
+/// Uploaded rather than provisioned: [`ACCOUNT`] is what the
+/// Vagrantfile's shell provisioner runs, and it hands this script
+/// to the agent's account.
 ///
 /// Held as a file rather than a string literal so it is
 /// syntax-highlighted, `shellcheck`-able and diffable.
@@ -44,75 +50,107 @@ pub const VAGRANTFILE_NAME: &str = "Vagrantfile";
 /// stated once here.
 pub const BOOTSTRAP_NAME: &str = "bootstrap.sh";
 
-/// Where the deploy key lives inside the guest.
+/// The account script's name on the VM host.
 ///
-/// Two files have to agree on this path and neither can read
-/// the other: [`render`] writes it as the upload's
-/// `destination:`, and [`BOOTSTRAP`] has it as a literal. It is
-/// stated here so the Rust half has one spelling, and a test
-/// asserts the shell half still contains it.
+/// The Vagrantfile's one shell provisioner runs it, as root, and
+/// its `path:` is relative to the Vagrantfile's directory, so the
+/// two names agree through this constant.
+pub const ACCOUNT_NAME: &str = "account.sh";
+
+/// The script that sets up the agent's account, shipped to the
+/// host unchanged.
 ///
-/// It is a *constant* rather than another config value on
-/// purpose. [`BOOTSTRAP`] is shipped exactly as written and
-/// bombyx pastes nothing into it, so the guest-side path has to
-/// be something the script can spell for itself.
+/// It runs as root, before [`BOOTSTRAP`]: it creates the account
+/// `guest_user` names, gives it `sudo`, moves the staged uploads
+/// into its home, and hands [`BOOTSTRAP`] to it. The split keeps
+/// root to this one short file, which never reads anything from
+/// the project's repository.
+pub const ACCOUNT: &str = include_str!("../templates/account.sh");
+
+/// The directory every upload lands in, in the home of the
+/// account Vagrant logs in as.
 ///
-/// Private, unlike [`VAGRANTFILE_NAME`] and [`BOOTSTRAP_NAME`],
-/// which the integration suite uses. Where the key lands in the
-/// guest is this module's business, and making it public would
-/// invite a caller to depend on it.
+/// Vagrant's file provisioner uploads as that account, so it can
+/// write only where that account can, and the agent's account
+/// does not exist yet when the upload is planned. So every file
+/// the guest needs is staged here first, and [`ACCOUNT`], running
+/// as root, moves it on. It removes the directory once it has.
 ///
-/// The Vagrantfile's file provisioner drops it here and
-/// `bootstrap.sh` leaves it here, at `0600` and owned by the
-/// box's SSH user, for the life of the VM. It is not moved
-/// anywhere more private on purpose: the agent works as that
-/// user and has to push with this key, so a placement it could
-/// not read would be a key that cannot do its job.
-/// `docs/trust-boundary.md` under **What this costs** holds
-/// what that exposes.
+/// Written with a `~`, which Vagrant expands by running
+/// `printf <destination>` through a shell **inside the guest**
+/// before it sends anything -- read in vagrant 2.4.9,
+/// `plugins/provisioners/file/provisioner.rb` and
+/// `plugins/guests/linux/cap/shell_expand_guest_path.rb`. That
+/// shell runs as the login account, so the directory lands in
+/// that account's real home whatever the box calls it. The SSH
+/// communicator's `upload` creates the directory when it is
+/// missing.
 ///
-/// The provisioner runs as the box's SSH user, so the
-/// destination has to be somewhere that user can write. This
-/// path assumes that user is `vagrant`, which is Vagrant's
-/// default for `config.ssh.username` rather than a rule -- a
-/// box is free to set another, and some do. On a box that sets
-/// a different user the upload fails inside Vagrant, a long way
-/// from `box` in the config.
+/// Every staged path below is built from this one with `concat!`,
+/// which takes only literals -- so the directory is a macro
+/// rather than a `const`, and the constant beside it exists for
+/// the tests that read it.
+macro_rules! staging_dir {
+    () => {
+        "~/.bombyx-staging"
+    };
+}
+
+/// [`staging_dir!`] as a value, for the tests that compare the
+/// staged paths and the scripts against it.
+#[cfg(test)]
+const STAGING_DIR: &str = staging_dir!();
+
+/// Where [`BOOTSTRAP`] is staged.
 ///
-/// This path is a constant because Vagrant evaluates the
-/// upload's `destination:` before the guest exists, so nothing
-/// in the guest can be consulted for it. `bootstrap.sh` derives
-/// the clone directory from `$HOME` instead, which is why the
-/// two do not have to agree about the account's name.
-const DEPLOY_KEY_GUEST_PATH: &str = "/home/vagrant/.ssh/bombyx-deploy-key";
+/// Vagrant's shell provisioner uploads and runs exactly one
+/// script, and that script is [`ACCOUNT`]. So [`BOOTSTRAP`]
+/// travels as a plain upload, and [`ACCOUNT`] installs it afresh on
+/// every provision before it hands it to the agent, so the agent's
+/// own edits to an earlier copy never run.
+const BOOTSTRAP_STAGED_PATH: &str = concat!(staging_dir!(), "/bootstrap.sh");
+
+/// Where the deploy key is staged.
+///
+/// [`ACCOUNT`] writes it on to `~/.ssh/bombyx-deploy-key` in the
+/// agent's home, as the agent, where [`BOOTSTRAP`] tightens it
+/// and leaves it, at `0600`, for the life of the VM. It is not
+/// kept anywhere more private on purpose: the agent has to push
+/// with this key, so a placement it could not read would be a
+/// key that cannot do its job. `docs/trust-boundary.md` under
+/// **What this costs** holds what that exposes.
+const DEPLOY_KEY_STAGED_PATH: &str = concat!(staging_dir!(), "/deploy-key");
 
 /// Environment variable telling the guest that the operator's
 /// config named a `deploy_key`.
 ///
-/// The config, where [`ENV_FILE_PRESENT_ENV`] and
+/// This flag reports the config; [`ENV_FILE_PRESENT_ENV`] and
 /// [`CREDENTIAL_PRESENT_ENV`] report what bombyx staged. The
 /// key never passes through bombyx: it is already on the VM
 /// host and vagrant uploads it, so there is nothing to stage
 /// and nothing the two answers could disagree about.
 ///
 /// [`render`] sets it in the shell provisioner's `env:` block
-/// on every render. [`BOOTSTRAP`] branches on it.
+/// on every render. [`ACCOUNT`] branches on it to decide whether
+/// to place the key, and [`BOOTSTRAP`], which receives it because
+/// the name is on [`PRESERVE_ENV`]'s list, to decide whether to
+/// use or remove it.
 ///
-/// **Why the guest is told rather than left to look.** The
-/// upload lands at [`DEPLOY_KEY_GUEST_PATH`], in a directory the
-/// box's SSH user owns -- the user the agent works as. So a
-/// leftover from an interrupted provision, or one `touch` by
-/// code running in the VM, would answer "was a key configured?"
-/// on the operator's behalf.
+/// **Why the guest is told rather than left to look.** The key
+/// ends up in the agent's own `~/.ssh`, and the agent has `sudo`
+/// besides. So a leftover from an interrupted provision, or one
+/// `touch` by code running in the VM, would answer "was a key
+/// configured?" on the operator's behalf.
 ///
 /// **It is set on every render, `"1"` or `"0"`, and that is the
 /// half that matters.** Vagrant runs a shell provisioner
 /// through `config.ssh.shell`, whose default is `bash -l` -- a
 /// login shell, which sources `/etc/profile` and
-/// `/etc/profile.d/*.sh` before the script. The `env:` block is
-/// the only thing that overrides what those files set. So a
-/// name bombyx does not render is left to them, and an export
-/// placed there reaches `bootstrap.sh` unopposed. Rendering the
+/// `/etc/profile.d/*.sh` before [`ACCOUNT`] runs. The `env:`
+/// block is the only thing that overrides what those files set.
+/// So a name bombyx does not render is left to them, and an
+/// export placed there reaches [`ACCOUNT`] unopposed and, once
+/// the name is on the preserve list, [`BOOTSTRAP`] too. Rendering the
 /// entry only for a configured key would leave the *no-key*
 /// case forgeable in exactly the direction that matters: the
 /// guest could claim a key was configured and keep a stale
@@ -126,7 +164,8 @@ const REPO_ENV: &str = "BOMBYX_REPO";
 /// Branch or tag the guest checks out.
 const REF_ENV: &str = "BOMBYX_REF";
 
-/// Provisioning script the guest runs out of the clone.
+/// The project's own script, which [`BOOTSTRAP`] runs out of the
+/// clone.
 const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
 
 /// The project's name, which the guest uses as the last component
@@ -139,9 +178,8 @@ const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
 /// lets several agent VMs be told apart by the directory alone,
 /// rather than by asking `git` which repository each one holds.
 ///
-/// [`BOOTSTRAP`] falls back to `project` when this is unset, so a
-/// directory an older bombyx wrote -- whose Vagrantfile does not
-/// set this name -- still clones where it always did.
+/// [`BOOTSTRAP`] reads it as `${BOMBYX_PROJECT:-project}` only so
+/// that `set -u` cannot abort on it; [`render`] always sets it.
 const PROJECT_ENV: &str = "BOMBYX_PROJECT";
 
 /// The secrets file's name in the project directory on the VM
@@ -158,25 +196,14 @@ const PROJECT_ENV: &str = "BOMBYX_PROJECT";
 /// on a pipe.
 pub(crate) const ENV_FILE_NAME: &str = "bombyx.env";
 
-/// Where the secrets file lands inside the guest.
+/// Where the secrets file is staged.
 ///
-/// Written with a `~` rather than spelled out, unlike
-/// [`DEPLOY_KEY_GUEST_PATH`]. Vagrant expands an upload's
-/// `destination:` by running `printf <destination>` through a
-/// shell **inside the guest** before it sends anything -- read
-/// in vagrant 2.4.9, `plugins/provisioners/file/provisioner.rb`
-/// and `plugins/guests/linux/cap/shell_expand_guest_path.rb`.
-/// That shell runs as the account vagrant logs in as, because
-/// the communicator's `execute` defaults to `sudo: false`. So
-/// the file lands in that account's real home whatever the box
-/// calls the account.
-///
-/// [`BOOTSTRAP`] cannot spell the same path with `$HOME`. A
-/// project's `[env]` table may set `HOME`, and the shell
-/// provisioner carries that value while the upload above used
-/// the account's real home. The script reads the passwd entry
-/// instead, which is what the two agree on.
-const ENV_FILE_GUEST_PATH: &str = "~/.bombyx-env";
+/// [`ACCOUNT`] writes it on to `~/.bombyx-env` in the agent's
+/// home. [`BOOTSTRAP`] cannot spell that path with `$HOME`: a
+/// project's `[env]` table may set `HOME`, and the provisioner's
+/// environment carries that value. The script reads the passwd
+/// entry instead, which names the home [`ACCOUNT`] wrote into.
+const ENV_FILE_STAGED_PATH: &str = concat!(staging_dir!(), "/env");
 
 /// Environment variable telling the guest that a secrets file
 /// is being staged for it.
@@ -207,22 +234,50 @@ const ENV_FILE_PRESENT_ENV: &str = "BOMBYX_ENV_FILE_PRESENT";
 /// clone that needs it.
 pub(crate) const CREDENTIAL_FILE_NAME: &str = "bombyx.git-credentials";
 
-/// Where the git credential file lands inside the guest.
+/// Where the git credential file is staged.
 ///
-/// Spelled out rather than written with a `~`, unlike
-/// [`ENV_FILE_GUEST_PATH`] and like [`DEPLOY_KEY_GUEST_PATH`].
-/// The path ends up inside a `credential.helper` setting, and a
-/// helper string carrying a space is handed to a shell --
-/// measured, with `HOME` pointed at a temporary directory: a
-/// helper spelled `--file=$HOME/real` found the file there while
-/// `--file=$NOPE/real` found nothing. So a space in the path
-/// splits it in two and a `$` is expanded. A path bombyx chose
-/// has neither, and a project's `[env]` table can set `HOME`.
+/// [`ACCOUNT`] writes it on to `~/.bombyx-git-credentials` in the
+/// agent's home. That final path ends up inside a
+/// `credential.helper` setting, which `git` hands to a shell, so
+/// [`BOOTSTRAP`] builds it from `/home/` and the checked account
+/// name rather than from `$HOME`; its banner on `GIT_CRED` holds
+/// the measurement.
+const CREDENTIAL_STAGED_PATH: &str =
+    concat!(staging_dir!(), "/git-credentials");
+
+/// The three paths [`ACCOUNT`] writes the staged credentials to,
+/// relative to the agent's home, and which [`BOOTSTRAP`] reads.
 ///
-/// `BOOTSTRAP` carries the same literal, and
-/// `the_bootstrap_script_reads_the_credential_path_it_is_sent`
-/// is what catches a rename in one of the two.
-const CREDENTIAL_GUEST_PATH: &str = "/home/vagrant/.bombyx-git-credentials";
+/// Test-only: neither script is built from this list. It is what
+/// lets a test assert both scripts spell each path the same way,
+/// since neither file can see the other.
+#[cfg(test)]
+const GUEST_HOME_FILES: [&str; 3] = [
+    ".ssh/bombyx-deploy-key",
+    ".bombyx-env",
+    ".bombyx-git-credentials",
+];
+
+/// Environment variable naming the account the agent works as.
+///
+/// [`ACCOUNT`] creates the account under this name and hands
+/// [`BOOTSTRAP`] to it; [`BOOTSTRAP`] checks it is running as
+/// that account and builds its bookkeeping paths from
+/// `/home/<name>`.
+const GUEST_USER_ENV: &str = "BOMBYX_GUEST_USER";
+
+/// Environment variable listing, comma-separated, every other
+/// name in the provisioner's `env:` hash.
+///
+/// [`ACCOUNT`] runs as root and ends with `sudo -u <guest_user>`,
+/// which clears the environment by default. It passes this list
+/// to `--preserve-env`, so [`BOOTSTRAP`] and the project's script
+/// receive every variable the Vagrantfile set, the project's
+/// `[env]` table included. [`render`] builds the list from
+/// [`BOMBYX_ENV_NAMES`] and the `[env]` keys, and
+/// `the_preserve_list_names_every_variable_the_hash_sets` checks
+/// it against the hash that was actually rendered.
+const PRESERVE_ENV: &str = "BOMBYX_PRESERVE_ENV";
 
 /// Environment variable telling the guest that a git credential
 /// is being staged for it.
@@ -266,11 +321,9 @@ const GIT_HOST_ENV: &str = "BOMBYX_GIT_HOST";
 /// offer.
 ///
 /// Left *unset* -- rather than empty -- the guest falls back to
-/// `accept-new`. The one route there is a `vagrant provision`
-/// run by hand in a directory an older bombyx wrote, whose
-/// Vagrantfile does not set this name. That guest then behaves
-/// as the bombyx that wrote its directory did, which is the
-/// answer that surprises nobody.
+/// `accept-new` too, because [`BOOTSTRAP`] reads it as
+/// `${VAR:-}` so that `set -u` cannot abort on it. [`render`]
+/// always sets it.
 const HOST_KEYS_URL_ENV: &str = "BOMBYX_HOST_KEYS_URL";
 
 /// Environment variable telling the guest what the fetched
@@ -280,13 +333,16 @@ const HOST_KEYS_URL_ENV: &str = "BOMBYX_HOST_KEYS_URL";
 /// this may hold, and [`BOOTSTRAP`] matches them.
 const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 
-/// Every variable bombyx sets in the provisioner itself.
+/// Every variable bombyx sets in the provisioner itself, apart
+/// from [`PRESERVE_ENV`].
 ///
-/// Test-only, because nothing in the rendering reads it: the
-/// names are written into the template one by one, in shapes
-/// that differ. What this array buys is a list to walk. No count
-/// here on purpose -- the array grows, and a figure in prose
-/// costs the next reader a recount.
+/// The names are written into the template one by one, in shapes
+/// that differ, so this list is kept beside them by hand.
+/// [`render`] reads it to build [`PRESERVE_ENV`], and
+/// `the_preserve_list_names_every_variable_the_hash_sets` fails
+/// when a name reaches the template without reaching this list.
+/// No count here on purpose -- the array grows, and a figure in
+/// prose costs the next reader a recount.
 ///
 /// The `[env]` table refuses a name carrying the prefix
 /// `RESERVED_PREFIX` names, and `config::env` holds why. This
@@ -296,8 +352,8 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// to start with the prefix, and a bombyx variable added
 /// without it would fall outside the reservation with every
 /// test still green.
-#[cfg(test)]
-const BOMBYX_ENV_NAMES: [&str; 12] = [
+const BOMBYX_ENV_NAMES: [&str; 13] = [
+    GUEST_USER_ENV,
     REPO_ENV,
     REF_ENV,
     SCRIPT_ENV,
@@ -335,7 +391,21 @@ const BOMBYX_ENV_NAMES: [&str; 12] = [
 /// sits here.
 #[cfg(test)]
 fn bootstrap_code() -> String {
-    BOOTSTRAP
+    script_code(BOOTSTRAP)
+}
+
+/// [`ACCOUNT`] as code, the way [`bootstrap_code`] gives
+/// [`BOOTSTRAP`].
+#[cfg(test)]
+fn account_code() -> String {
+    script_code(ACCOUNT)
+}
+
+/// `script` with every comment line dropped and the rest
+/// flattened to single spaces; [`bootstrap_code`] says why.
+#[cfg(test)]
+fn script_code(script: &str) -> String {
+    script
         .replace("\\\n", " ")
         .lines()
         .filter(|l| !l.trim_start().starts_with('#'))
@@ -417,6 +487,43 @@ fn project_env_block(env: &BTreeMap<EnvName, EnvValue>) -> String {
         out.push_str(&ruby_string(value.as_str()));
     }
     out
+}
+
+/// The Ruby that stages [`BOOTSTRAP`] for [`ACCOUNT`].
+///
+/// Unconditional, unlike the credential uploads: every provision
+/// needs the script. [`render`] places it ahead of the shell
+/// provisioner, because [`ACCOUNT`] refuses when the staged copy
+/// is missing.
+fn bootstrap_block() -> String {
+    format!(
+        "  # bootstrap.sh travels as a plain upload, because the shell
+  # provisioner below runs account.sh. Every upload lands in the
+  # staging directory of the account vagrant logs in as, and
+  # account.sh moves each file on.
+  config.vm.provision \"file\",
+    source: File.expand_path({bootstrap}, __dir__),
+    destination: {staged}
+
+",
+        bootstrap = ruby_string(BOOTSTRAP_NAME),
+        staged = ruby_string(BOOTSTRAP_STAGED_PATH),
+    )
+}
+
+/// The value of [`PRESERVE_ENV`]: every name bombyx sets, then
+/// every `[env]` name, comma-separated.
+///
+/// `sudo --preserve-env` reads it as a list of names, so a name
+/// holding a comma would split in two. None can: bombyx's own are
+/// constants, and an [`EnvName`] is a shell identifier.
+fn preserve_list(env: &BTreeMap<EnvName, EnvValue>) -> String {
+    BOMBYX_ENV_NAMES
+        .iter()
+        .copied()
+        .chain(env.keys().map(EnvName::as_str))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Panics unless `staged` was built from `cfg`.
@@ -507,14 +614,19 @@ Vagrant.configure(\"2\") do |config|
     v.memory = {memory}{disk}{cpu_mode}
   end
 
+{bootstrap_upload}\
 {deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
-    path: {bootstrap},
-    # Vagrant runs a shell provisioner as root without this.
-    # `bootstrap.sh` acts only on the agent's own home, and a
-    # project that has to install something calls `sudo` from
-    # its own script.
-    privileged: false,
+    path: {account},
+    # As root, for one step: account.sh creates the agent's
+    # account, moves the staged files into its home, and hands
+    # bootstrap.sh to it through `sudo -u`. Nothing from the
+    # project's repository runs before that hand-over.
+    privileged: true,
     env: {{
+      \"{guest_user_env}\" => {guest_user},
+      # Every name below, which account.sh passes to
+      # `sudo --preserve-env` so that bootstrap.sh receives them.
+      \"{preserve_env_name}\" => {preserve_env},
       \"{repo_env}\" => {repo},
       \"{ref_env}\" => {git_ref},
       \"{script_env}\" => {script},
@@ -567,7 +679,12 @@ end
         memory = vm.memory.mib(),
         disk = disk_setting(vm.disk),
         cpu_mode = cpu_mode_setting(vm.provider, vm.cpu_mode),
-        bootstrap = ruby_string(BOOTSTRAP_NAME),
+        bootstrap_upload = bootstrap_block(),
+        account = ruby_string(ACCOUNT_NAME),
+        guest_user_env = GUEST_USER_ENV,
+        guest_user = ruby_string(vm.guest_user.as_str()),
+        preserve_env_name = PRESERVE_ENV,
+        preserve_env = ruby_string(&preserve_list(&cfg.env)),
         project_env = project_env_block(&cfg.env),
         repo = ruby_string(source.repo.as_str()),
         git_ref = ruby_string(source.git_ref.as_str()),
@@ -629,8 +746,8 @@ fn cpu_mode_setting(provider: Provider, mode: Option<CpuMode>) -> String {
 ///
 /// [`render`] places this ahead of the shell provisioner.
 /// Vagrant runs provisioners in the order the file declares
-/// them, and [`BOOTSTRAP`] looks for the key as soon as it
-/// starts.
+/// them, and [`ACCOUNT`] moves the staged key on before it hands
+/// over to [`BOOTSTRAP`].
 ///
 /// The upload is conditional, and that is not the same as
 /// tolerating a missing key. `crate::remote::require_file`
@@ -676,7 +793,7 @@ fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
 
 ",
         key = ruby_string(key.as_str()),
-        dest = ruby_string(DEPLOY_KEY_GUEST_PATH),
+        dest = ruby_string(DEPLOY_KEY_STAGED_PATH),
     )
 }
 
@@ -722,7 +839,7 @@ fn env_file_block(staged: bool) -> String {
 
 ",
         name = ruby_string(ENV_FILE_NAME),
-        dest = ruby_string(ENV_FILE_GUEST_PATH),
+        dest = ruby_string(ENV_FILE_STAGED_PATH),
     )
 }
 
@@ -758,7 +875,7 @@ fn credential_block(staged: bool) -> String {
 
 ",
         name = ruby_string(CREDENTIAL_FILE_NAME),
-        dest = ruby_string(CREDENTIAL_GUEST_PATH),
+        dest = ruby_string(CREDENTIAL_STAGED_PATH),
     )
 }
 
@@ -773,15 +890,15 @@ fn credential_block(staged: bool) -> String {
 /// `CREDENTIAL_FILE_NAME`, and `crate::plan` writes both. Not
 /// rustdoc links: those constants are crate-private, and a
 /// public page may not link to one. `crate::remote::write`'s
-/// own header lists all four.
+/// own header lists all five.
 ///
 /// The list exists once, here, and everything else reads it:
 /// `plan` to build the write commands, and the tests to check
 /// each file is safe to send.
 ///
 /// That is the whole reason for the function. If the list were
-/// written out separately in each of those places, adding a
-/// third file would mean remembering all of them -- and the one
+/// written out separately in each of those places, adding another
+/// file would mean remembering all of them -- and the one
 /// people forget is the test, so the new file would be written
 /// to the host without ever being checked.
 ///
@@ -789,10 +906,11 @@ fn credential_block(staged: bool) -> String {
 ///
 /// Whenever [`render`] does, and for the same reason.
 #[must_use]
-pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 2] {
+pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 3] {
     [
         (VAGRANTFILE_NAME, render(cfg, staged)),
         (BOOTSTRAP_NAME, BOOTSTRAP.to_owned()),
+        (ACCOUNT_NAME, ACCOUNT.to_owned()),
     ]
 }
 
@@ -804,6 +922,11 @@ pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 2] {
 #[cfg(test)]
 mod bootstrap_tests;
 
+// The same kind of lint, over `account.sh`; its header says what
+// the lints pin.
+#[cfg(test)]
+mod account_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,8 +934,8 @@ mod tests {
 
     use crate::config::{
         BoxName, CpuMode, DeployKeyPath, EnvFilePath, EnvName, EnvValue,
-        GitRef, Hostname, Memory, Provider, RESERVED_PREFIX, RepoUrl,
-        ScriptPath, Source, Vm,
+        GitRef, GuestUser, Hostname, Memory, Provider, RESERVED_PREFIX,
+        RepoUrl, ScriptPath, Source, Vm,
     };
 
     /// A `deploy_key` value every rule accepts, written once so
@@ -837,6 +960,7 @@ mod tests {
             disk: None,
             cpu_mode: None,
             hostname: None,
+            guest_user: GuestUser::default(),
         };
         cfg.source = Source {
             repo: RepoUrl::parse("https://example.invalid/p.git")
@@ -1239,8 +1363,8 @@ mod tests {
     }
 
     #[test]
-    fn points_the_provisioner_at_the_bootstrap_script() {
-        // The name is a literal here, not `BOOTSTRAP_NAME`.
+    fn points_the_provisioner_at_the_account_script() {
+        // The name is a literal here, not `ACCOUNT_NAME`.
         // Asserting the constant against a rendering that
         // interpolates the same constant compares it with
         // itself: measured, renaming it to
@@ -1253,7 +1377,7 @@ mod tests {
         // cross-file agreement to check here, which is why this
         // is a plain rendering test.
         let out = rendered_for(&cfg_with(Provider::Libvirt));
-        assert!(out.contains("path: \"bootstrap.sh\""), "{out}");
+        assert!(out.contains("path: \"account.sh\""), "{out}");
         assert!(out.contains("config.vm.provision"), "{out}");
     }
 
@@ -1293,7 +1417,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains(&format!("destination: \"{DEPLOY_KEY_GUEST_PATH}\"")),
+            out.contains(&format!("destination: \"{DEPLOY_KEY_STAGED_PATH}\"")),
             "{out}"
         );
     }
@@ -1314,16 +1438,17 @@ mod tests {
     }
 
     #[test]
-    fn no_deploy_key_renders_no_upload_at_all() {
+    fn no_deploy_key_renders_no_key_upload() {
         // A public repository needs no credential, and an
         // upload block with an empty path would fail every
-        // `up`.
+        // `up`. The one upload left is `bootstrap.sh`'s.
         let out = rendered_for(&cfg_with(Provider::Libvirt));
-        for absent in [
-            "config.vm.provision \"file\"",
-            "File.expand_path",
-            DEPLOY_KEY_GUEST_PATH,
-        ] {
+        assert_eq!(
+            out.matches("config.vm.provision \"file\"").count(),
+            1,
+            "{out}"
+        );
+        for absent in ["bombyx_deploy_key", DEPLOY_KEY_STAGED_PATH] {
             assert!(!out.contains(absent), "{absent} rendered:\n{out}");
         }
     }
@@ -1377,28 +1502,209 @@ mod tests {
         );
     }
 
+    /// Every staged path, as the Vagrantfile writes it.
+    const STAGED_PATHS: [&str; 4] = [
+        BOOTSTRAP_STAGED_PATH,
+        DEPLOY_KEY_STAGED_PATH,
+        ENV_FILE_STAGED_PATH,
+        CREDENTIAL_STAGED_PATH,
+    ];
+
     #[test]
-    fn the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to() {
-        // Two files have to agree on one path and neither can
+    fn the_account_script_reads_every_path_the_vagrantfile_stages() {
+        // Two files have to agree on each path and neither can
         // see the other: the Vagrantfile uploads to it and
-        // `bootstrap.sh` has it as a literal. This is what
-        // catches a rename in one of them.
+        // `account.sh` reads it. Over the code, not the raw
+        // text, so a name mentioned only in a comment does not
+        // count.
+        let code = account_code();
+        let dir = STAGING_DIR
+            .strip_prefix("~/")
+            .expect("the staging directory is under the login home");
         assert!(
-            BOOTSTRAP.contains(DEPLOY_KEY_GUEST_PATH),
-            "{DEPLOY_KEY_GUEST_PATH} is not in the bootstrap script"
+            code.contains(&format!("/{dir}\"")),
+            "account.sh does not name {dir}:\n{code}"
+        );
+        for path in STAGED_PATHS {
+            let name = path
+                .strip_prefix(&format!("{STAGING_DIR}/"))
+                .expect("every staged path is in the staging directory");
+            assert!(
+                code.contains(&format!("\"$STAGING/{name}\"")),
+                "account.sh never reads the staged {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_guest_scripts_spell_each_credential_path_the_same_way() {
+        // `account.sh` writes each credential into the agent's
+        // home and `bootstrap.sh` reads it there. A rename in one
+        // file would leave the other looking at an empty path,
+        // and the guest would refuse the key as never arriving.
+        let account = account_code();
+        let bootstrap = bootstrap_code();
+        for file in GUEST_HOME_FILES {
+            assert!(
+                account.contains(&format!("\"$home/{file}\"")),
+                "account.sh does not write {file}"
+            );
+            assert!(
+                bootstrap.contains(&format!("/{file}\"")),
+                "bootstrap.sh does not read {file}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_guest_scripts_refuse_the_same_account_names() {
+        // Each script checks the name for itself, because each
+        // uses it in a place a shell reads. One pattern in both
+        // means a tightening in one cannot miss the other.
+        let pattern = "\"\" | [!a-z_]* | *[!a-z0-9_-]*)";
+        assert!(account_code().contains(pattern), "account.sh");
+        assert!(bootstrap_code().contains(pattern), "bootstrap.sh");
+    }
+
+    #[test]
+    fn the_one_shell_provisioner_runs_the_account_script_as_root() {
+        // Root is needed to create the account and its sudoers
+        // file, read the staging directory and install
+        // `bootstrap.sh`, and `account.sh` is the only file that
+        // gets it: it hands `bootstrap.sh` to the agent before
+        // anything from the repository runs. The other
+        // half lives in `bootstrap_tests`, as
+        // `nothing_in_the_bootstrap_script_asks_for_root`.
+        //
+        // Counted rather than found. A second shell provisioner
+        // added to the template would run a second script, and
+        // a check for one substring would stay green beside it.
+        //
+        // `cfg_with_key` rather than `cfg_with`, so a second
+        // file provisioner is rendered too and the count has
+        // something to be wrong about.
+        for provider in [Provider::Libvirt, Provider::Hyperv] {
+            let mut cfg = cfg_with_key();
+            cfg.vm.provider = provider;
+            let out = rendered_for(&cfg);
+            let shell_blocks: Vec<&str> = out
+                .split("config.vm.provision ")
+                .skip(1)
+                .filter(|b| b.starts_with("\"shell\""))
+                .collect();
+            assert_eq!(shell_blocks.len(), 1, "one shell provisioner:\n{out}");
+            let block = shell_blocks[0];
+            assert!(block.contains("path: \"account.sh\""), "{block}");
+            // The whole clause, which pins the comma that keeps
+            // the Ruby parseable.
+            assert!(
+                block.contains("privileged: true,\n    env: {\n"),
+                "the flag must sit on the shell provisioner:\n{block}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bootstrap_script_is_staged_before_the_account_script_runs() {
+        // Vagrant runs provisioners in the order the file
+        // declares them, and `account.sh` refuses when the
+        // staged script is missing.
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
+        let upload = out
+            .find(&format!("destination: \"{BOOTSTRAP_STAGED_PATH}\""))
+            .expect("bootstrap.sh must be staged");
+        let shell = out
+            .find("config.vm.provision \"shell\"")
+            .expect("the shell provisioner must be rendered");
+        assert!(upload < shell, "the upload must come first:\n{out}");
+        assert!(
+            out.contains("File.expand_path(\"bootstrap.sh\", __dir__)"),
+            "{out}"
         );
     }
 
     #[test]
-    fn the_bootstrap_script_reads_the_credential_path_it_is_sent() {
-        // The same trap as the deploy key's path above: the
-        // Vagrantfile uploads to this path and `bootstrap.sh`
-        // holds it as a literal, and neither file can see the
-        // other.
-        assert!(
-            BOOTSTRAP.contains(CREDENTIAL_GUEST_PATH),
-            "{CREDENTIAL_GUEST_PATH} is not in the bootstrap script"
-        );
+    fn every_upload_lands_in_the_staging_directory() {
+        // The login account can write only its own home, and
+        // `account.sh` clears exactly this directory once it has
+        // moved the files on. An upload anywhere else would be
+        // left behind in the login account's home.
+        let mut cfg = cfg_with_credential();
+        cfg.source.deploy_key =
+            Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
+        let out = rendered_for(&cfg);
+        let dests: Vec<&str> = out
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("destination: "))
+            .collect();
+        assert_eq!(dests.len(), STAGED_PATHS.len(), "{out}");
+        for dest in dests {
+            assert!(
+                dest.starts_with(&format!("\"{STAGING_DIR}/")),
+                "{dest} is outside the staging directory"
+            );
+        }
+        for path in STAGED_PATHS {
+            assert!(
+                path.starts_with(&format!("{STAGING_DIR}/")),
+                "{path} is outside the staging directory"
+            );
+        }
+    }
+
+    #[test]
+    fn the_preserve_list_names_every_variable_the_hash_sets() {
+        // `sudo` drops every variable the list leaves out, so a
+        // name missing here reaches the root script and never
+        // reaches `bootstrap.sh` or the project's own script.
+        // The hash is read back from the rendering rather than
+        // from `BOMBYX_ENV_NAMES`, which is the list this checks.
+        let out = rendered_for(&cfg_with_env());
+        let hash = out
+            .split_once("env: {\n")
+            .expect("the provisioner has an env hash")
+            .1
+            .split_once("\n    }")
+            .expect("the hash closes")
+            .0;
+        let mut set: Vec<&str> = hash
+            .lines()
+            .map(str::trim)
+            .filter_map(|l| l.strip_prefix('"'))
+            .filter_map(|l| l.split_once('"').map(|(name, _)| name))
+            .filter(|name| *name != PRESERVE_ENV)
+            .collect();
+        set.sort_unstable();
+        let listed = rendered(&out, PRESERVE_ENV);
+        let mut names: Vec<&str> =
+            listed.trim_matches('"').split(',').collect();
+        names.sort_unstable();
+        assert_eq!(names, set);
+        assert!(set.contains(&"NODE_MAJOR"), "the fixture's [env]:\n{out}");
+    }
+
+    #[test]
+    fn the_guest_user_is_rendered_from_the_config() {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        assert_eq!(rendered(&rendered_for(&cfg), GUEST_USER_ENV), "\"agent\"");
+        cfg.vm.guest_user = GuestUser::parse("dev").expect("a plain name");
+        assert_eq!(rendered(&rendered_for(&cfg), GUEST_USER_ENV), "\"dev\"");
+    }
+
+    #[test]
+    fn files_carries_both_scripts_unchanged() {
+        let cfg = cfg_with(Provider::Libvirt);
+        let out = files(&cfg, &cfg.staged_for_tests());
+        let find = |name: &str| {
+            out.iter()
+                .find(|(n, _)| *n == name)
+                .unwrap_or_else(|| panic!("{name} is not written"))
+                .1
+                .clone()
+        };
+        assert_eq!(find(BOOTSTRAP_NAME), BOOTSTRAP);
+        assert_eq!(find(ACCOUNT_NAME), ACCOUNT);
+        assert!(find(VAGRANTFILE_NAME).contains("Vagrant.configure"));
     }
 
     /// [`cfg_with_env_file`], carrying a `repo_token` too.
@@ -1421,7 +1727,7 @@ mod tests {
             "the upload block is missing:\n{with}"
         );
         assert!(
-            with.contains(&format!("destination: {CREDENTIAL_GUEST_PATH:?}")),
+            with.contains(&format!("destination: {CREDENTIAL_STAGED_PATH:?}")),
             "the destination is not the guest path:\n{with}"
         );
         assert!(
@@ -1468,7 +1774,7 @@ mod tests {
             "the upload block is missing:\n{with}"
         );
         assert!(
-            with.contains(&format!("destination: {ENV_FILE_GUEST_PATH:?}")),
+            with.contains(&format!("destination: {ENV_FILE_STAGED_PATH:?}")),
             "the destination is not the guest path:\n{with}"
         );
         assert!(
@@ -1584,78 +1890,6 @@ mod tests {
             assert!(
                 !contents.contains("myproject-unrendered"),
                 "{name} holds part of the workstation path"
-            );
-        }
-    }
-
-    #[test]
-    fn the_shell_provisioner_runs_unprivileged() {
-        // Vagrant runs a shell provisioner as root unless the
-        // Vagrantfile says otherwise, and `bootstrap.sh` needs
-        // no root: every command in it acts on the agent's own
-        // home, and a project that has to install something
-        // calls `sudo` from its own script.
-        //
-        // The other half of this arrangement lives in
-        // `bootstrap_tests`, as
-        // `nothing_in_the_bootstrap_script_asks_for_root`. This
-        // test asserts the flag is set; that one asserts no
-        // line in the script defeats it.
-        //
-        // Root here would also put the operator's `[env]`
-        // values into root's environment for the whole of
-        // `bootstrap.sh`, where `PATH` decides which `git` and
-        // which `readlink` run. Measured: an `[env]` entry
-        // setting `PATH` reaches this script's own environment,
-        // and `/etc/profile` does not overwrite it -- a garbage
-        // value stops the run at the `#!/usr/bin/env bash`
-        // line.
-        //
-        // Counted rather than found. A second shell
-        // provisioner added to the template would leave a
-        // single-substring check green while running as root,
-        // and the flag's own guard has the failure mode the
-        // comment above describes for the script.
-        //
-        // `cfg_with_key` rather than `cfg_with`, so the file
-        // provisioner is rendered too and the count has
-        // something to be wrong about.
-        for provider in [Provider::Libvirt, Provider::Hyperv] {
-            let mut cfg = cfg_with_key();
-            cfg.vm.provider = provider;
-            let out = rendered_for(&cfg);
-            assert!(!out.contains("privileged: true"), "{out}");
-            // Per shell provisioner, not per file. `privileged:`
-            // is legal on a `file` provisioner as well, so
-            // counting the flag over the whole rendering would
-            // let one added there stand in for a second shell
-            // provisioner that carries none.
-            //
-            // Each block runs to the next `config.vm.provision`
-            // or to the end, and the flag has to be inside it.
-            let shell_blocks: Vec<&str> = out
-                .split("config.vm.provision ")
-                .skip(1)
-                .filter(|b| b.starts_with("\"shell\""))
-                .collect();
-            assert!(
-                !shell_blocks.is_empty(),
-                "the fixture must render a shell provisioner:\n{out}"
-            );
-            for block in shell_blocks {
-                assert!(
-                    block.contains("privileged: false"),
-                    "a shell provisioner with no flag:\n{block}\n\
-                     in:\n{out}"
-                );
-            }
-            // And the whole clause, which pins the comma that
-            // keeps the Ruby parseable. Only the shell
-            // provisioner has an `env:` hash, so this also says
-            // which provisioner the flag belongs to.
-            assert!(
-                out.contains("privileged: false,\n    env: {\n"),
-                "the flag must sit on the shell provisioner:\n{out}"
             );
         }
     }

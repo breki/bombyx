@@ -300,10 +300,7 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // the status check and the boot plan follows it. Booting a
     // machine that is already running would rewrite files and stage
     // secrets for a run vagrant no-ops -- issue #89.
-    assert_eq!(
-        programs(&lines),
-        vec!["ssh", "ssh", "ssh", "ssh", "ssh", "ssh"]
-    );
+    assert_eq!(programs(&lines), vec!["ssh"; 7]);
     assert!(lines[0].contains("##bombyx"), "{}", lines[0]);
     assert!(lines[0].contains("vagrant 'status'"), "{}", lines[0]);
     assert!(lines[1].contains("mkdir -p ~/'vms/myproject'"));
@@ -313,13 +310,14 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     assert!(lines[2].contains("cat > ~/'vms/myproject/Vagrantfile'"));
     assert!(lines[2].contains("bytes on stdin"), "{}", lines[2]);
     assert!(lines[3].contains("cat > ~/'vms/myproject/bootstrap.sh'"));
+    assert!(lines[4].contains("cat > ~/'vms/myproject/account.sh'"));
     assert!(
-        lines[4].contains(&format!(
+        lines[5].contains(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'up';",
             vagrant_env()
         )),
         "{}",
-        lines[4]
+        lines[5]
     );
     // The snapshot save comes last, so it records a machine that
     // has finished booting -- and it is the guarded save, not the
@@ -327,12 +325,12 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // either, which is the one difference that decides whether
     // `up` overwrites the operator's return point every run.
     assert!(
-        lines[5].contains("vagrant 'snapshot' 'save' 'fresh-install'"),
+        lines[6].contains("vagrant 'snapshot' 'save' 'fresh-install'"),
         "{}",
-        lines[5]
+        lines[6]
     );
-    assert!(lines[5].contains("if ! printf"), "{}", lines[5]);
-    assert!(!lines[5].contains("'-f'"), "{}", lines[5]);
+    assert!(lines[6].contains("if ! printf"), "{}", lines[6]);
+    assert!(!lines[6].contains("'-f'"), "{}", lines[6]);
 }
 
 #[test]
@@ -445,15 +443,15 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
     // `up` reports success.
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "provision"]);
-    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
+    assert_eq!(programs(&lines), vec!["ssh"; 5]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
-        lines[3].contains(&format!(
+        lines[4].contains(&format!(
             "cd ~/'vms/myproject' && {} vagrant 'provision';",
             vagrant_env()
         )),
         "{}",
-        lines[3]
+        lines[4]
     );
 }
 
@@ -461,15 +459,15 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
 fn scratch_writes_into_a_project_scoped_dir() {
     let dir = project_dir();
     let lines = dry_run(&dir, &["--dry-run", "scratch", "pr-1234"]);
-    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh", "ssh"]);
+    assert_eq!(programs(&lines), vec!["ssh"; 5]);
     assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
-        lines[3].contains(&format!(
+        lines[4].contains(&format!(
             "cd ~/'vms/scratch/myproject/pr-1234' && {} vagrant 'up';",
             vagrant_env()
         )),
         "{}",
-        lines[3]
+        lines[4]
     );
 }
 
@@ -968,7 +966,7 @@ fn cli_help_flag() {
 /// asserts that bombyx produced the text it meant to, and none
 /// of them can say whether vagrant accepts it. A syntax error
 /// would otherwise surface on the VM host, after bombyx has
-/// already created the directory and written both files there.
+/// already created the directory and written its files there.
 ///
 /// It lives here rather than beside the renderer so its body,
 /// which never runs under coverage, does not count against that
@@ -1000,16 +998,14 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
         &path,
     )
     .unwrap();
-    std::fs::write(
-        dir.path().join(bombyx::vagrantfile::VAGRANTFILE_NAME),
-        bombyx::vagrantfile::render(&cfg, &bombyx::config::Staged::default()),
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join(bombyx::vagrantfile::BOOTSTRAP_NAME),
-        bombyx::vagrantfile::BOOTSTRAP,
-    )
-    .unwrap();
+    // Every file bombyx generates, not a hand-picked pair: the
+    // Vagrantfile's shell provisioner names `account.sh` in its
+    // `path:`, and vagrant refuses a path that does not exist.
+    for (name, contents) in
+        bombyx::vagrantfile::files(&cfg, &bombyx::config::Staged::default())
+    {
+        std::fs::write(dir.path().join(name), contents).unwrap();
+    }
 
     let out = std::process::Command::new("vagrant")
         .arg("validate")

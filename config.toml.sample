@@ -195,6 +195,20 @@ memory = "8GB"
 #
 # hostname = "myproject-agent"
 
+# Optional. The account the agent works as inside the guest.
+# Left out, it is `agent`. bombyx creates the account on the
+# first provision, with its home at /home/<name> and passwordless
+# `sudo`, and the clone, the project's script and `bombyx shell`
+# all run as it. Vagrant keeps logging in as the box's own
+# account, usually `vagrant`, which the agent never works as.
+#
+# Lowercase letters, digits, `_` and `-`, starting with a letter
+# or `_`, at most 32 characters, and neither `root` nor
+# `vagrant`. An account the box already has is used as it is,
+# provided its home is /home/<name>.
+#
+# guest_user = "agent"
+
 # The guest clones this repository once it is running. All
 # three keys are required. bombyx sends no project file
 # anywhere: the VM fetches the repository itself and runs
@@ -425,9 +439,9 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # a shell reading the same file would do.
 #
 # Inside the guest the credential lands at
-# `/home/vagrant/.bombyx-git-credentials` at mode 0600, and
-# bombyx points the clone at it so the agent can fetch and push
-# there afterwards. Take these keys out of this file and the
+# `.bombyx-git-credentials` in the agent's home, at mode 0600,
+# and bombyx points the clone at it so the agent can fetch and
+# push there afterwards. Take these keys out of this file and the
 # next run removes it from the guest.
 #
 # What this does not do: the token still ends up inside the VM,
@@ -463,10 +477,10 @@ script = ".bombyx/provision.sh"   # path inside the clone
 #
 # These variables reach more than your own script, which is the
 # one surprise in this table. Vagrant puts the whole of it in
-# the environment of the provisioner, and bombyx's own
-# bootstrap script is that provisioner -- so a name that
-# changes what that script does changes what bombyx does,
-# rather than what your script does. bombyx refuses those names
+# the environment of the provisioner, and bombyx's own guest
+# scripts run there before yours -- so a name that changes what
+# those scripts do changes what bombyx does, rather than what
+# your script does. bombyx refuses those names
 # while it reads this file, with a message saying so, and this
 # is the list:
 #
@@ -474,6 +488,11 @@ script = ".bombyx/provision.sh"   # path inside the clone
 #   LD_PRELOAD  LD_LIBRARY_PATH
 #   GIT_SSH_COMMAND  GIT_CONFIG_COUNT  GIT_CONFIG_GLOBAL
 #   GIT_CONFIG_SYSTEM  GIT_DIR  GIT_WORK_TREE
+#   SUDO_USER
+#
+# `SUDO_USER` is on the list for `account.sh`, the guest script
+# that runs as root first: it reads that name to find where
+# Vagrant staged the uploads.
 #
 # Set any of those inside your own script, where they do what
 # you meant. Two of them are the ones worth knowing about:

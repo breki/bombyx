@@ -70,7 +70,7 @@ they require manual approval every time.**
 bombyx drives isolated AI-agent VMs on a libvirt host,
 usually a second machine reached over SSH. It is the tooling
 half of the agent-VM isolation strategy: bombyx generates the
-Vagrantfile and a bootstrap script from the operator's own
+Vagrantfile and two guest scripts from the operator's own
 `config.toml`, writes them onto the VM host and runs `vagrant`
 there. When `host` names the machine bombyx is running on, it
 runs the same script through `sh -c` instead of `ssh`. Neither the

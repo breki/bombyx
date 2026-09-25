@@ -62,15 +62,16 @@ One qualification comes from the threat model:
 - A compromised VM host still learns the project, because it runs
   the hypervisor. That stronger property was never on offer.
 
-bombyx writes two files onto the VM host, both generated from
+bombyx writes three files onto the VM host, all generated from
 `[vm]` and `[source]` rather than taken from the repository:
 
 | File | Generated from | Notes |
 |---|---|---|
 | Vagrantfile | `[vm]`, `[source]`, `[env]` | Carries every `[env]` value; stays on the host for the life of the VM; written owner-only (default umask would be world-readable); disables Vagrant's default `/vagrant` share. |
-| Bootstrap script | `[vm]`, `[source]` | Runs inside the guest to clone the project and run its hooks. |
+| Account script | nothing; the same for every project | Runs inside the guest as root, first: creates the `guest_user` account, gives it passwordless `sudo`, moves the staged credentials into its home, and hands over to the bootstrap script. Reads nothing from the repository. |
+| Bootstrap script | nothing; the same for every project | Runs inside the guest as the `guest_user` account, to clone the project and run its hooks. Its per-project inputs arrive through the Vagrantfile's `env:`. |
 
-Both files travel on the commands' standard input, not in their
+All three travel on the commands' standard input, not in their
 arguments. This is a trust decision: every account on a Unix
 machine can list the full command line of every running process,
 so an argument would be readable by every other account while the
@@ -171,14 +172,15 @@ running; the Vagrantfile does not.
 - The workstation never holds the deploy key: the path travels in
   the Vagrantfile, and `vagrant` on the host reads it, so the key
   exists on the VM host and in the guest and nowhere else.
-- Inside the guest the key is owned by the agent's own user, and
-  that is deliberate: work leaves the VM by being pushed, and
-  pushing needs the key. A key the agent could not read would be a
-  key it could not push with.
+- Inside the guest the key is owned by the agent's own account,
+  `guest_user`, and that is deliberate: work leaves the VM by being
+  pushed, and pushing needs the key. A key the agent could not read
+  would be a key it could not push with.
 - `bootstrap.sh` tightens the mode to keep *other* guest accounts
   out; against the agent itself the mode buys nothing, and nothing
-  can. Running the provisioner unprivileged does not change this,
-  because that user has passwordless `sudo`.
+  can. Giving the agent an account of its own, rather than
+  `vagrant`, does not change this either, because that account has
+  passwordless `sudo`.
 
 ### Host-key verification
 

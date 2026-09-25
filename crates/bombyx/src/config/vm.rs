@@ -32,6 +32,7 @@ use serde::Deserialize;
 
 use super::error::FieldError;
 use super::guards::check_renderable;
+use super::guest_user::GuestUser;
 use crate::name::ProjectName;
 use crate::newtype::{
     checked_str_newtype, checked_str_parse, checked_str_try_from,
@@ -242,6 +243,16 @@ pub struct Vm {
     /// `crate::remote::VM_HOSTNAME_ENV`, which carries the VM
     /// host's name into the guest.
     pub hostname: Option<Hostname>,
+
+    /// The account the agent works as inside the guest.
+    ///
+    /// `agent` when the key is absent. The Vagrantfile's
+    /// privileged provisioner creates the account and hands the
+    /// clone, the project's script and `bombyx shell` to it, so
+    /// the agent never works as `vagrant`, the account Vagrant
+    /// itself logs in with. A [`GuestUser`], so the name rules
+    /// have run against whatever is in here.
+    pub guest_user: GuestUser,
 }
 
 /// The `[vm]` table as it parses, before its one cross-field rule.
@@ -270,6 +281,8 @@ struct VmFields {
     cpu_mode: Option<CpuMode>,
     #[serde(default)]
     hostname: Option<Hostname>,
+    #[serde(default)]
+    guest_user: GuestUser,
 }
 
 /// Refuses a libvirt-only field set on another provider.
@@ -325,6 +338,7 @@ impl TryFrom<VmFields> for Vm {
             disk: fields.disk,
             cpu_mode: fields.cpu_mode,
             hostname: fields.hostname,
+            guest_user: fields.guest_user,
         })
     }
 }
@@ -1116,6 +1130,23 @@ mod tests {
             err.to_string().contains("letters, digits and hyphens"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn the_guest_user_defaults_to_agent_and_is_checked_when_set() {
+        let base = "box = \"b\"\ncpus = 2\nmemory = 2048\n";
+        let absent = toml::from_str::<Vm>(base).expect("a minimal table");
+        assert_eq!(absent.guest_user.as_str(), "agent");
+
+        let set =
+            toml::from_str::<Vm>(&format!("{base}guest_user = \"dev\"\n"))
+                .expect("a plain account name");
+        assert_eq!(set.guest_user.as_str(), "dev");
+
+        let err =
+            toml::from_str::<Vm>(&format!("{base}guest_user = \"vagrant\"\n"))
+                .expect_err("vagrant must be refused");
+        assert!(err.to_string().contains("guest_user"), "{err}");
     }
 
     #[test]

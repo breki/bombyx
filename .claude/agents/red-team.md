@@ -40,7 +40,8 @@ missing deny/forbid lint levels, vulnerable dependencies.
 
 **The files bombyx writes onto the VM host**: the Vagrantfile,
 which `crates/bombyx/src/vagrantfile.rs` renders with config
-values pasted into Ruby; the bootstrap script
+values pasted into Ruby; the two guest scripts,
+`crates/bombyx/templates/account.sh`, which runs as root, and
 `crates/bombyx/templates/bootstrap.sh`; and the commands
 `crates/bombyx/src/plan.rs` and
 `crates/bombyx/src/remote/write.rs` run there. Look for a value

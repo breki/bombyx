@@ -1082,9 +1082,8 @@ pub fn save_snapshot_if_absent(
 /// segment. bombyx then joins the project name onto that root,
 /// so every path derived from a loaded `Config` is already at
 /// least two real segments deep. A type running the rules once
-/// is what keeps the write path (`mkdir`, then the two file
-/// writes) and this removal path agreeing about which roots are
-/// usable.
+/// is what keeps the write path (`mkdir`, then the file writes)
+/// and this removal path agreeing about which roots are usable.
 ///
 /// The `debug_assert` catches a caller that builds a path some
 /// other way; it is not the safety mechanism.
@@ -1107,35 +1106,68 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// local stdio looks like. Every other vagrant call decides per run.
 /// On the guest side, `vagrant ssh -c` asks for a TTY by default.
 ///
-/// **The shell opens in the project's clone**, which the guest's
-/// bootstrap script puts at `$HOME/<project>`. A bare `vagrant ssh`
-/// would open in `$HOME`. So the guest runs `cd`, then `exec`s a
-/// login shell:
+/// **The shell opens as the agent's account, in its clone.**
+/// `vagrant ssh` logs in as the box's own account, usually
+/// `vagrant`, and the clone belongs to the account `guest_user`
+/// names. The login account has passwordless `sudo` on a Vagrant
+/// box, which is what lets it run `sudo -u <guest_user>`; the
+/// grant `account.sh` writes is the agent's own. The shell that
+/// `sudo` starts `cd`s into `$HOME/<project>` -- where
+/// `bootstrap.sh` clones -- then `exec`s a login shell:
 ///
-/// - `$SHELL` sits inside the single quotes that wrap the whole
-///   guest command for the VM host, so the VM host passes it on
-///   unexpanded and the guest expands it to its own user's shell.
-/// - `exec` replaces the `bash -c` that vagrant started, so one
-///   `exit` leaves the VM.
+/// - `$HOME` and `$SHELL` are the agent's: `-H` sets `HOME` from
+///   its passwd entry whatever the box's sudoers policy keeps, and
+///   `sudo` sets `SHELL` the same way. Both sit inside single
+///   quotes all the way down, so neither the VM host nor the
+///   login shell expands them first.
+/// - The project name travels as `$1`, a separate argument, so
+///   the script is the same text for every project.
+/// - `exec` replaces each shell on the way, so one `exit` leaves
+///   the VM.
 /// - `-l` makes the shell read the login profile, as the shell a
 ///   bare `vagrant ssh` starts does.
 ///
-/// The `cd` and the `exec` are joined by `;` rather than `&&`.
-/// So when the clone is missing, `cd` prints its error and the
-/// operator still gets a shell, in `$HOME`, to look into why.
+/// `|| cd` falls back to the account's home when the clone is
+/// missing, so the operator still gets a shell, after `cd` prints
+/// its error, to look into why. Without it the shell would open
+/// in whatever directory `sudo` inherited. A project whose
+/// `[env]` table sets `HOME` lands there too: its clone follows
+/// that value, while this `$HOME` is the account's passwd home.
 ///
-/// **Two layers of single quotes nest here.** The clone path
-/// arrives quoted as `~/'<project>'`, and vagrant wraps the whole
-/// command in its own `bash -l -c '...'`. Left alone, the inner
-/// `'` would close vagrant's outer quote early. Vagrant rewrites
-/// each inner `'` before wrapping, which vagrant 2.4.9's
-/// `ssh_run.rb` shows and a run against a real VM host confirmed.
-/// So the path can stay quoted the way every other value in a
-/// remote script is.
+/// **A missing account gets a shell too.** The account is missing
+/// when `account.sh` refused before creating it -- a box without
+/// `useradd`, a renamed `guest_user` -- or when bombyx 0.7.0 or
+/// earlier built the VM. `sudo -u` would then fail and `exec`
+/// would end the session, exactly when the operator needs to look
+/// around. So `id -u` checks first, and without the account the
+/// guest says so and opens a login shell as the account Vagrant
+/// logged in with.
+///
+/// **The clone path is spelled in the guest, not in Rust.** `$HOME`
+/// here is the agent's, set by `sudo -H` after the switch, so
+/// nothing on this side can name the directory ahead of time.
+/// `the_shell_opens_where_the_bootstrap_script_clones` holds this
+/// spelling and `bootstrap.sh`'s together.
+///
+/// **Three layers of single quotes nest here.** The script and
+/// its arguments are quoted for the login shell, the whole guest
+/// command is quoted once more for the VM host, and vagrant wraps
+/// it in its own `bash -l -c '...'`, rewriting each inner `'`
+/// first -- vagrant 2.4.9's `ssh_run.rb` shows it.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
-    let clone = quote_remote_path(&cfg.guest_clone_dir());
-    let guest = format!("cd {clone}; exec \"$SHELL\" -l");
+    let user = shell_quote(cfg.vm.guest_user.as_str());
+    let guest = format!(
+        "if id -u {user} >/dev/null 2>&1; \
+         then exec sudo -u {user} -H -- sh -c {script} sh {project}; \
+         else echo \"bombyx: this guest has no account {user}, so it \
+         was never provisioned for it; run bombyx provision, or \
+         bombyx destroy then bombyx up if provisioning refuses. \
+         Opening a shell as $(id -un) instead.\" >&2; \
+         exec \"$SHELL\" -l; fi",
+        script = shell_quote(r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#),
+        project = shell_quote(cfg.project.as_str()),
+    );
     vagrant_in(
         cfg,
         &cfg.remote_project_dir(),
@@ -1361,20 +1393,62 @@ mod tests {
 
     #[test]
     fn an_interactive_shell_starts_in_the_project_clone() {
-        // The guest clones into `$HOME/<project>`, and a bare
-        // `vagrant ssh` opens in `$HOME`. The `;` keeps the shell
-        // when the `cd` fails, so a missing clone still leaves
-        // the operator a shell to look into why. The whole guest
-        // command is one argument, quoted once for the VM host.
+        // `vagrant ssh` logs in as the box's own account, and the
+        // clone belongs to the agent's, so the guest switches
+        // with `sudo -u` first. The clone is `$HOME/<project>` of
+        // that account; `|| cd` falls back to its home when the
+        // clone is missing, so the operator still gets a shell to
+        // look into why. The project travels as an argument
+        // rather than inside the script, so the script is the
+        // same text for every project. The whole guest command is
+        // one argument, quoted once more for the VM host.
+        let guest = "if id -u 'agent' >/dev/null 2>&1; \
+                     then exec sudo -u 'agent' -H -- sh -c \
+                     'cd \"$HOME/$1\" || cd; exec \"$SHELL\" -l' \
+                     sh 'myproject'; \
+                     else echo \"bombyx: this guest has no account \
+                     'agent', so it was never provisioned for it; \
+                     run bombyx provision, or bombyx destroy then \
+                     bombyx up if provisioning refuses. Opening a \
+                     shell as $(id -un) instead.\" >&2; \
+                     exec \"$SHELL\" -l; fi";
         let c = shell_into_vm(&cfg());
         assert_eq!(
             remote_script(&c),
             format!(
-                "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' \
-                 'cd ~/'\\''myproject'\\''; exec \"$SHELL\" -l'",
-                vagrant_env()
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' {}",
+                vagrant_env(),
+                shell_quote(guest)
             )
         );
+    }
+
+    #[test]
+    fn the_shell_opens_where_the_bootstrap_script_clones() {
+        // Two spellings of one path, in two files that cannot see
+        // each other: `bootstrap.sh` clones into
+        // `$HOME/$BOMBYX_PROJECT`, and the shell `cd`s into
+        // `$HOME/$1` with the project as `$1`. A change to either
+        // would open the shell outside the clone and fail nothing
+        // else.
+        assert!(
+            crate::vagrantfile::BOOTSTRAP.contains(
+                "readonly CLONE_DIR=\"$HOME/${BOMBYX_PROJECT:-project}\""
+            ),
+            "bootstrap.sh no longer clones into $HOME/<project>"
+        );
+        let script = remote_script(&shell_into_vm(&cfg()));
+        assert!(script.contains(r#"cd "$HOME/$1""#), "{script}");
+        assert!(script.contains("sh '\\''myproject'\\''"), "{script}");
+    }
+
+    #[test]
+    fn an_interactive_shell_opens_as_the_configured_account() {
+        let mut cfg = cfg();
+        cfg.vm.guest_user =
+            crate::config::GuestUser::parse("dev").expect("a plain name");
+        let script = remote_script(&shell_into_vm(&cfg));
+        assert!(script.contains("sudo -u '\\''dev'\\''"), "{script}");
     }
 
     #[test]

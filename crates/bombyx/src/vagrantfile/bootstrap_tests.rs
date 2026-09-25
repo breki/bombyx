@@ -13,35 +13,33 @@
 //! renderer's own tests, and the renderer's tests sit next to
 //! the code they exercise.
 //!
-//! **Three tests in `super::tests` span both files**, and stay
-//! there because neither half is the subject on its own:
-//! `the_bootstrap_script_reads_the_path_the_vagrantfile_writes_to`,
-//! its twin for the git credential's path, and
-//! `the_bootstrap_script_branches_on_the_announcement`.
-//! Each compares `BOOTSTRAP` against a Rust constant, so each
-//! catches a rename in *either* file. That is a property of
-//! how they assert rather than of where they sit: a needle
-//! taken over the raw text can be satisfied by the script's
-//! own comments, which is why the announcement test goes
-//! through `super::bootstrap_code` and the path test does not
-//! need to -- `DEPLOY_KEY_GUEST_PATH` appears in the script's
-//! code and nowhere in its prose.
+//! **Three tests in `super::tests` span more than one file**,
+//! and stay there because no one file is the subject on its own:
+//! `the_account_script_reads_every_path_the_vagrantfile_stages`,
+//! `both_guest_scripts_spell_each_credential_path_the_same_way`,
+//! and `the_bootstrap_script_branches_on_the_announcement`. Each
+//! compares a script against a Rust constant or against the other
+//! script, so each catches a rename in *either* file. All three
+//! read the scripts through `super::script_code`, because a
+//! needle taken over the raw text can be satisfied by a script's
+//! own comments.
 //!
 //! Two more stay there for different reasons, and it is worth
 //! knowing which is which. In `super::tests`,
-//! `the_shell_provisioner_runs_unprivileged` is a rendering
-//! test whose companion here is
+//! `the_one_shell_provisioner_runs_the_account_script_as_root`
+//! is a rendering test whose companion here is
 //! `nothing_in_the_bootstrap_script_asks_for_root`: one asserts
-//! the flag is set, the other that no line in the script
-//! defeats it. And `points_the_provisioner_at_the_bootstrap_script`
-//! is a plain rendering test with no shell half at all.
+//! that root goes to `account.sh` alone, the other that no line
+//! in this script asks for it again. And
+//! `points_the_provisioner_at_the_account_script` is a plain
+//! rendering test with no shell half at all.
 //!
 //! **A test here cannot run the script**, so every assertion is
 //! over text. `CLAUDE.md` under **Test-Driven Development**
-//! holds why that is accepted for this one file and refused for
-//! rendered output: `bootstrap.sh` is the artifact bombyx
-//! ships, byte for byte, so its text is a contract. A rendered
-//! terminal report is not.
+//! holds why that is accepted for the two guest scripts and
+//! refused for rendered output: `bootstrap.sh` and `account.sh`
+//! are artifacts bombyx ships, byte for byte, so their text is a
+//! contract. A rendered terminal report is not.
 
 use super::{BOOTSTRAP, bootstrap_code};
 
@@ -338,7 +336,7 @@ fn the_fetched_keys_are_the_only_ones_the_clone_accepts() {
     // for a fetched key.
     //
     // The path itself is asserted by
-    // `the_known_hosts_path_has_nothing_in_it_to_expand`.
+    // `the_paths_git_hands_to_a_shell_have_nothing_in_them_to_expand`.
     let code = bootstrap_code();
     for clause in [
         "git_ssh=\"$git_ssh -o StrictHostKeyChecking=yes\"",
@@ -418,34 +416,52 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
 }
 
 #[test]
-fn the_known_hosts_path_has_nothing_in_it_to_expand() {
-    // The path lands inside `core.sshCommand`, and `git` hands
-    // that to a shell, which expands `$` and a backtick inside
-    // double quotes as readily as outside them. Measured: a
-    // path holding `$WORKDIR` arrived at `ssh` as
-    // `/home/vagrant/EXPANDED/kh`.
+fn the_paths_git_hands_to_a_shell_have_nothing_in_them_to_expand() {
+    // `KNOWN_HOSTS` and `DEPLOY_KEY` land inside
+    // `core.sshCommand` and `GIT_CRED` inside `credential.helper`,
+    // and `git` hands both strings to a shell, which expands `$`
+    // and a backtick inside double quotes as readily as outside
+    // them. Measured: a path holding `$WORKDIR` arrived at `ssh`
+    // as `/home/vagrant/EXPANDED/kh`.
     //
     // `$HOME` could carry either character, because a project's
     // `[env]` table may set it and
     // `config::guards::check_renderable` refuses a quote, a
-    // backslash and `#{` while allowing `$`. A literal has
-    // nothing to expand, which is why the declaration is one --
-    // the same answer `DEPLOY_KEY` reaches for its own reason.
+    // backslash and `#{` while allowing `$`. So each path is
+    // built from `ACCOUNT_HOME`, which is `/home/` and the
+    // account name, and the script refuses a name holding
+    // anything but lowercase letters, digits, `_` and `-`.
     let code = bootstrap_code();
     assert!(
-        code.contains(
-            "readonly KNOWN_HOSTS=/home/vagrant/.ssh/bombyx-known-hosts"
-        ),
-        "the known_hosts path must be a literal"
+        code.contains("readonly ACCOUNT_HOME=\"/home/${BOMBYX_GUEST_USER:-}\""),
+        "ACCOUNT_HOME must be /home/ and the account name"
     );
+    assert!(
+        code.contains("\"\" | [!a-z_]* | *[!a-z0-9_-]*) refuse"),
+        "the script must refuse an account name a shell could misread"
+    );
+    for (name, rest) in [
+        ("KNOWN_HOSTS", ".ssh/bombyx-known-hosts"),
+        ("DEPLOY_KEY", ".ssh/bombyx-deploy-key"),
+        ("GIT_CRED", ".bombyx-git-credentials"),
+    ] {
+        assert!(
+            code.contains(&format!("readonly {name}=\"$ACCOUNT_HOME/{rest}\"")),
+            "{name} must be built from ACCOUNT_HOME"
+        );
+    }
     for line in flat_bootstrap_lines() {
-        if line.starts_with('#') || !line.contains("KNOWN_HOSTS=") {
+        if line.starts_with('#')
+            || !["KNOWN_HOSTS=", "DEPLOY_KEY=", "GIT_CRED="]
+                .iter()
+                .any(|n| line.contains(n))
+        {
             continue;
         }
         assert!(
             !line.contains("$HOME"),
-            "the known_hosts path must not be built from a \
-             variable:\n  {line}"
+            "a path git hands to a shell must not be built from \
+             $HOME:\n  {line}"
         );
     }
 }
@@ -581,9 +597,10 @@ fn a_box_missing_the_fetch_tools_is_refused_by_name() {
 
 #[test]
 fn the_clone_sits_in_the_home_the_provisioner_was_given() {
-    // `$HOME` is the account's own home because the
-    // provisioner is unprivileged, so the shell that runs
-    // `bootstrap.sh` was started with it already set.
+    // `$HOME` is the account's own home because `account.sh`
+    // starts `bootstrap.sh` through `sudo -u <guest_user> -H`,
+    // which sets it -- or it is the `[env]` table's `HOME`, which
+    // `--preserve-env` carries across and which wins over `-H`.
     //
     // The derivation is pinned as a literal. Asserting only
     // that `$HOME` appears somewhere would pass with
@@ -852,10 +869,10 @@ fn the_deploy_key_ends_up_readable_by_the_agent() {
 #[test]
 fn nothing_in_the_bootstrap_script_asks_for_root() {
     // `super::tests` holds one half of this arrangement, as
-    // `the_shell_provisioner_runs_unprivileged`, and this is
-    // the other. A line here that raises privilege puts root
-    // back inside a tree the agent owns, and the rendered flag
-    // would go on saying the script is unprivileged.
+    // `the_one_shell_provisioner_runs_the_account_script_as_root`,
+    // and this is the other. A line here that raises privilege
+    // puts root back inside a tree the agent owns, while the
+    // rendering would go on saying root stops at `account.sh`.
     //
     // Root in that tree is a measured escalation rather than
     // a theoretical one. git trusts the uid in `SUDO_UID` as
@@ -898,8 +915,8 @@ fn nothing_in_the_bootstrap_script_asks_for_root() {
             assert!(
                 !RAISERS.contains(&command),
                 "this line raises privilege:\n  {line}\n\
-                 The provisioner is unprivileged and every \
-                 command here acts on the agent's own home. \
+                 This script runs as the agent's account and \
+                 every command here acts on its own home. \
                  A project needing root calls `sudo` from \
                  its own script."
             );
@@ -912,8 +929,8 @@ fn nothing_in_the_bootstrap_script_asks_for_root() {
             assert!(
                 !line.contains(reach),
                 "this line reaches root's own home:\n  {line}\n\
-                 The provisioner is unprivileged, so nothing \
-                 here can write there."
+                 This script runs as the agent's account, so \
+                 nothing here can write there."
             );
         }
     }
@@ -949,8 +966,8 @@ fn the_bootstrap_script_deletes_a_key_no_upload_replaced() {
 
 #[test]
 fn the_project_script_runs_as_the_agent_not_as_root() {
-    // The whole provisioner is unprivileged, so this
-    // `exec` changes no privilege. What it does decide is
+    // `account.sh` already handed this script to the agent's
+    // account, so this `exec` changes no privilege. What it does decide is
     // what the process becomes: `exec` replaces this
     // script rather than starting a second process beside
     // it, so the project's script inherits the process and
@@ -980,24 +997,6 @@ fn the_bootstrap_script_guards_every_variable_it_needs() {
         assert!(BOOTSTRAP.contains(guard), "{guard} missing");
     }
     assert!(BOOTSTRAP.contains("set -euo pipefail"));
-}
-
-#[test]
-fn the_secrets_file_is_named_the_same_way_in_both_halves() {
-    // Two files have to agree on this name and neither can read
-    // the other: the generated Vagrantfile writes it as the
-    // upload's `destination:`, and this script builds the same
-    // path from the passwd entry. The leading `~` differs on
-    // purpose -- vagrant expands that inside the guest -- so the
-    // last component is what the two share.
-    let name = super::ENV_FILE_GUEST_PATH
-        .rsplit('/')
-        .next()
-        .expect("the guest path must have a last component");
-    assert!(
-        BOOTSTRAP.contains(&format!("/{name}\"")),
-        "the script must build a path ending in {name}"
-    );
 }
 
 #[test]

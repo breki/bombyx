@@ -4,6 +4,32 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-25-the-root-script-runs-in-the-projects-environment
+
+**Category:** Security
+
+`crates/bombyx/templates/account.sh` runs as root with the whole
+`[env]` table in its environment, because Vagrant applies the
+provisioner's `env:` block as a prefix inside the root shell. The
+reserved-name list in `config/env.rs` covers the names that change
+what `bash` or `git` does, and `SUDO_USER`, but any other variable
+a root tool reads is the project's to set. `TMPDIR` was one:
+`mktemp` followed it, and it now takes an absolute template in
+`/etc/sudoers.d` instead (RT-2 on PR #124).
+
+The general answer is to stop the environment steering root at
+all: have `account.sh` read the `BOMBYX_*` names it needs, then
+run its own tools under `env -i` with a fixed `PATH`, while still
+handing the full list to `sudo --preserve-env` for `bootstrap.sh`.
+That changes how the two scripts share the environment, which is
+a design change rather than a round's fix.
+
+Deferred on 2026-09-25, while the agent keeps passwordless `sudo`
+and so can reach root anyway. It stops being moot the day that
+`sudo` is withdrawn. Found as RT-2's broader half.
+
+---
+
 ### rt-2026-09-14-the-present-pair-keeps-two-sources-of-truth
 
 **Category:** Design (an invariant asserted rather than made

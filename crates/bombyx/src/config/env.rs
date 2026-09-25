@@ -1,13 +1,15 @@
 //! The `[env]` table: variables a project hands to its own
 //! provisioning script.
 //!
-//! They reach bombyx's own `bootstrap.sh` as well, because
-//! Vagrant puts the whole table in the provisioner's
-//! environment. So two sets of names are refused: the ones
-//! bombyx sets itself, and the ones that change what its script
-//! does. `HOME` changes what the script does and is accepted
-//! anyway, because honouring it moves the clone, which is a
-//! decision rather than an accident.
+//! They reach bombyx's own guest scripts as well. Vagrant puts the
+//! whole table in the provisioner's environment, and the
+//! provisioner is `account.sh`, which runs as root; `account.sh`
+//! then hands every name on to `bootstrap.sh` through
+//! `sudo --preserve-env`. So two sets of names are refused: the
+//! ones bombyx sets itself, and the ones that change what those
+//! scripts do. `HOME` changes where `bootstrap.sh` clones and is
+//! accepted anyway, because honouring it moves the clone, which
+//! is a decision rather than an accident.
 //!
 //! Two newtypes, one for a name and one for a value, because
 //! the two carry different rules. A name becomes a shell
@@ -43,8 +45,8 @@ const FIELD: &str = "env";
 /// `BOMBYX_SCRIPT` would decide which script bombyx runs.
 pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 
-/// Names that change what `bootstrap.sh` does, so a project may
-/// not set them.
+/// Names that change what `bootstrap.sh` or `account.sh` does,
+/// so a project may not set them.
 ///
 /// Not "names the script reads": most of these appear nowhere in
 /// it. `LD_PRELOAD` and `LD_LIBRARY_PATH` are read by the
@@ -54,10 +56,18 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 ///
 /// Vagrant renders the provisioner's `env:` as an assignment
 /// prefix on the command it runs, so an `[env]` name is in
-/// `bootstrap.sh`'s own environment and not only the project
-/// script's. Measured against a real VM host: an `[env]` entry
-/// setting `PATH` to a directory with no `bash` in it fails the
-/// provision at the `#!/usr/bin/env bash` line.
+/// `account.sh`'s own environment, as root, and `sudo
+/// --preserve-env` carries it into `bootstrap.sh`'s -- not only
+/// into the project script's. `PATH` is the exception on the second
+/// hop: `sudo` replaces it with `secure_path`.
+///
+/// The measurements below were taken when `bootstrap.sh` itself
+/// was the provisioner. `account.sh` is a bash script started the
+/// same way, so the shell-level names act on it too, now as root;
+/// that has not been measured separately. Measured against a real
+/// VM host: an `[env]` entry setting `PATH` to a directory with no
+/// `bash` in it fails the provision at the `#!/usr/bin/env bash`
+/// line.
 ///
 /// Six of these were measured to disarm one of bombyx's own
 /// guarantees, on bash 5.2.21 and git 2.43.0:
@@ -91,6 +101,13 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 /// this script's behaviour could turn on, and none is a name a
 /// project needs bombyx to hand onward.
 ///
+/// `SUDO_USER` belongs to `account.sh`, the root half of the
+/// provisioning, rather than to `bootstrap.sh`. That script reads
+/// it to find the home of the account Vagrant logged in as, where
+/// the uploads were staged. `sudo` sets it, and Vagrant then
+/// applies the `env:` prefix inside the root shell, so an `[env]`
+/// value would replace the one `sudo` set.
+///
 /// `HOME` is deliberately absent: `bootstrap.sh` derives the
 /// clone directory from it, so writing it here moves the clone,
 /// and that is a recorded decision rather than an accident: the
@@ -98,7 +115,7 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 ///
 /// Keeping a list is a maintenance cost, and `docs/todo.md`
 /// holds the alternative to it as `bootstrap-sets-own-path`.
-const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 14] = [
+const NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO: [&str; 15] = [
     "PATH",
     "IFS",
     "BASH_ENV",
@@ -113,6 +130,7 @@ const NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES: [&str; 14] = [
     "GIT_CONFIG_SYSTEM",
     "GIT_DIR",
     "GIT_WORK_TREE",
+    "SUDO_USER",
 ];
 
 /// The name of a variable the guest's shell will carry.
@@ -198,10 +216,11 @@ fn is_name_char(c: char) -> bool {
 ///
 /// Two sets of names are then refused rather than spelled
 /// wrongly: [`RESERVED_PREFIX`] for the ones bombyx sets, and
-/// [`NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES`] for the ones its script reads.
+/// [`NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO`] for the ones
+/// its guest scripts depend on.
 fn check_name(value: &str) -> Result<(), FieldError> {
     guards::check_not_empty(FIELD, value)?;
-    if NAMES_THAT_CHANGE_WHAT_BOOTSTRAP_DOES.contains(&value) {
+    if NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO.contains(&value) {
         return Err(FieldError::invalid(
             FIELD,
             format!(
@@ -363,6 +382,11 @@ mod tests {
             "GIT_CONFIG_COUNT",
             "GIT_DIR",
             "GIT_WORK_TREE",
+            // Read by `account.sh`, as root, to find the home
+            // the staged uploads landed in. Vagrant applies the
+            // `env:` prefix after `sudo` has set it, so an
+            // `[env]` value would win.
+            "SUDO_USER",
         ] {
             assert!(
                 EnvName::parse(name).is_err(),

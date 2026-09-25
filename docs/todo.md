@@ -86,7 +86,7 @@ stopping a VM.
 
 The first half of this landed with `generate-vagrantfile`: `vagrantfile.rs`
 renders infrastructure only -- box, provider block with cpus and memory, the
-disabled synced folder, and one shell provisioner pointing at bootstrap.sh.
+disabled synced folder, and one shell provisioner pointing at account.sh.
 Nothing project-specific reaches it.
 
 What is left is the parity claim. The renderer emits one provider block
@@ -435,27 +435,6 @@ accept-or-override `AskUserQuestion` -- the last bullet of `/release` step 3,
 not step 4 -- is judged enough on its own. Whichever way, say it in
 `CLAUDE.md` and in `.claude/commands/release.md` both, so the two cannot
 disagree.
-
-### deploy-key-path-names-vagrant
-
-**Summary:** the guest path hard-codes the account
-
-The deploy key's guest path is hard-coded as
-`/home/vagrant/.ssh/bombyx-deploy-key`, which assumes the box's
-SSH account is `vagrant`. That is Vagrant's default for
-`config.ssh.username`, but a box may set another, and some do; on
-such a box the upload fails inside Vagrant, a long way from `box`
-in the config. `DEPLOY_KEY_GUEST_PATH` in
-`crates/bombyx/src/vagrantfile.rs` and the matching literal in
-`crates/bombyx/templates/bootstrap.sh` both carry the assumption.
-The way out: Vagrant expands an upload's `destination:` by
-running `printf <destination>` through a shell inside the guest
-as the SSH account (verified in vagrant 2.4.9, file provisioner's
-`expand_guest_path`), so `~/.ssh/bombyx-deploy-key` lands in the
-real home whatever the account is called. `bootstrap.sh` cannot
-then use `$HOME`, because a project's `[env]` table may set it;
-it reads the passwd entry instead, as `ENV_FILE` already does.
-Found while working issue #78, left out of that change.
 
 ### never-built-non-status-verbs
 

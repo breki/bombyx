@@ -129,7 +129,7 @@ impl Action {
 ///
 /// **The file writes are the exception, and cannot be
 /// otherwise.** Each carries a whole file -- the generated
-/// Vagrantfile, the bootstrap script, the project's secrets
+/// Vagrantfile, the two guest scripts, the project's secrets
 /// when the config names an `env_file`, and the git credential
 /// when it names a `repo_token` -- and no file is in the
 /// command at all: it travels on the command's standard input,
@@ -358,8 +358,8 @@ mod tests {
         for action in all_actions() {
             // The rule is per command: a step gets a terminal
             // when it runs vagrant, because that is the step with
-            // output to render. The `mkdir`, the two file writes
-            // and the `rm -rf` have none worth one.
+            // output to render. The `mkdir`, the file writes and
+            // the `rm -rf` have none worth one.
             //
             // Doctor is the exemption. Its probes are parsed, and
             // a PTY would fold control characters into the text
@@ -539,18 +539,17 @@ mod tests {
         remote::script_without_disarm(c)
     }
 
-    /// Like [`scripts`], with the two file writes' payloads
-    /// cleared before rendering.
+    /// Like [`scripts`], with the file writes' payloads cleared
+    /// before rendering.
     ///
-    /// A write carries a whole Vagrantfile or a whole
-    /// `bootstrap.sh`, and [`Display`](std::fmt::Display) ends
-    /// such a command with the payload's size in bytes. Pinning
-    /// that number here would fail whenever a comment in
-    /// `bootstrap.sh` was reworded, in a test about command
-    /// order. The contents are pinned where they belong:
-    /// `vagrantfile::tests` for what is rendered, and
-    /// `remote::write::tests` for what reaches the pipe. What
-    /// these tests own is the shell shape and the order.
+    /// A write carries a whole generated file, and
+    /// [`Display`](std::fmt::Display) ends such a command with the
+    /// payload's size in bytes. Pinning that number here would
+    /// fail whenever a comment in either guest script was
+    /// reworded, in a test about command order. The contents are
+    /// pinned where they belong: `vagrantfile::tests` for what is
+    /// rendered, and `remote::write::tests` for what reaches the
+    /// pipe. What these tests own is the shell shape and the order.
     ///
     /// [`RemoteCommand::without_payload`] beats cutting the
     /// rendered string, which would need a parser for the note
@@ -574,18 +573,18 @@ mod tests {
     #[test]
     fn up_makes_the_dir_writes_the_files_then_boots() {
         // Order is the point. `vagrant up` reads the Vagrantfile
-        // from the directory it runs in, so both generated files
-        // have to be written before the boot, into a directory
+        // from the directory it runs in, so every generated file
+        // has to be written before the boot, into a directory
         // that already exists.
         //
         // The `fresh-install` snapshot is not part of this plan: the
         // binary's `up_run` appends it, and only when it is creating
-        // the machine. So `plan(Up)` is the four boot steps, and the
+        // the machine. So `plan(Up)` is the five boot steps, and the
         // length assertion catches one going missing.
         let s = scripts_without_payloads(&Action::Up);
-        assert_eq!(s.len(), 4, "up lost or gained a step: {s:?}");
+        assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
         assert_eq!(
-            s[..4],
+            s[..5],
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "ssh vmhost \"umask 077; \
@@ -594,6 +593,9 @@ mod tests {
                 "ssh vmhost \"umask 077; \
                  cat > ~/'vms/myproject/bootstrap.sh' && \
                  chmod 600 ~/'vms/myproject/bootstrap.sh'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/account.sh' && \
+                 chmod 600 ~/'vms/myproject/account.sh'\"",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
@@ -763,14 +765,14 @@ mod tests {
 
     #[test]
     fn scratch_writes_the_files_before_booting() {
-        // Without the two writes, `scratch` boots a directory
+        // Without the writes, `scratch` boots a directory
         // holding no Vagrantfile.
         let cmds = run(&Action::Scratch(scratch("pr-1234")));
         let programs: Vec<&str> =
             cmds.iter().map(|c| c.program.as_str()).collect();
-        // Four, and every one of them is `ssh`: a VM action
+        // Five, and every one of them is `ssh`: a VM action
         // runs no program on the workstation.
-        assert_eq!(programs, vec!["ssh", "ssh", "ssh", "ssh"]);
+        assert_eq!(programs, vec!["ssh"; 5]);
         assert!(script(&cmds[0]).contains("mkdir -p"));
         assert!(script(cmds.last().unwrap()).contains("vagrant 'up';"));
     }
@@ -789,6 +791,9 @@ mod tests {
                 "ssh vmhost \"umask 077; \
                  cat > ~/'vms/myproject/bootstrap.sh' && \
                  chmod 600 ~/'vms/myproject/bootstrap.sh'\"",
+                "ssh vmhost \"umask 077; \
+                 cat > ~/'vms/myproject/account.sh' && \
+                 chmod 600 ~/'vms/myproject/account.sh'\"",
                 "ssh vmhost \"cd ~/'vms/myproject' && \
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \

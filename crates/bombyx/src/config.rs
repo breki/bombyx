@@ -100,6 +100,7 @@ mod env;
 mod env_file;
 mod error;
 mod guards;
+mod guest_user;
 mod host;
 mod read;
 mod registry;
@@ -244,6 +245,7 @@ pub use env::{EnvName, EnvValue};
 pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
+pub use guest_user::GuestUser;
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
 };
@@ -827,29 +829,6 @@ impl Config {
     #[must_use]
     pub fn remote_project_dir(&self) -> String {
         format!("{}/{}", self.root(), self.project)
-    }
-
-    /// Returns the project's clone directory inside the guest,
-    /// e.g. `~/myproject`.
-    ///
-    /// The guest's bootstrap script decides this path: its
-    /// `CLONE_DIR` joins `BOMBYX_PROJECT` onto `$HOME`. The
-    /// generated Vagrantfile sets `BOMBYX_PROJECT` to this
-    /// project's key, so the two paths agree. This method spells
-    /// the same path for the commands bombyx runs in the guest, so
-    /// the two must change together.
-    ///
-    /// They disagree in one case: a Vagrantfile that does not set
-    /// `BOMBYX_PROJECT` makes the bootstrap fall back to
-    /// `~/project`. The `cd` in `bombyx shell` then fails with its
-    /// error, and the shell opens in `$HOME`.
-    ///
-    /// The path starts with `~/` rather than `$HOME/` because
-    /// `quote_remote_path` keeps a leading `~` outside its quotes,
-    /// so the guest's shell still expands it.
-    #[must_use]
-    pub fn guest_clone_dir(&self) -> String {
-        format!("~/{}", self.project)
     }
 
     /// Returns the name the guest should answer to.

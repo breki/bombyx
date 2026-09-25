@@ -6,6 +6,24 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-25-the-shell-ignores-an-env-home
+
+**Category:** Behaviour
+
+When a project's `[env]` table sets `HOME`, `bootstrap.sh` clones
+under that value, but `bombyx shell` resolves `$HOME` as the
+agent's passwd home after `sudo -H`, so it opens outside the
+clone after `cd` prints an error. The comments in
+`remote::shell_into_vm` and `bootstrap.sh`, and the tutorial, now
+say so. bombyx reads the `[env]` table itself, so it could pass
+that `HOME` to the shell entry instead.
+
+Deferred on 2026-09-25: a behaviour change found in the
+prose-only stage of PR #124's review, which fixes only what a
+person reads. Found as FR-4.
+
+---
+
 ### fr-2026-09-24-shell-help-names-no-path
 
 **Category:** help text

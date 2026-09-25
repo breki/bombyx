@@ -12,11 +12,30 @@ and this project adheres to
 
 ### Added
 
+- A `guest_user` key in `[vm]` names the account the agent works as inside the
+  guest. It defaults to `agent` and refuses `root`, `vagrant`, and any name
+  outside lowercase letters, digits, `_` and `-`.
+
 ### Changed
 
-- `bombyx shell` opens in the project's clone, `~/<project>` in the guest,
-  rather than in the guest home directory. When the clone is missing, the `cd`
-  fails with its error and the shell opens in the guest home directory.
+- `bombyx shell` opens as the agent's account, in the project's clone,
+  `~/<project>` in that account's home, rather than in the guest home
+  directory. When the clone is missing, the `cd` fails with its error and the
+  shell opens in the account's home directory. When provisioning stopped before
+  the account was created, it says so and opens a shell as the account Vagrant
+  logs in with.
+- **BREAKING:** The agent now works as an account of its own inside the guest,
+  `agent` by default, rather than as `vagrant`, the account Vagrant logs in
+  with. A new root step, `account.sh`, creates the account with passwordless
+  `sudo`, moves the staged deploy key, secrets file and git credential into its
+  home, and hands `bootstrap.sh` to it, so the clone moves to
+  `/home/agent/<project>`. A provision script that names the `vagrant` account
+  or `/home/vagrant` needs updating, and an existing VM needs `bombyx destroy`
+  and `bombyx up` to move across: `bombyx provision` on such a VM, or on one
+  whose `guest_user` has since changed, refuses and says so, so an old
+  account's `sudo` grant and credentials never outlive the move (issue #123).
+- `SUDO_USER` is now a reserved name in the `[env]` table, because the root step
+  reads it to find the staged uploads.
 
 ### Fixed
 
