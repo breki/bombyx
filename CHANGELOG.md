@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.8.0] - 2026-09-25
+
+### Added
+
 - A `guest_user` key in `[vm]` names the account the agent works as inside the
   guest. It defaults to `agent` and refuses `root`, `vagrant`, and any name
   outside lowercase letters, digits, `_` and `-`.
