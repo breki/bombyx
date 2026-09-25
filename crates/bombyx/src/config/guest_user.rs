@@ -89,12 +89,6 @@ fn check_guest_user(value: &str) -> Result<(), FieldError> {
     let Some(first) = value.chars().next() else {
         return Err(FieldError::Empty { field: FIELD });
     };
-    if value.len() > MAX_GUEST_USER_LEN {
-        return Err(FieldError::invalid(
-            FIELD,
-            format!("must be at most {MAX_GUEST_USER_LEN} characters"),
-        ));
-    }
     if !(first.is_ascii_lowercase() || first == '_') {
         return Err(FieldError::invalid(
             FIELD,
@@ -109,10 +103,20 @@ fn check_guest_user(value: &str) -> Result<(), FieldError> {
             "must contain only lowercase letters, digits, `_` and `-`",
         ));
     }
+    // After the character-set check, so every character is one
+    // ASCII byte and the byte count is the character count.
+    if value.len() > MAX_GUEST_USER_LEN {
+        return Err(FieldError::invalid(
+            FIELD,
+            format!("must be at most {MAX_GUEST_USER_LEN} characters"),
+        ));
+    }
     if REFUSED_GUEST_USERS.contains(&value) {
         return Err(FieldError::invalid(
             FIELD,
-            format!("must not be `{value}`"),
+            format!(
+                "must not be `{value}`; the agent needs an account of its own"
+            ),
         ));
     }
     Ok(())
@@ -148,6 +152,20 @@ mod tests {
         ] {
             assert!(GuestUser::parse(bad).is_err(), "{bad:?} must be refused");
         }
+    }
+
+    #[test]
+    fn a_refusal_names_the_rule_the_value_broke() {
+        // Twenty non-ASCII characters are forty bytes, so a length
+        // check that ran first would call the name too long when
+        // the character set is what it broke.
+        let wide = "\u{e9}".repeat(20);
+        let err = GuestUser::parse(&wide).expect_err("non-ASCII").to_string();
+        assert!(err.contains("lowercase"), "{err}");
+        let err = GuestUser::parse("vagrant")
+            .expect_err("reserved")
+            .to_string();
+        assert!(err.contains("account of its own"), "{err}");
     }
 
     #[test]

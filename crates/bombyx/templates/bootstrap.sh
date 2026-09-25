@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # This script runs INSIDE the guest VM, not on your machine.
-# The Vagrantfile that bombyx generates points at it.
+# The Vagrantfile that bombyx generates uploads it, and account.sh
+# hands it to the agent's account.
 #
 # It is the same file for every project. bombyx never edits it
 # or pastes anything into it -- it is copied across exactly as
@@ -106,15 +107,11 @@ readonly ACCOUNT_HOME="/home/${BOMBYX_GUEST_USER:-}"
 # provisioner's `env:` becomes a prefix on the command line and
 # is applied after any /etc/profile.d has been sourced, and
 # account.sh carries it here through `sudo --preserve-env`. It is
-# read as `${VAR:-}` all the same: `set -u` above makes an
-# unset variable fatal, and one route leaves it unset -- a
-# `vagrant provision` run on the VM host by hand, in a
-# directory an older bombyx wrote, where the Vagrantfile does
-# not set this variable and this script expects it. bombyx
-# rewrites both files together on every `up`, `provision` and
-# `scratch`, so its own runs cannot produce the mismatch.
-# Defaulting to empty takes the deleting branch, which is the
-# safe answer to "these two files disagree".
+# read as `${VAR:-}` all the same, so that a missing value takes
+# the deleting branch -- the safe answer -- rather than aborting
+# under `set -u` before `refuse` could remove anything. bombyx
+# rewrites the Vagrantfile and both scripts together on every
+# `up`, `provision` and `scratch`, so its own runs always set it.
 #
 # This path is built from ACCOUNT_HOME above and not from `$HOME`
 # the way `CLONE_DIR` below is, for the reason ACCOUNT_HOME's
@@ -153,10 +150,11 @@ readonly GIT_CRED="$ACCOUNT_HOME/.bombyx-git-credentials"
 # WHERE THE SECRETS FILE LANDS, and why this one is read from
 # passwd while DEPLOY_KEY above is built from ACCOUNT_HOME.
 #
-# account.sh writes it to `.bombyx-env` in this account's home,
-# which it read from the passwd entry. The path never reaches a
-# string `git` hands to a shell, so reading the same entry here
-# is safe, and it is what the two scripts agree on.
+# account.sh writes it to `.bombyx-env` in /home/<name>, and
+# refuses an account whose passwd home is anywhere else, so the
+# passwd entry read here names that same directory. The path
+# never reaches a string `git` hands to a shell, so the passwd
+# entry is safe to use for it.
 #
 # `$HOME` cannot name the same file. A project's `[env]` table
 # may set HOME, and this script's environment carries that value
@@ -271,9 +269,9 @@ fi
 # directory it goes in.
 #
 # `$HOME` answers, because this script *is* the account the
-# agent works as. The provisioner is unprivileged, so the shell
-# running this file was started with that account's home
-# already in the environment.
+# agent works as. account.sh starts it through `sudo -u -H`, so
+# the shell running this file was started with that account's
+# home already in the environment.
 #
 # A project's `[env]` table can set `HOME`, and the clone then
 # moves with it. That is a line the operator wrote in their own
@@ -368,16 +366,15 @@ fi
 # environment variable, not pasted into this file, so the script
 # stays byte-identical for every project -- see the header.
 #
-# It falls back to `project` when the variable is unset. An older
-# bombyx always cloned into a fixed `$HOME/project`, and the
-# Vagrantfile it wrote on the VM host never sets `BOMBYX_PROJECT`.
-# So a `vagrant provision` run there by hand arrives with the
-# variable unset, and this fallback clones into the old fixed
-# location rather than aborting under `set -u`.
+# `:-project` only keeps `set -u` from aborting on an unset name;
+# the Vagrantfile bombyx generates always sets it.
 #
 # `bombyx shell` opens in this directory, and bombyx spells the
 # path itself in `remote::shell_into_vm`, as `$HOME/<project>`
-# of this account, so change the two together.
+# of this account, so change the two together. The one case they
+# part is an `[env]` table that sets `HOME`: the clone follows it,
+# while the shell uses the account's passwd home and falls back
+# to that home when the clone is not there.
 readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 
 # A REFUSAL IS SAFE HERE; AN ABORT IS NOT. That is the
@@ -434,9 +431,9 @@ readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 # account the agent works as, so asking the filesystem would
 # let the guest answer on the operator's behalf.
 #
-# Read as `${VAR:-}` because a `vagrant provision` run by hand
-# in a directory an older bombyx wrote leaves it unset, and
-# `set -u` would abort before `refuse` could say anything.
+# Read as `${VAR:-}` so that a missing value reaches the branch
+# below rather than aborting under `set -u` before `refuse` could
+# say anything.
 if [ "${BOMBYX_ENV_FILE_PRESENT:-}" = 1 ]; then
     # AN EMPTY `bombyx_home` MEANS ENV_FILE NAMES A PLACEHOLDER,
     # so every line below is about the wrong path. Both branches
@@ -700,17 +697,16 @@ fi
 # serves finished `known_hosts` lines and needs nothing.
 #
 # Read as `${VAR:-}` for the reason the deploy-key banner gives:
-# `set -u` makes an unset variable fatal, and a `vagrant
-# provision` run by hand in a directory an older bombyx wrote
-# leaves these unset. Such a guest falls back to `accept-new`,
-# which is what the bombyx that wrote its directory did.
+# an unset value falls back to `accept-new` rather than aborting
+# under `set -u` before `refuse` could say anything.
 #
 # `KNOWN_HOSTS` IS BUILT FROM ACCOUNT_HOME, and not from `$HOME`,
 # for two reasons.
 #
-# The first is DEPLOY_KEY's: this is bombyx's own bookkeeping
-# rather than the project's, so it belongs beside the key in the
-# account's real home and not wherever the clone went.
+# The first is that this is bombyx's own bookkeeping rather than
+# the project's, so it belongs beside the deploy key in the
+# account's real home, not wherever an `[env]` HOME moved the
+# clone.
 #
 # The second is about quoting, and it is the one that bites. The
 # path ends up inside `core.sshCommand`, which `git` hands to a

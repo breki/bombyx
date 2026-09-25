@@ -597,9 +597,10 @@ fn a_box_missing_the_fetch_tools_is_refused_by_name() {
 
 #[test]
 fn the_clone_sits_in_the_home_the_provisioner_was_given() {
-    // `$HOME` is the account's own home because the
-    // provisioner is unprivileged, so the shell that runs
-    // `bootstrap.sh` was started with it already set.
+    // `$HOME` is the account's own home because `account.sh`
+    // starts `bootstrap.sh` through `sudo -u <guest_user> -H`,
+    // which sets it -- or it is the `[env]` table's `HOME`, which
+    // `--preserve-env` carries across and which wins over `-H`.
     //
     // The derivation is pinned as a literal. Asserting only
     // that `$HOME` appears somewhere would pass with

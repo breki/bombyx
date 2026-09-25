@@ -4,6 +4,32 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-25-staging-tests-in-the-renderers-module
+
+**Category:** Module Size
+
+`crates/bombyx/src/vagrantfile.rs` holds the tests that check
+the Vagrantfile, `account.sh` and `bootstrap.sh` against each
+other, in the middle of the renderer's own tests:
+`the_account_script_reads_every_path_the_vagrantfile_stages`,
+`both_guest_scripts_spell_each_credential_path_the_same_way`,
+`both_guest_scripts_refuse_the_same_account_names`,
+`every_upload_lands_in_the_staging_directory`,
+`the_preserve_list_names_every_variable_the_hash_sets`, and the
+`STAGED_PATHS` fixture. The test module is now larger than the
+code above it, and a maintainer changing a staged path has to
+search three test modules for the checks that pin it.
+
+They would move to `vagrantfile/staging_tests.rs`, and the
+header of `bootstrap_tests.rs`, which lists the cross-file tests,
+would point there.
+
+Deferred by the operator on 2026-09-25: a move of about 200
+lines, better reviewed as its own commit than inside the review
+of the change that added them (PR #124). Found as AQ-7.
+
+---
+
 ### aq-2026-09-14-error-names-downgrade-a-checked-value
 
 **Category:** Type Safety

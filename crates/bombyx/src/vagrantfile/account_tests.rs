@@ -97,6 +97,53 @@ fn the_sudoers_entry_is_checked_before_it_is_installed() {
 }
 
 #[test]
+fn no_temporary_file_follows_the_projects_environment() {
+    // The project's `[env]` table is in this script's own
+    // environment, so a bare `mktemp` would create root's
+    // sudoers draft wherever that table points `TMPDIR` -- a
+    // directory the agent may own, or one that does not exist
+    // yet. An absolute template names the directory itself.
+    let code = account_code();
+    assert!(
+        code.contains("mktemp /etc/sudoers.d/.bombyx-XXXXXX"),
+        "the sudoers draft must be created beside its target:\n{code}"
+    );
+    assert_eq!(code.matches("mktemp").count(), 1, "{code}");
+}
+
+#[test]
+fn a_vm_set_up_for_another_account_is_refused_before_anything_is_written() {
+    // Everything this script writes is under the current
+    // `guest_user`, so after a rename nothing would ever remove
+    // the old account's sudoers file or its credentials. The
+    // check has to come before `useradd`, so a refused run leaves
+    // the VM as it found it.
+    let code = account_code();
+    let check = code
+        .find("for granted in /etc/sudoers.d/bombyx-*; do")
+        .expect("account.sh looks for another account's grant");
+    let create = code
+        .find("useradd --create-home")
+        .expect("account.sh creates the account");
+    assert!(check < create, "the check must come first");
+    assert!(
+        code.contains("[ \"${granted#/etc/sudoers.d/bombyx-}\" != \"$user\" ]"),
+        "{code}"
+    );
+    // A VM an earlier bombyx built has no such file: its agent
+    // was the login account, and the credentials sit in that
+    // account's home. Those paths are the tell.
+    let older = code
+        .find(
+            "for left in \"$staging_home/.ssh/bombyx-deploy-key\" \
+               \"$staging_home/.bombyx-env\" \
+               \"$staging_home/.bombyx-git-credentials\"; do",
+        )
+        .expect("account.sh looks for an earlier bombyx's credentials");
+    assert!(older < create, "that check must come first too");
+}
+
+#[test]
 fn nothing_from_the_repository_is_read_as_root() {
     // The clone does not exist until bootstrap.sh makes it, as
     // the agent. A root script that named the repository, the
@@ -121,15 +168,21 @@ fn root_writes_nothing_into_the_agents_home() {
     // file root opened, so a link the agent left at one of those
     // paths reaches only what the agent could already reach. The
     // one writer is the `sh -c` below, run through `sudo -u`.
+    //
+    // `umask 077` comes first, so `cat >` creates the file at 0600
+    // rather than at the inherited umask's 0644 until `chmod`
+    // runs. An account's home is often traversable, and another
+    // account holding the file open in that window keeps it.
     let code = account_code();
     assert!(
         code.contains(
-            "sudo -u \"$user\" -- sh -c 'mkdir -p -m 700 \"$1\" && \
-             cat >\"$2\" && chmod 600 \"$2\"'"
+            "sudo -u \"$user\" -- sh -c 'umask 077 && \
+             mkdir -p -m 700 \"${1%/*}\" && \
+             cat >\"$1\" && chmod 600 \"$1\"'"
         ),
         "the credentials must be written as the agent:\n{code}"
     );
-    assert_eq!(code.matches(">\"$2\"").count(), 1, "{code}");
+    assert_eq!(code.matches(">\"$1\"").count(), 1, "{code}");
     assert!(!code.contains(">\"$home"), "{code}");
-    assert!(!code.contains(">\"$4\""), "{code}");
+    assert!(!code.contains(">\"$3\""), "{code}");
 }

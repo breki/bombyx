@@ -5,6 +5,15 @@
 # generates points its one shell provisioner at it, marked
 # `privileged: true`.
 #
+# WHY THE UPLOADS ARE STAGED. Vagrant uploads files as the
+# account it logs in as -- the login account, usually `vagrant`
+# -- and that account can write only its own home. So the
+# Vagrantfile stages every file in ~/.bombyx-staging there, the
+# staging directory, and this script moves each one on. The login
+# account is never the agent's: bombyx refuses a `guest_user` of
+# `vagrant`, and this script refuses a guest_user equal to
+# SUDO_USER, which names the account Vagrant logged in as.
+#
 # It does four things, and then hands over:
 #
 #   1. creates the account the agent works as, named by
@@ -17,23 +26,18 @@
 #   4. installs bootstrap.sh root-owned, and runs it as that
 #      account.
 #
-# Root is needed for the first two steps and nothing after them.
-# So this file stays short, and it reads nothing from the
-# project's repository: the clone does not exist until
-# bootstrap.sh makes it, as the agent. docs/trust-boundary.md
-# describes the isolation this serves.
+# Root is needed throughout: to create the account and its
+# sudoers file, to read the staging directory in the login
+# account's home, and to install bootstrap.sh root-owned. Only
+# the writes into the agent's own home run as the agent. So this
+# file stays short, and it reads nothing from the project's
+# repository: the clone does not exist until bootstrap.sh makes
+# it, as the agent. docs/trust-boundary.md describes the
+# isolation this serves.
 #
 # Like bootstrap.sh, this file is the same for every project, and
 # bombyx pastes nothing into it. Everything that changes per
 # project arrives as an environment variable, set by Vagrant.
-#
-# WHY THE UPLOADS ARE STAGED. Vagrant uploads files as the
-# account it logs in as, usually `vagrant`, and that account can
-# write only its own home. So the Vagrantfile stages every file
-# in ~/.bombyx-staging there, and this script moves each one on.
-# The login account is never the agent's: bombyx refuses a
-# `guest_user` of `vagrant`, and this script refuses one that
-# matches whatever account Vagrant logged in as.
 
 # `-e` stops at the first failing command, `-u` makes an unset
 # variable an error, and `pipefail` fails a pipeline when any
@@ -66,9 +70,12 @@ readonly STAGING="${staging_home:-/nonexistent}/.bombyx-staging"
 user="${BOMBYX_GUEST_USER:-}"
 readonly home="/home/$user"
 
-# Where bootstrap.sh is installed. Root-owned, so nothing the
-# agent does between provisions can change what the next one
-# runs as it.
+# Where bootstrap.sh is installed. It is installed fresh from the
+# staged upload on every provision, so what runs is bombyx's copy
+# whatever the agent left there. Root ownership adds nothing while
+# the agent has passwordless `sudo`; it would matter only if the
+# agent lost it, for instance by an operator removing its file in
+# /etc/sudoers.d. bombyx has no setting for that.
 readonly BOOTSTRAP=/usr/local/libexec/bombyx/bootstrap.sh
 
 # Set once the first credential may have been written into the
@@ -108,22 +115,19 @@ if [ -z "$staging_home" ]; then
         "find the files Vagrant staged there."
 fi
 
-# A name the shell reads as one plain word. A pattern and not a
-# comparison: `[a-z_]*` is "starts with a lowercase letter or an
-# underscore", and `*[!a-z0-9_-]*` is "holds any other
-# character anywhere".
+# A name the shell reads as one plain word, in the same pattern
+# bootstrap.sh uses: empty, `[!a-z_]*` "starts with anything but
+# a lowercase letter or an underscore", or `*[!a-z0-9_-]*` "holds
+# any other character anywhere".
 case "$user" in
-    [a-z_]*) ;;
-    *) refuse "BOMBYX_GUEST_USER is \"$user\", which is not an" \
-        "account name bombyx creates." ;;
-esac
-case "$user" in
-    *[!a-z0-9_-]*) refuse "BOMBYX_GUEST_USER is \"$user\", which is" \
-        "not an account name bombyx creates." ;;
+    "" | [!a-z_]* | *[!a-z0-9_-]*)
+        refuse "guest_user (\"$user\") is not an account name" \
+            "bombyx creates."
+        ;;
 esac
 if [ "$user" = root ] || [ "$user" = "$login_user" ]; then
-    refuse "guest_user is \"$user\", which is the account Vagrant" \
-        "logs in as or root. The agent needs an account of its own."
+    refuse "guest_user (\"$user\") is root or the account Vagrant" \
+        "logs in as. The agent needs an account of its own."
 fi
 
 # The hand-over list, checked for the same reason: `sudo` reads
@@ -151,6 +155,39 @@ if [ ! -f "$STAGING/bootstrap.sh" ]; then
     refuse "bootstrap.sh did not arrive at $STAGING/bootstrap.sh," \
         "so there is nothing to hand to the agent's account."
 fi
+
+# A VM SET UP FOR ANOTHER ACCOUNT IS REFUSED. Everything this
+# script and bootstrap.sh write sits under the current
+# guest_user, so after a rename nothing would ever remove the old
+# account's sudoers file or the credentials in its home -- and
+# the operator who dropped a credential in the same edit would
+# believe it gone. So a sudoers file bombyx wrote for another
+# name stops the run here, before anything is created. The glob
+# is left unexpanded when nothing matches, which `-e` answers.
+#
+# A VM that bombyx 0.7.0 or earlier built carries no such file,
+# because its agent was the login account itself. Its credentials
+# sit in that account's home instead, at the paths the second loop
+# checks, so finding one of them is refused the same way.
+for granted in /etc/sudoers.d/bombyx-*; do
+    if [ -e "$granted" ] &&
+        [ "${granted#/etc/sudoers.d/bombyx-}" != "$user" ]; then
+        refuse "this VM was set up for guest_user" \
+            "\"${granted#/etc/sudoers.d/bombyx-}\", and the config now" \
+            "names \"$user\". bombyx does not move a VM from one" \
+            "account to another; run bombyx destroy, then bombyx up."
+    fi
+done
+for left in "$staging_home/.ssh/bombyx-deploy-key" \
+    "$staging_home/.bombyx-env" \
+    "$staging_home/.bombyx-git-credentials"; do
+    if [ -e "$left" ]; then
+        refuse "this VM was set up by bombyx 0.7.0 or earlier, which" \
+            "left a credential at $left, in the home of the account" \
+            "Vagrant logs in as. bombyx does not move a VM to the" \
+            "agent's own account; run bombyx destroy, then bombyx up."
+    fi
+done
 
 # 1. THE ACCOUNT. Created with its home at /home/<name>, a login
 # shell of bash, and a group of the same name. `useradd` locks
@@ -180,7 +217,14 @@ fi
 # Vagrant's own included. The file name holds no `.`, which
 # matters because `sudo` skips a file in /etc/sudoers.d whose
 # name contains one.
-sudoers_tmp=$(mktemp) || refuse "could not create a temporary file."
+#
+# The draft is created in /etc/sudoers.d itself, under a name
+# holding a `.` so `sudo` skips it, rather than wherever `TMPDIR`
+# points: the project's `[env]` table is in this script's
+# environment, so a bare `mktemp` would follow it into a
+# directory the agent may own.
+sudoers_tmp=$(mktemp /etc/sudoers.d/.bombyx-XXXXXX) ||
+    refuse "could not create a temporary file in /etc/sudoers.d."
 if ! printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$user" >"$sudoers_tmp" ||
     ! visudo -cqf "$sudoers_tmp" ||
     ! install -m 0440 -o root -g root "$sudoers_tmp" \
@@ -205,35 +249,38 @@ rm -f -- "$sudoers_tmp"
 # it was not announced at all, bootstrap.sh removes the old copy
 # itself, and says so.
 #
-# $1 is the announcement, $2 the staged file, $3 the directory
-# the file goes in, and $4 the path it ends up at.
+# $1 is the announcement, $2 the staged file, and $3 the path it
+# ends up at. The writer creates $3's directory, `${1%/*}` being
+# the path with its last component removed. `umask 077` makes
+# `cat >` create a new file at 0600; without it the file would sit
+# at the inherited 0644 until `chmod` ran, and an account's home
+# is often traversable by the others.
 place() {
     if [ "$1" = 1 ] && [ -f "$2" ]; then
         # SC2024 warns that the redirect is opened by root and not
         # by the account `sudo` switches to. That is the intent:
         # the agent cannot read the login account's home.
         # shellcheck disable=SC2024
-        if ! sudo -u "$user" -- sh -c \
-            'mkdir -p -m 700 "$1" && cat >"$2" && chmod 600 "$2"' \
-            sh "$3" "$4" <"$2"; then
-            refuse "could not write $4 as $user. The error above" \
+        if ! sudo -u "$user" -- sh -c 'umask 077 &&
+            mkdir -p -m 700 "${1%/*}" && cat >"$1" && chmod 600 "$1"' \
+            sh "$3" <"$2"; then
+            refuse "could not write $3 as $user. The error above" \
                 "says why."
         fi
     elif [ "$1" = 1 ]; then
-        if ! sudo -u "$user" -- rm -f -- "$4"; then
-            refuse "could not remove the stale copy at $4. The" \
+        if ! sudo -u "$user" -- rm -f -- "$3"; then
+            refuse "could not remove the stale copy at $3. The" \
                 "error above says why."
         fi
     fi
 }
 
 placing=1
-place "${BOMBYX_DEPLOY_KEY:-}" "$STAGING/deploy-key" "$home/.ssh" \
+place "${BOMBYX_DEPLOY_KEY:-}" "$STAGING/deploy-key" \
     "$home/.ssh/bombyx-deploy-key"
-place "${BOMBYX_ENV_FILE_PRESENT:-}" "$STAGING/env" "$home" \
-    "$home/.bombyx-env"
+place "${BOMBYX_ENV_FILE_PRESENT:-}" "$STAGING/env" "$home/.bombyx-env"
 place "${BOMBYX_GIT_CRED_PRESENT:-}" "$STAGING/git-credentials" \
-    "$home" "$home/.bombyx-git-credentials"
+    "$home/.bombyx-git-credentials"
 
 # 4. THE HAND-OVER. bootstrap.sh is installed root-owned before
 # the staging directory goes, and then runs as the agent.

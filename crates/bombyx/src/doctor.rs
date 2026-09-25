@@ -1,7 +1,7 @@
 //! Checking bombyx's preconditions before they cost anything.
 //!
 //! `bombyx up` changes state before it runs `vagrant`: it
-//! creates a directory on the host and writes two generated
+//! creates a directory on the host and writes three generated
 //! files into it.
 //! So a host that is missing something reports it half-way
 //! through. This module models the up-front check instead.

@@ -358,8 +358,8 @@ mod tests {
         for action in all_actions() {
             // The rule is per command: a step gets a terminal
             // when it runs vagrant, because that is the step with
-            // output to render. The `mkdir`, the two file writes
-            // and the `rm -rf` have none worth one.
+            // output to render. The `mkdir`, the file writes and
+            // the `rm -rf` have none worth one.
             //
             // Doctor is the exemption. Its probes are parsed, and
             // a PTY would fold control characters into the text
@@ -539,18 +539,17 @@ mod tests {
         remote::script_without_disarm(c)
     }
 
-    /// Like [`scripts`], with the two file writes' payloads
-    /// cleared before rendering.
+    /// Like [`scripts`], with the file writes' payloads cleared
+    /// before rendering.
     ///
-    /// A write carries a whole Vagrantfile or a whole
-    /// `bootstrap.sh`, and [`Display`](std::fmt::Display) ends
-    /// such a command with the payload's size in bytes. Pinning
-    /// that number here would fail whenever a comment in
-    /// `bootstrap.sh` was reworded, in a test about command
-    /// order. The contents are pinned where they belong:
-    /// `vagrantfile::tests` for what is rendered, and
-    /// `remote::write::tests` for what reaches the pipe. What
-    /// these tests own is the shell shape and the order.
+    /// A write carries a whole generated file, and
+    /// [`Display`](std::fmt::Display) ends such a command with the
+    /// payload's size in bytes. Pinning that number here would
+    /// fail whenever a comment in either guest script was
+    /// reworded, in a test about command order. The contents are
+    /// pinned where they belong: `vagrantfile::tests` for what is
+    /// rendered, and `remote::write::tests` for what reaches the
+    /// pipe. What these tests own is the shell shape and the order.
     ///
     /// [`RemoteCommand::without_payload`] beats cutting the
     /// rendered string, which would need a parser for the note

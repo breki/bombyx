@@ -966,7 +966,7 @@ fn cli_help_flag() {
 /// asserts that bombyx produced the text it meant to, and none
 /// of them can say whether vagrant accepts it. A syntax error
 /// would otherwise surface on the VM host, after bombyx has
-/// already created the directory and written both files there.
+/// already created the directory and written its files there.
 ///
 /// It lives here rather than beside the renderer so its body,
 /// which never runs under coverage, does not count against that
@@ -998,16 +998,14 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
         &path,
     )
     .unwrap();
-    std::fs::write(
-        dir.path().join(bombyx::vagrantfile::VAGRANTFILE_NAME),
-        bombyx::vagrantfile::render(&cfg, &bombyx::config::Staged::default()),
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join(bombyx::vagrantfile::BOOTSTRAP_NAME),
-        bombyx::vagrantfile::BOOTSTRAP,
-    )
-    .unwrap();
+    // Every file bombyx generates, not a hand-picked pair: the
+    // Vagrantfile's shell provisioner names `account.sh` in its
+    // `path:`, and vagrant refuses a path that does not exist.
+    for (name, contents) in
+        bombyx::vagrantfile::files(&cfg, &bombyx::config::Staged::default())
+    {
+        std::fs::write(dir.path().join(name), contents).unwrap();
+    }
 
     let out = std::process::Command::new("vagrant")
         .arg("validate")

@@ -515,8 +515,9 @@ Third, its working directory is the clone, which bombyx names
 after your project -- `~/myproject` here, in that user's home, so
 several agent VMs are told apart by their directory rather than by
 asking which repository each one holds. `bombyx shell` opens in
-that same directory, so you land where the script runs. The clone
-is the only copy of your code in the VM.
+that same directory, so you land where the script runs, unless
+your `[env]` table sets `HOME`, which moves the clone but not the
+shell. The clone is the only copy of your code in the VM.
 
 Save the script below as `.bombyx/provision.sh`, creating the
 directory as you go: `mkdir -p .bombyx`. The leading dot makes
@@ -655,7 +656,7 @@ project that sets `env_file` or `repo_token` gets an eighth or
 ninth command, staging that file.
 
 **Read the plan; never pipe it into a shell.**
-`bombyx --dry-run up | sh` writes the two generated files empty --
+`bombyx --dry-run up | sh` writes the generated files empty --
 or not at all, depending on the shell -- and can leave
 `vagrant up` running against an empty Vagrantfile, with a zero
 exit that reads as success. The file sizes the plan reports change

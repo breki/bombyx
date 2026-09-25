@@ -212,7 +212,7 @@ to do, `destroy` above all. The plan is for reading, and for
 pasting one line at a time.
 
 **Do not pipe the plan into a shell.** `bombyx --dry-run up | sh`
-writes the two generated files empty, or not at all depending on
+writes the generated files empty, or not at all depending on
 the shell, and can leave `vagrant up` running against an empty
 Vagrantfile with a zero exit that reads as success. To run the
 commands, run bombyx without `--dry-run`.

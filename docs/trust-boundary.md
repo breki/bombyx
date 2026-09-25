@@ -69,9 +69,9 @@ bombyx writes three files onto the VM host, all generated from
 |---|---|---|
 | Vagrantfile | `[vm]`, `[source]`, `[env]` | Carries every `[env]` value; stays on the host for the life of the VM; written owner-only (default umask would be world-readable); disables Vagrant's default `/vagrant` share. |
 | Account script | nothing; the same for every project | Runs inside the guest as root, first: creates the `guest_user` account, gives it passwordless `sudo`, moves the staged credentials into its home, and hands over to the bootstrap script. Reads nothing from the repository. |
-| Bootstrap script | `[vm]`, `[source]` | Runs inside the guest as the `guest_user` account, to clone the project and run its hooks. |
+| Bootstrap script | nothing; the same for every project | Runs inside the guest as the `guest_user` account, to clone the project and run its hooks. Its per-project inputs arrive through the Vagrantfile's `env:`. |
 
-Both files travel on the commands' standard input, not in their
+All three travel on the commands' standard input, not in their
 arguments. This is a trust decision: every account on a Unix
 machine can list the full command line of every running process,
 so an argument would be readable by every other account while the

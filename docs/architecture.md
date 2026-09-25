@@ -342,10 +342,11 @@ own home, so every file the guest needs is staged in
 clears the environment, so `account.sh` passes
 `BOMBYX_PRESERVE_ENV`, the list of every name in the Vagrantfile's
 `env:` hash, to `sudo --preserve-env`. The `[env]` table may not
-set a name that would change what either script does.
-`config/env.rs` and `config.toml.sample` list those names, and
-`docs/trust-boundary.md` describes the isolation model this
-arrangement serves.
+set the names `config/env.rs` reserves, because each changes what
+one of the scripts does. `HOME` is accepted on purpose and moves
+the clone. `config/env.rs` and `config.toml.sample` list the
+reserved names, and `docs/trust-boundary.md` describes the
+isolation model this arrangement serves.
 
 ## Why three stages and not one
 
