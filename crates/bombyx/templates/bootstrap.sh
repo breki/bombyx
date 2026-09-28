@@ -409,13 +409,14 @@ readonly CLONE_DIR="$HOME/${BOMBYX_PROJECT:-project}"
 # and tells the project's own script where the file is. What it
 # never does is put the file anywhere. bombyx does not know that a
 # project keeps its secrets at the top of the clone, or that it
-# calls them `.env`, so the project's script makes the link:
+# calls them `.env`, so the project's script makes the copy:
 #
-#     ln -sf "$BOMBYX_ENV_FILE" .env
+#     cp "$BOMBYX_ENV_FILE" .env
 #
-# A link rather than a copy, because `bombyx up` and `bombyx
-# shell` rewrite this file in a running guest without running
-# this script, and a copy would keep the old values.
+# `bombyx up` and `bombyx shell` rewrite this file in a running
+# guest without running this script, so a copy made here keeps the
+# old values until the project runs its copy step again.
+# docs/usage.md, under "Rotating a secret", says how.
 #
 # BOMBYX_ENV_FILE_PRESENT answers whether bombyx staged one for
 # this run. Staging is what bombyx does just before it runs

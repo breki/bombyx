@@ -118,9 +118,17 @@ routes.
 Only those two copies change:
 
 - **A copy your provisioning script made keeps the old values.**
-  If the script ran `cp "$BOMBYX_ENV_FILE" .env`, the `.env` is
-  stale. Link it instead, with `ln -sf "$BOMBYX_ENV_FILE" .env`, or
-  read `~/.bombyx-env` directly.
+  Put the copy in a step you can run again, and run it after `up`
+  or `shell` has rewritten the file. The step reads
+  `~/.bombyx-env`, because `BOMBYX_ENV_FILE` is set only while
+  provisioning runs, and writes `.env` with
+  `install -m 600 ~/.bombyx-env .env`. Your provisioning script
+  calls the same step, so the two cannot drift apart. A link
+  (`ln -sf ~/.bombyx-env .env`) needs no step, but it suits only a
+  project that never writes to `.env` itself: a line appended
+  through the link lands in `~/.bombyx-env`, and the next rewrite
+  removes it. A project that checks `.env` is a plain file will
+  refuse the link as well.
 - **A running process keeps the values it read.** Restart it.
 - **Adding `env_file` or `repo_token` to a project still needs
   `provision`**, because the provisioning script is what uses the

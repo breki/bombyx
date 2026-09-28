@@ -296,13 +296,14 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # bombyx puts it nowhere else. Your provisioning script is what
 # puts it into place, and the path arrives in `BOMBYX_ENV_FILE`:
 #
-#   ln -sf "$BOMBYX_ENV_FILE" .env
+#   install -m 600 "$BOMBYX_ENV_FILE" .env
 #
-# A link rather than a copy, because `bombyx up` and
-# `bombyx shell` rewrite `~/.bombyx-env` whenever the VM already
-# exists. That is how a token you rotate here reaches the guest
-# without a provision, and a copy would keep the old value.
-# docs/usage.md, under "Rotating a secret", has the rest.
+# `bombyx up` and `bombyx shell` rewrite `~/.bombyx-env` whenever
+# the VM already exists, which is how a token you rotate here
+# reaches the guest without a provision. A copy made at provision
+# time keeps the old value, so make the copy a step you can run
+# again. docs/usage.md, under "Rotating a secret", shows how, and
+# says when a link works instead.
 #
 # That variable is always set. It holds the path when this key
 # is present and an empty string when it is not, so a script

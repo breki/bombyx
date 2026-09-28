@@ -340,10 +340,12 @@ what that costs.
 A project's own secrets travel in the other direction. `env_file`
 in `[source]` names a file on the machine you are typing on,
 usually the project's untracked `.env`, which bombyx carries into
-the guest; your provisioning script then links it into place from
-`$BOMBYX_ENV_FILE`. A link keeps it current, because `up` and
-`shell` rewrite the guest's copy each time you run them. The sample
-config explains this in full.
+the guest; your provisioning script then copies it into place from
+`$BOMBYX_ENV_FILE`. `up` and `shell` rewrite the guest's copy each
+time you run them, but a copy your script made keeps the old
+values, so give the copy a step you can run again. The sample
+config explains the variable, and "Rotating a secret" in
+[usage.md](usage.md) explains the step.
 
 Alongside it, `repo_token` and `repo_user` clone a private
 repository over `https` instead, authenticating with a token that

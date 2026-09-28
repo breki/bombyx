@@ -16,6 +16,12 @@ and this project adheres to
 
 ### Fixed
 
+- The docs, the sample config and `bootstrap.sh` no longer tell a project to
+  link `.env` to `$BOMBYX_ENV_FILE`. A link breaks a project that writes to
+  `.env` or refuses a linked one. They now say to copy the file with `install -m
+  600` in a step the project can run again after `up` or `shell` rewrites
+  `~/.bombyx-env`, and say when a link is safe.
+
 ### Removed
 
 ## [0.9.0] - 2026-09-28
