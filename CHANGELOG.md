@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.9.0] - 2026-09-28
+
+### Added
+
 - An `env_file` you change on the workstation now reaches a VM
   that already exists, running or stopped, without a provision.
   `bombyx up` and `bombyx shell` write it over `~/.bombyx-env` in
