@@ -45,6 +45,11 @@ and this project adheres to
   `.env` or refuses a linked one. They now say to copy the file with `install -m
   600` in a step the project can run again after `up` or `shell` rewrites
   `~/.bombyx-env`, and say when a link is safe.
+- Vagrant commands in a libvirt VM's directory on the VM host no longer print
+  `[fog][WARNING] Unrecognized arguments: libvirt_ip_command`. The generated
+  Vagrantfile drops that one inert fog warning and forwards every other fog
+  warning. An existing VM gets the filter the next time `up`, `provision` or
+  `scratch` rewrites its Vagrantfile.
 
 ### Removed
 

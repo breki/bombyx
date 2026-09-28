@@ -6,6 +6,19 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-28-gem-versions-point-at-a-check-that-omits-them
+
+**Category:** Comprehension
+
+`docs/vm-host-setup.md`, in "A fog warning that bombyx filters",
+says the gem pair was "seen with `vagrant-libvirt 0.12.2` and
+`fog-libvirt 0.15.0` at the August 2026 check above". The check
+near the top of the page names Ubuntu 24.04.4 and Vagrant 2.4.9
+and no plugin or gem versions, so a reader who goes back to
+confirm finds nothing. Record the versions next to that check,
+or state them here without pointing "above". Deferred from the
+#55 review: the sentence predates that change.
+
 ### fr-2026-09-28-whether-vagrant-reprovisions-has-five-homes
 
 **Category:** Comprehension
