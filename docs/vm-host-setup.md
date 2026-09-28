@@ -212,10 +212,12 @@ Turn it on once:
 virsh -c qemu:///system pool-autostart default
 ```
 
-## A warning that appears on every vagrant command
+## A fog warning that bombyx filters
 
-Once the provider is installed, every vagrant command prints a
-line like this before doing anything else:
+Once the provider is installed, any vagrant command that
+connects to libvirt -- `up`, `status`, `halt` and the like, for
+a libvirt machine -- prints a line like this before doing
+anything else:
 
 ```
 [fog][WARNING] Unrecognized arguments: libvirt_ip_command
@@ -223,7 +225,11 @@ line like this before doing anything else:
 
 It is harmless, and it is worth knowing that in advance because
 it appears at the top of otherwise successful output, where a
-reader naturally looks for the cause of a problem.
+reader naturally looks for the cause of a problem. A VM bombyx
+has written the Vagrantfile for does not print it, as the end
+of this section explains. You meet it on a VM an older bombyx
+created, and on a machine whose Vagrantfile bombyx did not
+write.
 
 The warning comes from `fog-libvirt`, the library the provider
 uses to talk to libvirt. `vagrant-libvirt` passes it an option
@@ -248,14 +254,21 @@ out in June 2023 and rubygems still listed it as the newest
 release in September 2026.
 
 bombyx filters the line instead. The Vagrantfile it generates
-for a libvirt project replaces fog's warning channel with one
-that drops any message naming `libvirt_ip_command` and forwards
-every other warning, so a genuine fog warning still reaches you.
-The filter lives in that Vagrantfile, so it applies only to
-vagrant commands run in a project directory bombyx wrote, which
-is where bombyx runs every command that acts on a VM. A vagrant
-command run anywhere else on the host still prints the line;
-`vagrant plugin list`, which `bombyx doctor` runs, is one.
+for a libvirt project wraps fog's warning channel in a filter
+that drops exactly that one line and passes every other warning
+on, so a genuine fog warning still reaches you. That includes a
+line naming a second unrecognized option next to
+`libvirt_ip_command`: fog lists them all in one line, and the
+filter lets such a line through whole.
+
+The filter lives in the Vagrantfile, so it covers every vagrant
+command on a machine bombyx defined, whether bombyx runs it or
+you do. A VM an older bombyx created gets the filter the next
+time `up`, `provision` or `scratch` rewrites its Vagrantfile;
+until then it still prints the line. So does a libvirt machine
+defined by a Vagrantfile bombyx did not write. Commands that
+never connect to libvirt, such as `vagrant plugin list`, do not
+print it at all.
 
 ## Checking that it worked
 

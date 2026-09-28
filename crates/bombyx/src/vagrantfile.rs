@@ -754,19 +754,34 @@ fn header(provider: Provider) -> String {
 /// or nothing for a provider other than libvirt.
 ///
 /// vagrant-libvirt 0.12.2 passes `libvirt_ip_command` to
-/// fog-libvirt, and fog-libvirt 0.15.0 no longer accepts it, so
-/// fog prints `[fog][WARNING] Unrecognized arguments:
-/// libvirt_ip_command` at the top of every vagrant command. The
-/// option configures nothing that runs: the provider looks a
-/// guest's address up through its DHCP leases instead.
+/// fog-libvirt, and fog-libvirt 0.15.0 no longer accepts it. So
+/// each time a vagrant command opens a libvirt connection, fog
+/// prints `[fog][WARNING] Unrecognized arguments:
+/// libvirt_ip_command`. The option configures nothing that
+/// runs: the provider looks a guest's address up through its
+/// DHCP leases instead.
 ///
-/// fog writes each warning through `Fog::Logger[:warning]`, one
-/// writable channel per severity. The block puts a filter in
-/// that slot which forwards every message except the one that
-/// names `libvirt_ip_command`. It matches that one string on
-/// purpose: setting the channel to `nil` would also hide the
-/// next warning that matters. When vagrant-libvirt stops
-/// passing the option, the filter simply never matches.
+/// fog is a family of Ruby gems: fog-core holds the shared
+/// parts, among them the logger `Fog::Logger`, and fog-libvirt
+/// is the libvirt driver built on it. The block needs only the
+/// logger, so it loads fog-core. fog writes each warning
+/// through `Fog::Logger[:warning]`, one writable channel per
+/// severity, and the block wraps the channel already in that
+/// slot in a filter.
+///
+/// fog colours a warning when the channel is a terminal, so the
+/// filter first strips the colour codes and the trailing
+/// newline. It drops the message only when what remains equals
+/// the inert line exactly, and passes every other message on to
+/// the wrapped channel. An empty slot is left empty, and a slot
+/// already holding the filter is not wrapped twice.
+///
+/// The filter compares the whole line because fog names every
+/// unrecognized option in one line. A substring match would
+/// also hide a second option that stopped working, and setting
+/// the channel to `nil` would hide every warning. When
+/// vagrant-libvirt stops passing the option, the filter simply
+/// never matches.
 ///
 /// [`header`] places the block under the do-not-edit comment.
 /// The leading newline leaves a blank line between the two, and
@@ -775,40 +790,63 @@ fn fog_filter_block(provider: Provider) -> &'static str {
     if provider != Provider::Libvirt {
         return "";
     }
-    "
+    r#"
 # vagrant-libvirt passes fog an option, libvirt_ip_command, that
 # the fog-libvirt it runs with no longer accepts, so fog warns
-# about it on every vagrant command. The option does nothing, so
-# this drops that one warning and forwards every other. Setting
-# the channel to nil would be shorter, and would also hide the
-# next warning that matters.
+# about it each time vagrant connects to libvirt. The option does
+# nothing, so this drops that one warning line and passes every
+# other on. It compares the whole line because fog names every
+# unrecognized option in one line, and a second one there is
+# worth seeing. Setting the channel to nil would hide them all.
 begin
-  require \"fog/core\"
+  require "fog/core"
 
-  class FogNoiseFilter
-    def initialize(io, pattern)
-      @io = io
-      @pattern = pattern
-    end
+  # Inside a module, so the name cannot clash with a class some
+  # plugin defines in the same Ruby process.
+  module Bombyx
+    class FogNoiseFilter
+      def initialize(io, line)
+        @io = io
+        @line = line
+      end
 
-    # fog asks the channel this before it formats a message.
-    def tty?
-      @io.tty?
-    end
+      # fog asks whether the channel is a terminal, to decide
+      # whether to colour the line, so the filter passes the
+      # wrapped channel's answer through.
+      def tty?
+        @io.tty?
+      end
 
-    def write(message)
-      @io.write(message) unless message.include?(@pattern)
+      # fog colours the line when the channel is a terminal, so
+      # the colour codes come off before the comparison.
+      def write(message)
+        return if message.gsub(/\e\[[0-9;]*m/, "").chomp == @line
+
+        @io.write(message)
+      end
     end
   end
 
-  Fog::Logger[:warning] =
-    FogNoiseFilter.new($stderr, \"libvirt_ip_command\")
+  inert = "[fog][WARNING] " \
+          "Unrecognized arguments: libvirt_ip_command"
+
+  # Wrap whatever channel is already there. A plugin or the
+  # operator may have silenced fog's warnings by setting the
+  # channel to nil, and the filter keeps that choice rather than
+  # turning warnings back on. Vagrant can read this file more
+  # than once in one run, and the second read must not wrap the
+  # filter again.
+  previous = Fog::Logger[:warning]
+  if previous && !previous.is_a?(Bombyx::FogNoiseFilter)
+    Fog::Logger[:warning] =
+      Bombyx::FogNoiseFilter.new(previous, inert)
+  end
 rescue LoadError
-  # fog is not loaded in every context that reads this file
-  # (`vagrant --version`, for one), and then there is nothing
-  # to filter.
+  # fog-core, which holds Fog::Logger, arrives with the
+  # vagrant-libvirt plugin, so on a host without the plugin
+  # there is no fog to load, and nothing to filter.
 end
-"
+"#
 }
 
 /// What [`DEPLOY_KEY_ENV`] is set to for `key`.
@@ -1396,6 +1434,13 @@ mod tests {
 
     #[test]
     fn a_libvirt_vagrantfile_filters_the_inert_fog_warning() {
+        // This checks the Ruby bombyx emits, not what it does: no
+        // Ruby runs here. The filtering itself was checked against
+        // a real VM host. The order check keeps the block at the
+        // top, where a reader of the generated file meets it
+        // first; fog connects only when a command acts on the
+        // machine, after the whole file is read, so the position
+        // does not change what the filter catches.
         let out = rendered_for(&cfg_with(Provider::Libvirt));
         let filter = out
             .find("Fog::Logger[:warning] =")
@@ -1406,7 +1451,23 @@ mod tests {
             "the filter must be installed before Vagrant.configure:\n{out}"
         );
         for needed in [
-            "FogNoiseFilter.new($stderr, \"libvirt_ip_command\")",
+            // Under a bombyx module, so the class cannot clash with
+            // a plugin's constant in Vagrant's shared process.
+            "module Bombyx",
+            // Wraps whatever channel is in the slot, rather than
+            // resetting it to stderr, and never wraps itself when
+            // Vagrant loads the file a second time.
+            "previous = Fog::Logger[:warning]",
+            "previous.is_a?(Bombyx::FogNoiseFilter)",
+            "Bombyx::FogNoiseFilter.new(previous, inert)",
+            // fog names every unrecognized option in one line, so
+            // the filter compares the whole line: a line naming a
+            // second option as well must still get through. The
+            // closing quote shows the line ends right after
+            // `libvirt_ip_command`, and `.chomp == @line` shows the
+            // comparison is an equality, not an `include?`.
+            "\"Unrecognized arguments: libvirt_ip_command\"",
+            ".chomp == @line",
             "def tty?",
             "def write(message)",
             "rescue LoadError",
@@ -1420,10 +1481,12 @@ mod tests {
         // fog is the libvirt provider's library; a hyperv host
         // never loads it, so the block would only be noise.
         let out = rendered_for(&cfg_with(Provider::Hyperv));
-        assert!(
-            !out.contains("Fog"),
-            "a hyperv Vagrantfile must carry no fog filter:\n{out}"
-        );
+        for marker in ["Fog::Logger", "FogNoiseFilter"] {
+            assert!(
+                !out.contains(marker),
+                "a hyperv Vagrantfile must carry no fog filter:\n{out}"
+            );
+        }
     }
 
     #[test]
