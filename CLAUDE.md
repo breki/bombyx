@@ -226,6 +226,14 @@ for tools that are not present:
   exit status. Write the file after **each** successful
   replacement and read it back: a fix is landed when `grep` or
   `sed -n` shows it, not when the script that made it says so.
+
+  **End an `Edit`'s `old_string` at a newline.** Ending it partway
+  through a wrapped line leaves the rest of that line untouched,
+  and the rest fuses onto the last line of `new_string`, making a
+  line over 80 columns or two words run together. Extend the
+  anchor to the end of the line and reflow the whole span in the
+  one edit. Rust has the same hazard, and rustfmt does not repair
+  a fused token inside a string.
 - **Print the variable before claiming what it holds.** A claim
   about what a variable, a file or a platform actually contains
   needs the command that read it, in the same breath --
