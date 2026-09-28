@@ -261,4 +261,25 @@ pub enum ConfigError {
         /// What rule the value broke.
         reason: String,
     },
+
+    /// A project names a `secrets_refreshed` hook and no
+    /// `env_file`.
+    ///
+    /// The hook runs only after bombyx rewrites the secrets file,
+    /// so without one it would never run. A rule spanning two
+    /// tables, so no single type can hold it; the registry's
+    /// `parse` checks it once both tables have parsed.
+    #[error(
+        "invalid config in {}: [projects.\"{project}\".hooks] names \
+         `secrets_refreshed`, which runs after bombyx rewrites the \
+         project's secrets, but [projects.\"{project}\".source] names \
+         no `env_file` -- add one, or remove the hook",
+        .path.display()
+    )]
+    HookWithoutEnvFile {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project whose table pairs them.
+        project: String,
+    },
 }

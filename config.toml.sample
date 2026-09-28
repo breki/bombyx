@@ -302,8 +302,10 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # the VM already exists, which is how a token you rotate here
 # reaches the guest without a provision. A copy made at provision
 # time keeps the old value, so make the copy a step you can run
-# again. docs/usage.md, under "Rotating a secret", shows how, and
-# says when a link works instead.
+# again, and name that step as the `secrets_refreshed` hook at the
+# end of this file so bombyx runs it after each rewrite.
+# docs/usage.md, under "Rotating a secret", shows how, and says
+# when a link works instead.
 #
 # That variable is always set. It holds the path when this key
 # is present and an empty string when it is not, so a script
@@ -540,3 +542,40 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # NODE_MAJOR = "22"
 # GIT_USER_NAME = "Your Name"
 # GIT_USER_EMAIL = "you@example.com"
+
+# HOOKS: scripts from the clone that bombyx runs in the guest at a
+# named moment. One moment exists so far.
+#
+# `secrets_refreshed` is the step that puts your secrets into
+# `.env`, or wherever your project keeps them, and bombyx runs it
+# whenever it has written `~/.bombyx-env`: after the provisioning
+# run of the first `bombyx up` and of `bombyx provision`, and after
+# `bombyx up` or `bombyx shell` rewrites the file in a running
+# guest. So a project VM needs no copy step in your provisioning
+# script. `scratch` VMs run no hook, though, so a project that uses
+# them calls the hook script from its provisioning script too. The
+# hook runs after that script, so a script that needs a secret
+# during its run reads `$BOMBYX_ENV_FILE` instead of `.env`. The
+# hook needs `env_file` above: without one there is nothing for it
+# to copy, so bombyx refuses the pair.
+#
+# The path is relative to the clone root, like `script`, and holds
+# no `..` segment. It does not start with `-`, holds only letters,
+# digits, `.`, `_`, `-` and `/`, and names a file, so it has no
+# final `.` and no trailing `/`. In the guest, bombyx also refuses
+# a path a symlink leads out of the clone.
+#
+# The hook runs as the agent's account, from the clone, through
+# `/bin/bash`, so it needs no execute bit. It starts from an empty
+# environment holding only HOME, PATH, BOMBYX_PROJECT and
+# BOMBYX_ENV_FILE -- not the `[env]` table above -- with no input,
+# and it is stopped after 60 seconds. It runs every time, whether
+# the secrets changed or not, so it must be safe to run twice. What
+# it prints is shown after it ends, cut at 65536 bytes. A failure
+# makes `up` and `provision` exit non-zero, and `shell` warns and
+# opens anyway. docs/usage.md, under "Rotating a secret", has the
+# rest, and docs/trust-boundary.md says what the empty environment
+# does and does not protect.
+#
+# [projects.myproject.hooks]
+# secrets_refreshed = ".bombyx/refresh-env.sh"

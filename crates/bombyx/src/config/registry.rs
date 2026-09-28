@@ -138,6 +138,17 @@ pub struct Project {
     /// byte-identical between runs.
     #[serde(default)]
     pub env: BTreeMap<EnvName, EnvValue>,
+
+    /// Scripts from the clone that bombyx runs in the guest at a
+    /// named moment, from the project's `[hooks]` table.
+    ///
+    /// A table of its own rather than keys in `[source]`, because a
+    /// hook is about the guest's lifecycle, not about where the
+    /// clone comes from. The one rule tying it to another table --
+    /// `secrets_refreshed` needs `source.env_file` -- runs in this
+    /// module's `parse`, once both tables exist.
+    #[serde(default)]
+    pub hooks: super::Hooks,
 }
 
 /// The per-developer file, as it parses.
@@ -228,6 +239,7 @@ impl Project {
             vm: self.vm.clone(),
             source: self.source.clone(),
             env: self.env.clone(),
+            hooks: self.hooks.clone(),
             transport,
         }
     }
@@ -431,6 +443,18 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
                 &super::HostOrigin::ProjectEntry(key.clone()),
                 path,
             )?;
+        }
+        // The hook runs after the secrets refresh and at no other
+        // time, and a project with no `env_file` has no refresh.
+        // Accepting the pairing would leave a hook that never runs
+        // and nothing saying why.
+        if project.hooks.secrets_refreshed.is_some()
+            && project.source.env_file.is_none()
+        {
+            return Err(ConfigError::HookWithoutEnvFile {
+                path: path.to_path_buf(),
+                project: key.as_str().to_owned(),
+            });
         }
     }
 

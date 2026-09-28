@@ -114,6 +114,24 @@ pub(crate) fn sanitize(text: &str) -> String {
         .collect()
 }
 
+/// Makes captured guest output safe to print, line by line.
+///
+/// `sanitize` for text that has more than one line: the output a
+/// `secrets_refreshed` hook prints, which the branch checked out in
+/// the guest controls. Each line goes through `sanitize`, so an
+/// escape sequence cannot repaint what the operator already read,
+/// and the line breaks between them survive. A `\r\n` ending
+/// counts as a line break, a tab becomes a space, and a byte that
+/// is not UTF-8 becomes `?` with everything else `sanitize`
+/// refuses. Every line ends in `\n`, the last one included.
+#[must_use]
+pub fn relay(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(|line| sanitize(&line.replace('\t', " ")) + "\n")
+        .collect()
+}
+
 /// Shortens `detail` to at most `budget` characters.
 ///
 /// ASCII `...`, not an ellipsis character: every other byte
@@ -167,6 +185,21 @@ pub(crate) fn first_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relayed_output_keeps_its_lines_and_loses_its_escapes() {
+        // A hook's output is several lines from the guest. The line
+        // breaks carry meaning and survive; an escape that could
+        // move the cursor, a carriage return that could overwrite a
+        // line, and a byte that is not text do not.
+        let raw = b"=== refreshed .env\r\n\x1b[1A\x1b[2Kok\tdone\n\xff end";
+        assert_eq!(relay(raw), "=== refreshed .env\n?[1A?[2Kok done\n? end\n");
+    }
+
+    #[test]
+    fn nothing_relayed_prints_nothing() {
+        assert_eq!(relay(b""), "");
+    }
 
     #[test]
     fn leaves_text_alone_when_not_asked() {

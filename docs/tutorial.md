@@ -343,9 +343,11 @@ usually the project's untracked `.env`, which bombyx carries into
 the guest; your provisioning script then copies it into place from
 `$BOMBYX_ENV_FILE`. `up` and `shell` rewrite the guest's copy each
 time you run them, but a copy your script made keeps the old
-values, so give the copy a step you can run again. The sample
-config explains the variable, and "Rotating a secret" in
-[usage.md](usage.md) explains the step.
+values, so give the copy a step of its own and name that step as
+the project's `secrets_refreshed` hook; bombyx then runs it after
+every rewrite. The sample config explains the variable and the
+hook, and "Rotating a secret" in [usage.md](usage.md) explains
+both in full.
 
 Alongside it, `repo_token` and `repo_user` clone a private
 repository over `https` instead, authenticating with a token that

@@ -447,8 +447,8 @@ checked_str_parse!(
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
     /// [`FieldError::Invalid`] when it begins or ends with
     /// whitespace, would break the generated Vagrantfile, would
-    /// be read by `git` as an option, or leaves the clone
-    /// directory.
+    /// be read by `git` as an option, leaves the clone
+    /// directory, or cannot name a file.
     ScriptPath,
     FieldError,
     check_script
@@ -565,11 +565,16 @@ fn check_repo(value: &str) -> Result<(), FieldError> {
 /// Both [`ScriptPath::parse`] and [`ScriptPath::try_from`] call
 /// this, so neither can run a different set.
 ///
-/// The first two rules are shared with other fields. The rest
-/// are `script`'s own, and they matter because the guest
-/// changes into the cloned project, runs `chmod +x` on this
-/// path, and executes it -- so whatever this names is
-/// about to be given the run of the machine.
+/// Every rule lives in `guards`. The first two are shared with
+/// other fields, and the last two with the `secrets_refreshed`
+/// hook, which also names a file in the clone. They matter because
+/// the guest changes into the cloned project, runs `chmod +x` on
+/// this path, and executes it -- so whatever this names is about to
+/// be given the run of the machine.
+///
+/// A path that cannot name a file -- a final `.`, which is the
+/// clone itself, or a trailing `/` -- is refused too, because the
+/// guest would refuse it for a misleading reason.
 ///
 /// A value escapes the clone in two ways, and both are refused:
 ///
@@ -588,21 +593,8 @@ fn check_repo(value: &str) -> Result<(), FieldError> {
 fn check_script(value: &str) -> Result<(), FieldError> {
     guards::check_renderable("script", value)?;
     guards::check_not_an_option("script", value, "git")?;
-
-    let bad = if value.starts_with('/') {
-        Some("must be relative to the clone root")
-    } else if value.split('/').any(|s| s == "..") {
-        Some("must not contain a `..` segment")
-    } else {
-        None
-    };
-    match bad {
-        Some(reason) => Err(FieldError::Invalid {
-            field: "script",
-            reason: reason.to_owned(),
-        }),
-        None => Ok(()),
-    }
+    guards::check_inside_clone("script", value)?;
+    guards::check_names_a_file("script", value)
 }
 
 #[cfg(test)]
@@ -841,6 +833,23 @@ mod tests {
             let repo =
                 RepoUrl::parse(url).unwrap_or_else(|e| panic!("{url:?}: {e}"));
             assert_eq!(repo.ssh_host(), want, "{url:?}");
+        }
+    }
+
+    #[test]
+    fn a_script_path_must_name_a_file() {
+        // `.` resolves to the clone itself, which the guest would
+        // refuse as "outside the cloned project" -- a false reason
+        // for a value that can never name a script.
+        for bad in [".", "./", "vagrant/.", "vagrant/", "a/./"] {
+            refused_because(
+                |s| ScriptPath::parse(s).map(|_| ()),
+                bad,
+                "must name a file",
+            );
+        }
+        for good in ["./vagrant/provision.sh", "a/./b.sh", "a//b.sh"] {
+            ScriptPath::parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
         }
     }
 

@@ -34,7 +34,7 @@ pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::{write_file, write_file_of_hidden_size};
 
-use crate::config::{Config, Provider, Transport};
+use crate::config::{Config, HookPath, Provider, Secrets, Transport};
 use crate::vagrantfile::GuestHomeFile;
 
 /// Environment variable carrying the VM host's SSH alias into
@@ -1160,7 +1160,7 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
     let guest = as_guest_user(
         cfg,
         r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#,
-        cfg.project.as_str(),
+        &[cfg.project.as_str()],
         "run bombyx provision, or bombyx destroy then bombyx up if \
          provisioning refuses. Opening a shell as $(id -un) instead.",
         "exec \"$SHELL\" -l",
@@ -1174,36 +1174,42 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
 }
 
 /// The guest command that runs `script` as the agent's account,
-/// with `arg` as its `$1`, or reports the account missing and runs
-/// `otherwise`.
+/// with `args` as its `$1`, `$2` and on, or reports the account
+/// missing and runs `otherwise`.
 ///
-/// Shared by [`shell_into_vm`] and [`refresh_in_guest`], so the
-/// account switch is written once. `shell_into_vm`'s doc gives the
-/// reasons for each part: the login account's passwordless `sudo`,
-/// `-H` setting `HOME` from the passwd entry, and the `id -u` check
-/// for a guest never provisioned for the account.
+/// Shared by every guest command that runs as the agent's account
+/// -- [`shell_into_vm`], [`refresh_in_guest`] and
+/// `refresh_secrets_then_hook` -- so the account switch is written
+/// once. `shell_into_vm`'s doc gives the reasons for each part: the
+/// login account's passwordless `sudo`, `-H` setting `HOME` from the
+/// passwd entry, and the `id -u` check for a guest never provisioned
+/// for the account.
 ///
-/// `script` and `arg` are quoted here. `advice` and `otherwise` are
-/// fixed text the callers write, placed as they stand: `advice`
-/// inside the double quotes of an `echo`, so the guest expands a
-/// `$(...)` in it and it must hold no `"`, and `otherwise` as the
-/// command that runs in the account's place.
+/// `script` is quoted here, and so is each of `args`. `advice` and
+/// `otherwise` are fixed text the callers write, placed as they
+/// stand: `advice` inside the double quotes of an `echo`, so the
+/// guest expands a `$(...)` in it and it must hold no `"`, and
+/// `otherwise` as the command that runs in the account's place.
 fn as_guest_user(
     cfg: &Config,
     script: &str,
-    arg: &str,
+    args: &[&str],
     advice: &str,
     otherwise: &str,
 ) -> String {
     let user = shell_quote(cfg.vm.guest_user.as_str());
+    let args = args
+        .iter()
+        .map(|a| shell_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
     format!(
         "if id -u {user} >/dev/null 2>&1; \
-         then exec sudo -u {user} -H -- sh -c {script} sh {arg}; \
+         then exec sudo -u {user} -H -- sh -c {script} sh {args}; \
          else echo \"bombyx: this guest has no account {user}, so it \
          was never provisioned for it; {advice}\" >&2; \
          {otherwise}; fi",
         script = shell_quote(script),
-        arg = shell_quote(arg),
     )
 }
 
@@ -1274,7 +1280,7 @@ pub fn refresh_in_guest(
     let guest = as_guest_user(
         cfg,
         REFRESH_SCRIPT,
-        file.path(),
+        &[file.path()],
         "run bombyx provision.",
         "exit 1",
     );
@@ -1288,6 +1294,242 @@ pub fn refresh_in_guest(
         cmd.with_stdin_of_hidden_size(contents)
     } else {
         cmd.with_stdin(contents)
+    }
+}
+
+/// The exit status of a refresh whose write succeeded and whose
+/// `secrets_refreshed` hook the guest did not start, for any reason:
+/// no clone, a path that leads out of it, nothing there that is a
+/// regular file, or no temporary file for the hook's output.
+///
+/// The three hook statuses sit far from 1, which the write, `sudo`,
+/// `vagrant` and `ssh` all use for their own failures, so bombyx
+/// can tell "the secrets are current and the hook did not run" from
+/// "the secrets may not be current".
+///
+/// `REFRESH_THEN_HOOK_SCRIPT` spells the three as literals, because
+/// `concat!` takes literals only;
+/// `the_script_exits_with_the_hook_statuses` ties the two, on every
+/// platform.
+const HOOK_REFUSED: i32 = 90;
+
+/// The exit status of a refresh whose write succeeded and whose
+/// hook ran and exited non-zero, whatever status it chose.
+const HOOK_FAILED: i32 = 91;
+
+/// The exit status of a refresh whose write succeeded and whose
+/// hook ran past [`HOOK_TIMEOUT_SECS`] and was stopped.
+const HOOK_TIMED_OUT: i32 = 92;
+
+/// How long a `secrets_refreshed` hook may run before the guest
+/// stops it.
+///
+/// `shell` waits for the hook before it opens, so a hook waiting
+/// on the network or on input would otherwise hold the shell
+/// indefinitely. Fixed rather than a setting until a project needs
+/// longer. It bounds the hook's own run; `REFRESH_THEN_HOOK_SCRIPT`
+/// says why a process the hook leaves behind does not extend it.
+const HOOK_TIMEOUT_SECS: u32 = 60;
+
+/// [`REFRESH_SCRIPT`], then the project's `secrets_refreshed` hook.
+///
+/// `$1` is the secrets file's path in the home, `$2` the clone's
+/// directory name, `$3` the hook's path inside the clone and `$4`
+/// the timeout in seconds. One guest command rather than two,
+/// because each `vagrant ssh` pays vagrant's start-up again, and
+/// `shell` waits for all of it.
+///
+/// **The hook runs only after the rename succeeded.** A failed
+/// write exits 1, as [`REFRESH_SCRIPT`] does, and the hook never
+/// starts: it would copy a file that is not the one the operator
+/// just sent.
+///
+/// **The path is checked where it is used.** The config refused an
+/// absolute path and a `..` segment already; this resolves the path
+/// once with `readlink -f` and refuses one that a symlink in the
+/// repository leads out of the clone, as `bootstrap.sh` does for
+/// `script`. Only the resolved path is used afterwards. The clone
+/// is `$HOME/<project>` with `HOME` from the passwd entry, which is
+/// where `bootstrap.sh` clones unless the project's `[env]` table
+/// sets `HOME`; that project gets the "no clone" refusal.
+///
+/// **The hook starts from an empty environment.** `/usr/bin/env -i`
+/// clears everything this shell inherited -- `BASH_ENV`, exported
+/// functions, `SHELLOPTS` with `PS4` -- and sets only `HOME`, a
+/// fixed `PATH`, `BOMBYX_PROJECT` and `BOMBYX_ENV_FILE`, the two
+/// names provisioning also exports, so one step can serve both.
+/// That guards against the project's own configuration reaching
+/// the refresh by accident. It is not a boundary against the agent,
+/// which has passwordless `sudo` in the guest and can change
+/// anything on the way here. The path to `env` is spelt out so no
+/// exported function named `env` can stand in for it, and `bash`
+/// runs the file, so it needs no execute bit and bombyx changes
+/// nothing in the checkout. The `umask` goes back to 022 first,
+/// because the write above tightened it for its own file only.
+///
+/// **Its standard input is `/dev/null`**, so a hook that reads
+/// input ends rather than waiting, and `timeout` stops one that
+/// runs too long: with SIGTERM, and with SIGKILL five seconds
+/// later if the hook ignores that. `timeout` then exits 124 or
+/// 137, and passes any other status through, so a hook that itself
+/// exits 124 or 137 is reported as timed out; no status could tell
+/// the two apart.
+///
+/// **Its output goes to a temporary file, not to the pipe bombyx
+/// reads.** A hook may leave a process running, such as a dev
+/// server it restarted, and that process holds whatever the hook's
+/// output was. Pointed at the pipe, it would keep `vagrant ssh`
+/// open and hold `shell` for as long as the process lived. So the
+/// guest waits for the hook alone, then relays the file's first
+/// 65536 bytes on standard output, with a note on standard error
+/// when there was more, and removes the file; the process keeps
+/// writing to a file nobody can reach, which costs disk -- or
+/// memory, where `/tmp` is a tmpfs -- until it stops. Every refusal
+/// and failure is said on standard error, which bombyx relays.
+const REFRESH_THEN_HOOK_SCRIPT: &str = concat!(
+    r#"t="$HOME/$1.new"; umask 077; "#,
+    r#"if cat > "$t" && chmod 600 "$t" && mv -f -- "$t" "$HOME/$1"; "#,
+    r#"then :; else rm -f -- "$t"; exit 1; fi; "#,
+    "umask 022; ",
+    r#"if ! clone=$(readlink -f -- "$HOME/$2") || [ ! -d "$clone" ]; "#,
+    r#"then echo "bombyx: no clone at $HOME/$2, so the "#,
+    r#"secrets_refreshed hook did not run" >&2; exit 90; fi; "#,
+    r#"if ! hook=$(readlink -f -- "$clone/$3"); "#,
+    r#"then echo "bombyx: no secrets_refreshed hook at $3 in the "#,
+    r#"clone" >&2; exit 90; fi; "#,
+    r#"case "$hook" in "$clone"/*) ;; "#,
+    r#"*) echo "bombyx: the secrets_refreshed hook $3 leads outside "#,
+    r#"the clone, so it did not run" >&2; exit 90 ;; esac; "#,
+    r#"if [ ! -f "$hook" ]; "#,
+    r#"then echo "bombyx: no secrets_refreshed hook at $3 in the "#,
+    r#"clone" >&2; exit 90; fi; "#,
+    r#"cd -- "$clone" || exit 90; "#,
+    r#"if ! log=$(mktemp); then echo "bombyx: no temporary file for "#,
+    r#"the secrets_refreshed hook's output, so it did not run" >&2; "#,
+    "exit 90; fi; ",
+    r#"timeout -k 5 "$4" /usr/bin/env -i HOME="$HOME" "#,
+    "PATH=/usr/local/bin:/usr/bin:/bin ",
+    r#"BOMBYX_PROJECT="$2" BOMBYX_ENV_FILE="$HOME/$1" "#,
+    r#"/bin/bash -- "$hook" </dev/null >"$log" 2>&1; "#,
+    "rc=$?; ",
+    r#"head -c 65536 -- "$log"; "#,
+    r#"size=$(wc -c < "$log" | tr -d ' '); "#,
+    r#"if [ "$size" -gt 65536 ]; then echo; "#,
+    r#"echo "bombyx: the secrets_refreshed hook printed $size bytes; "#,
+    r#"the rest was dropped after 65536" >&2; fi; "#,
+    r#"rm -f -- "$log"; "#,
+    r#"if [ "$rc" -eq 0 ]; then exit 0; fi; "#,
+    r#"if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; "#,
+    r#"then echo "bombyx: the secrets_refreshed "#,
+    r#"hook ran longer than $4 seconds and was stopped" >&2; "#,
+    "exit 92; fi; ",
+    r#"echo "bombyx: the secrets_refreshed hook exited $rc" >&2; "#,
+    "exit 91",
+);
+
+/// Builds the command that writes the project's secrets over
+/// `~/.bombyx-env` in the running project VM and then runs `hook`
+/// from the clone.
+///
+/// [`refresh_in_guest`] for [`GuestHomeFile::Secrets`], with the
+/// hook appended in the same guest command;
+/// `REFRESH_THEN_HOOK_SCRIPT` holds how the hook is checked and
+/// run. The route, the terminal rule and the payload are the same
+/// as that function's, so its doc covers them.
+///
+/// The exit status says which part failed: 1 for the write, and
+/// `HOOK_REFUSED`, `HOOK_FAILED` or `HOOK_TIMED_OUT` for the
+/// hook. [`RefreshOutcome::from_code`] reads it.
+#[must_use]
+pub fn refresh_secrets_then_hook(
+    cfg: &Config,
+    secrets: &Secrets,
+    hook: &HookPath,
+) -> RemoteCommand {
+    let timeout = HOOK_TIMEOUT_SECS.to_string();
+    let guest = as_guest_user(
+        cfg,
+        REFRESH_THEN_HOOK_SCRIPT,
+        &[
+            GuestHomeFile::Secrets.path(),
+            cfg.project.as_str(),
+            hook.as_str(),
+            &timeout,
+        ],
+        "run bombyx provision.",
+        "exit 1",
+    );
+    vagrant_in(
+        cfg,
+        &cfg.remote_project_dir(),
+        &["ssh", "--no-tty", "-c", &guest],
+        Tty::NoPty,
+    )
+    .with_stdin(secrets.as_bytes())
+}
+
+/// What one refresh command's exit status means to the operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshOutcome {
+    /// The file was written, and the hook, if any, succeeded.
+    Done,
+    /// The file may not have been written. Everything that is not
+    /// one of the hook statuses lands here, because a failed
+    /// `ssh`, `vagrant` or `sudo` says nothing about the file.
+    WriteFailed,
+    /// The file was written, and the hook was not run.
+    HookRefused,
+    /// The file was written, and the hook exited non-zero.
+    HookFailed,
+    /// The file was written, and the hook was stopped for running
+    /// too long.
+    HookTimedOut,
+}
+
+impl RefreshOutcome {
+    /// Reads a refresh command's exit status. `None` is a process
+    /// ended by a signal, which is a failure like any other.
+    #[must_use]
+    pub fn from_code(code: Option<i32>) -> Self {
+        match code {
+            Some(0) => Self::Done,
+            Some(HOOK_REFUSED) => Self::HookRefused,
+            Some(HOOK_FAILED) => Self::HookFailed,
+            Some(HOOK_TIMED_OUT) => Self::HookTimedOut,
+            _ => Self::WriteFailed,
+        }
+    }
+
+    /// The line bombyx prints for this outcome, or `None` when
+    /// there is nothing to report.
+    ///
+    /// A write failure makes no claim about what the guest now
+    /// holds; `run_refresh` in the binary says why. A hook outcome
+    /// says the secrets are current, which is true because the
+    /// guest runs the hook only after the rename succeeded, and
+    /// points at the guest's own line above it for the reason.
+    #[must_use]
+    pub fn message(self) -> Option<&'static str> {
+        match self {
+            Self::Done => None,
+            Self::WriteFailed => Some(
+                "bombyx: could not refresh a secrets file in the guest; \
+                 run the command again",
+            ),
+            Self::HookRefused => Some(
+                "bombyx: the secrets in the guest are current, but the \
+                 secrets_refreshed hook did not run; the line above says \
+                 why",
+            ),
+            Self::HookFailed => Some(
+                "bombyx: the secrets in the guest are current, but the \
+                 secrets_refreshed hook failed; its output is above",
+            ),
+            Self::HookTimedOut => Some(
+                "bombyx: the secrets in the guest are current, but the \
+                 secrets_refreshed hook was stopped for running too long",
+            ),
+        }
     }
 }
 
@@ -1678,6 +1920,371 @@ mod tests {
             "the secret reached an argument: {:?}",
             c.args
         );
+    }
+
+    /// A guest home for [`run_hook_script`]: a clone at `proj`, and
+    /// a `BASH_ENV` file that leaves a marker if any shell reads it.
+    #[cfg(target_os = "linux")]
+    fn hook_home() -> tempfile::TempDir {
+        let home = tempfile::tempdir().expect("a temp dir");
+        std::fs::create_dir(home.path().join("proj")).expect("a clone");
+        std::fs::write(
+            home.path().join("bash_env.sh"),
+            "touch \"$HOME/bash_env_ran\"\n",
+        )
+        .expect("a BASH_ENV file");
+        home
+    }
+
+    /// Writes `body` as the hook at `rel` inside the clone.
+    #[cfg(target_os = "linux")]
+    fn write_hook(home: &std::path::Path, rel: &str, body: &str) {
+        let path = home.join("proj").join(rel);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).expect("the hook's directory");
+        }
+        std::fs::write(path, body).expect("the hook");
+    }
+
+    /// Runs `REFRESH_THEN_HOOK_SCRIPT` under `sh` as the guest
+    /// would: `HOME` at `home`, the payload `input` on standard
+    /// input, the clone `proj`, the hook `hook` and a timeout of
+    /// `timeout` seconds. Returns the exit status, and standard
+    /// output followed by standard error.
+    ///
+    /// The caller's environment carries `BASH_ENV` and a stray
+    /// variable, the two things the hook must not see.
+    ///
+    /// Linux only: the guest is Linux, and the script needs GNU
+    /// `timeout` and `readlink -f`, which macOS does not ship.
+    #[cfg(target_os = "linux")]
+    fn run_hook_script(
+        home: &std::path::Path,
+        input: &[u8],
+        hook: &str,
+        timeout: &str,
+    ) -> (Option<i32>, String) {
+        use std::io::Write as _;
+        let mut child = std::process::Command::new("sh")
+            .args([
+                "-c",
+                REFRESH_THEN_HOOK_SCRIPT,
+                "sh",
+                ".bombyx-env",
+                "proj",
+                hook,
+                timeout,
+            ])
+            .env("HOME", home)
+            .env("BASH_ENV", home.join("bash_env.sh"))
+            .env("BOMBYX_LEAK", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh starts");
+        child
+            .stdin
+            .take()
+            .expect("a piped stdin")
+            .write_all(input)
+            .expect("the script reads its input");
+        let out = child.wait_with_output().expect("sh finishes");
+        let mut printed = String::from_utf8_lossy(&out.stdout).into_owned();
+        printed.push_str(&String::from_utf8_lossy(&out.stderr));
+        (out.status.code(), printed)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_hook_runs_in_the_clone_from_a_clean_environment_after_the_write() {
+        // What the hook sees is its contract: the clone as its
+        // working directory, four named variables and nothing the
+        // calling shell carried, input from nowhere, and an
+        // ordinary umask -- and the file already rewritten.
+        let home = hook_home();
+        write_hook(
+            home.path(),
+            ".bombyx/refresh.sh",
+            "{ pwd; umask; [ -c /dev/stdin ] && echo stdin-null; \
+             cat \"$BOMBYX_ENV_FILE\"; env; } > \"$HOME/seen\"\n",
+        );
+        let (code, err) = run_hook_script(
+            home.path(),
+            b"NEW=2\n",
+            ".bombyx/refresh.sh",
+            "10",
+        );
+        assert_eq!(code, Some(0), "{err}");
+        let seen =
+            std::fs::read_to_string(home.path().join("seen")).expect("ran");
+        let clone =
+            std::fs::canonicalize(home.path().join("proj")).expect("the clone");
+        let mut lines = seen.lines();
+        assert_eq!(lines.next(), Some(clone.to_str().expect("utf-8")));
+        assert_eq!(lines.next(), Some("0022"), "{seen}");
+        assert_eq!(lines.next(), Some("stdin-null"), "{seen}");
+        assert_eq!(
+            lines.next(),
+            Some("NEW=2"),
+            "the hook ran before the write"
+        );
+        let names: std::collections::BTreeSet<&str> =
+            lines.filter_map(|l| l.split('=').next()).collect();
+        for want in ["HOME", "PATH", "BOMBYX_PROJECT", "BOMBYX_ENV_FILE"] {
+            assert!(names.contains(want), "{want} missing: {seen}");
+        }
+        for leaked in ["BASH_ENV", "BOMBYX_LEAK"] {
+            assert!(!names.contains(leaked), "{leaked} leaked: {seen}");
+        }
+        assert!(seen.contains("BOMBYX_PROJECT=proj\n"), "{seen}");
+        assert!(
+            !home.path().join("bash_env_ran").exists(),
+            "a shell read BASH_ENV"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hook_that_fails_is_reported_whatever_status_it_chose() {
+        // A hook exiting 1 must not read as a failed write, and one
+        // exiting 90 must not read as a refusal: the guest maps
+        // every non-zero status to one of its own. 124 and 137 are
+        // the exceptions, because `timeout` uses them for a hook it
+        // stopped, and `REFRESH_THEN_HOOK_SCRIPT` says so.
+        for status in [1, 2, HOOK_REFUSED, HOOK_FAILED, 125] {
+            let home = hook_home();
+            write_hook(home.path(), "h.sh", &format!("exit {status}\n"));
+            let (code, err) =
+                run_hook_script(home.path(), b"NEW=2\n", "h.sh", "10");
+            assert_eq!(code, Some(HOOK_FAILED), "{status}: {err}");
+            assert!(err.contains(&format!("exited {status}")), "{err}");
+            let file = std::fs::read(home.path().join(".bombyx-env"))
+                .expect("the file");
+            assert_eq!(file, b"NEW=2\n", "the write must stand");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hook_the_guest_cannot_find_is_refused_after_the_write() {
+        // A missing file, a directory, and no clone at all: each is
+        // a refusal, never a silent skip, and the secrets stay
+        // written because the hook is the only part that failed.
+        type Arrange = fn(&std::path::Path);
+        let cases: [(&str, Arrange); 3] = [
+            ("nothing there", |_| {}),
+            ("a directory", |h| {
+                std::fs::create_dir(h.join("proj/h.sh")).expect("a dir");
+            }),
+            ("no clone", |h| {
+                std::fs::remove_dir(h.join("proj")).expect("no clone");
+            }),
+        ];
+        for (case, arrange) in cases {
+            let home = hook_home();
+            arrange(home.path());
+            let (code, err) =
+                run_hook_script(home.path(), b"NEW=2\n", "h.sh", "10");
+            assert_eq!(code, Some(HOOK_REFUSED), "{case}: {err}");
+            assert!(
+                err.contains("did not run") || err.contains("no "),
+                "{err}"
+            );
+            let file = std::fs::read(home.path().join(".bombyx-env"))
+                .expect("the file");
+            assert_eq!(file, b"NEW=2\n", "{case}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hook_a_symlink_leads_out_of_the_clone_is_not_run() {
+        // The config refuses `..` and an absolute path; a symlink in
+        // the repository is what only the guest can see. Both
+        // shapes: the file itself a link, and a linked directory
+        // above it.
+        for shape in ["file", "dir"] {
+            let home = hook_home();
+            let outside = home.path().join("outside");
+            std::fs::create_dir(&outside).expect("outside");
+            std::fs::write(
+                outside.join("h.sh"),
+                "touch \"$HOME/outside_ran\"\n",
+            )
+            .expect("an outside script");
+            let (link, target, hook) = match shape {
+                "file" => ("proj/h.sh", outside.join("h.sh"), "h.sh"),
+                _ => ("proj/sub", outside.clone(), "sub/h.sh"),
+            };
+            std::os::unix::fs::symlink(target, home.path().join(link))
+                .expect("a link");
+            let (code, err) =
+                run_hook_script(home.path(), b"NEW=2\n", hook, "10");
+            assert_eq!(code, Some(HOOK_REFUSED), "{shape}: {err}");
+            assert!(err.contains("outside the clone"), "{err}");
+            assert!(
+                !home.path().join("outside_ran").exists(),
+                "{shape}: the outside script ran"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_write_that_fails_runs_no_hook() {
+        // The hook copies `~/.bombyx-env` somewhere else, so running
+        // it after a failed write would copy the old secrets and
+        // report the refresh as done.
+        let home = hook_home();
+        write_hook(home.path(), "h.sh", "touch \"$HOME/hook_ran\"\n");
+        std::fs::create_dir(home.path().join(".bombyx-env.new"))
+            .expect("a directory in the way");
+        let (code, err) =
+            run_hook_script(home.path(), b"NEW=2\n", "h.sh", "10");
+        assert_eq!(code, Some(1), "{err}");
+        assert!(!home.path().join("hook_ran").exists(), "the hook ran");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hook_that_runs_too_long_is_stopped() {
+        let home = hook_home();
+        write_hook(home.path(), "h.sh", "sleep 30\n");
+        let started = std::time::Instant::now();
+        let (code, err) = run_hook_script(home.path(), b"NEW=2\n", "h.sh", "1");
+        assert_eq!(code, Some(HOOK_TIMED_OUT), "{err}");
+        assert!(err.contains("longer than 1 seconds"), "{err}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the timeout did not stop it"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_process_the_hook_leaves_running_does_not_hold_the_output_open() {
+        // A hook may restart a dev server in the background. Its
+        // output goes to a file, not to the pipe bombyx reads, so
+        // the command ends when the hook does and `shell` opens.
+        let home = hook_home();
+        write_hook(home.path(), "h.sh", "sleep 8 &\necho started\n");
+        let started = std::time::Instant::now();
+        let (code, printed) =
+            run_hook_script(home.path(), b"NEW=2\n", "h.sh", "10");
+        assert_eq!(code, Some(0), "{printed}");
+        assert!(printed.contains("started"), "{printed}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(4),
+            "the background process held the output open"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hook_that_ignores_the_stop_signal_is_reported_as_timed_out() {
+        // `timeout -k` kills it after the grace period and then
+        // exits 137, not 124; that is still a hook that ran too long.
+        let home = hook_home();
+        write_hook(home.path(), "h.sh", "trap '' TERM\nsleep 30\n");
+        let (code, printed) =
+            run_hook_script(home.path(), b"NEW=2\n", "h.sh", "1");
+        assert_eq!(code, Some(HOOK_TIMED_OUT), "{printed}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hook_that_prints_without_end_is_cut() {
+        let home = hook_home();
+        write_hook(
+            home.path(),
+            "h.sh",
+            "head -c 200000 /dev/zero | tr '\\0' x\n",
+        );
+        let (code, printed) =
+            run_hook_script(home.path(), b"NEW=2\n", "h.sh", "10");
+        assert_eq!(code, Some(0), "{}", &printed[printed.len() - 200..]);
+        assert!(printed.len() < 70_000, "{} bytes relayed", printed.len());
+        assert!(printed.contains("the rest was dropped"), "not said");
+    }
+
+    #[test]
+    fn the_hook_travels_in_the_same_guest_command_as_the_write() {
+        // One `vagrant ssh`, not two, with the four arguments the
+        // script reads as `$1` to `$4`, on the same no-terminal
+        // route and with the file on standard input.
+        let hook =
+            HookPath::parse(".bombyx/refresh-env.sh").expect("a good hook");
+        let secrets = Secrets::for_tests(b"K=v\n");
+        let c = refresh_secrets_then_hook(&cfg(), &secrets, &hook);
+        let guest = format!(
+            "if id -u 'agent' >/dev/null 2>&1; \
+             then exec sudo -u 'agent' -H -- sh -c {} sh '.bombyx-env' \
+             'myproject' '.bombyx/refresh-env.sh' '{HOOK_TIMEOUT_SECS}'; \
+             else echo \"bombyx: this guest has no account \
+             'agent', so it was never provisioned for it; \
+             run bombyx provision.\" >&2; exit 1; fi",
+            shell_quote(REFRESH_THEN_HOOK_SCRIPT)
+        );
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '--no-tty' \
+                 '-c' {}",
+                vagrant_env(),
+                shell_quote(&guest)
+            )
+        );
+        assert!(opts_before_host(&c).is_empty(), "{:?}", c.args);
+        let stdin = c.stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), b"K=v\n");
+    }
+
+    #[test]
+    fn the_script_exits_with_the_hook_statuses() {
+        // The script cannot name the constants, so this is what keeps
+        // `RefreshOutcome::from_code` and the guest in step. Not
+        // platform-gated, unlike the tests that run the script.
+        for status in [HOOK_REFUSED, HOOK_FAILED, HOOK_TIMED_OUT] {
+            assert!(
+                REFRESH_THEN_HOOK_SCRIPT.contains(&format!("exit {status}")),
+                "the script never exits {status}"
+            );
+        }
+        for code in 1..=255 {
+            let spelt = format!("exit {code};");
+            let used = REFRESH_THEN_HOOK_SCRIPT.contains(&spelt)
+                || REFRESH_THEN_HOOK_SCRIPT.ends_with(&format!("exit {code}"));
+            let known = [0, 1, HOOK_REFUSED, HOOK_FAILED, HOOK_TIMED_OUT];
+            assert!(!used || known.contains(&code), "unexpected exit {code}");
+        }
+    }
+
+    #[test]
+    fn each_exit_status_reads_as_the_part_that_failed() {
+        // 1 is what the write, `sudo`, `vagrant` and `ssh` all use,
+        // so it and every other unknown status must read as "the
+        // file may not be current". Only the three hook statuses
+        // may say the secrets are current.
+        use RefreshOutcome as O;
+        for (code, want) in [
+            (Some(0), O::Done),
+            (Some(1), O::WriteFailed),
+            (Some(255), O::WriteFailed),
+            (None, O::WriteFailed),
+            (Some(HOOK_REFUSED), O::HookRefused),
+            (Some(HOOK_FAILED), O::HookFailed),
+            (Some(HOOK_TIMED_OUT), O::HookTimedOut),
+        ] {
+            assert_eq!(O::from_code(code), want, "{code:?}");
+        }
+        assert_eq!(O::Done.message(), None);
+        for o in [O::HookRefused, O::HookFailed, O::HookTimedOut] {
+            let m = o.message().expect("a hook outcome is reported");
+            assert!(m.contains("secrets in the guest are current"), "{m}");
+        }
+        let m = O::WriteFailed.message().expect("reported");
+        assert!(!m.contains("current"), "{m}");
     }
 
     #[test]

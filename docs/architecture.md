@@ -174,6 +174,9 @@ classDiagram
     +RepoTokenVar var
     +RepoUser user
   }
+  class Hooks {
+    +Option~HookPath~ secrets_refreshed
+  }
   class Provider {
     <<enumeration>>
     Libvirt
@@ -199,10 +202,12 @@ classDiagram
 
   Config *-- Vm : vm
   Config *-- Source : source
+  Config *-- Hooks : hooks
   Config *-- Transport : transport
   Registry *-- Project : projects
   Project *-- Vm : vm
   Project *-- Source : source
+  Project *-- Hooks : hooks
   Project ..> Config : one entry becomes one
   Vm --> Provider
   Source *-- RepoToken : repo_token
@@ -212,10 +217,10 @@ classDiagram
 `Config` is the value bombyx runs with. `Registry` and `Project`
 parse the file it comes from: a file-wide `host`, and one
 `[projects.<name>]` table per project holding `remote_root`,
-`[vm]`, `[source]`, and an optional `host`. `Config::load_project`
-builds one `Config` from one entry. It reads the file once, so a
-mid-run edit cannot combine a project host and a file-wide host
-that never existed together.
+`[vm]`, `[source]`, and an optional `host` and `[hooks]`.
+`Config::load_project` builds one `Config` from one entry. It
+reads the file once, so a mid-run edit cannot combine a project
+host and a file-wide host that never existed together.
 
 `Config.host` is a `HostName`, the VM host bombyx connects to;
 `Vm.hostname` is a `Hostname`, the guest's own name. The two types

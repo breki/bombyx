@@ -22,8 +22,9 @@ pub enum Action {
     ///
     /// The binary follows the boot with [`refresh_secrets`] when
     /// the machine already existed, because vagrant does not
-    /// provision it then. `plan` returns the boot alone, since it
-    /// cannot see the machine's state.
+    /// provision it then, and with [`refresh_after_provisioning`]
+    /// when this boot created it. `plan` returns the boot alone,
+    /// since it cannot see the machine's state.
     Up,
     /// Write the generated files and re-run provisioning in the
     /// guest.
@@ -48,6 +49,10 @@ pub enum Action {
     /// Requires a machine that already exists: `vagrant
     /// provision` has nothing to provision on a VM that was
     /// never booted, so `up` comes first.
+    ///
+    /// The binary follows a successful run with
+    /// [`refresh_after_provisioning`], which runs the project's
+    /// `secrets_refreshed` hook when one is configured.
     Provision,
     /// Halt the project VM.
     Down,
@@ -263,18 +268,20 @@ pub fn plan(
 ///
 /// Only the two copies are rewritten. A project script that
 /// copied the secrets somewhere else during provisioning keeps
-/// that copy, and a process that read them keeps its values until
-/// it restarts; `docs/usage.md` says so to the operator.
+/// that copy, unless the project names a `secrets_refreshed` hook
+/// to make it again, and a process that read them keeps its
+/// values until it restarts; `docs/usage.md` says so to the
+/// operator.
+///
+/// **The hook rides on the secrets command**, in the same guest
+/// command as the write, so it costs no round trip of its own and
+/// runs only once the write has succeeded;
+/// [`remote::refresh_secrets_then_hook`] holds how. The credential
+/// goes first for the hook's sake: a hook that runs `git` then
+/// finds the token the operator just rotated.
 #[must_use]
 pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
     let mut cmds = Vec::new();
-    if let Some(secrets) = staged.secrets() {
-        cmds.push(remote::refresh_in_guest(
-            cfg,
-            GuestHomeFile::Secrets,
-            secrets.as_bytes(),
-        ));
-    }
     if let Some(credential) = staged.credential() {
         cmds.push(remote::refresh_in_guest(
             cfg,
@@ -282,7 +289,58 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
             credential.as_bytes(),
         ));
     }
+    cmds.extend(secrets_command(cfg, staged));
     cmds
+}
+
+/// The command that rewrites the secrets file, carrying the
+/// `secrets_refreshed` hook when one is configured, or `None` when
+/// nothing was staged.
+///
+/// Shared by [`refresh_secrets`] and [`refresh_after_provisioning`],
+/// which differ only in whether the credential goes too.
+fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
+    let secrets = staged.secrets()?;
+    Some(match &cfg.hooks.secrets_refreshed {
+        Some(hook) => remote::refresh_secrets_then_hook(cfg, secrets, hook),
+        None => remote::refresh_in_guest(
+            cfg,
+            GuestHomeFile::Secrets,
+            secrets.as_bytes(),
+        ),
+    })
+}
+
+/// Returns the refresh that follows a provisioning run: the `up`
+/// that creates the machine, and `provision`.
+///
+/// The project's `secrets_refreshed` hook is the one place it
+/// copies its secrets, so it runs after provisioning as well as
+/// after a rewrite in an existing guest. It rides on the secrets
+/// command, so this is that one command when a hook is configured,
+/// and nothing otherwise.
+///
+/// Provisioning has just written both files, so rewriting the
+/// secrets here serves only to carry the hook. The credential has
+/// no hook, so rewriting it would cost a `vagrant ssh` and change
+/// nothing; it is left out.
+///
+/// The hook runs *after* the project's own provisioning script, so
+/// that script cannot rely on the copy the hook makes; one that
+/// needs a secret during its run reads `BOMBYX_ENV_FILE`, which
+/// provisioning exports. Running it before the script needs the
+/// hook inside `bootstrap.sh`, which is left to
+/// `provision-lifecycle-hooks` in `docs/todo.md`.
+#[must_use]
+pub fn refresh_after_provisioning(
+    cfg: &Config,
+    staged: &Staged,
+) -> Vec<RemoteCommand> {
+    if cfg.hooks.secrets_refreshed.is_some() {
+        secrets_command(cfg, staged).into_iter().collect()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Destroys the VM defined in `dir`, then removes `dir`.
@@ -1464,12 +1522,12 @@ mod tests {
         let (cfg, staged) = staged_project(true);
         let cmds = refresh_secrets(&cfg, &staged);
         assert_eq!(cmds.len(), 2, "{cmds:?}");
-        let script = script(&cmds[1]);
+        let script = script(&cmds[0]);
         assert!(
             script.contains(GuestHomeFile::Credential.path()),
             "{script}"
         );
-        let stdin = cmds[1].stdin.as_ref().expect("the file is on stdin");
+        let stdin = cmds[0].stdin.as_ref().expect("the file is on stdin");
         let credential = staged.credential().expect("a token was configured");
         assert_eq!(stdin.bytes(), credential.as_bytes());
         assert!(!stdin.size_may_be_shown());
@@ -1479,6 +1537,85 @@ mod tests {
                 "the token reached an argument: {c}"
             );
         }
+    }
+
+    /// [`staged_project`] with a `secrets_refreshed` hook as well.
+    fn staged_project_with_hook(with_token: bool) -> (Config, Staged) {
+        let (mut cfg, staged) = staged_project(with_token);
+        cfg.hooks.secrets_refreshed = Some(
+            crate::config::HookPath::parse(".bombyx/refresh-env.sh")
+                .expect("a good hook"),
+        );
+        (cfg, staged)
+    }
+
+    #[test]
+    fn a_configured_hook_rides_on_the_secrets_command() {
+        // One round trip for the write and the hook, so no extra
+        // command, and the secrets command is the one carrying it.
+        let (cfg, staged) = staged_project_with_hook(false);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        let script = script(&cmds[0]);
+        assert!(script.contains(".bombyx/refresh-env.sh"), "{script}");
+        assert!(script.contains(GuestHomeFile::Secrets.path()), "{script}");
+        let stdin = cmds[0].stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), b"TOKEN=hunter2\n");
+    }
+
+    #[test]
+    fn the_credential_is_refreshed_before_the_secrets_and_their_hook() {
+        // A hook that runs `git` must find the token the operator
+        // just rotated, so the credential goes first and the hook
+        // runs last. Nothing else in the plan carries the hook.
+        let (cfg, staged) = staged_project_with_hook(true);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 2, "{cmds:?}");
+        assert!(
+            script(&cmds[0]).contains(GuestHomeFile::Credential.path()),
+            "{}",
+            cmds[0]
+        );
+        assert!(!script(&cmds[0]).contains("refresh-env.sh"), "{}", cmds[0]);
+        assert!(script(&cmds[1]).contains("refresh-env.sh"), "{}", cmds[1]);
+    }
+
+    #[test]
+    fn provisioning_is_followed_by_the_hook_when_one_is_configured() {
+        // The hook is the one place a project copies its secrets,
+        // so it follows a provisioning run too, on the secrets
+        // command. The credential is not sent again: provisioning
+        // has just written it, and a second `vagrant ssh` would buy
+        // nothing.
+        let (cfg, staged) = staged_project_with_hook(true);
+        let cmds = refresh_after_provisioning(&cfg, &staged);
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        let script = script(&cmds[0]);
+        assert!(script.contains("refresh-env.sh"), "{script}");
+        assert!(
+            !script.contains(GuestHomeFile::Credential.path()),
+            "{script}"
+        );
+    }
+
+    #[test]
+    fn provisioning_without_a_hook_costs_no_round_trip() {
+        // Provisioning has just placed both files, so rewriting them
+        // with no hook to follow would repeat `account.sh` for the
+        // price of one `vagrant ssh`.
+        let (cfg, staged) = staged_project(true);
+        assert!(refresh_after_provisioning(&cfg, &staged).is_empty());
+    }
+
+    #[test]
+    fn a_project_without_a_hook_refreshes_as_before() {
+        let (cfg, staged) = staged_project(false);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert!(
+            !script(&cmds[0]).contains("secrets_refreshed"),
+            "{}",
+            cmds[0]
+        );
     }
 
     #[test]

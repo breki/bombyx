@@ -6,7 +6,9 @@
 //! two ways to run one. [`Resolver::execute`] leaves the child
 //! bombyx's own streams, so a provisioning run scrolls past as
 //! it happens. [`Resolver::output`] collects what the child
-//! printed, for a reply bombyx parses rather than shows.
+//! printed, for a reply bombyx parses rather than shows, and
+//! [`Resolver::output_capped`] collects it up to a limit, for
+//! output bombyx relays from a source it does not trust.
 //!
 //! Starting a process lives here rather than in `main` so that
 //! the program lookup and the standard-input path can have
@@ -39,7 +41,7 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Output, Stdio};
 
@@ -212,62 +214,112 @@ impl Resolver {
     ///
     /// As [`Resolver::execute`].
     pub fn output(&self, cmd: &RemoteCommand) -> Result<Output, Error> {
+        self.collect(cmd, usize::MAX).map(|c| c.output)
+    }
+
+    /// Runs `cmd` and collects at most `limit` bytes of each of its
+    /// two streams.
+    ///
+    /// For output bombyx relays rather than parses, from a source
+    /// it does not trust: a project's `secrets_refreshed` hook runs
+    /// code from the guest's branch, which could print without end.
+    /// Past the limit, the rest of each stream is read and dropped,
+    /// so the child never blocks on a full pipe and bombyx's memory
+    /// stays bounded; [`Capped::truncated`] says whether that
+    /// happened.
+    ///
+    /// # Errors
+    ///
+    /// As [`Resolver::execute`].
+    pub fn output_capped(
+        &self,
+        cmd: &RemoteCommand,
+        limit: usize,
+    ) -> Result<Capped, Error> {
+        self.collect(cmd, limit)
+    }
+
+    /// [`Resolver::output`] and [`Resolver::output_capped`], which
+    /// differ only in the limit.
+    ///
+    /// **Every stream moves at once.** Each output pipe is read on
+    /// its own thread and the payload is written on a third, while
+    /// this one waits. A child that prints more than a pipe holds
+    /// before it finishes reading would otherwise block on its
+    /// output while bombyx blocked on its input, and neither would
+    /// ever move again.
+    ///
+    /// **A command without a payload gets a null standard input.**
+    /// Spawning by hand inherits bombyx's own standard input, and
+    /// then `ssh` can read the operator's terminal and sit there
+    /// waiting for a password. Measured: a child started this way
+    /// without it receives whatever was piped into bombyx.
+    fn collect(
+        &self,
+        cmd: &RemoteCommand,
+        limit: usize,
+    ) -> Result<Capped, Error> {
         let mut child = self.child_for(cmd)?;
         child.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-        let Some(payload) = &cmd.stdin else {
-            // Split for the reason `execute`'s no-payload branch
-            // gives. `output()` also reads the child's two
-            // pipes, so it has a third way to fail that is not a
-            // spawn either.
-            //
-            // **The `null` is not tidying.** `Command::output`
-            // supplies one itself; spawning by hand inherits
-            // bombyx's own standard input instead, and then
-            // `ssh` can read the operator's terminal and sit
-            // there waiting for a password. Measured: a child
-            // started this way without it receives whatever was
-            // piped into bombyx.
+        let (mut running, pipe) = if cmd.stdin.is_some() {
+            child.stdin(Stdio::piped());
+            let (running, pipe) = start_with_pipe(&cmd.program, child)?;
+            (running, Some(pipe))
+        } else {
             child.stdin(Stdio::null());
-            let running = start_child(&cmd.program, &mut child)?;
-            return running.wait_with_output().map_err(|cause| Error::Wait {
-                program: cmd.program.clone(),
-                cause,
-            });
+            (start_child(&cmd.program, &mut child)?, None)
         };
 
-        child.stdin(Stdio::piped());
-        let (running, mut pipe) = start_with_pipe(&cmd.program, child)?;
-
-        // The write goes on its own thread, and this one waits.
-        // Both directions have to move at once: the child's
-        // stdout is a pipe too, so a child that prints more than
-        // a pipe holds before it finishes reading would block on
-        // stdout while bombyx blocked on stdin, and neither
-        // would ever move again.
-        let bytes = payload.bytes().to_vec();
-        let writer = std::thread::spawn(move || {
-            let written = pipe.write_all(&bytes);
-            // Dropping the handle closes the pipe, which is the
-            // end-of-file the child waits for.
-            drop(pipe);
-            written
-        });
-        let collected = running.wait_with_output();
-        // A panicking writer dropped the pipe part-way, so the
-        // child saw a clean end-of-file and may well have
-        // exited 0 over half a file. Reporting that as a
-        // successful write is the outcome
-        // `reject_failed_write` exists to prevent, so the panic
-        // becomes a write error instead.
-        let written = writer.join().unwrap_or_else(|_| {
-            Err(std::io::Error::other("the writing thread panicked"))
-        });
-        let status = collected.as_ref().ok().map(|o| o.status);
-        reject_failed_write(&cmd.program, written, status)?;
-        collected.map_err(|cause| Error::Wait {
+        let wait_error = |cause| Error::Wait {
             program: cmd.program.clone(),
             cause,
+        };
+        let stdout = running.stdout.take();
+        let stderr = running.stderr.take();
+        let out = std::thread::spawn(move || read_capped(stdout, limit));
+        let err = std::thread::spawn(move || read_capped(stderr, limit));
+        let writer = pipe.zip(cmd.stdin.as_ref()).map(|(mut pipe, payload)| {
+            let bytes = payload.bytes().to_vec();
+            std::thread::spawn(move || {
+                let written = pipe.write_all(&bytes);
+                // Dropping the handle closes the pipe, which is the
+                // end-of-file the child waits for.
+                drop(pipe);
+                written
+            })
+        });
+
+        let waited = running.wait();
+        let joined = |reader: std::thread::JoinHandle<_>| {
+            reader.join().unwrap_or_else(|_| {
+                Err(std::io::Error::other("a reading thread panicked"))
+            })
+        };
+        let (stdout, out_cut) = joined(out).map_err(wait_error)?;
+        let (stderr, err_cut) = joined(err).map_err(wait_error)?;
+        if let Some(writer) = writer {
+            // A panicking writer dropped the pipe part-way, so the
+            // child saw a clean end-of-file and may well have
+            // exited 0 over half a file. Reporting that as a
+            // successful write is the outcome
+            // `reject_failed_write` exists to prevent, so the panic
+            // becomes a write error instead.
+            let written = writer.join().unwrap_or_else(|_| {
+                Err(std::io::Error::other("the writing thread panicked"))
+            });
+            reject_failed_write(
+                &cmd.program,
+                written,
+                waited.as_ref().ok().copied(),
+            )?;
+        }
+        Ok(Capped {
+            output: Output {
+                status: waited.map_err(wait_error)?,
+                stdout,
+                stderr,
+            },
+            truncated: out_cut || err_cut,
         })
     }
 
@@ -328,6 +380,36 @@ fn start_with_pipe(
         });
     };
     Ok((running, pipe))
+}
+
+/// What [`Resolver::output_capped`] collected.
+#[derive(Debug)]
+pub struct Capped {
+    /// The exit status, and what was kept of each stream.
+    pub output: Output,
+    /// Whether either stream ran past the limit and was cut.
+    pub truncated: bool,
+}
+
+/// Reads `stream` whole, keeping its first `limit` bytes and
+/// dropping the rest, and says whether anything was dropped.
+///
+/// The rest is still read rather than left in the pipe: a child
+/// writing to a pipe nobody reads blocks, and a command that never
+/// ends is worse than one whose output was cut. `None` is a stream
+/// that was not piped, which reads as empty.
+fn read_capped(
+    stream: Option<impl Read>,
+    limit: usize,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    let Some(mut stream) = stream else {
+        return Ok((Vec::new(), false));
+    };
+    let mut kept = Vec::new();
+    let cap = u64::try_from(limit).unwrap_or(u64::MAX);
+    (&mut stream).take(cap).read_to_end(&mut kept)?;
+    let dropped = std::io::copy(&mut stream, &mut std::io::sink())?;
+    Ok((kept, dropped > 0))
 }
 
 /// Fails the run when the write failed and the child's own
@@ -689,6 +771,32 @@ mod tests {
             .expect("sh runs");
         assert!(got.status.success(), "{:?}", got.status);
         assert_eq!(got.stdout.len(), 200_000);
+    }
+
+    #[test]
+    fn capped_output_keeps_the_limit_and_says_it_cut() {
+        // A child that prints without end must not grow bombyx's
+        // memory without end: each stream keeps `limit` bytes, the
+        // rest is read and dropped so the child is never blocked,
+        // and the cut is reported.
+        let cmd = sh("head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2");
+        let got = resolver(std::slice::from_ref(&cmd))
+            .output_capped(&cmd, 1000)
+            .expect("sh runs");
+        assert!(got.output.status.success(), "{:?}", got.output.status);
+        assert_eq!(got.output.stdout.len(), 1000);
+        assert_eq!(got.output.stderr.len(), 1000);
+        assert!(got.truncated);
+    }
+
+    #[test]
+    fn capped_output_under_the_limit_is_whole() {
+        let cmd = sh("cat; echo done").with_stdin(b"fed\n");
+        let got = resolver(std::slice::from_ref(&cmd))
+            .output_capped(&cmd, 1000)
+            .expect("sh runs");
+        assert_eq!(got.output.stdout, b"fed\ndone\n");
+        assert!(!got.truncated);
     }
 
     #[test]
