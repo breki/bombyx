@@ -243,14 +243,19 @@ Do not try to fix it by pinning `fog-libvirt` to an older
 release. That means overriding dependency resolution inside
 Vagrant's embedded Ruby, and a pin that resolves badly breaks
 the provider completely -- a much worse outcome than one line
-of noise. The warning will stop appearing when `vagrant-libvirt`
-releases a version that no longer passes the option, but do not
-wait for that: 0.12.2 came out in June 2023 and rubygems still
-listed it as the newest release in September 2026.
+of noise. Nor is an upstream fix worth waiting for: 0.12.2 came
+out in June 2023 and rubygems still listed it as the newest
+release in September 2026.
 
-bombyx does not silence the line either. That is a decision
-rather than an omission, and issue #55 records the routes we
-considered and why we declined them.
+bombyx filters the line instead. The Vagrantfile it generates
+for a libvirt project replaces fog's warning channel with one
+that drops any message naming `libvirt_ip_command` and forwards
+every other warning, so a genuine fog warning still reaches you.
+The filter lives in that Vagrantfile, so it applies only to
+vagrant commands run in a project directory bombyx wrote, which
+is where bombyx runs every command that acts on a VM. A vagrant
+command run anywhere else on the host still prints the line;
+`vagrant plugin list`, which `bombyx doctor` runs, is one.
 
 ## Checking that it worked
 
