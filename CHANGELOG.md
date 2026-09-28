@@ -48,6 +48,8 @@ and this project adheres to
   `bombyx --project myproject destroy myproject` becomes `bombyx destroy
   myproject`, and a script that ran it unattended now needs `--yes`: `bombyx
   destroy myproject --yes`.
+- `bombyx list` asks every host at once, and each host runs `vagrant status` for
+  up to four of its projects at the same time rather than one after another.
 
 ### Fixed
 

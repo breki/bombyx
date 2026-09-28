@@ -355,6 +355,9 @@ pub fn status_commands(configs: &[Config]) -> Vec<RemoteCommand> {
 /// real one and tests pass a canned reply. `Err` is for a
 /// command that could not be started at all, which is a
 /// different failure from one that started and exited non-zero.
+/// `run` is called once per host, from several threads at once,
+/// which is why it must be `Fn + Sync`: `ask_every_host` says why
+/// the hosts are asked together.
 ///
 /// One host that cannot be reached costs only its own projects.
 /// The alternative -- returning an error -- would mean a single
@@ -369,15 +372,13 @@ pub fn status_commands(configs: &[Config]) -> Vec<RemoteCommand> {
 /// The rows come back in `configs` order, not host order, so
 /// the table reads the same whichever machines answered.
 /// [`Config::load_all`] is what decides that order.
-pub fn entries<F>(configs: Vec<Config>, mut run: F) -> Vec<Entry>
+pub fn entries<F>(configs: Vec<Config>, run: F) -> Vec<Entry>
 where
-    F: FnMut(&RemoteCommand) -> Result<ProbeResult, String>,
+    F: Fn(&RemoteCommand) -> Result<ProbeResult, String> + Sync,
 {
+    let groups = group_by_host(&configs);
     let mut states: BTreeMap<ProjectName, VmState> = BTreeMap::new();
-    for group in group_by_host(&configs) {
-        // The states the host reported, and what to say about a
-        // project it did not mention. One match, so the two
-        // cannot describe different replies.
+    for (group, reply) in ask_every_host(&groups, &run) {
         // The match produces both the parsed states and the
         // reason to give a project the host said nothing useful
         // about, so the two cannot describe different replies.
@@ -385,7 +386,7 @@ where
         // The reply is read whatever the exit status, because
         // that status answers for one project only --
         // `remote::vagrant_status_many` says why.
-        let (mut parsed, host_reason) = match run(&group.status_command()) {
+        let (mut parsed, host_reason) = match reply {
             Ok(result) => (
                 parse_states(&result.stdout),
                 (!result.success)
@@ -404,12 +405,16 @@ where
             // vagrant did answer about keeps its state, so one
             // project's problem cannot overwrite a sibling's row.
             //
-            // The guess is worth little here: the marker is
-            // printed before the `Vagrantfile` guard by `printf`,
-            // a shell builtin, so a project always has a block
-            // and an empty one says only that vagrant wrote
-            // nothing to stdout. `sh: vagrant: not found` is on
-            // stderr, and it is the sentence the operator needs.
+            // The guess -- the `Unknown` text above -- is worth
+            // little next to the host's stderr:
+            //
+            // - The marker comes from `printf`, a shell builtin,
+            //   so it prints even when `vagrant` is missing. The
+            //   block is then empty, and `sh: vagrant: not found`
+            //   on stderr is the sentence the operator needs.
+            // - When `mktemp -d` fails, the script exits before
+            //   printing any marker, so every project on the host
+            //   gets the host's stderr as its reason.
             let state = match (state, &host_reason) {
                 (VmState::Unknown(_), Some(why)) => {
                     VmState::Unknown(why.clone())
@@ -426,6 +431,46 @@ where
             Entry { config, state }
         })
         .collect()
+}
+
+/// Runs every group's status command at once, one thread per
+/// host, and returns each group with its reply, in group order.
+///
+/// Each reply travels with its group rather than by position, so
+/// no change here can hand one host's words to another host's
+/// projects.
+///
+/// At once because the hosts are independent machines: asked in
+/// turn, each host would add its connection and its vagrant calls
+/// to the wait for every host after it. The listing still waits
+/// for the slowest host, which is why `remote::unattended` bounds
+/// each connection.
+///
+/// A panic in `run` is a bug rather than a host's failure, so it
+/// is raised again here instead of being reported as a row.
+fn ask_every_host<'g, 'a, F>(
+    groups: &'g [HostGroup<'a>],
+    run: &F,
+) -> Vec<(&'g HostGroup<'a>, Result<ProbeResult, String>)>
+where
+    F: Fn(&RemoteCommand) -> Result<ProbeResult, String> + Sync,
+{
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = groups
+            .iter()
+            .map(|group| {
+                (group, scope.spawn(move || run(&group.status_command())))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|(group, h)| {
+                let reply =
+                    h.join().unwrap_or_else(|p| std::panic::resume_unwind(p));
+                (group, reply)
+            })
+            .collect()
+    })
 }
 
 /// One row per project, with no state and no machine contacted.
@@ -454,13 +499,15 @@ pub fn offline_entries(configs: Vec<Config>) -> Vec<Entry> {
 /// would report something about a project the host never said,
 /// and the parser does not need to know what could produce one.
 ///
-/// A marker with no lines after it is [`VmState::NotCreated`]:
-/// the `if [ -f Vagrantfile ]` guard in
-/// [`remote::vagrant_status_many`] emitted the marker and never
-/// ran vagrant. A block that carries lines but names no state is
-/// [`VmState::Unknown`], because vagrant answered with something
-/// this parser does not recognise and inventing a state would be
-/// a claim bombyx cannot support.
+/// A block holding the `remote::NEVER_BUILT` line is
+/// [`VmState::NotCreated`]: the `if [ -f Vagrantfile ]` guard in
+/// [`remote::vagrant_status_many`] found no Vagrantfile and never
+/// ran vagrant. A block with no lines at all is
+/// [`VmState::Unknown`], because the host said nothing, which is
+/// not the same as saying the VM was never built. A block that
+/// carries lines but names no state is unknown too, because
+/// vagrant answered with something this parser does not recognise
+/// and inventing a state would be a claim bombyx cannot support.
 #[must_use]
 fn parse_states(reply: &str) -> BTreeMap<ProjectName, VmState> {
     let mut out = BTreeMap::new();
@@ -880,6 +927,51 @@ mod tests {
     }
 
     #[test]
+    fn the_hosts_are_asked_at_the_same_time() {
+        // Each call waits for the other host's call to start. Asked
+        // one after another, the first call gives up after five
+        // seconds and reports `alone` instead of `running`.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        let started = AtomicUsize::new(0);
+        let configs = vec![cfg("api", "one"), cfg("web", "two")];
+        let rows = entries(configs, |cmd| {
+            started.fetch_add(1, Ordering::SeqCst);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while started.load(Ordering::SeqCst) < 2
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let name = if cmd.args.join(" ").contains("'api'") {
+                "api"
+            } else {
+                "web"
+            };
+            let state = if started.load(Ordering::SeqCst) < 2 {
+                "alone"
+            } else {
+                "running"
+            };
+            Ok(crate::doctor::ProbeResult {
+                success: true,
+                stdout: format!(
+                    "##bombyx {name}\n1,default,state-human-short,{state}\n"
+                ),
+                stderr: String::new(),
+            })
+        });
+        for name in ["api", "web"] {
+            assert_eq!(
+                state_named(&rows, name),
+                Some(&VmState::Reported("running".into())),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn the_host_s_own_words_beat_this_module_s_guess() {
         // vagrant missing from the non-interactive PATH is this
         // project's recurring VM-host failure. The marker is
@@ -929,8 +1021,8 @@ mod tests {
 
     #[test]
     fn one_failing_project_does_not_blank_its_neighbours() {
-        // The fragments are joined with `;`, so the script's exit
-        // status is the last fragment's alone. Reading the reply
+        // The script's exit status is the last fragment's alone,
+        // because the last `wait` sets it. Reading the reply
         // only on a zero status throws away correct blocks for
         // every other project on a reachable host.
         let configs = vec![cfg("api", "one"), cfg("zzz", "one")];

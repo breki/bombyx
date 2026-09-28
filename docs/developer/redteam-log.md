@@ -4,6 +4,32 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-28-listing-temp-file-loses-a-block
+
+**Category:** Correctness
+
+`remote::vagrant_status_many` writes each project's block into a
+file under `mktemp -d` on the VM host and prints the files at the
+end. When the host's temporary directory is full or read-only, a
+fragment's `printf` into its file fails. If that fragment is not
+the last one, the script can still exit 0, so `listing::entries`
+attaches no host reason, and the row reads "the host did not
+report this project" with no explanation. The same path serves
+`up` and `shell` through `probe_state`, and it fails safe there:
+the state is unknown and `shell` does not refuse.
+
+A fix would print each marker from the parent shell before its
+`cat`, so the block survives a failed write, and would make the
+script exit non-zero when any file could not be written.
+
+Deferred on 2026-09-28: it needs an unwritable temporary directory
+on the VM host, the row fails safe, and the fix changes the script's
+failure reporting, which is more than a review fix for issue #115
+(PR #133). The comment in `listing::entries` now states the
+dependency. Found as RT-2 in the second red-team round.
+
+---
+
 ### rt-2026-09-28-guest-advice-names-no-project
 
 **Category:** Correctness

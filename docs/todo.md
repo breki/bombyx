@@ -457,3 +457,13 @@ frosti (local transport) on 2026-09-28 while verifying #116; the teardown
 commands in plan.rs/remote.rs are untouched by that change, so it predates it.
 Not checked over ssh.
 
+### stdout-broken-pipe-panic
+
+**Summary:** bombyx panics when stdout closes early (piped into head)
+
+bombyx panics on a closed stdout: `bombyx list --dry-run | head -1` prints
+"thread 'main' panicked ... failed printing to stdout: Broken pipe (os error
+32)". Seen on main (693648b) and on perf/parallel-list, frosti, 2026-09-28.
+println! panics on EPIPE; a CLI piped into head should exit quietly. Likely
+affects every command that prints with println!.
+
