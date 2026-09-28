@@ -35,6 +35,13 @@ and this project adheres to
   or a key that only works beside one (`repo_user`, the `secrets_refreshed`
   hook), is refused while the config is read, because nothing would receive
   them.
+- A recipe that builds the Windows guest box from Microsoft's own Windows Server
+  2025 evaluation ISO, in `boxes/windows-server-2025/`. `build.sh` downloads the
+  ISO over HTTPS and refuses one whose SHA-256 differs from the pin, installs
+  Server Core unattended with qemu, installs every update Windows Update offers,
+  sets up sshd for vagrant, and packages a libvirt box to add as
+  `bombyx/windows-server-2025`. One build on frosti took about 80 minutes.
+  `docs/windows-guest-box.md` records what the box holds.
 
 ### Changed
 

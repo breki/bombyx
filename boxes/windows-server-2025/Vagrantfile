@@ -1,0 +1,20 @@
+# The Vagrantfile inside the box, which vagrant reads before the
+# project's own. It says what the box is: a Windows guest reached over
+# SSH, on the emulated hardware build.sh installed it on.
+
+Vagrant.configure("2") do |config|
+  config.vm.guest = :windows
+  config.vm.communicator = "winssh"
+  # `vagrant ssh -c` then runs Windows PowerShell 5.1.
+  config.winssh.shell = "powershell"
+  # A first boot finishes Windows' setup before sshd answers.
+  config.vm.boot_timeout = 900
+
+  config.vm.provider :libvirt do |v|
+    # The install ran on a q35 machine with a SATA disk and an e1000e
+    # network card, which Windows drives without extra drivers.
+    v.machine_type = "q35"
+    v.disk_bus = "sata"
+    v.nic_model_type = "e1000e"
+  end
+end

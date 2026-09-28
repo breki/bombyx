@@ -689,17 +689,21 @@ const BOX_RDP_HOST_PORT: u16 = 53389;
 /// `config.vm.guest = :windows` tells vagrant the guest's operating
 /// system. The guest is reached over `winssh`, vagrant's SSH
 /// communicator for Windows, because bombyx reaches every guest over
-/// SSH. The box that `docs/windows-guest-box.md` records sets
-/// `winrm` in its own Vagrantfile, and this one overrides it.
+/// SSH. A box that picks `winrm` in its own Vagrantfile is overridden
+/// here.
 ///
-/// That box also forwards the guest's remote desktop, port 3389,
-/// to host port 53389 on every address of the VM host. It adds the
-/// forward inside a provider override, which vagrant applies after
-/// the top-level config, so a top-level `disabled: true` loses to
-/// it. The override below carries the id vagrant derives for the
-/// box's forward. vagrant builds that id from the host IP, the
-/// protocol and the host port; the box sets no host IP, so the id is
-/// `tcp53389`. This Vagrantfile loads after the box's, so it wins.
+/// The box `docs/windows-guest-box.md` describes forwards no port.
+/// Boxes built from gusztavvargadr's Packer templates forward the
+/// guest's remote desktop, port 3389, to host port 53389 on every
+/// address of the VM host, so the override below switches that
+/// forward off whichever box is named; with no such forward it does
+/// nothing. Such a box adds the forward inside a provider override,
+/// which vagrant applies after the top-level config, so a top-level
+/// `disabled: true` loses to it. The override below carries the id
+/// vagrant derives for that forward. vagrant builds that id from the
+/// host IP, the protocol and the host port; the box sets no host IP,
+/// so the id is `tcp53389`. This Vagrantfile loads after the box's,
+/// so it wins.
 fn guest_block(guest: Guest, provider: Provider) -> String {
     let rdp = BOX_RDP_HOST_PORT;
     match guest {
@@ -712,9 +716,9 @@ fn guest_block(guest: Guest, provider: Provider) -> String {
   # 300 s default; 900 s is more than twice that.
   config.vm.boot_timeout = 900
 
-  # The box forwards the guest's remote desktop to host port {rdp}
-  # on every address. Its forward sits in a provider override, so
-  # only an override switches it off.
+  # Some Windows boxes forward the guest's remote desktop to host
+  # port {rdp} on every address, from a provider override, so only
+  # an override switches it off.
   config.vm.provider :{provider} do |v, override|
     override.vm.network :forwarded_port, guest: 3389, host: {rdp},
       id: \"tcp{rdp}\", disabled: true
@@ -2232,12 +2236,12 @@ mod tests {
 
     #[test]
     fn a_windows_guest_switches_off_the_box_s_remote_desktop_forward() {
-        // The box forwards guest port 3389 to host port 53389 on
-        // every address, inside a provider override. A top-level
-        // `disabled: true` loses to that override -- measured on
-        // frosti -- so the switch-off must itself be an override,
-        // on the configured provider, with the id vagrant derives
-        // for the box's forward.
+        // A box built from gusztavvargadr's templates forwards guest
+        // port 3389 to host port 53389 on every address, inside a
+        // provider override. A top-level `disabled: true` loses to
+        // that override -- measured on frosti -- so the switch-off
+        // must itself be an override, on the configured provider,
+        // with the id vagrant derives for the box's forward.
         for provider in [Provider::Libvirt, Provider::Hyperv] {
             let mut cfg = cfg_windows();
             cfg.vm.provider = provider;

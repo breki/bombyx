@@ -117,7 +117,7 @@ impl fmt::Display for Provider {
 /// `deploy_key`, an `env_file` or a `repo_token`, or a key that only
 /// works beside one (`repo_user`, the `secrets_refreshed` hook),
 /// because nothing on the guest would receive them.
-/// `docs/windows-guest-box.md` records the box it was tested with.
+/// `docs/windows-guest-box.md` records the box bombyx builds for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Guest {

@@ -218,8 +218,8 @@ memory = "8GB"
 # project may not name a `deploy_key`, an `env_file` or a
 # `repo_token` yet, or a key that only works beside one
 # (`repo_user`, the `secrets_refreshed` hook), because nothing on
-# the guest would receive them. docs/windows-guest-box.md records
-# the box it was tested with.
+# the guest would receive them. Use the box bombyx builds from
+# Microsoft's ISO; docs/windows-guest-box.md says how.
 #
 # guest = "linux"
 
