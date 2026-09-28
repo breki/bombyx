@@ -448,10 +448,10 @@ fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
 ///
 /// Setting them in one place is what makes the guarantee
 /// structural rather than something each builder remembers.
-/// `bombyx list` contacts the hosts one after another, so an
-/// unbounded wait on the first of them is a wait on all of
-/// them -- and the documents promise that a machine which does
-/// not answer costs the others nothing.
+/// `bombyx list` asks every host at once but prints nothing until
+/// the slowest has answered, so an unbounded wait on one host is a
+/// wait for the whole table -- and the documents promise that a
+/// machine which does not answer costs the others nothing.
 ///
 /// Every variant named, so a third route is a compile error here
 /// rather than one that quietly takes the `ssh` arm.
@@ -686,11 +686,45 @@ pub(crate) const NEVER_BUILT: &str = "##bombyx-never-built";
 /// the host answered nothing, which is a different thing and
 /// reads as unknown.
 ///
+/// **The fragments run at the same time.** Each `vagrant status`
+/// spends about two seconds loading plugins and asking the
+/// provider, so fragments run in turn would cost a host two
+/// seconds per project. The script starts every fragment in the
+/// background, with its stdout in its own file under a
+/// `mktemp -d` directory, waits for all of them, then prints the
+/// files in the order the projects arrived:
+///
+/// ```sh
+/// t=$(mktemp -d) || exit 1; trap 'rm -rf "$t"' EXIT
+/// trap 'exit 1' HUP INT TERM
+/// ( <web fragment> ) > "$t/0" & p0=$!
+/// ( <api fragment> ) > "$t/1" & p1=$!
+/// wait "$p0"; wait "$p1"; s=$?; cat "$t/0" "$t/1"; exit "$s"
+/// ```
+///
+/// The files are what keep one project's block from landing
+/// inside another's, so the reply reads exactly as it would if
+/// the fragments had run in turn. stderr stays shared, because
+/// bombyx reads it only as the text of a failure.
+///
+/// The second `trap` is what removes the directory when the
+/// operator interrupts the listing. A shell killed by a signal
+/// skips its `EXIT` trap, but one that calls `exit` from a signal
+/// trap runs it.
+///
+/// Running together is safe for vagrant because the fragments
+/// ask about different machines. vagrant locks each machine
+/// with a non-blocking `flock` and refuses with `MachineLocked`
+/// when another process holds it, so two calls about the *same*
+/// machine would fail; the shared machine-index lock blocks
+/// instead, so calls about different machines only queue on it
+/// briefly. Each project has its own directory, so no two
+/// fragments ever name one machine.
+///
 /// **The script's exit status answers for the last fragment
-/// only**, because `;` joins them and a shell reports the last
-/// command. So the status cannot say whether any particular
-/// project succeeded, and `listing::entries` reads the reply
-/// whatever the status is.
+/// only**: the last `wait` is the one `$?` records. So the status
+/// cannot say whether any particular project succeeded, and
+/// `listing::entries` reads the reply whatever the status is.
 ///
 /// Built by `unattended`, so **no PTY is ever requested** and
 /// the connection options are the ones a parsed, unwatched run
@@ -705,11 +739,29 @@ pub(crate) fn vagrant_status_many(
     cfg: &Config,
     rest: &[&Config],
 ) -> RemoteCommand {
-    let script = std::iter::once(cfg)
-        .chain(rest.iter().copied())
-        .map(status_fragment)
-        .collect::<Vec<_>>()
-        .join("; ");
+    use std::fmt::Write as _;
+
+    let configs: Vec<&Config> =
+        std::iter::once(cfg).chain(rest.iter().copied()).collect();
+    let mut script = String::from(
+        "t=$(mktemp -d) || exit 1; trap 'rm -rf \"$t\"' EXIT; \
+         trap 'exit 1' HUP INT TERM; ",
+    );
+    for (i, project) in configs.iter().enumerate() {
+        let fragment = status_fragment(project);
+        let _ = write!(script, "( {fragment} ) > \"$t/{i}\" & p{i}=$!; ");
+    }
+    let waits: Vec<String> = (0..configs.len())
+        .map(|i| format!("wait \"$p{i}\""))
+        .collect();
+    let files: Vec<String> =
+        (0..configs.len()).map(|i| format!("\"$t/{i}\"")).collect();
+    let _ = write!(
+        script,
+        "{waits}; s=$?; cat {files}; exit \"$s\"",
+        waits = waits.join("; "),
+        files = files.join(" "),
+    );
     unattended(cfg, &script)
 }
 
@@ -3090,12 +3142,12 @@ fi
 
     #[test]
     fn a_listing_command_carries_the_unattended_connection_options() {
-        // `list` contacts the hosts one after another, so an
-        // unbounded wait on one is a wait on all of them -- and
-        // the documents promise a machine that does not answer
-        // costs the others nothing. Without `BatchMode` an `ssh`
-        // wanting a password waits for input nobody is there to
-        // give.
+        // `list` prints nothing until every host has answered, so
+        // an unbounded wait on one is a wait for the whole table
+        // -- and the documents promise a machine that does not
+        // answer costs the others nothing. Without `BatchMode` an
+        // `ssh` wanting a password waits for input nobody is there
+        // to give.
         let cmd = vagrant_status_many(&cfg(), &[]);
         let argv = cmd.args.join(" ");
         for opt in [
@@ -3167,5 +3219,91 @@ fi
         let script = remote_script(&vagrant_status_many(&web, &[&api]));
         assert!(script.contains("=\'libvirt\'"), "{script}");
         assert!(script.contains("=\'hyperv\'"), "{script}");
+    }
+}
+
+// These tests run the listing script through a real `sh`, with a
+// stub `vagrant` on `PATH`. What they cover is timing and output
+// order, which only an executed script has.
+#[cfg(all(test, unix))]
+mod listing_script_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    /// A `vagrant` that waits until every project's call has
+    /// started, then answers `running`, or `alone` when it gave up
+    /// waiting.
+    ///
+    /// The wait is what makes the test fail when the calls run one
+    /// after another: the first call never sees the others start.
+    /// It finishes in the reverse of the start order, so a script
+    /// that printed each reply as it arrived would get the order
+    /// wrong.
+    const STUB: &str = r#"#!/bin/sh
+name=$(basename "$PWD")
+touch "$MARKS/$name"
+started() { ls "$MARKS" | wc -l; }
+i=0
+while [ "$(started)" -lt 3 ] && [ "$i" -lt 50 ]; do
+    sleep 0.1; i=$((i + 1))
+done
+case $name in p1) sleep 0.6 ;; p2) sleep 0.3 ;; esac
+if [ "$(started)" -ge 3 ]; then state=running; else state=alone; fi
+echo "1,default,state,$state"
+"#;
+
+    #[test]
+    fn a_host_asks_about_its_projects_at_the_same_time() {
+        let home = TempDir::new().unwrap();
+        let bin = home.path().join("bin");
+        let marks = home.path().join("marks");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&marks).unwrap();
+        let stub = bin.join("vagrant");
+        std::fs::write(&stub, STUB).unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+
+        let names = ["p1", "p2", "p3"];
+        let configs: Vec<Config> = names
+            .iter()
+            .map(|name| {
+                let dir = home.path().join("vms").join(name);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("Vagrantfile"), "").unwrap();
+                let mut cfg = Config::for_tests_local();
+                cfg.project = crate::name::ProjectName::parse(name).unwrap();
+                cfg
+            })
+            .collect();
+        let rest: Vec<&Config> = configs[1..].iter().collect();
+        let cmd = vagrant_status_many(&configs[0], &rest);
+
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = std::process::Command::new(&cmd.program)
+            .args(&cmd.args)
+            .env("HOME", home.path())
+            .env("PATH", path)
+            .env("MARKS", &marks)
+            .output()
+            .unwrap();
+
+        let expected = names
+            .iter()
+            .map(|n| format!("{LISTING_MARKER}{n}\n1,default,state,running\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            expected,
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.status.success(), "{out:?}");
     }
 }
