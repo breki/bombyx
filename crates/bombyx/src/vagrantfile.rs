@@ -776,10 +776,9 @@ fn header(provider: Provider) -> String {
 /// the wrapped channel. An empty slot is left empty, and a slot
 /// already holding the filter is not wrapped twice.
 ///
-/// The filter compares the whole line because fog names every
-/// unrecognized option in one line. A substring match would
-/// also hide a second option that stopped working, and setting
-/// the channel to `nil` would hide every warning. When
+/// The comment at the top of the emitted block says why the
+/// filter compares the whole line rather than setting the
+/// channel to `nil` or matching a substring. When
 /// vagrant-libvirt stops passing the option, the filter simply
 /// never matches.
 ///
@@ -796,8 +795,9 @@ fn fog_filter_block(provider: Provider) -> &'static str {
 # about it each time vagrant connects to libvirt. The option does
 # nothing, so this drops that one warning line and passes every
 # other on. It compares the whole line because fog names every
-# unrecognized option in one line, and a second one there is
-# worth seeing. Setting the channel to nil would hide them all.
+# unrecognized option in one line, so matching a substring would
+# also hide a second option that stopped working. Setting the
+# channel to nil would hide every warning.
 begin
   require "fog/core"
 
@@ -1460,12 +1460,11 @@ mod tests {
             "previous = Fog::Logger[:warning]",
             "previous.is_a?(Bombyx::FogNoiseFilter)",
             "Bombyx::FogNoiseFilter.new(previous, inert)",
-            // fog names every unrecognized option in one line, so
-            // the filter compares the whole line: a line naming a
-            // second option as well must still get through. The
-            // closing quote shows the line ends right after
-            // `libvirt_ip_command`, and `.chomp == @line` shows the
-            // comparison is an equality, not an `include?`.
+            // The filter compares the whole line; the comment at
+            // the top of the block says why. The closing quote
+            // shows the line ends right after `libvirt_ip_command`,
+            // and `.chomp == @line` shows the comparison is an
+            // equality, not an `include?`.
             "\"Unrecognized arguments: libvirt_ip_command\"",
             ".chomp == @line",
             "def tty?",
