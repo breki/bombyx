@@ -26,18 +26,11 @@ passes.
 
 **Summary:** the VM host is on WiFi; VLAN tagging needs it wired
 
-Prerequisite for the agent VLAN.
+Prerequisite for the agent VLAN, GitHub issue #130.
 
 ### packer-box
 
 **Summary:** bake a base box so `scratch` boots fast enough to use.
-
-### agent-vlan
-
-**Summary:** isolate VMs on a VLAN with an egress allowlist
-**Depends on:** wire-vm-host
-
-Enforced at the router.
 
 ### host-network-isolation
 
@@ -66,8 +59,8 @@ DHCP rule for renewals, which a leased guest sends straight to the gateway:
 no run has lasted long enough to watch one. Deleting either accept would
 leave every check we ran still passing. The broadcast DHCP rule is
 exercised: issue #113 stranded a lease-less guest without it and leased the
-guest with it. This is a host-level stopgap for agent-vlan, not a
-replacement: enforcement sits on the machine being protected.
+guest with it. This is a host-level stopgap for the agent VLAN (#130), not
+a replacement: enforcement sits on the machine being protected.
 
 ### suspend-resume-commands
 
