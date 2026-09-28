@@ -1,15 +1,19 @@
 # Windows guest box
 
-bombyx does not build Windows guests yet. This file records the
-box the Windows-guest work is built and tested against, how it was
-chosen, and what a run on a real VM host showed about it.
+bombyx boots a Windows guest but cannot provision one yet. This
+file records the box the Windows-guest work is built and tested
+against, how it was chosen, and what a run on a real VM host showed
+about it.
 
-The work is tracked in GitHub issue #138 and split into three
-parts. #135 chose this box and is closed by the change that added
-this file. #136 adds a Windows branch to provisioning: the config
-key, the Vagrantfile and PowerShell versions of the guest scripts.
-#137 makes `shell`, the secrets refresh and the hook work on a
-Windows guest. Both build on the findings below.
+The work is tracked in GitHub issue #138, in four parts. #135 chose
+this box. #136 added the `guest = "windows"` key: the Vagrantfile
+boots the guest over `winssh` with the remote desktop forward
+switched off; `up`, `provision` and `scratch` then fail with a
+message naming #141, and a Windows project may not name secrets.
+#141 ports
+the guest scripts to PowerShell. #137 makes `shell`, the secrets
+refresh and the hook work on a Windows guest. The later parts
+build on the findings below.
 
 ## What the guest is for
 
@@ -103,8 +107,9 @@ alone.
 
 ## What a run on frosti showed
 
-Run on 2026-09-28 against frosti (vagrant 2.4.9, vagrant-libvirt
-0.12.2), with no bombyx involved. The Vagrantfile was:
+Run on 2026-09-28 against frosti, the project's own Linux libvirt
+VM host (vagrant 2.4.9, vagrant-libvirt 0.12.2), with no bombyx
+involved. The Vagrantfile was:
 
 ```ruby
 Vagrant.configure(2) do |config|
@@ -144,8 +149,11 @@ end
 - **The forwarded RDP port listens on every address.** Host port
   53389 was bound on `0.0.0.0` and `[::]`, tunnelled to the guest's
   RDP port, so the guest's remote desktop was reachable from the VM
-  host's network. bombyx's generated Vagrantfile must switch that
-  forward off, and #136 tracks it.
+  host's network. bombyx's generated Vagrantfile switches it off
+  (#136). A top-level `disabled: true` did not: the box adds the
+  forward inside a provider override, which vagrant applies after
+  the top-level config. An override on the same provider with the
+  forward's id, `tcp53389`, left nothing listening on 53389.
 - **Resources.** 2 GB of memory by default, 921 MB of it in use at
   idle; 8.6 GB used of a 125 GB disk.
 - **Tools.** .NET Framework 4.8 is installed (release key 528449).

@@ -262,7 +262,7 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
-pub use vm::{BoxName, CpuMode, Disk, Hostname, Memory, Provider, Vm};
+pub use vm::{BoxName, CpuMode, Disk, Guest, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 pub(crate) use root::path_segments;
@@ -1658,6 +1658,97 @@ mod load_project_tests {
             load(&test_registry("myproject", "vmhost", None), "myproject")
                 .expect("a registry with no hooks must load");
         assert_eq!(cfg.hooks, Hooks::default());
+    }
+
+    /// [`registry_with_source_key`] for a Windows guest.
+    fn windows_registry_with_source_key(extra: &str) -> String {
+        registry_with_source_key(extra).replacen(
+            "[projects.myproject.vm]\n",
+            "[projects.myproject.vm]\nguest = \"windows\"\n",
+            1,
+        )
+    }
+
+    #[test]
+    fn a_windows_guest_with_no_secret_loads() {
+        let (cfg, _) = load(&windows_registry_with_source_key(""), "myproject")
+            .expect("a Windows project naming no secret must load");
+        assert_eq!(cfg.vm.guest, crate::config::Guest::Windows);
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_every_secret_while_the_file_is_read() {
+        // Nothing provisions a Windows guest yet, so a key, a
+        // secrets file or a token would be read on the workstation
+        // and copied to the VM host for nothing. Each is refused by
+        // name, and the message points at the issue that lifts it.
+        for (key, lines) in [
+            ("deploy_key", "deploy_key = \"~/.secrets/k\""),
+            ("env_file", "env_file = \"~/.secrets/x.env\""),
+            // A token needs an `env_file`, so it never comes alone,
+            // and both are named in the one message.
+            (
+                "repo_token",
+                "env_file = \"~/.secrets/x.env\"\n\
+                 repo_token = \"TOKEN\"\nrepo_user = \"x-token-auth\"",
+            ),
+        ] {
+            let err =
+                load(&windows_registry_with_source_key(lines), "myproject")
+                    .expect_err(key);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestSecret { .. }),
+                "{key}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", key, "#141"] {
+                assert!(text.contains(part), "{key}: {part}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_windows_refusal_names_every_key_the_operator_removes() {
+        // One message, so removing what it names leaves a config
+        // that loads. `repo_user` needs `repo_token`, and the hook
+        // needs `env_file`, so each rides along with its partner
+        // rather than failing on the next run.
+        let src = format!(
+            "{}\n[projects.myproject.hooks]\n\
+             secrets_refreshed = \".bombyx/refresh-env.sh\"\n",
+            windows_registry_with_source_key(
+                "env_file = \"~/.secrets/x.env\"\n\
+                 repo_token = \"TOKEN\"\nrepo_user = \"x-token-auth\""
+            )
+        );
+        let err = load(&src, "myproject").expect_err("must be refused");
+        assert!(
+            matches!(err, ConfigError::WindowsGuestSecret { .. }),
+            "{err:?}"
+        );
+        let text = err.to_string();
+        for part in ["env_file", "repo_token", "repo_user", "secrets_refreshed"]
+        {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+    }
+
+    #[test]
+    fn a_windows_hook_without_an_env_file_gets_the_windows_refusal() {
+        // "Add an env_file", the hook error's advice, would only be
+        // refused next, so a Windows project is told the rule that
+        // actually applies.
+        let src = format!(
+            "{}\n[projects.myproject.hooks]\n\
+             secrets_refreshed = \".bombyx/refresh-env.sh\"\n",
+            windows_registry_with_source_key("")
+        );
+        let err = load(&src, "myproject").expect_err("must be refused");
+        assert!(
+            matches!(err, ConfigError::WindowsGuestSecret { .. }),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("secrets_refreshed"), "{err}");
     }
 
     #[test]

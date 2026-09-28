@@ -26,6 +26,15 @@ and this project adheres to
   escaping, failing or slow hook makes `up` and `provision` exit non-zero, and
   `shell` warns and opens anyway. The config refuses a hook without an
   `env_file`, and a path that cannot name a file.
+- A `guest` key under `[vm]`, `"linux"` by default. `guest = "windows"` boots a
+  Windows guest over vagrant's `winssh` communicator, with a 900 s boot timeout
+  and the box's remote desktop forward switched off, but bombyx cannot provision
+  one yet: `up` and `scratch` boot the VM, and they and `provision` then fail
+  with a message naming GitHub issue #141.
+  A Windows project that names a `deploy_key`, an `env_file` or a `repo_token`,
+  or a key that only works beside one (`repo_user`, the `secrets_refreshed`
+  hook), is refused while the config is read, because nothing would receive
+  them.
 
 ### Changed
 

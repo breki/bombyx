@@ -25,7 +25,8 @@
 use std::collections::BTreeMap;
 
 use crate::config::{
-    Config, CpuMode, DeployKeyPath, Disk, EnvName, EnvValue, Provider, Staged,
+    Config, CpuMode, DeployKeyPath, Disk, EnvName, EnvValue, Guest, Provider,
+    Staged,
 };
 use crate::hostkeys;
 
@@ -596,6 +597,11 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
 /// Returns a `String`. Nothing is written to disk here, and
 /// nothing is sent anywhere -- `remote::write_file` does that.
 ///
+/// The guest's operating system picks the provisioners: a Linux
+/// guest gets `linux_provisioning`, and a Windows guest gets
+/// `guest_block`'s settings and none, because bombyx cannot
+/// provision Windows yet and says so itself after the boot.
+///
 /// **The block below configures a provider; it does not select
 /// one.** Vagrant applies it only to the provider it has
 /// chosen, and it chooses from what the host offers. bombyx
@@ -632,11 +638,6 @@ pub fn render(cfg: &Config, staged: &Staged) -> String {
     assert_staged_matches(cfg, staged);
 
     let vm = &cfg.vm;
-    let source = &cfg.source;
-    // `None` when `repo` reaches the server by something other
-    // than ssh, and when it names a host bombyx has no key
-    // source for.
-    let host_keys = source.repo.ssh_host().and_then(hostkeys::for_host);
     format!(
         "{header}
 Vagrant.configure(\"2\") do |config|
@@ -654,7 +655,87 @@ Vagrant.configure(\"2\") do |config|
     v.memory = {memory}{disk}{cpu_mode}
   end
 
-{bootstrap_upload}\
+{guest}{provisioning}end
+",
+        header = header(vm.provider),
+        box_name = ruby_string(vm.box_name.as_str()),
+        hostname = ruby_string(cfg.vm_hostname().as_str()),
+        provider = vm.provider,
+        cpus = vm.cpus,
+        memory = vm.memory.mib(),
+        disk = disk_setting(vm.disk),
+        cpu_mode = cpu_mode_setting(vm.provider, vm.cpu_mode),
+        guest = guest_block(vm.guest, vm.provider),
+        provisioning = match vm.guest {
+            Guest::Linux => linux_provisioning(cfg, staged),
+            // No provisioner: `plan::unprovisioned_guest` holds why.
+            Guest::Windows => String::new(),
+        },
+    )
+}
+
+/// The host port the Windows box forwards the guest's remote
+/// desktop to, which `guest_block` switches off.
+///
+/// Rendered as both the forward's `host:` and its `id:`: vagrant
+/// identifies the forward by an id built from this port, so a
+/// `host:` and an `id:` that disagree leave the box's forward in
+/// place.
+const BOX_RDP_HOST_PORT: u16 = 53389;
+
+/// The settings a guest's operating system needs ahead of its
+/// provisioners, or nothing for a Linux guest.
+///
+/// `config.vm.guest = :windows` tells vagrant the guest's operating
+/// system. The guest is reached over `winssh`, vagrant's SSH
+/// communicator for Windows, because bombyx reaches every guest over
+/// SSH. The box that `docs/windows-guest-box.md` records sets
+/// `winrm` in its own Vagrantfile, and this one overrides it.
+///
+/// That box also forwards the guest's remote desktop, port 3389,
+/// to host port 53389 on every address of the VM host. It adds the
+/// forward inside a provider override, which vagrant applies after
+/// the top-level config, so a top-level `disabled: true` loses to
+/// it. The override below carries the id vagrant derives for the
+/// box's forward. vagrant builds that id from the host IP, the
+/// protocol and the host port; the box sets no host IP, so the id is
+/// `tcp53389`. This Vagrantfile loads after the box's, so it wins.
+fn guest_block(guest: Guest, provider: Provider) -> String {
+    let rdp = BOX_RDP_HOST_PORT;
+    match guest {
+        Guest::Linux => String::new(),
+        Guest::Windows => format!(
+            "  config.vm.guest = :windows
+  config.vm.communicator = \"winssh\"
+  # A Windows guest's first boot runs setup before sshd answers.
+  # The slowest first boot measured took 385 s, past vagrant's
+  # 300 s default; 900 s is more than twice that.
+  config.vm.boot_timeout = 900
+
+  # The box forwards the guest's remote desktop to host port {rdp}
+  # on every address. Its forward sits in a provider override, so
+  # only an override switches it off.
+  config.vm.provider :{provider} do |v, override|
+    override.vm.network :forwarded_port, guest: 3389, host: {rdp},
+      id: \"tcp{rdp}\", disabled: true
+  end
+
+"
+        ),
+    }
+}
+
+/// The provisioners that set up a Linux guest: the uploads, then
+/// `account.sh` as root, which hands `bootstrap.sh` to the agent.
+fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
+    let vm = &cfg.vm;
+    let source = &cfg.source;
+    // `None` when `repo` reaches the server by something other
+    // than ssh, and when it names a host bombyx has no key
+    // source for.
+    let host_keys = source.repo.ssh_host().and_then(hostkeys::for_host);
+    format!(
+        "{bootstrap_upload}\
 {deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
     path: {account},
     # As root, for one step: account.sh creates the agent's
@@ -688,9 +769,7 @@ Vagrant.configure(\"2\") do |config|
       \"{host_env}\" => ENV.fetch(\"{host_env}\", \"unknown\"),
       \"{hostname_env}\" => ENV.fetch(\"{hostname_env}\", \"unknown\"){project_env}
     }}
-end
 ",
-        header = header(vm.provider),
         deploy_key = deploy_key_block(source.deploy_key.as_ref()),
         env_file = env_file_block(staged.secrets().is_some()),
         credential = credential_block(staged.credential().is_some()),
@@ -712,13 +791,6 @@ end
         host_keys_format_env = HOST_KEYS_FORMAT_ENV,
         host_keys_format =
             ruby_string(host_keys.map_or("", |k| k.format().as_str())),
-        box_name = ruby_string(vm.box_name.as_str()),
-        hostname = ruby_string(cfg.vm_hostname().as_str()),
-        provider = vm.provider,
-        cpus = vm.cpus,
-        memory = vm.memory.mib(),
-        disk = disk_setting(vm.disk),
-        cpu_mode = cpu_mode_setting(vm.provider, vm.cpu_mode),
         bootstrap_upload = bootstrap_block(),
         account = ruby_string(ACCOUNT_NAME),
         guest_user_env = GUEST_USER_ENV,
@@ -1088,7 +1160,7 @@ mod tests {
 
     use crate::config::{
         BoxName, CpuMode, DeployKeyPath, EnvFilePath, EnvName, EnvValue,
-        GitRef, GuestUser, Hostname, Memory, Provider, RESERVED_PREFIX,
+        GitRef, Guest, GuestUser, Hostname, Memory, Provider, RESERVED_PREFIX,
         RepoUrl, ScriptPath, Source, Vm,
     };
 
@@ -1115,6 +1187,7 @@ mod tests {
             cpu_mode: None,
             hostname: None,
             guest_user: GuestUser::default(),
+            guest: Guest::default(),
         };
         cfg.source = Source {
             repo: RepoUrl::parse("https://example.invalid/p.git")
@@ -2101,6 +2174,100 @@ mod tests {
                 !contents.contains("myproject-unrendered"),
                 "{name} holds part of the workstation path"
             );
+        }
+    }
+
+    /// A Windows project carrying every upload the Linux branch
+    /// can make: a deploy key, a secrets file and a git credential.
+    fn cfg_windows() -> Config {
+        let mut cfg = cfg_with_credential();
+        cfg.source.deploy_key =
+            Some(DeployKeyPath::parse(KEY).expect("a valid fixture path"));
+        cfg.vm.guest = Guest::Windows;
+        cfg
+    }
+
+    #[test]
+    fn a_windows_guest_boots_over_winssh() {
+        // The box's own Vagrantfile picks winrm. bombyx reaches
+        // every guest over SSH, and `winssh` is vagrant's SSH
+        // communicator for Windows; the Linux `ssh` one is not it.
+        let out = rendered_for(&cfg_windows());
+        assert!(out.contains("config.vm.guest = :windows\n"), "{out}");
+        assert!(
+            out.contains("config.vm.communicator = \"winssh\"\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_windows_vagrantfile_carries_no_provisioner() {
+        // bombyx cannot provision a Windows guest, and says so
+        // itself after the boot (`plan::unprovisioned_guest`).
+        // vagrant runs a provisioner on the first `up` only, so one
+        // here would fail that `up` and let every later one succeed.
+        let out = rendered_for(&cfg_windows());
+        assert_eq!(out.matches("config.vm.provision").count(), 0, "{out}");
+    }
+
+    #[test]
+    fn a_windows_vagrantfile_uploads_no_file_and_no_secret() {
+        // Nothing provisions a Windows guest yet, so a key, a
+        // secrets file or a credential uploaded to it would sit
+        // in the login account's home with nothing to move it.
+        let out = rendered_for(&cfg_windows());
+        for absent in [
+            "config.vm.provision \"file\"",
+            ACCOUNT_NAME,
+            BOOTSTRAP_NAME,
+            "privileged: true",
+            DEPLOY_KEY_STAGED_PATH,
+            ENV_FILE_STAGED_PATH,
+            CREDENTIAL_STAGED_PATH,
+            KEY,
+        ] {
+            assert!(!out.contains(absent), "{absent} rendered: {out}");
+        }
+    }
+
+    #[test]
+    fn a_windows_guest_switches_off_the_box_s_remote_desktop_forward() {
+        // The box forwards guest port 3389 to host port 53389 on
+        // every address, inside a provider override. A top-level
+        // `disabled: true` loses to that override -- measured on
+        // frosti -- so the switch-off must itself be an override,
+        // on the configured provider, with the id vagrant derives
+        // for the box's forward.
+        for provider in [Provider::Libvirt, Provider::Hyperv] {
+            let mut cfg = cfg_windows();
+            cfg.vm.provider = provider;
+            let out = rendered_for(&cfg);
+            let rdp = BOX_RDP_HOST_PORT;
+            let block = format!(
+                "  config.vm.provider :{provider} do |v, override|\n    \
+                 override.vm.network :forwarded_port, guest: 3389, \
+                 host: {rdp},\n      id: \"tcp{rdp}\", disabled: true\n  \
+                 end\n"
+            );
+            assert!(out.contains(&block), "{provider}: {out}");
+        }
+    }
+
+    #[test]
+    fn a_windows_guest_gets_a_boot_timeout_longer_than_its_first_boot() {
+        // vagrant waits 300 s for a guest by default. The Windows
+        // box's first boot took 234 s, 314 s and 385 s on frosti,
+        // and a bombyx `up` with the default timed out at 305 s, so
+        // the default is inside the range a first boot takes.
+        let out = rendered_for(&cfg_windows());
+        assert!(out.contains("config.vm.boot_timeout = 900\n"), "{out}");
+    }
+
+    #[test]
+    fn a_linux_guest_renders_none_of_the_windows_settings() {
+        let out = rendered_for(&cfg_with(Provider::Libvirt));
+        for absent in [":windows", "winssh", "boot_timeout"] {
+            assert!(!out.contains(absent), "{absent} rendered: {out}");
         }
     }
 }

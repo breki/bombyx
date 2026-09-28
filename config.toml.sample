@@ -209,6 +209,20 @@ memory = "8GB"
 #
 # guest_user = "agent"
 
+# Optional. The operating system the guest runs: "linux" or
+# "windows". Left out, it is "linux". A Windows guest boots over
+# vagrant's SSH communicator for Windows, with the box's remote
+# desktop forward switched off, but bombyx cannot provision one
+# yet: `up` and `scratch` boot the VM, and they and `provision`
+# then fail with a message naming GitHub issue #141. A Windows
+# project may not name a `deploy_key`, an `env_file` or a
+# `repo_token` yet, or a key that only works beside one
+# (`repo_user`, the `secrets_refreshed` hook), because nothing on
+# the guest would receive them. docs/windows-guest-box.md records
+# the box it was tested with.
+#
+# guest = "linux"
+
 # The guest clones this repository once it is running. All
 # three keys are required. bombyx sends no project file
 # anywhere: the VM fetches the repository itself and runs

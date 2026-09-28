@@ -102,6 +102,33 @@ impl fmt::Display for Provider {
     }
 }
 
+/// The operating system the guest runs.
+///
+/// An enum for the reason [`Provider`] is one: an unknown value
+/// fails while the config is read rather than on the VM host.
+/// `Linux` is the default, so a config with no `guest` key builds a
+/// Linux guest.
+///
+/// `Windows` boots over vagrant's `winssh` communicator but is not
+/// provisioned yet: `up` and `scratch` boot the VM, and they and
+/// `provision` then fail with a message naming GitHub issue #141,
+/// which ports the guest scripts (`plan::unprovisioned_guest`). The
+/// registry's `parse` refuses a Windows project that names a
+/// `deploy_key`, an `env_file` or a `repo_token`, or a key that only
+/// works beside one (`repo_user`, the `secrets_refreshed` hook),
+/// because nothing on the guest would receive them.
+/// `docs/windows-guest-box.md` records the box it was tested with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Guest {
+    /// A Linux guest, provisioned by `account.sh` and
+    /// `bootstrap.sh`.
+    #[default]
+    Linux,
+    /// A Windows guest. Boots, but is not provisioned.
+    Windows,
+}
+
 /// The guest CPU model the generated Vagrantfile selects.
 ///
 /// A closed set rather than a free string, for the same reason
@@ -156,10 +183,11 @@ impl CpuMode {
 /// `box`, `cpus` and `memory` are required: the base image is the
 /// one thing bombyx cannot invent, and a size it chose would be
 /// wrong on both a laptop and a workstation. `provider`, `disk`,
-/// `cpu_mode` and `hostname` are optional -- `provider` defaults to
-/// libvirt, an absent `disk` leaves the box's own disk size, an
-/// absent `cpu_mode` takes bombyx's default, and an absent
-/// `hostname` lets bombyx derive a name.
+/// `cpu_mode`, `hostname`, `guest_user` and `guest` are optional --
+/// `provider` defaults to libvirt, an absent `disk` leaves the box's
+/// own disk size, an absent `cpu_mode` takes bombyx's default, an
+/// absent `hostname` lets bombyx derive a name, `guest_user`
+/// defaults to `agent`, and `guest` defaults to Linux.
 ///
 /// Serde reads the table through the private `VmFields`, whose
 /// `#[serde(deny_unknown_fields)]` turns a key it does not
@@ -251,8 +279,14 @@ pub struct Vm {
     /// clone, the project's script and `bombyx shell` to it, so
     /// the agent never works as `vagrant`, the account Vagrant
     /// itself logs in with. A [`GuestUser`], so the name rules
-    /// have run against whatever is in here.
+    /// have run against whatever is in here. A Windows guest has no
+    /// provisioner yet, so it does not use this until GitHub issue
+    /// #141.
     pub guest_user: GuestUser,
+
+    /// The operating system the guest runs. [`Guest::Linux`] when
+    /// the key is absent.
+    pub guest: Guest,
 }
 
 /// The `[vm]` table as it parses, before its one cross-field rule.
@@ -283,6 +317,8 @@ struct VmFields {
     hostname: Option<Hostname>,
     #[serde(default)]
     guest_user: GuestUser,
+    #[serde(default)]
+    guest: Guest,
 }
 
 /// Refuses a libvirt-only field set on another provider.
@@ -339,6 +375,7 @@ impl TryFrom<VmFields> for Vm {
             cpu_mode: fields.cpu_mode,
             hostname: fields.hostname,
             guest_user: fields.guest_user,
+            guest: fields.guest,
         })
     }
 }
@@ -1464,6 +1501,40 @@ mod tests {
         let msg = err.message();
         assert!(msg.contains("unknown variant `custom`"), "{msg}");
         assert!(msg.contains("host-passthrough"), "{msg}");
+    }
+
+    /// A `[vm]` table with a `guest` line, or none when `guest` is
+    /// `None`.
+    fn vm_with_guest(guest: Option<&str>) -> Result<Vm, toml::de::Error> {
+        let line =
+            guest.map_or(String::new(), |g| format!("guest = \"{g}\"\n"));
+        toml::from_str::<Vm>(&format!(
+            "box = \"b\"\ncpus = 2\nmemory = 2048\n{line}"
+        ))
+    }
+
+    #[test]
+    fn guest_parses_its_two_values_and_nothing_else() {
+        assert_eq!(vm_with_guest(Some("linux")).unwrap().guest, Guest::Linux);
+        assert_eq!(
+            vm_with_guest(Some("windows")).unwrap().guest,
+            Guest::Windows
+        );
+        // A closed set, refused while the config is read. The
+        // serde spelling is lowercase, like `provider`.
+        for bad in ["Windows", "win", "macos", ""] {
+            let err = vm_with_guest(Some(bad)).expect_err(bad);
+            let msg = err.message();
+            assert!(msg.contains("unknown variant"), "{bad}: {msg}");
+            assert!(msg.contains("windows"), "{bad}: {msg}");
+        }
+    }
+
+    #[test]
+    fn guest_defaults_to_linux_when_the_key_is_absent() {
+        // Every config written before the key existed describes a
+        // Linux guest, and must go on meaning that.
+        assert_eq!(vm_with_guest(None).unwrap().guest, Guest::Linux);
     }
 
     #[test]
