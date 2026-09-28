@@ -19,7 +19,10 @@ they are separate here.
 
 ### 1. Read the issue, then verify it against the tree
 
-`gh issue view <n> --comments`.
+Run `gh issue view <n> --json title,body,state,comments`. Use the
+JSON form: the plain `--comments` form can print nothing and still
+exit 0, so its empty output cannot be told apart from an issue with
+no text. We have seen that on one machine and not traced the cause.
 
 **Do not trust the issue body.** Somebody wrote it at one point
 in time and the tree has moved since. Check every factual claim
