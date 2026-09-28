@@ -59,8 +59,17 @@ use.
   2, the out-of-box grace period, with 10 days left (read from the
   `SoftwareLicensingProduct` CIM class). The 180-day evaluation
   starts only on activation, which contacts Microsoft's servers.
-  What the guest does when the 10 days run out unactivated was not
-  checked.
+- **Unactivated, it shuts down after 10 days.** Microsoft's
+  [Evaluation Center page][eval] says: "Evaluation versions of
+  Windows Server must activate over the internet in the first 10
+  days to avoid automatic shutdown." The guest had internet through
+  libvirt's NAT, yet had not activated itself a few minutes after
+  boot, so an agent VM needs an activation step (`slmgr /ato`) or it
+  stops working. The one VM built here reported the full 10 days
+  although the box was built earlier, so the grace seems to start at
+  first boot, and `destroy` then `up` should start it again; a
+  second VM was not built to confirm that. #136 holds the decision
+  on who activates.
 - **After activation** it runs 180 days, and a Server evaluation can
   be converted to a licensed edition with a product key.
 - **For routine use** the guest needs a licence of its own: a
@@ -72,6 +81,8 @@ use.
   [pricing page](https://visualstudio.microsoft.com/vs/pricing/) on
   2026-09-28; the retail and host options were not checked against
   Microsoft's terms. This is not legal advice.
+
+[eval]: https://www.microsoft.com/en-US/evalcenter/evaluate-windows-server-2022
 
 ## What the box ships
 
@@ -164,8 +175,9 @@ end
 ## Not checked
 
 - The Hyper-V variant of the box, and any VM host other than frosti.
-- Activating the evaluation, what happens when the 10-day grace
-  runs out, and how the 180 days behave across `destroy` and `up`.
+- Activating the evaluation, whether the guest would activate
+  itself given more time, and how often shutdowns come once the
+  10-day grace has run out.
 - Which RDP credentials the box accepts.
 - Memory the guest needs once git, the Build Tools and a real build
   are on it.
