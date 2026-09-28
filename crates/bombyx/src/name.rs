@@ -104,7 +104,7 @@ pub fn check_segment(value: &str) -> Result<(), NameError> {
 /// to build the directory it creates on the VM host with
 /// `mkdir` and deletes with `rm -rf`.
 ///
-/// The `--project` argument becomes one of these before it
+/// The project argument becomes one of these before it
 /// reaches `crate::config`, and that is why the rule matters
 /// for a name that was merely asked for. Every "no such
 /// project" message tells the operator to add

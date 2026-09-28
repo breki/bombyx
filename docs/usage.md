@@ -12,11 +12,11 @@ shell internals -- see [trust-boundary.md](trust-boundary.md) and
 The examples use the README's config: a host alias `vmhost` and a
 project `myproject`.
 
-**Every command but `list` takes `--project myproject`**, left
-out of the examples so the line under discussion stays readable.
-bombyx reads nothing out of the project's own directory, so it
-cannot work out which project you mean from where you are
-standing. `--config <path>` names a registry file other than the
+**Every command but `list` and `self-update` takes the project as
+its first argument**, as in `bombyx up myproject`. bombyx reads
+nothing out of the project's own directory, so it cannot work out
+which project you mean from where you are standing.
+`--config <path>` names a registry file other than the
 one in your config directory -- point it only at a file you
 trust, because a config can name a key to copy into the VM
 ([trust-boundary.md](trust-boundary.md) explains).
@@ -33,20 +33,20 @@ trust, because a config can name a key to copy into the VM
 ## Commands
 
 ```bash
-bombyx doctor             # check the preconditions, change nothing
-bombyx up                 # write the generated files, boot the VM
-bombyx provision          # re-run provisioning in the guest
-bombyx shell              # open a shell inside the VM
-bombyx status             # vagrant status on the host
-bombyx reset              # restore the fresh-install snapshot
-bombyx snapshot           # replace the fresh-install snapshot
-bombyx down               # halt the VM
-bombyx destroy myproject  # destroy the VM and remove its dir
+bombyx doctor myproject     # check the preconditions, change nothing
+bombyx up myproject         # write the generated files, boot the VM
+bombyx provision myproject  # re-run provisioning in the guest
+bombyx shell myproject      # open a shell inside the VM
+bombyx status myproject     # vagrant status on the host
+bombyx reset myproject      # restore the fresh-install snapshot
+bombyx snapshot myproject   # replace the fresh-install snapshot
+bombyx down myproject       # halt the VM
+bombyx destroy myproject    # destroy the VM and remove its dir
 
-bombyx scratch pr-1234    # boot a throwaway VM
-bombyx discard pr-1234    # destroy it
+bombyx scratch myproject pr-1234  # boot a throwaway VM
+bombyx discard myproject pr-1234  # destroy it
 
-bombyx list               # every registered project and its VM state
+bombyx list                 # every registered project and its VM state
 ```
 
 There are two lifecycles, on purpose:
@@ -74,7 +74,7 @@ machine and reports success without re-running it. Use `provision`
 instead:
 
 ```bash
-bombyx provision
+bombyx provision myproject
 ```
 
 `provision` re-runs the bootstrap in the guest, fetching
@@ -95,7 +95,7 @@ To change a value in your `env_file`, such as an expired token,
 edit the file on your workstation and run `up` or `shell`:
 
 ```bash
-bombyx up        # or: bombyx shell
+bombyx up myproject   # or: bombyx shell myproject
 ```
 
 Both commands write the file over its copy in the guest,
@@ -239,7 +239,7 @@ went by unread.
 To move the return point on purpose:
 
 ```bash
-bombyx snapshot
+bombyx snapshot myproject
 ```
 
 That replaces `fresh-install` without asking; the old return point
@@ -250,26 +250,26 @@ dependency build.
 
 ## destroy and discard
 
-`destroy` throws away the VM and its directory, and asks for the
-project name as confirmation:
-
-```bash
-bombyx destroy myproject
-```
-
-**Read the target it prints, not the name you typed.** Both the
-refusal and the confirmation print the resolved
-`<host>:<directory>`:
+`destroy` throws away the VM and its directory. It first prints
+the resolved `<host>:<directory>`, then asks you to type the
+project name:
 
 ```console
-$ bombyx --project myproject destroy
-bombyx: destroy needs the project name to confirm: re-run the
-same command with "myproject" as its last argument -- target is
-vmhost:~/vms/myproject
+$ bombyx destroy myproject
+bombyx: this destroys vmhost:~/vms/myproject
+type the project name to confirm: myproject
+bombyx: destroying vmhost:~/vms/myproject
 ```
 
-That printed target is the part you can check against reality;
-repeating the name only proves you can read your own command line.
+**Read the target it prints before you type.** That target is the
+part you can check against reality: which machine and which
+directory your config resolved to. A name that does not match, or
+no answer at all, refuses and destroys nothing.
+
+`--yes` skips the question. `destroy` needs it wherever nobody can
+answer, because when stdin is not a terminal -- a script, a pipe
+-- it refuses rather than reading the name from there. A
+`--dry-run` asks nothing, since it destroys nothing.
 
 `discard` does the same for a scratch VM. Both remove the VM's
 directory after destroying the VM, and both are re-runnable, so an
@@ -311,7 +311,7 @@ every check rather than stopping at the first failure, and exits
 non-zero if any fails:
 
 ```console
-$ bombyx doctor
+$ bombyx doctor myproject
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Win...
   vmhost  ssh               ok
   vmhost  login shell       ok    posix

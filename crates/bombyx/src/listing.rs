@@ -167,7 +167,7 @@ pub fn shell_refusal(cfg: &Config, state: Option<&VmState>) -> Option<String> {
     let project = cfg.project.as_str();
     let refuse = |what: &str| {
         Some(format!(
-            "bombyx: {project} {what} on {}; run `bombyx -p {project} up` \
+            "bombyx: {project} {what} on {}; run `bombyx up {project}` \
              first",
             cfg.host.as_str()
         ))
@@ -1233,7 +1233,7 @@ mod tests {
                 shell_refusal(&c, Some(&absent)).as_deref(),
                 Some(
                     "bombyx: vmtest has no VM on fusion-wsl; \
-                     run `bombyx -p vmtest up` first"
+                     run `bombyx up vmtest` first"
                 ),
                 "{absent:?}"
             );
@@ -1250,7 +1250,7 @@ mod tests {
                 Some(
                     format!(
                         "bombyx: vmtest is not running ({word}) on \
-                         fusion-wsl; run `bombyx -p vmtest up` first"
+                         fusion-wsl; run `bombyx up vmtest` first"
                     )
                     .as_str()
                 ),

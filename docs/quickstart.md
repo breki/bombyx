@@ -88,7 +88,8 @@ script = ".bombyx/provision.sh"
 runs `vagrant` directly instead of over `ssh`.
 
 The table key is the project name. Nothing inside repeats it,
-and it is what you pass as `--project`.
+and it is what you give each command, as in
+`bombyx up myproject`.
 
 > **Warning.** `remote_root` must sit above the two sub-tables.
 > TOML binds a bare key to the header above it, so written below

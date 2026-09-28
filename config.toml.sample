@@ -8,9 +8,9 @@
 # This is the only file bombyx reads. It holds every project you
 # drive VMs for, one `[projects.<name>]` table each, and it is
 # yours: nothing in it is committed anywhere. Name the project
-# you mean on the command line -- `bombyx --project myproject
-# up` -- because bombyx reads nothing at all from the project's
-# own directory and so cannot work it out from where you stand.
+# you mean on the command line -- `bombyx up myproject` --
+# because bombyx reads nothing at all from the project's own
+# directory and so cannot work it out from where you stand.
 #
 # Paths in the comments below, such as docs/trust-boundary.md,
 # are in bombyx's own repository:

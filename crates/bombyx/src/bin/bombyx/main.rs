@@ -17,7 +17,7 @@
 //! post-extraction re-check in `update::asset::confirm_unchanged`,
 //! because both are decisions and neither needs a process.
 
-use std::io::IsTerminal;
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
@@ -32,22 +32,12 @@ use bombyx::plan::{self, Action, StagedRead, plan};
 use bombyx::remote::{self, RemoteCommand, Tty};
 use bombyx::term;
 use bombyx::update::{self, asset};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use tempfile::TempDir;
 
 #[derive(Parser)]
 #[command(name = "bombyx", version, about)]
 struct Cli {
-    /// Which project to act on; required by every subcommand
-    /// except `self-update` and `list`
-    ///
-    /// Names a `[projects.<name>]` table in your config file.
-    /// bombyx reads nothing from the project's own directory, so
-    /// it cannot work out which project you mean from where you
-    /// are standing.
-    #[arg(short, long, global = true)]
-    project: Option<String>,
-
     /// Path to your `config.toml`, the project registry; defaults
     /// to the one in your config directory
     #[arg(short, long, global = true)]
@@ -85,9 +75,6 @@ enum Cmd {
     /// complete table from one with gaps in it. That covers a
     /// machine bombyx could not reach and a machine that
     /// answered without naming a state.
-    ///
-    /// The only subcommand that reads the config without naming
-    /// one project, so `--project` is ignored here.
     List {
         /// List what the config file holds, contacting no machine
         ///
@@ -131,7 +118,7 @@ enum VmCmd {
     /// table names one, runs from the clone after the rewrite, and
     /// after provisioning on the `up` that creates the VM. A
     /// failed rewrite or hook makes `up` exit non-zero.
-    Up,
+    Up(ProjectArg),
     /// Write the generated files and re-run provisioning in
     /// the guest
     ///
@@ -163,20 +150,20 @@ enum VmCmd {
     /// failed hook makes `provision` exit non-zero.
     ///
     /// The VM must already exist: run `up` first.
-    Provision,
+    Provision(ProjectArg),
     /// Halt the project VM
-    Down,
+    Down(ProjectArg),
     /// Open a shell inside the project VM, in the project clone
     ///
     /// First rewrites the guest's copy of the `env_file` secrets,
     /// and the git credential when `repo_token` is set, and runs
     /// the `secrets_refreshed` hook, as `up` does. If any of that
     /// fails, bombyx warns and opens the shell anyway.
-    Shell,
+    Shell(ProjectArg),
     /// Show VM status on the host
-    Status,
+    Status(ProjectArg),
     /// Restore the project VM to its `fresh-install` snapshot
-    Reset,
+    Reset(ProjectArg),
     /// Save the project VM's `fresh-install` snapshot
     ///
     /// `up` already takes this snapshot on a machine that has
@@ -189,36 +176,78 @@ enum VmCmd {
     /// Replaces an existing snapshot without asking, which
     /// discards the state `reset` would have returned to. The VM
     /// and its caches are untouched.
-    Snapshot,
+    Snapshot(ProjectArg),
     /// Check bombyx's preconditions, changing nothing
-    Doctor,
+    Doctor(ProjectArg),
     /// Destroy the project VM and remove its directory
     ///
-    /// Takes the project name as confirmation, since this
-    /// discards the warm caches the persistent lifecycle
-    /// exists to keep.
+    /// Prints the host and directory it is about to remove, then
+    /// asks you to type the project name, since this discards
+    /// the warm caches the persistent lifecycle exists to keep.
+    /// A dry run asks nothing, because it destroys nothing.
     Destroy {
-        // The clap id is `confirm` rather than `project`
-        // because `--project` is a global argument and clap
-        // requires every argument in one command to have a
-        // distinct id; two called `project` make it panic on
-        // startup. `value_name` keeps the help reading as a
-        // project name. A `///` here would print this
-        // explanation to the operator.
-        /// Must match the `--project` being destroyed
-        #[arg(id = "confirm", value_name = "PROJECT")]
-        confirm: Option<String>,
+        #[command(flatten)]
+        project: ProjectArg,
+        /// Destroy without asking for the project name
+        ///
+        /// Needed where nobody can answer the question: when
+        /// stdin is not a terminal, as in a script, `destroy`
+        /// refuses without it.
+        #[arg(long)]
+        yes: bool,
     },
     /// Boot a throwaway VM for untrusted work
     Scratch {
+        #[command(flatten)]
+        project: ProjectArg,
         /// Name for the scratch VM, e.g. `pr-1234`
         name: String,
     },
     /// Destroy a throwaway VM
     Discard {
+        #[command(flatten)]
+        project: ProjectArg,
         /// Name of the scratch VM to destroy
         name: String,
     },
+}
+
+/// The project a VM subcommand acts on, which each of them takes
+/// as its first positional argument.
+#[derive(Args)]
+struct ProjectArg {
+    /// The project to act on: a `[projects.<name>]` table in your
+    /// config file
+    ///
+    /// bombyx reads nothing from the project's own directory, so
+    /// it cannot work out which project you mean from where you
+    /// are standing.
+    //
+    // Parsed by clap into the checked type, so a name no table
+    // key could hold is a usage error naming this argument, and
+    // no later message can advise a `[projects.<name>]` heading
+    // the TOML parser refuses.
+    #[arg(value_parser = ProjectName::parse)]
+    project: ProjectName,
+}
+
+impl VmCmd {
+    /// The project this subcommand names.
+    fn project(&self) -> &ProjectName {
+        match self {
+            Self::Up(p)
+            | Self::Provision(p)
+            | Self::Down(p)
+            | Self::Shell(p)
+            | Self::Status(p)
+            | Self::Reset(p)
+            | Self::Snapshot(p)
+            | Self::Doctor(p)
+            | Self::Destroy { project: p, .. }
+            | Self::Scratch { project: p, .. }
+            | Self::Discard { project: p, .. } => &p.project,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -344,25 +373,10 @@ fn run() -> Result<Ran> {
         Cmd::Vm(vm) => vm,
     };
 
-    // clap cannot mark one global argument required for some
-    // subcommands and not others, so the requirement is stated
-    // here instead -- on the far side of the two returns above,
-    // which are the subcommands that must work without it.
-    let project = cli.project.ok_or_else(|| {
-        anyhow!(
-            "--project is required: name the `[projects.<name>]` \
-             table this command is about"
-        )
-    })?;
-
-    // Checked here, at the argument, so no later message can
-    // advise a `[projects.<name>]` heading the TOML parser
-    // refuses -- and so the refusal names the command line,
-    // which is where the value came from. `Config::load_project`
-    // takes the checked value and cannot be reached with
-    // anything else.
-    let project =
-        ProjectName::parse(&project).context("invalid --project value")?;
+    // Required and checked by clap, so it is a `ProjectName` by
+    // now. `Config::load_project` takes the checked value and
+    // cannot be reached with anything else.
+    let project = vm.project().clone();
 
     // `Config::load_project` takes a path, so the machine whose
     // environment names no config directory is answered here,
@@ -434,7 +448,19 @@ fn run() -> Result<Ran> {
         ),
     }
 
-    let action = action_of(&vm, &cfg)?;
+    let action = action_of(&vm)?;
+    if let VmCmd::Destroy { yes, .. } = vm {
+        let target = format!("{}:{}", cfg.host, cfg.remote_project_dir());
+        let stdin = std::io::stdin();
+        let consent = Consent::of(yes, cli.dry_run, stdin.is_terminal());
+        confirm_destroy(
+            cfg.project.as_str(),
+            &target,
+            consent,
+            &mut stdin.lock(),
+            &mut std::io::stderr(),
+        )?;
+    }
     let tty = tty_choice();
 
     // Read here, at the edge, because this is the only place in
@@ -759,22 +785,19 @@ fn run_id() -> String {
 /// config and has no `Action` -- an arm reachable only if some
 /// `matches!` elsewhere in the file stopped agreeing with it. The
 /// types hold that invariant instead.
-fn action_of(cmd: &VmCmd, cfg: &Config) -> Result<Action> {
+fn action_of(cmd: &VmCmd) -> Result<Action> {
     Ok(match cmd {
-        VmCmd::Up => Action::Up,
-        VmCmd::Provision => Action::Provision,
-        VmCmd::Down => Action::Down,
-        VmCmd::Shell => Action::Shell,
-        VmCmd::Status => Action::Status,
-        VmCmd::Reset => Action::Reset,
-        VmCmd::Snapshot => Action::Snapshot,
-        VmCmd::Doctor => Action::Doctor,
-        VmCmd::Destroy { confirm } => {
-            confirm_destroy(confirm.as_deref(), cfg)?;
-            Action::Destroy
-        }
-        VmCmd::Scratch { name } => Action::Scratch(vm_name(name)?),
-        VmCmd::Discard { name } => Action::Discard(vm_name(name)?),
+        VmCmd::Up(_) => Action::Up,
+        VmCmd::Provision(_) => Action::Provision,
+        VmCmd::Down(_) => Action::Down,
+        VmCmd::Shell(_) => Action::Shell,
+        VmCmd::Status(_) => Action::Status,
+        VmCmd::Reset(_) => Action::Reset,
+        VmCmd::Snapshot(_) => Action::Snapshot,
+        VmCmd::Doctor(_) => Action::Doctor,
+        VmCmd::Destroy { .. } => Action::Destroy,
+        VmCmd::Scratch { name, .. } => Action::Scratch(vm_name(name)?),
+        VmCmd::Discard { name, .. } => Action::Discard(vm_name(name)?),
     })
 }
 
@@ -782,44 +805,88 @@ fn vm_name(raw: &str) -> Result<ScratchName> {
     ScratchName::parse(raw).with_context(|| format!("invalid VM name {raw:?}"))
 }
 
-/// Requires `given` to name the configured project, and always
-/// reports the target being destroyed.
-///
-/// `down` halts a VM and `reset` rolls it back; `destroy`
-/// throws away the warm caches and installed tooling that make
-/// the persistent lifecycle worth having, so it asks for a
-/// deliberate act rather than a flag.
-///
-/// Printing the resolved target is the more important half.
-/// Typing the name back confirms only that the operator can
-/// read their own command line, since `--project` supplied it a
-/// moment earlier. What they can check against reality is
-/// `<host>:<dir>`, so that is shown on both the refusal and the
-/// confirmed path. `destroy-confirmation-shape` in
-/// `docs/todo.md` is where the positional itself is settled.
-fn confirm_destroy(given: Option<&str>, cfg: &Config) -> Result<()> {
-    let target = format!("{}:{}", cfg.host, cfg.remote_project_dir());
-    match given {
-        Some(name) if name == cfg.project.as_str() => {
-            eprintln!("bombyx: destroying {target}");
-            Ok(())
+/// How `destroy` gets the operator's go-ahead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Consent {
+    /// `--yes`, or a dry run, which destroys nothing: there is
+    /// nothing to ask.
+    Given,
+    /// stdin is a terminal, so somebody can type the project name.
+    Ask,
+    /// Nobody can answer and `--yes` was not passed.
+    Refused,
+}
+
+impl Consent {
+    /// The consent a `destroy` run has, from its flags and from
+    /// whether stdin is a terminal.
+    ///
+    /// A pipe is refused rather than read. A script that pipes
+    /// the project name in has typed it into the script, which is
+    /// what `--yes` says in plain words, and a pipe that happens to
+    /// carry the right text is not an operator who read the
+    /// target.
+    fn of(yes: bool, dry_run: bool, interactive: bool) -> Self {
+        if yes || dry_run {
+            Self::Given
+        } else if interactive {
+            Self::Ask
+        } else {
+            Self::Refused
         }
-        Some(name) => bail!(
-            "{name:?} does not match the project being destroyed \
-             ({:?}); refusing to destroy {target}",
-            cfg.project.as_str()
-        ),
-        // Says what to add rather than spelling a whole
-        // command. A reconstructed one drops every other
-        // argument the operator gave -- `--config` above all,
-        // which would send the re-run at a different registry.
-        None => bail!(
-            "destroy needs the project name to confirm: re-run \
-             the same command with {:?} as its last argument -- \
-             target is {target}",
-            cfg.project.as_str()
-        ),
     }
+}
+
+/// Prints the `<host>:<dir>` about to be destroyed and, when
+/// `consent` says to, asks for `project` to be typed back.
+///
+/// The target is the part worth reading. The project name came
+/// from the command line a moment earlier, so typing it again
+/// proves little on its own; what the operator can check against
+/// reality is which machine and which directory the config
+/// resolved to, and the prompt shows that before it asks.
+///
+/// `input` and `out` are stdin and stderr in a real run, and a
+/// test hands in its own.
+fn confirm_destroy(
+    project: &str,
+    target: &str,
+    consent: Consent,
+    input: &mut dyn BufRead,
+    out: &mut dyn Write,
+) -> Result<()> {
+    match consent {
+        Consent::Given => {}
+        Consent::Refused => bail!(
+            "destroy asks you to type the project name, and stdin \
+             is not a terminal: pass --yes to destroy {target} \
+             without asking"
+        ),
+        Consent::Ask => {
+            write!(
+                out,
+                "bombyx: this destroys {target}\n\
+                 type the project name to confirm: "
+            )?;
+            out.flush()?;
+            let mut answer = String::new();
+            if input.read_line(&mut answer)? == 0 {
+                bail!("no answer; refusing to destroy {target}");
+            }
+            // `trim`, so a line ending of `\r\n` from a Windows
+            // console compares equal.
+            let answer = answer.trim();
+            if answer != project {
+                bail!(
+                    "{answer:?} does not match the project being \
+                     destroyed ({project:?}); refusing to destroy \
+                     {target}"
+                );
+            }
+        }
+    }
+    writeln!(out, "bombyx: destroying {target}")?;
+    Ok(())
 }
 
 /// What running a command list came to.
@@ -1373,4 +1440,102 @@ fn local_tool(name: &str, version_arg: Option<&str>) -> Finding {
 fn exit_status_byte(status: ExitStatus) -> u8 {
     let code = status.code().unwrap_or(1);
     u8::try_from(code).unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Consent, confirm_destroy};
+
+    const TARGET: &str = "vmhost:~/vms/myproject";
+
+    /// Runs the prompt with `typed` as stdin and returns the result
+    /// with everything written to stderr.
+    fn ask(typed: &str) -> (anyhow::Result<()>, String) {
+        let mut out = Vec::new();
+        let result = confirm_destroy(
+            "myproject",
+            TARGET,
+            Consent::Ask,
+            &mut typed.as_bytes(),
+            &mut out,
+        );
+        (result, String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn yes_or_a_dry_run_gives_consent_and_a_terminal_asks() {
+        for (yes, dry_run, interactive) in [
+            (true, false, false),
+            (false, true, false),
+            (true, true, true),
+        ] {
+            assert_eq!(
+                Consent::of(yes, dry_run, interactive),
+                Consent::Given,
+                "yes={yes} dry_run={dry_run} interactive={interactive}"
+            );
+        }
+        assert_eq!(Consent::of(false, false, true), Consent::Ask);
+        assert_eq!(Consent::of(false, false, false), Consent::Refused);
+    }
+
+    #[test]
+    fn the_prompt_shows_the_target_before_it_asks() {
+        let (result, out) = ask("myproject\n");
+        result.unwrap();
+        let asked = out.find("type the project name").unwrap();
+        assert!(out[..asked].contains(TARGET), "{out}");
+        assert!(out.ends_with(&format!("destroying {TARGET}\n")), "{out}");
+    }
+
+    #[test]
+    fn a_windows_line_ending_still_matches() {
+        ask("myproject\r\n").0.unwrap();
+    }
+
+    #[test]
+    fn a_wrong_name_refuses_and_names_the_target() {
+        let (result, out) = ask("other\n");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("does not match"), "{err}");
+        assert!(err.contains(TARGET), "{err}");
+        assert!(!out.contains("destroying"), "{out}");
+    }
+
+    #[test]
+    fn no_answer_refuses() {
+        let err = ask("").0.unwrap_err().to_string();
+        assert!(err.contains("no answer"), "{err}");
+    }
+
+    #[test]
+    fn refused_consent_says_to_pass_yes_and_reads_nothing() {
+        let mut out = Vec::new();
+        let err = confirm_destroy(
+            "myproject",
+            TARGET,
+            Consent::Refused,
+            &mut "myproject\n".as_bytes(),
+            &mut out,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("--yes") && err.contains(TARGET), "{err}");
+        assert!(out.is_empty(), "nothing is printed or asked: {out:?}");
+    }
+
+    #[test]
+    fn given_consent_asks_nothing_and_names_the_target() {
+        let mut out = Vec::new();
+        confirm_destroy(
+            "myproject",
+            TARGET,
+            Consent::Given,
+            &mut "".as_bytes(),
+            &mut out,
+        )
+        .unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(out, format!("bombyx: destroying {TARGET}\n"));
+    }
 }

@@ -72,8 +72,9 @@ and a `repo_token` credential derived from it. bombyx removes both
 when the `vagrant` run ends. When `up` or `shell` rewrites them in
 a guest that already exists, they pass through the VM host on a
 pipe and are not stored there at all. The workstation reads only
-`config.toml`, which is why `--project` names the project instead
-of inferring it from the working directory. `docs/trust-boundary.md`
+`config.toml`, which is why each command names the project
+instead of inferring it from the working directory.
+`docs/trust-boundary.md`
 explains the reasoning.
 
 ## Library modules
@@ -293,7 +294,7 @@ sequenceDiagram
   participant guest as guest VM
   participant git as git host
 
-  op->>cli: bombyx --project p up
+  op->>cli: bombyx up p
   cli->>cli: read config.toml, check every value
   cli->>host: mkdir -p the project dir
   cli->>host: cat > Vagrantfile (file on stdin)
