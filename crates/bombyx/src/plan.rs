@@ -8,7 +8,7 @@ use crate::config::{Config, DeployKeyPath, Staged};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
-use crate::vagrantfile;
+use crate::vagrantfile::{self, GuestHomeFile};
 
 /// What the user asked bombyx to do.
 ///
@@ -19,6 +19,11 @@ use crate::vagrantfile;
 pub enum Action {
     /// Write the generated files on the VM host and boot the
     /// project VM.
+    ///
+    /// The binary follows the boot with [`refresh_secrets`] when
+    /// the machine already existed, because vagrant does not
+    /// provision it then. `plan` returns the boot alone, since it
+    /// cannot see the machine's state.
     Up,
     /// Write the generated files and re-run provisioning in the
     /// guest.
@@ -47,6 +52,12 @@ pub enum Action {
     /// Halt the project VM.
     Down,
     /// Open a shell inside the project VM, in the project clone.
+    ///
+    /// The binary runs [`refresh_secrets`] first and warns rather
+    /// than stops when it fails, so it is not part of this plan.
+    /// [`Action::staged_read`] says [`StagedRead::BestEffort`] for
+    /// the same reason: `shell` reads the files when it can and
+    /// opens the shell when it cannot.
     Shell,
     /// Show VM status on the host.
     Status,
@@ -70,17 +81,41 @@ pub enum Action {
     Discard(ScratchName),
 }
 
+/// How an [`Action`] treats the file `source.env_file` names, and
+/// the git credential bombyx builds out of it.
+///
+/// [`Action::staged_read`] gives the answer for each action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagedRead {
+    /// The action needs the files. A read that fails stops it
+    /// before anything runs.
+    Required,
+    /// The action uses the files when it can read them. A read
+    /// that fails is a warning, and the action runs with nothing
+    /// staged.
+    BestEffort,
+    /// The action never reads the files.
+    Skip,
+}
+
 impl Action {
-    /// Whether this action needs the file `source.env_file`
-    /// names, and the git credential bombyx builds out of it.
+    /// How this action treats the file `source.env_file` names,
+    /// and the git credential bombyx builds out of it.
     ///
     /// The caller reads that file, and reading it can fail --
     /// the operator rotated it, or moved it, or the config names
-    /// a path this machine never had. The variable `repo_token`
-    /// names can be missing from it too. So this decides which
-    /// actions either failure is allowed to stop.
+    /// a path this machine never had. The file may also lack the
+    /// variable that `repo_token` names. So this decides which
+    /// actions either failure is allowed to stop: only the
+    /// [`StagedRead::Required`] ones.
     ///
-    /// **The teardown verbs are the reason it exists.** A
+    /// `shell` is [`StagedRead::BestEffort`]. It refreshes the
+    /// guest's copies before the shell opens, and it is the
+    /// command an operator reaches for when something is already
+    /// wrong, so a missing secrets file must not also cost them the
+    /// shell.
+    ///
+    /// **The teardown verbs are why `Skip` exists.** A
     /// `destroy` refused because the secrets file has gone would
     /// leave the VM and the directory it was asked to remove,
     /// with no bombyx command able to clear either. `write_then`
@@ -95,17 +130,19 @@ impl Action {
     /// Written as an exhaustive match rather than a `matches!`,
     /// so a new variant is a decision somebody makes here.
     #[must_use]
-    pub fn needs_staged_files(&self) -> bool {
+    pub fn staged_read(&self) -> StagedRead {
         match self {
-            Self::Up | Self::Provision | Self::Scratch(_) => true,
+            Self::Up | Self::Provision | Self::Scratch(_) => {
+                StagedRead::Required
+            }
+            Self::Shell => StagedRead::BestEffort,
             Self::Down
-            | Self::Shell
             | Self::Status
             | Self::Reset
             | Self::Snapshot
             | Self::Doctor
             | Self::Destroy
-            | Self::Discard(_) => false,
+            | Self::Discard(_) => StagedRead::Skip,
         }
     }
 }
@@ -201,6 +238,51 @@ pub fn plan(
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
     }
+}
+
+/// Returns the commands that write the staged files over their
+/// copies inside the running project VM.
+///
+/// Provisioning is the only other thing that writes them, and it
+/// also re-runs `bootstrap.sh`, whose forced checkout overwrites
+/// work in the guest's clone. So `up` and `shell` send the files
+/// this way instead: nothing but the two files changes, and a
+/// token rotated on the workstation reaches the guest without the
+/// operator committing anything first.
+///
+/// One command per file, and none for a file `staged` lacks, so a
+/// project with no `env_file` pays no round trip. The credential
+/// is refreshed alongside the secrets because it is built from
+/// one variable inside them, and a rotated repo token would leave
+/// `git` pushing with the old one otherwise.
+///
+/// **The commands are independent**, so a caller runs every one
+/// and reports each failure, rather than stopping at the first:
+/// a secrets file the guest would not take is no reason to leave
+/// the credential stale.
+///
+/// Only the two copies are rewritten. A project script that
+/// copied the secrets somewhere else during provisioning keeps
+/// that copy, and a process that read them keeps its values until
+/// it restarts; `docs/usage.md` says so to the operator.
+#[must_use]
+pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
+    let mut cmds = Vec::new();
+    if let Some(secrets) = staged.secrets() {
+        cmds.push(remote::refresh_in_guest(
+            cfg,
+            GuestHomeFile::Secrets,
+            secrets.as_bytes(),
+        ));
+    }
+    if let Some(credential) = staged.credential() {
+        cmds.push(remote::refresh_in_guest(
+            cfg,
+            GuestHomeFile::Credential,
+            credential.as_bytes(),
+        ));
+    }
+    cmds
 }
 
 /// Destroys the VM defined in `dir`, then removes `dir`.
@@ -1307,13 +1389,17 @@ mod tests {
         // the secrets file on the workstation, or the VM and its
         // directory become unremovable by bombyx. That is the
         // rule `plan::write_then` already states for the deploy
-        // key, aimed at the other machine.
+        // key, aimed at the other machine. `shell` reads the file
+        // to refresh the guest's copy, and must open all the same.
         for action in all_actions() {
-            let want = matches!(
-                action,
-                Action::Up | Action::Provision | Action::Scratch(_)
-            );
-            assert_eq!(action.needs_staged_files(), want, "{action:?}");
+            let want = match action {
+                Action::Up | Action::Provision | Action::Scratch(_) => {
+                    StagedRead::Required
+                }
+                Action::Shell => StagedRead::BestEffort,
+                _ => StagedRead::Skip,
+            };
+            assert_eq!(action.staged_read(), want, "{action:?}");
         }
     }
 
@@ -1354,6 +1440,52 @@ mod tests {
                  status: {removing}"
             );
         }
+    }
+
+    #[test]
+    fn a_refresh_rewrites_the_secrets_file_in_the_agents_home() {
+        // One command, carrying the file exactly as the workstation
+        // holds it, aimed at the path `account.sh` writes. No token,
+        // so no credential and no second command.
+        let (cfg, staged) = staged_project(false);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        let script = script(&cmds[0]);
+        assert!(script.contains(GuestHomeFile::Secrets.path()), "{script}");
+        let stdin = cmds[0].stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), b"TOKEN=hunter2\n");
+        assert!(stdin.size_may_be_shown());
+    }
+
+    #[test]
+    fn a_refresh_rewrites_the_git_credential_too_and_hides_its_size() {
+        // A rotated repo token lives in the same file, so refreshing
+        // only the file would leave `git` pushing with the old one.
+        let (cfg, staged) = staged_project(true);
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 2, "{cmds:?}");
+        let script = script(&cmds[1]);
+        assert!(
+            script.contains(GuestHomeFile::Credential.path()),
+            "{script}"
+        );
+        let stdin = cmds[1].stdin.as_ref().expect("the file is on stdin");
+        let credential = staged.credential().expect("a token was configured");
+        assert_eq!(stdin.bytes(), credential.as_bytes());
+        assert!(!stdin.size_may_be_shown());
+        for c in &cmds {
+            assert!(
+                c.args.iter().all(|a| !a.contains("hunter2")),
+                "the token reached an argument: {c}"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_refreshed_when_nothing_was_staged() {
+        // A project without an `env_file`, or a `shell` that could
+        // not read it, sends nothing and costs no round trip.
+        assert!(refresh_secrets(&cfg(), &Staged::default()).is_empty());
     }
 
     #[test]

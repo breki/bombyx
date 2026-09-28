@@ -245,17 +245,61 @@ pub(crate) const CREDENTIAL_FILE_NAME: &str = "bombyx.git-credentials";
 const CREDENTIAL_STAGED_PATH: &str =
     concat!(staging_dir!(), "/git-credentials");
 
+/// A file bombyx keeps in the agent's home that
+/// `crate::remote::refresh_in_guest` may write over on a machine
+/// that already exists.
+///
+/// [`ACCOUNT`] writes both when it provisions. A closed set
+/// rather than a path, because only these two are refreshed:
+/// holding one is the proof the destination is one of them, and
+/// each carries its own answer to whether a dry run may print its
+/// size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestHomeFile {
+    /// The project's secrets, `~/.bombyx-env`.
+    Secrets,
+    /// The git credential built from `repo_token`,
+    /// `~/.bombyx-git-credentials`.
+    Credential,
+}
+
+impl GuestHomeFile {
+    /// The file's path relative to the agent's home.
+    ///
+    /// Relative, because the home is the agent's and only the
+    /// guest can name it.
+    #[must_use]
+    pub const fn path(self) -> &'static str {
+        match self {
+            Self::Secrets => ".bombyx-env",
+            Self::Credential => ".bombyx-git-credentials",
+        }
+    }
+
+    /// Whether a dry run must not print the file's size.
+    ///
+    /// True for the credential, which is fixed text plus one
+    /// token, so its length measures the token. `crate::remote::Stdin`
+    /// holds the rule.
+    #[must_use]
+    pub const fn hides_size(self) -> bool {
+        matches!(self, Self::Credential)
+    }
+}
+
 /// The three paths [`ACCOUNT`] writes the staged credentials to,
 /// relative to the agent's home, and which [`BOOTSTRAP`] reads.
 ///
 /// Test-only: neither script is built from this list. It is what
 /// lets a test assert both scripts spell each path the same way,
-/// since neither file can see the other.
+/// since neither file can see the other. Two of the three come
+/// from [`GuestHomeFile`], so the same test holds the refresh to
+/// the scripts' spelling.
 #[cfg(test)]
 const GUEST_HOME_FILES: [&str; 3] = [
     ".ssh/bombyx-deploy-key",
-    ".bombyx-env",
-    ".bombyx-git-credentials",
+    GuestHomeFile::Secrets.path(),
+    GuestHomeFile::Credential.path(),
 ];
 
 /// Environment variable naming the account the agent works as.

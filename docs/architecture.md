@@ -69,7 +69,9 @@ neither the workstation nor the VM host reads a file from it; the
 guest clones it. The only files that reach the VM host are the two
 that bombyx generates and, when configured, a staged `env_file`
 and a `repo_token` credential derived from it. bombyx removes both
-when the `vagrant` run ends. The workstation reads only
+when the `vagrant` run ends. When `up` or `shell` rewrites them in
+a guest that already exists, they pass through the VM host on a
+pipe and are not stored there at all. The workstation reads only
 `config.toml`, which is why `--project` names the project instead
 of inferring it from the working directory. `docs/trust-boundary.md`
 explains the reasoning.

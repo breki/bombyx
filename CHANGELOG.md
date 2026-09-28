@@ -12,6 +12,21 @@ and this project adheres to
 
 ### Added
 
+- An `env_file` you change on the workstation now reaches a VM
+  that already exists, running or stopped, without a provision.
+  `bombyx up` and `bombyx shell` write it over `~/.bombyx-env` in
+  the guest, and rewrite the git credential when `repo_token` is
+  set. Nothing is fetched or checked out, so work in the guest's
+  clone is untouched. Each file travels on a pipe through
+  `vagrant ssh --no-tty`, so the rewrite itself stores nothing on
+  the VM host (#125).
+- A failed rewrite makes `up` exit non-zero; `shell` warns and
+  opens the shell anyway. On a running VM, the rewrite is all
+  `up` does (#125).
+- The sample config and `bootstrap.sh` now suggest linking `.env`
+  to `$BOMBYX_ENV_FILE` rather than copying it, so the link follows
+  the rewritten file (#125).
+
 ### Changed
 
 ### Fixed
