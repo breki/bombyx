@@ -123,9 +123,14 @@ enum VmCmd {
     /// A VM that already exists is not provisioned again, so its
     /// copy of the `env_file` secrets, and the git credential when
     /// `repo_token` is set, are rewritten in the guest once it is
-    /// up. On a running VM, that rewrite is all `up` does. Nothing
-    /// is fetched or checked out, so work in the guest's clone is
+    /// up. On a running VM, that is all `up` does. Nothing is
+    /// fetched or checked out, so work in the guest's clone is
     /// untouched.
+    ///
+    /// The project's `secrets_refreshed` hook, when its `[hooks]`
+    /// table names one, runs from the clone after the rewrite, and
+    /// after provisioning on the `up` that creates the VM. A
+    /// failed rewrite or hook makes `up` exit non-zero.
     Up,
     /// Write the generated files and re-run provisioning in
     /// the guest
@@ -153,6 +158,10 @@ enum VmCmd {
     /// Rewriting the same URL with or without a trailing `/` or
     /// `.git` keeps the clone.
     ///
+    /// The project's `secrets_refreshed` hook, when its `[hooks]`
+    /// table names one, runs after a successful provision, and a
+    /// failed hook makes `provision` exit non-zero.
+    ///
     /// The VM must already exist: run `up` first.
     Provision,
     /// Halt the project VM
@@ -160,9 +169,9 @@ enum VmCmd {
     /// Open a shell inside the project VM, in the project clone
     ///
     /// First rewrites the guest's copy of the `env_file` secrets,
-    /// and the git credential when `repo_token` is set, as `up`
-    /// does. If that fails, bombyx warns and opens the shell
-    /// anyway.
+    /// and the git credential when `repo_token` is set, and runs
+    /// the `secrets_refreshed` hook, as `up` does. If any of that
+    /// fails, bombyx warns and opens the shell anyway.
     Shell,
     /// Show VM status on the host
     Status,
@@ -472,15 +481,19 @@ fn run() -> Result<Ran> {
     };
 
     // `up` and `shell` decide on the machine's live state before
-    // they act, so each owns both its dry run and its live run --
-    // see `up_run` and `shell_run`. They handle `dry_run`
-    // themselves, so they come before the generic dry-run line
-    // below.
+    // they act, and `provision` follows its run with the secrets
+    // hook, so each owns both its dry run and its live run -- see
+    // `up_run`, `shell_run` and `provision_run`. They handle
+    // `dry_run` themselves, so they come before the generic dry-run
+    // line below.
     if matches!(action, Action::Up) {
         return up_run(&cfg, tty, &staged, cli.dry_run);
     }
     if matches!(action, Action::Shell) {
         return shell_run(&cfg, tty, &staged, cli.dry_run);
+    }
+    if matches!(action, Action::Provision) {
+        return provision_run(&cfg, tty, &staged, cli.dry_run);
     }
 
     // Every other action renders its dry run the same way, through
@@ -687,9 +700,7 @@ fn ran_ok(cmd: &RemoteCommand) -> Result<bool> {
 /// every other program does -- see that module; the working
 /// directory is never searched.
 fn capture(cmd: &RemoteCommand) -> Result<String> {
-    let resolver = bombyx::run::Resolver::for_command(cmd)
-        .map_err(|e| anyhow!("{}", doctor::not_on_path(e.program())))?;
-    let out = resolver.output(cmd)?;
+    let out = capture_output(cmd)?;
     if !out.status.success() {
         // The program's own stderr is the useful part -- for
         // `git ls-remote` it distinguishes "no network" from
@@ -699,6 +710,17 @@ fn capture(cmd: &RemoteCommand) -> Result<String> {
     }
     String::from_utf8(out.stdout)
         .with_context(|| format!("{} printed invalid UTF-8", cmd.program))
+}
+
+/// Runs a command and returns everything it printed, and its exit
+/// status, whatever that status is.
+///
+/// [`capture`] for a caller that reads a failure itself rather
+/// than turning it into an error.
+fn capture_output(cmd: &RemoteCommand) -> Result<std::process::Output> {
+    let resolver = bombyx::run::Resolver::for_command(cmd)
+        .map_err(|e| anyhow!("{}", doctor::not_on_path(e.program())))?;
+    Ok(resolver.output(cmd)?)
 }
 
 /// Returns a string distinguishing this run from any other on
@@ -892,10 +914,11 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 ///
 /// A dry run contacts nothing, so it cannot know the state. It
 /// prints the probe `up` would run first, then the boot, then the
-/// snapshot -- the shape of a first `up`, which is the honest
-/// description when the state is unknown ahead of time. A first
-/// `up` provisions, so that shape has no refresh in it; `bombyx
-/// shell --dry-run` prints the refresh commands.
+/// refresh that follows provisioning -- empty unless a
+/// `secrets_refreshed` hook is configured -- then the snapshot:
+/// the shape of a first `up`, which is the honest description when
+/// the state is unknown ahead of time. `bombyx shell --dry-run`
+/// prints the refresh an existing guest gets.
 fn up_run(
     cfg: &Config,
     tty: Tty,
@@ -911,6 +934,7 @@ fn up_run(
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(boot);
+        cmds.extend(plan::refresh_after_provisioning(cfg, staged));
         cmds.push(snapshot);
         return execute(&cmds, true);
     }
@@ -952,18 +976,59 @@ fn up_run(
     // state; the `_if_absent` inside the command is a different test
     // -- it skips the save when the `fresh-install` name already
     // exists -- so the two do not overlap.
-    let mut cmds = boot;
-    if listing::takes_fresh_snapshot(state.as_ref()) {
-        cmds.push(snapshot);
-    }
-    let booted = execute(&cmds, false)?;
-    // After the boot, because the guest must be up to take the
-    // files, and after the snapshot, which then holds only what
-    // provisioning wrote. A boot that failed keeps its own status.
-    if !booted.ok() || !listing::refreshes_secrets_after_up(state.as_ref()) {
+    let booted = execute(&boot, false)?;
+    if !booted.ok() {
         return Ok(booted);
     }
-    Ok(refreshed(run_refresh(&refresh)))
+    // After the boot, because the guest must be up to take the
+    // files. A boot that provisioned is followed by the hook alone
+    // when one is configured; one that did not gets the whole
+    // refresh.
+    let after = if listing::refreshes_secrets_after_up(state.as_ref()) {
+        refresh
+    } else {
+        plan::refresh_after_provisioning(cfg, staged)
+    };
+    let refresh_ok = run_refresh(&after);
+    // Before the snapshot, so a `reset` returns to a guest holding
+    // the copy the hook made. Taken even when the refresh failed:
+    // a later `up` finds the machine present and takes no
+    // `fresh-install` snapshot, so skipping it here would leave
+    // `reset` with nothing to return to.
+    if listing::takes_fresh_snapshot(state.as_ref()) {
+        let saved = execute(std::slice::from_ref(&snapshot), false)?;
+        if !saved.ok() {
+            return Ok(saved);
+        }
+    }
+    Ok(refreshed(refresh_ok))
+}
+
+/// Runs `provision`, then the project's `secrets_refreshed` hook
+/// when one is configured.
+///
+/// [`plan::refresh_after_provisioning`] holds why the hook follows
+/// a provisioning run. A provisioning run that failed keeps its own
+/// status and runs no hook, and a hook that failed after a
+/// successful run makes `provision` exit non-zero, as it makes `up`
+/// do.
+fn provision_run(
+    cfg: &Config,
+    tty: Tty,
+    staged: &Staged,
+    dry_run: bool,
+) -> Result<Ran> {
+    let mut cmds = plan(&Action::Provision, cfg, tty, staged);
+    let after = plan::refresh_after_provisioning(cfg, staged);
+    if dry_run {
+        cmds.extend(after);
+        return execute(&cmds, true);
+    }
+    let provisioned = execute(&cmds, false)?;
+    if !provisioned.ok() {
+        return Ok(provisioned);
+    }
+    Ok(refreshed(run_refresh(&after)))
 }
 
 /// The outcome of an `up` whose last step was [`run_refresh`].
@@ -1042,27 +1107,41 @@ fn shell_run(
 /// a pipe that broke -- is reported the same way as a failed exit
 /// status rather than returned, so `shell` can still open after
 /// either. The caller decides what a failure costs.
+///
+/// **The output is captured and relayed, never streamed.** The
+/// secrets command can carry the project's `secrets_refreshed`
+/// hook, which is code from the branch checked out in the guest,
+/// and it runs on every `shell`. [`term::relay`] keeps that code
+/// from repainting the operator's terminal, the rule `doctor`
+/// follows for the same reason. Nothing here is interactive, so
+/// capturing costs only the order between the two streams:
+/// standard output is printed first, then standard error.
+///
+/// **The exit status names the part that failed**, which
+/// [`remote::RefreshOutcome`] reads. A failed write makes no claim
+/// about what the guest now holds: a failure in the guest leaves
+/// its copy alone, because the new file is renamed into place only
+/// once whole, but a pipe broken on this side can end the guest's
+/// `cat` as if the input were complete, and then a short file is
+/// the one kept. A failed hook says the secrets are current, which
+/// the guest guarantees by running the hook only after the rename.
 fn run_refresh(commands: &[RemoteCommand]) -> bool {
     let mut all_ok = true;
     for cmd in commands {
-        let ok = match execute(std::slice::from_ref(cmd), false) {
-            Ok(ran) => ran.ok(),
+        let outcome = match capture_output(cmd) {
+            Ok(out) => {
+                print_lines(&term::relay(&out.stdout));
+                eprint_lines(&term::relay(&out.stderr));
+                remote::RefreshOutcome::from_code(out.status.code())
+            }
             Err(e) => {
                 eprint_lines(&format!("bombyx: {e:#}\n"));
-                false
+                remote::RefreshOutcome::WriteFailed
             }
         };
-        if !ok {
+        if let Some(message) = outcome.message() {
             all_ok = false;
-            // No claim about what the guest now holds. A failure in
-            // the guest leaves its copy alone, because the new file
-            // is renamed into place only once whole; a pipe broken
-            // on this side can end the guest's `cat` as if the input
-            // were complete, and then a short file is the one kept.
-            eprint_lines(
-                "bombyx: could not refresh a secrets file in the guest; \
-                 run the command again\n",
-            );
+            eprint_lines(&format!("{message}\n"));
         }
     }
     all_ok

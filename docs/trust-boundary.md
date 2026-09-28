@@ -199,6 +199,32 @@ running; the Vagrantfile does not.
   `vagrant`, does not change this either, because that account has
   passwordless `sudo`.
 
+### The secrets hook runs branch code on every refresh
+
+A project's `secrets_refreshed` hook is a script from the clone,
+so the branch checked out in the guest decides what it does, and
+bombyx runs it every time it writes the secrets: after
+provisioning, and on every `up` and `shell` that rewrites them.
+That is the trust provisioning already gives the project's
+`script`, and the hook gains nothing by it: it runs as the agent's
+account, which can already read `~/.bombyx-env`.
+
+- **The empty environment guards against accidents, not against
+  the agent.** `/usr/bin/env -i` keeps what the calling shells
+  carried -- a `BASH_ENV` the project's own tooling sets, exported
+  functions -- out of the refresh. It cannot stop an agent that
+  wants in, because the agent has passwordless `sudo` and can
+  change the login account's profile, which `vagrant ssh` reads, or
+  `/usr/bin/env` itself.
+- **The operator's terminal is protected.** The hook's output is
+  captured and printed with every control character shown as `?`,
+  so the branch cannot repaint lines the operator already read.
+- **A zero exit is not proof.** A hostile hook can print success
+  and exit 0 while leaving `.env` stale, as any script in the guest
+  can.
+- **Time is bounded.** The guest stops a hook after 60 seconds and
+  gives it no input, so a hook cannot hold `shell` open.
+
 ### Host-key verification
 
 The guest verifies the git host when bombyx knows where it

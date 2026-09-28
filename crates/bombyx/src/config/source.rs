@@ -588,21 +588,7 @@ fn check_repo(value: &str) -> Result<(), FieldError> {
 fn check_script(value: &str) -> Result<(), FieldError> {
     guards::check_renderable("script", value)?;
     guards::check_not_an_option("script", value, "git")?;
-
-    let bad = if value.starts_with('/') {
-        Some("must be relative to the clone root")
-    } else if value.split('/').any(|s| s == "..") {
-        Some("must not contain a `..` segment")
-    } else {
-        None
-    };
-    match bad {
-        Some(reason) => Err(FieldError::Invalid {
-            field: "script",
-            reason: reason.to_owned(),
-        }),
-        None => Ok(()),
-    }
+    guards::check_inside_clone("script", value)
 }
 
 #[cfg(test)]

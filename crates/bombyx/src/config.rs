@@ -24,7 +24,7 @@
 //! wrong at all.** Each field named below is a newtype of
 //! bombyx's own -- `remote_root`, `host`, `repo`, `script`,
 //! `box`, `ref`, `deploy_key`, `env_file`, `repo_token`,
-//! `repo_user` and `project` -- and
+//! `repo_user`, `secrets_refreshed` and `project` -- and
 //! an `[env]` entry is two more, an [`EnvName`] keying an
 //! [`EnvValue`]. No count here: the list grows, and a figure in
 //! prose costs the next reader a recount. See [`RepoUrl`] for
@@ -77,6 +77,9 @@
 //!   variable the first one names.
 //! - `error` -- the two error types, and why there are two.
 //! - `guards` -- the rules more than one field shares.
+//! - `hooks` -- the `[hooks]` table: scripts from the clone the
+//!   guest runs at a named moment, and the type holding a path to
+//!   one.
 //! - `host` -- where the VM host name comes from, and its shape.
 //! - `root` -- every rule `remote_root` must pass.
 //! - `source` -- the `[source]` table and the checked types
@@ -101,6 +104,7 @@ mod env_file;
 mod error;
 mod guards;
 mod guest_user;
+mod hooks;
 mod host;
 mod read;
 mod registry;
@@ -246,6 +250,7 @@ pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
 pub use guest_user::GuestUser;
+pub use hooks::{HookPath, Hooks};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
 };
@@ -341,6 +346,11 @@ pub struct Config {
     /// Rendered into the Vagrantfile beside bombyx's own
     /// variables. Empty when the project's table names none.
     pub env: BTreeMap<EnvName, EnvValue>,
+
+    /// Scripts from the clone that bombyx runs in the guest at a
+    /// named moment. Runs nothing when the project's table names
+    /// none; `config::hooks` holds the one moment there is.
+    pub hooks: Hooks,
 
     /// Whether bombyx reaches `host` over `ssh` or runs the
     /// script here.
@@ -1605,6 +1615,56 @@ mod load_project_tests {
         .expect_err("a relative env_file must be refused");
         let text = err.to_string();
         assert!(text.contains("env_file"), "{text}");
+    }
+
+    /// A registry whose project has a `[hooks]` table naming the
+    /// `secrets_refreshed` hook, with `source_key` added to its
+    /// `[source]` table first.
+    fn registry_with_hook(source_key: &str) -> String {
+        format!(
+            "{}\n[projects.myproject.hooks]\n\
+             secrets_refreshed = \".bombyx/refresh-env.sh\"\n",
+            registry_with_source_key(source_key)
+        )
+    }
+
+    #[test]
+    fn a_hook_reaches_the_loaded_config() {
+        let (cfg, _) = load(
+            &registry_with_hook("env_file = \"~/.secrets/x.env\""),
+            "myproject",
+        )
+        .expect("a hook beside an env_file must load");
+        assert_eq!(
+            cfg.hooks.secrets_refreshed.as_ref().map(HookPath::as_str),
+            Some(".bombyx/refresh-env.sh")
+        );
+    }
+
+    #[test]
+    fn a_project_with_no_hooks_table_runs_none() {
+        let (cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("a registry with no hooks must load");
+        assert_eq!(cfg.hooks, Hooks::default());
+    }
+
+    #[test]
+    fn a_hook_without_an_env_file_is_refused_while_the_file_is_read() {
+        // The hook follows the secrets refresh and nothing else, so
+        // with no `env_file` it could never run. The refusal names
+        // the project and both tables, which is what the operator
+        // edits.
+        let err = load(&registry_with_hook(""), "myproject")
+            .expect_err("a hook with no env_file must be refused");
+        assert!(
+            matches!(err, ConfigError::HookWithoutEnvFile { .. }),
+            "{err:?}"
+        );
+        let text = err.to_string();
+        for part in ["myproject", "secrets_refreshed", "env_file"] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
     }
 
     #[test]

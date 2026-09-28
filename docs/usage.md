@@ -117,13 +117,13 @@ routes.
 
 Only those two copies change:
 
-- **A copy your provisioning script made keeps the old values.**
-  Put the copy in a step you can run again, and run it after `up`
-  or `shell` has rewritten the file. The step reads
-  `~/.bombyx-env`, because `BOMBYX_ENV_FILE` is set only while
-  provisioning runs, and writes `.env` with
-  `install -m 600 ~/.bombyx-env .env`. Your provisioning script
-  calls the same step, so the two cannot drift apart. A link
+- **A copy your provisioning script made keeps the old values**,
+  until the step that made it runs again. Put the copy in a script
+  of its own, which writes `.env` with
+  `install -m 600 "$BOMBYX_ENV_FILE" .env`, and name it as the
+  project's `secrets_refreshed` hook (below). bombyx then runs it
+  after every rewrite. Your provisioning script calls the same
+  script, so the two cannot drift apart. A link
   (`ln -sf ~/.bombyx-env .env`) needs no step, but it suits only a
   project that never writes to `.env` itself: a line appended
   through the link lands in `~/.bombyx-env`, and the next rewrite
@@ -139,6 +139,68 @@ Only those two copies change:
   leaves the guest's copy in place, and `git` keeps sending a
   token you meant to withdraw. `provision` deletes the copies the
   config no longer names.
+
+### The `secrets_refreshed` hook
+
+A project names the hook in its own table, as a path inside the
+clone:
+
+```toml
+[projects.myproject.hooks]
+secrets_refreshed = ".bombyx/refresh-env.sh"
+```
+
+It needs `env_file` in the project's `[source]` table, because the
+rewrite of that file is what it follows; bombyx refuses a hook
+without one. The path follows the rules for `script`, holds only
+letters, digits, `.`, `_`, `-` and `/`, and in the guest must not
+lead out of the clone through a symlink.
+
+When it runs: whenever bombyx has written `~/.bombyx-env`. That is
+after the provisioning run of the `up` that creates the VM (before
+the `fresh-install` snapshot, so `reset` returns to a guest with
+the copy), after the provisioning run of `provision`, and after
+`up` or `shell` has rewritten the file in a running guest. On the
+last path it runs in the same command as the rewrite, and only once
+the rewrite succeeded. The credential is rewritten before it, so a
+hook that runs `git` sees a rotated token. It runs every time,
+whether the secrets changed or not, so it must be safe to run
+twice.
+
+So the hook is your project's one copy step, and your provisioning
+script needs none. The hook runs *after* that script, though, so a
+provisioning script that needs a secret during its own run reads
+`$BOMBYX_ENV_FILE` rather than `.env`. `scratch` VMs do not run the
+hook.
+
+How it runs: as the agent's account, with the clone as its working
+directory, through `/bin/bash`, so it needs no execute bit. Its
+environment is empty apart from four variables:
+
+| Variable | Value |
+|----------|-------|
+| `HOME` | the agent's home, from its passwd entry |
+| `PATH` | `/usr/local/bin:/usr/bin:/bin` |
+| `BOMBYX_PROJECT` | the project's name, which is also the clone's directory |
+| `BOMBYX_ENV_FILE` | `$HOME/.bombyx-env`, the same name provisioning exports |
+
+The project's `[env]` table does not reach it. Its standard input
+is empty, and the guest stops it after 60 seconds.
+
+What it prints reaches your terminal once the command ends, with
+any control character shown as `?`. When the hook is missing,
+leads out of the clone, fails or runs too long, bombyx says so and
+says the secrets themselves are current: `up` and `provision` exit
+non-zero, and `shell` warns and opens the shell anyway. After a
+first `up` the snapshot is taken all the same, because no later
+`up` would take it. A hook that itself exits with status 124 is
+reported as having run too long, because that is the status
+`timeout` uses. `--dry-run` prints the hook's command for `shell`,
+`provision` and `up`; for `up` it shows the shape of a first `up`,
+where the hook follows provisioning.
+
+[trust-boundary.md](trust-boundary.md) says what the empty
+environment protects and what it does not.
 
 ## reset and snapshot
 

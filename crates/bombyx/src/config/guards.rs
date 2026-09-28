@@ -2,11 +2,12 @@
 //! came from.
 //!
 //! A rule that several fields share lives here once, so widening
-//! it reaches all of them at the same time. Five fields use the
-//! leading-dash rule. Six fields carry the Ruby-literal rule,
-//! and `[env]` is one of them -- every entry's value goes
-//! through it, so one field there is many values. Both the
-//! blank check and the character check have several callers.
+//! it reaches all of them at the same time. Every field reaching a
+//! command line uses the leading-dash rule. Six fields carry the
+//! Ruby-literal rule, and `[env]` is one of them -- every entry's
+//! value goes through it, so one field there is many values. The
+//! blank check, the character check and the inside-the-clone
+//! check have several callers each.
 //!
 //! Everything here returns [`FieldError`], not `ConfigError`.
 //! These functions check a value and nothing else. The caller
@@ -57,8 +58,9 @@ pub(super) fn check_not_empty(
 /// run on the other end, rather than as a branch name.
 ///
 /// **Add a field whose value reaches a command line, and it
-/// requires this check too.** Five use it today: `host`,
-/// `remote_root`, `ref`, `repo` and `script`. `project` needs
+/// requires this check too.** It has one caller per such field:
+/// `host`, `remote_root`, `ref`, `repo`, `script` and the
+/// `secrets_refreshed` hook. `project` needs
 /// no separate call: it is a `crate::name::ProjectName`, whose
 /// rule refuses any first character that is not a letter or a
 /// digit, and that covers a leading dash.
@@ -77,6 +79,33 @@ pub(super) fn check_not_an_option(
         ));
     }
     Ok(())
+}
+
+/// Refuses a path that leaves the clone before the guest has
+/// resolved it: an absolute one, or one holding a `..` segment.
+///
+/// Two fields name a file inside the clone -- `script` and the
+/// `secrets_refreshed` hook -- and both reach a command on the
+/// guest that runs whatever the path names. This is the half of
+/// the containment rule the config can check. The other half runs
+/// on the guest, which resolves the path with `readlink -f` and
+/// refuses one that a symlink in the repository leads out of,
+/// because only the guest can see what the repository put there.
+pub(super) fn check_inside_clone(
+    field: &'static str,
+    value: &str,
+) -> Result<(), FieldError> {
+    let bad = if value.starts_with('/') {
+        Some("must be relative to the clone root")
+    } else if value.split('/').any(|s| s == "..") {
+        Some("must not contain a `..` segment")
+    } else {
+        None
+    };
+    match bad {
+        Some(reason) => Err(FieldError::invalid(field, reason)),
+        None => Ok(()),
+    }
 }
 
 /// Requires every character of `value` to be one `allowed`

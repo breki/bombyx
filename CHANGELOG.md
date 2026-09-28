@@ -12,6 +12,19 @@ and this project adheres to
 
 ### Added
 
+- A `[projects.<name>.hooks]` table with one key, `secrets_refreshed`: a script
+  in the clone that bombyx runs in the guest whenever it has written the
+  project's secrets -- after the provisioning run of the first `up` and of
+  `provision`, and after `up` or `shell` rewrites `~/.bombyx-env` in a running
+  guest. It is meant to be the project's one step for copying the secrets into
+  place, such as `.env`. It runs as the agent from the clone, through
+  `/bin/bash`, from an empty environment holding only `HOME`, `PATH`,
+  `BOMBYX_PROJECT` and `BOMBYX_ENV_FILE`, with no input and a 60-second limit.
+  It runs every time, so it must be safe to repeat. Its output is shown with
+  control characters replaced by `?`. A missing, escaping, failing or slow hook
+  makes `up` and `provision` exit non-zero, and `shell` warns and opens anyway.
+  The config refuses a hook without an `env_file`.
+
 ### Changed
 
 ### Fixed
