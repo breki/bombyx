@@ -463,6 +463,20 @@ checked_str_try_from!(
     check_script
 );
 
+impl ScriptPath {
+    /// Whether the path names a `.ps1` file, the only kind a
+    /// Windows guest runs.
+    ///
+    /// Windows matches an extension without regard to case, so
+    /// `Setup.PS1` counts. A file named `.ps1` alone does not: it
+    /// has no name in front of the extension.
+    #[must_use]
+    pub(crate) fn is_powershell(&self) -> bool {
+        let file = self.0.rsplit(['/', '\\']).next().unwrap_or_default();
+        file.len() > ".ps1".len() && file.to_ascii_lowercase().ends_with(".ps1")
+    }
+}
+
 /// A branch or tag name that `git` will fetch, and not read as
 /// an option.
 ///

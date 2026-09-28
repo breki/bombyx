@@ -444,7 +444,7 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
                 path,
             )?;
         }
-        // A Windows guest is booted but not provisioned, so a
+        // A Windows guest's scripts place no secret yet, so a
         // secret for it would be read and copied to the VM host
         // with nothing on the guest to receive it. Checked before
         // the hook rule, whose advice -- add an `env_file` -- this
@@ -454,6 +454,23 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
         // `[source]` parse to add `repo_user`, then told here to
         // remove both.
         if project.vm.guest == super::Guest::Windows {
+            let user = &project.vm.guest_user;
+            if let Some(reason) = user.windows_refusal() {
+                return Err(ConfigError::WindowsGuestUser {
+                    path: path.to_path_buf(),
+                    project: key.as_str().to_owned(),
+                    user: user.as_str().to_owned(),
+                    reason,
+                });
+            }
+            let script = &project.source.script;
+            if !script.is_powershell() {
+                return Err(ConfigError::WindowsGuestScript {
+                    path: path.to_path_buf(),
+                    project: key.as_str().to_owned(),
+                    script: script.as_str().to_owned(),
+                });
+            }
             let source = &project.source;
             let token = source.repo_token.is_some();
             let named: Vec<String> = [

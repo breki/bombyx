@@ -212,17 +212,19 @@ memory = "8GB"
 # Optional. The operating system the guest runs: "linux" or
 # "windows". Left out, it is "linux". A Windows guest boots over
 # vagrant's SSH communicator for Windows, with a box's remote
-# desktop forward switched off if it has one, but bombyx cannot
-# provision one yet: `up` and `scratch` boot the VM, and they and
-# `provision` then fail with a message naming GitHub issue #141. A
-# Windows project may not name a `deploy_key`, an `env_file` or a
-# `repo_token` yet, or a key that only works beside one
-# (`repo_user`, the `secrets_refreshed` hook), because nothing on
-# the guest would receive them. Use the box built from Microsoft's
-# ISO by the recipe in boxes/windows-server-2025/, added as
-# `bombyx/windows-server-2025`; docs/windows-guest-box.md says how.
-# That box has no git: the `box` rule above that a box has git is
-# for a Linux guest, and #141's Windows provisioning installs git.
+# desktop forward switched off if it has one. bombyx creates the
+# agent's account as an administrator, installs git, clones the
+# project and runs `script`, which must be a `.ps1` file. On
+# Windows, `guest_user` is at most 20 characters and names none of
+# the box's built-in accounts. A Windows project may not name a
+# `deploy_key`, an `env_file` or a `repo_token` yet, or a key that
+# only works beside one (`repo_user`, the `secrets_refreshed` hook),
+# because the Windows scripts place no secret yet (GitHub issue
+# #141). Use the box built from Microsoft's ISO by the recipe in
+# boxes/windows-server-2025/, added as `bombyx/windows-server-2025`;
+# docs/windows-guest-box.md says how. That box has no git: the `box`
+# rule above that a box has git is for a Linux guest, and a Windows
+# guest's provisioning installs git.
 #
 # guest = "linux"
 

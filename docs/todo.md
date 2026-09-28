@@ -467,3 +467,24 @@ bombyx panics on a closed stdout: `bombyx list --dry-run | head -1` prints
 println! panics on EPIPE; a CLI piped into head should exit quietly. Likely
 affects every command that prints with println!.
 
+### windows-guest-official-box
+
+**Summary:** build the Windows guest box from Microsoft's own ISO
+
+The operator uses no Windows box from an unofficial source. Microsoft publishes
+no Vagrant box or libvirt image for Windows Server, so bombyx needs a box built
+from Microsoft's evaluation ISO, with an unattended install that enables OpenSSH
+and a vagrant account. The ISO is verified against a hash Microsoft publishes,
+if it publishes one. GitHub issue #141 is blocked on it: its scripts must be
+re-verified on that box, and a stock OpenSSH install reads
+administrators_authorized_keys for an administrator, which changes where
+account.ps1 authorizes the hand-over key.
+
+### test-runner-counts
+
+**Summary:** print the pass count when cargo xtask test succeeds
+
+On success the runner prints only Test OK, so a filter that matches no test
+reads the same as one that ran thirty. A failing run already prints libtest's
+count line; printing that same line on success would show what ran.
+

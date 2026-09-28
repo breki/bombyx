@@ -1660,13 +1660,16 @@ mod load_project_tests {
         assert_eq!(cfg.hooks, Hooks::default());
     }
 
-    /// [`registry_with_source_key`] for a Windows guest.
+    /// [`registry_with_source_key`] for a Windows guest, whose
+    /// script is PowerShell.
     fn windows_registry_with_source_key(extra: &str) -> String {
-        registry_with_source_key(extra).replacen(
-            "[projects.myproject.vm]\n",
-            "[projects.myproject.vm]\nguest = \"windows\"\n",
-            1,
-        )
+        registry_with_source_key(extra)
+            .replacen(
+                "[projects.myproject.vm]\n",
+                "[projects.myproject.vm]\nguest = \"windows\"\n",
+                1,
+            )
+            .replacen("vagrant/provision.sh", "vagrant/provision.ps1", 1)
     }
 
     #[test]
@@ -1674,6 +1677,82 @@ mod load_project_tests {
         let (cfg, _) = load(&windows_registry_with_source_key(""), "myproject")
             .expect("a Windows project naming no secret must load");
         assert_eq!(cfg.vm.guest, crate::config::Guest::Windows);
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_a_script_powershell_cannot_run() {
+        // bootstrap.ps1 runs the script with `powershell -File`,
+        // which runs a `.ps1` file and nothing else. Accepting
+        // another would boot a VM whose provisioning then fails.
+        for script in ["setup.sh", "setup.cmd", "setup", "setup.ps1.txt"] {
+            let src = windows_registry_with_source_key("").replacen(
+                "vagrant/provision.ps1",
+                script,
+                1,
+            );
+            let err = load(&src, "myproject").expect_err(script);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestScript { .. }),
+                "{script}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", script, ".ps1"] {
+                assert!(text.contains(part), "{script}: {part}: {text}");
+            }
+        }
+        // Windows matches an extension without regard to case.
+        let src = windows_registry_with_source_key("").replacen(
+            "vagrant/provision.ps1",
+            "vagrant/Setup.PS1",
+            1,
+        );
+        load(&src, "myproject").expect("an upper-case .PS1 must load");
+    }
+
+    #[test]
+    fn a_linux_guest_runs_a_script_of_any_name() {
+        let src = registry_with_source_key("").replacen(
+            "vagrant/provision.sh",
+            "setup",
+            1,
+        );
+        load(&src, "myproject").expect("a Linux script needs no extension");
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_a_guest_user_windows_cannot_hold() {
+        // Windows caps a local account name at 20 characters, and
+        // these names are the box's own built-in accounts. The
+        // rules `GuestUser` applies to every guest still run first.
+        for user in [
+            "a23456789012345678901",
+            "administrator",
+            "guest",
+            "defaultaccount",
+            "wdagutilityaccount",
+        ] {
+            let src = windows_registry_with_source_key("").replacen(
+                "guest = \"windows\"\n",
+                &format!("guest = \"windows\"\nguest_user = \"{user}\"\n"),
+                1,
+            );
+            let err = load(&src, "myproject").expect_err(user);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestUser { .. }),
+                "{user}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", user] {
+                assert!(text.contains(part), "{user}: {part}: {text}");
+            }
+        }
+        // Twenty characters is the longest name Windows accepts.
+        let src = windows_registry_with_source_key("").replacen(
+            "guest = \"windows\"\n",
+            "guest = \"windows\"\nguest_user = \"a2345678901234567890\"\n",
+            1,
+        );
+        load(&src, "myproject").expect("a 20-character name must load");
     }
 
     #[test]

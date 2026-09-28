@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::{Config, DeployKeyPath, Guest, Staged};
+use crate::config::{Config, DeployKeyPath, Staged};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -244,47 +244,6 @@ pub fn plan(
         }
     }
 }
-
-/// Why `action` must not report success for this project's guest,
-/// or `None` when it may.
-///
-/// bombyx boots a Windows guest but cannot provision one yet
-/// (GitHub issue #141), so an action that would end with a
-/// provisioned guest -- `up`, `provision` and `scratch` -- prints
-/// this and fails after doing its work. The rule lives here, where a
-/// test can read it, and the binary prints what it returns.
-///
-/// bombyx alone decides the exit status, which is why the Windows
-/// Vagrantfile carries no provisioner. vagrant runs a provisioner on
-/// a machine's first `up` and on `provision`, not on a later `up`,
-/// so a failing provisioner would fail the first `up` and let every
-/// later one succeed.
-#[must_use]
-pub fn unprovisioned_guest(
-    cfg: &Config,
-    action: &Action,
-) -> Option<&'static str> {
-    // Exhaustive, so a new action has to take a side here.
-    let provisions = match action {
-        Action::Up | Action::Provision | Action::Scratch(_) => true,
-        Action::Down
-        | Action::Shell
-        | Action::Status
-        | Action::Reset
-        | Action::Snapshot
-        | Action::Doctor
-        | Action::Destroy
-        | Action::Discard(_) => false,
-    };
-    (provisions && cfg.vm.guest == Guest::Windows)
-        .then_some(WINDOWS_UNPROVISIONED)
-}
-
-/// What [`unprovisioned_guest`] says about a Windows guest.
-const WINDOWS_UNPROVISIONED: &str = "bombyx cannot provision a \
-     Windows guest yet: the VM boots but has no agent account and no \
-     clone. Once bombyx issue #141 is released, destroy it and run \
-     `up` again (https://github.com/breki/bombyx/issues/141)";
 
 /// Returns the commands that write the staged files over their
 /// copies inside the running project VM.
@@ -744,42 +703,6 @@ mod tests {
 
     fn scratch(name: &str) -> ScratchName {
         ScratchName::parse(name).unwrap()
-    }
-
-    #[test]
-    fn only_the_provisioning_actions_refuse_a_windows_guest() {
-        // bombyx cannot provision a Windows guest, so every action
-        // that would end with a provisioned guest -- `up`,
-        // `provision` and `scratch` -- says so and fails, whether or
-        // not the VM was already running. The others are not refused
-        // here; `shell` and the secrets refresh are not expected to
-        // work on Windows until GitHub issue #137.
-        let mut win = Config::for_tests();
-        win.vm.guest = crate::config::Guest::Windows;
-        let linux = Config::for_tests();
-        let refusing = [
-            Action::Up,
-            Action::Provision,
-            Action::Scratch(scratch("pr-1")),
-        ];
-        for action in &refusing {
-            let why = unprovisioned_guest(&win, action)
-                .unwrap_or_else(|| panic!("{action:?} must refuse"));
-            assert!(why.contains("#141"), "{why}");
-            assert_eq!(unprovisioned_guest(&linux, action), None, "{action:?}");
-        }
-        for action in [
-            Action::Down,
-            Action::Shell,
-            Action::Status,
-            Action::Reset,
-            Action::Snapshot,
-            Action::Doctor,
-            Action::Destroy,
-            Action::Discard(scratch("pr-1")),
-        ] {
-            assert_eq!(unprovisioned_guest(&win, &action), None, "{action:?}");
-        }
     }
 
     // A dumb pin, on purpose: it reads as the exact shell

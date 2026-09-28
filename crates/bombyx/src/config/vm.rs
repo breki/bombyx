@@ -109,14 +109,13 @@ impl fmt::Display for Provider {
 /// `Linux` is the default, so a config with no `guest` key builds a
 /// Linux guest.
 ///
-/// `Windows` boots over vagrant's `winssh` communicator but is not
-/// provisioned yet: `up` and `scratch` boot the VM, and they and
-/// `provision` then fail with a message naming GitHub issue #141,
-/// which ports the guest scripts (`plan::unprovisioned_guest`). The
-/// registry's `parse` refuses a Windows project that names a
-/// `deploy_key`, an `env_file` or a `repo_token`, or a key that only
-/// works beside one (`repo_user`, the `secrets_refreshed` hook),
-/// because nothing on the guest would receive them.
+/// `Windows` boots over vagrant's `winssh` communicator and is
+/// provisioned by `account.ps1` and `bootstrap.ps1`. Those place no
+/// secret yet (GitHub issue #141), so the registry's `parse` refuses
+/// a Windows project that names a `deploy_key`, an `env_file` or a
+/// `repo_token`, or a key that only works beside one (`repo_user`,
+/// the `secrets_refreshed` hook). It also refuses a `script` that is
+/// not a `.ps1` file and a `guest_user` Windows cannot hold.
 /// `docs/windows-guest-box.md` records the box the recipe in
 /// `boxes/windows-server-2025/` builds for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -126,7 +125,8 @@ pub enum Guest {
     /// `bootstrap.sh`.
     #[default]
     Linux,
-    /// A Windows guest. Boots, but is not provisioned.
+    /// A Windows guest, provisioned by `account.ps1` and
+    /// `bootstrap.ps1`.
     Windows,
 }
 

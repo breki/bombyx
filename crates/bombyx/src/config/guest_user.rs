@@ -29,6 +29,22 @@ const MAX_GUEST_USER_LEN: usize = 32;
 /// that account is what this setting is for.
 const REFUSED_GUEST_USERS: [&str; 2] = ["root", "vagrant"];
 
+/// The longest local account name Windows accepts.
+const MAX_WINDOWS_GUEST_USER_LEN: usize = 20;
+
+/// The accounts a Windows guest is born with, lower-cased as a
+/// [`GuestUser`] must be.
+///
+/// Taking one would hand the agent an account the box already
+/// uses, which is what `REFUSED_GUEST_USERS` keeps it from on
+/// every guest.
+const WINDOWS_BUILT_IN_USERS: [&str; 4] = [
+    "administrator",
+    "guest",
+    "defaultaccount",
+    "wdagutilityaccount",
+];
+
 /// A validated guest account name.
 ///
 /// A *newtype* in the shape `super::source::RepoUrl` describes:
@@ -75,6 +91,27 @@ checked_str_try_from!(
     FieldError,
     check_guest_user
 );
+
+impl GuestUser {
+    /// Why a Windows guest cannot hold this account, or `None` when
+    /// it can.
+    ///
+    /// A method rather than a rule in [`GuestUser::parse`], because
+    /// only a Windows guest has it and the name is read before the
+    /// config says which guest it is for. The registry's `parse`
+    /// asks it once `[vm]`'s `guest` is known, and the Windows
+    /// account script applies the same rules in the guest.
+    #[must_use]
+    pub(crate) fn windows_refusal(&self) -> Option<&'static str> {
+        if self.0.len() > MAX_WINDOWS_GUEST_USER_LEN {
+            Some("must be at most 20 characters")
+        } else if WINDOWS_BUILT_IN_USERS.contains(&self.0.as_str()) {
+            Some("must not name one of the box's built-in accounts")
+        } else {
+            None
+        }
+    }
+}
 
 impl Default for GuestUser {
     /// `agent`, the name bombyx uses when the config sets none.
