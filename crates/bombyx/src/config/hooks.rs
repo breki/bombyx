@@ -84,7 +84,7 @@ checked_str_parse!(
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
     /// [`FieldError::Invalid`] when it holds a character outside
     /// letters, digits, `.`, `_`, `-` and `/`, starts with `-`,
-    /// is absolute, or holds a `..` segment.
+    /// is absolute, holds a `..` segment, or cannot name a file.
     HookPath,
     FieldError,
     check_hook
@@ -119,8 +119,14 @@ fn check_hook(value: &str) -> Result<(), FieldError> {
         is_hook_path_char,
         "letters, digits, `.`, `_`, `-` and `/`",
     )?;
-    guards::check_not_an_option(field, value, "bash")?;
-    guards::check_inside_clone(field, value)
+    // Defence in depth rather than a live risk: the guest joins the
+    // value onto the clone's path before any command sees it, so no
+    // command receives a leading `-`. The rule stays for the day a
+    // command is handed the value as it stands, as it does for
+    // `ref`, whose `git fetch` also puts it after `--`.
+    guards::check_not_an_option(field, value, "a command given it unjoined")?;
+    guards::check_inside_clone(field, value)?;
+    guards::check_names_a_file(field, value)
 }
 
 #[cfg(test)]
@@ -162,6 +168,19 @@ mod tests {
             assert!(err.contains(reason), "{bad:?}: {err}");
             assert!(err.contains("secrets_refreshed"), "{bad:?}: {err}");
         }
+    }
+
+    #[test]
+    fn a_path_that_cannot_name_a_file_is_refused() {
+        // The rest of the family: the clone itself and a directory.
+        // The guest would refuse each on every run, and for `.` with
+        // the false reason "leads outside the clone". A doubled `/`
+        // still names a file, so it is accepted.
+        for bad in [".", "./", "a/.", "a/", "a/./"] {
+            let err = HookPath::parse(bad).expect_err(bad).to_string();
+            assert!(err.contains("must name a file"), "{bad:?}: {err}");
+        }
+        HookPath::parse("a//b.sh").expect("a doubled slash names a file");
     }
 
     #[test]

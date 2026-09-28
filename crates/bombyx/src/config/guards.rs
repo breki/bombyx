@@ -108,6 +108,32 @@ pub(super) fn check_inside_clone(
     }
 }
 
+/// Refuses a path inside the clone that cannot name a file: a
+/// final `.` segment, which is the directory holding it, and a
+/// trailing `/`.
+///
+/// The same two fields as [`check_inside_clone`] call it, and for
+/// a reason the guest cannot give. `readlink -f` resolves `.` to
+/// the clone itself, which the guest's containment check then
+/// refuses as leading outside the clone -- a false reason, repeated
+/// on every run, for a value that is simply not a file. A `.` or a
+/// doubled `/` elsewhere in the path is left alone, because
+/// `./a.sh`, `a/./b.sh` and `a//b.sh` all name a file.
+pub(super) fn check_names_a_file(
+    field: &'static str,
+    value: &str,
+) -> Result<(), FieldError> {
+    let names_a_file =
+        !value.ends_with('/') && value.rsplit('/').next() != Some(".");
+    if names_a_file {
+        return Ok(());
+    }
+    Err(FieldError::invalid(
+        field,
+        "must name a file: no final `.` and no trailing `/`",
+    ))
+}
+
 /// Requires every character of `value` to be one `allowed`
 /// accepts, naming `expected` in the message when one is not.
 pub(super) fn check_charset(

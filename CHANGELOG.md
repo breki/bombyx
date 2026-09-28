@@ -20,12 +20,23 @@ and this project adheres to
   place, such as `.env`. It runs as the agent from the clone, through
   `/bin/bash`, from an empty environment holding only `HOME`, `PATH`,
   `BOMBYX_PROJECT` and `BOMBYX_ENV_FILE`, with no input and a 60-second limit.
-  It runs every time, so it must be safe to repeat. Its output is shown with
-  control characters replaced by `?`. A missing, escaping, failing or slow hook
-  makes `up` and `provision` exit non-zero, and `shell` warns and opens anyway.
-  The config refuses a hook without an `env_file`.
+  It runs every time, so it must be safe to repeat. Its output is shown once it
+  ends, cut at 65536 bytes, with control characters replaced by `?`, and a
+  process it leaves running does not hold the command open. A missing,
+  escaping, failing or slow hook makes `up` and `provision` exit non-zero, and
+  `shell` warns and opens anyway. The config refuses a hook without an
+  `env_file`, and a path that cannot name a file.
 
 ### Changed
+
+- The output of the secrets refresh that `up` and `shell` run in an existing
+  guest is now shown when each command ends, not as it arrives: bombyx collects
+  it, prints standard output and then standard error, keeps at most 1 MiB of
+  each, and shows any control character as `?`. A failed refresh also prints the
+  command's exit status.
+- `script` now refuses a path that cannot name a file: a final `.` or a trailing
+  `/`. `bootstrap.sh` refused both in the guest already, and a final `.` with
+  the misleading reason that it points outside the clone.
 
 ### Fixed
 

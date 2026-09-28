@@ -551,27 +551,31 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # whenever it has written `~/.bombyx-env`: after the provisioning
 # run of the first `bombyx up` and of `bombyx provision`, and after
 # `bombyx up` or `bombyx shell` rewrites the file in a running
-# guest. So your provisioning script needs no copy step of its
-# own. It runs after that script, so a script that needs a secret
+# guest. So a project VM needs no copy step in your provisioning
+# script. `scratch` VMs run no hook, though, so a project that uses
+# them calls the hook script from its provisioning script too. The
+# hook runs after that script, so a script that needs a secret
 # during its run reads `$BOMBYX_ENV_FILE` instead of `.env`. The
 # hook needs `env_file` above: without one there is nothing for it
 # to copy, so bombyx refuses the pair.
 #
-# The path is relative to the clone root, like `script`. It may
-# hold letters, digits, `.`, `_`, `-` and `/`, and it must not
-# start with `/` or `-` or hold a `..` segment. In the guest,
-# bombyx also refuses a path a symlink leads out of the clone.
+# The path is relative to the clone root, like `script`, and holds
+# no `..` segment. It does not start with `-`, holds only letters,
+# digits, `.`, `_`, `-` and `/`, and names a file, so it has no
+# final `.` and no trailing `/`. In the guest, bombyx also refuses
+# a path a symlink leads out of the clone.
 #
 # The hook runs as the agent's account, from the clone, through
 # `/bin/bash`, so it needs no execute bit. It starts from an empty
 # environment holding only HOME, PATH, BOMBYX_PROJECT and
 # BOMBYX_ENV_FILE -- not the `[env]` table above -- with no input,
-# and it is stopped after 60 seconds. It runs on every `up` and
-# `shell` that rewrites the file, changed or not, so it must be
-# safe to run twice. A failure makes `up` exit non-zero, and
-# `shell` warns and opens anyway. docs/usage.md, under "Rotating a
-# secret", has the rest, and docs/trust-boundary.md says what the
-# empty environment does and does not protect.
+# and it is stopped after 60 seconds. It runs every time, whether
+# the secrets changed or not, so it must be safe to run twice. What
+# it prints is shown after it ends, cut at 65536 bytes. A failure
+# makes `up` and `provision` exit non-zero, and `shell` warns and
+# opens anyway. docs/usage.md, under "Rotating a secret", has the
+# rest, and docs/trust-boundary.md says what the empty environment
+# does and does not protect.
 #
 # [projects.myproject.hooks]
 # secrets_refreshed = ".bombyx/refresh-env.sh"

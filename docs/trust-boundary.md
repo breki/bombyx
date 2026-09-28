@@ -206,8 +206,9 @@ so the branch checked out in the guest decides what it does, and
 bombyx runs it every time it writes the secrets: after
 provisioning, and on every `up` and `shell` that rewrites them.
 That is the trust provisioning already gives the project's
-`script`, and the hook gains nothing by it: it runs as the agent's
-account, which can already read `~/.bombyx-env`.
+`script`. Running the hook gives the branch no access it lacks: the
+hook runs as the agent's account, which can already read
+`~/.bombyx-env`.
 
 - **The empty environment guards against accidents, not against
   the agent.** `/usr/bin/env -i` keeps what the calling shells
@@ -219,11 +220,18 @@ account, which can already read `~/.bombyx-env`.
 - **The operator's terminal is protected.** The hook's output is
   captured and printed with every control character shown as `?`,
   so the branch cannot repaint lines the operator already read.
+- **The workstation's memory is bounded.** The guest relays at most
+  64 KiB of the hook's output, and bombyx keeps at most 1 MiB of
+  each stream whatever the guest sends, because an agent with root
+  in the guest can change the guest's half.
 - **A zero exit is not proof.** A hostile hook can print success
   and exit 0 while leaving `.env` stale, as any script in the guest
   can.
-- **Time is bounded.** The guest stops a hook after 60 seconds and
-  gives it no input, so a hook cannot hold `shell` open.
+- **Time is bounded for a hook that behaves.** The guest stops the
+  hook after 60 seconds, gives it no input, and does not wait for a
+  process the hook leaves running. It is not bounded against the
+  agent: with root in the guest it can hold the command open by
+  other means, as it can hold any `vagrant ssh` open.
 
 ### Host-key verification
 

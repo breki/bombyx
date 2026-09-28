@@ -712,6 +712,20 @@ fn capture(cmd: &RemoteCommand) -> Result<String> {
         .with_context(|| format!("{} printed invalid UTF-8", cmd.program))
 }
 
+/// How much of each stream a refresh command may print before
+/// bombyx stops keeping it. Well above the 64 KiB the guest relays
+/// of a hook's output, so only a guest that has been changed to
+/// print more reaches it.
+const RELAY_LIMIT: usize = 1 << 20;
+
+/// [`capture_output`] with each stream kept to [`RELAY_LIMIT`]
+/// bytes, for output relayed from the guest rather than parsed.
+fn capture_capped(cmd: &RemoteCommand) -> Result<bombyx::run::Capped> {
+    let resolver = bombyx::run::Resolver::for_command(cmd)
+        .map_err(|e| anyhow!("{}", doctor::not_on_path(e.program())))?;
+    Ok(resolver.output_capped(cmd, RELAY_LIMIT)?)
+}
+
 /// Runs a command and returns everything it printed, and its exit
 /// status, whatever that status is.
 ///
@@ -967,22 +981,14 @@ fn up_run(
             cfg.project.as_str()
         ));
     }
-    // The `fresh-install` snapshot is taken only when this `up`
-    // creates the machine, or cannot tell -- never when the probe
-    // reports a present but stopped machine, whose in-use disk the
-    // name would mislabel. The policy is `listing::takes_fresh_snapshot`,
-    // in the tested library because this branch is otherwise
-    // uncovered; see its doc. This guard turns on the machine's
-    // state; the `_if_absent` inside the command is a different test
-    // -- it skips the save when the `fresh-install` name already
-    // exists -- so the two do not overlap.
     let booted = execute(&boot, false)?;
     if !booted.ok() {
         return Ok(booted);
     }
     // After the boot, because the guest must be up to take the
-    // files. A boot that provisioned is followed by the hook alone
-    // when one is configured; one that did not gets the whole
+    // files. A boot that provisioned is followed, when a hook is
+    // configured, by the secrets rewrite carrying the hook, without
+    // the credential; one that did not provision gets the whole
     // refresh.
     let after = if listing::refreshes_secrets_after_up(state.as_ref()) {
         refresh
@@ -990,11 +996,22 @@ fn up_run(
         plan::refresh_after_provisioning(cfg, staged)
     };
     let refresh_ok = run_refresh(&after);
-    // Before the snapshot, so a `reset` returns to a guest holding
-    // the copy the hook made. Taken even when the refresh failed:
-    // a later `up` finds the machine present and takes no
-    // `fresh-install` snapshot, so skipping it here would leave
-    // `reset` with nothing to return to.
+    // The refresh runs before the snapshot, so a `reset` returns to
+    // a guest holding the copy the hook made.
+    //
+    // The snapshot is taken only when this `up` creates the
+    // machine, or cannot tell -- never when the probe reports a
+    // present but stopped machine, whose in-use disk the name would
+    // mislabel. The policy is `listing::takes_fresh_snapshot`, in the
+    // tested library because this branch is otherwise uncovered; see
+    // its doc. This guard turns on the machine's state; the
+    // `_if_absent` inside the command is a different test -- it
+    // skips the save when the `fresh-install` name already exists --
+    // so the two do not overlap.
+    //
+    // It is taken even when the refresh failed: a later `up` finds
+    // the machine present and takes no `fresh-install` snapshot, so
+    // skipping it here would leave `reset` with nothing to return to.
     if listing::takes_fresh_snapshot(state.as_ref()) {
         let saved = execute(std::slice::from_ref(&snapshot), false)?;
         if !saved.ok() {
@@ -1031,9 +1048,11 @@ fn provision_run(
     Ok(refreshed(run_refresh(&after)))
 }
 
-/// The outcome of an `up` whose last step was [`run_refresh`].
+/// The outcome of an `up` or a `provision` whose refresh
+/// ([`run_refresh`]) reported `all_ok`, once every other step
+/// succeeded.
 ///
-/// `up` fails when a refresh failed: the operator ran it to get
+/// Either fails when a refresh failed: the operator ran it to get
 /// the guest current, and a zero exit would say it is. The status
 /// is 1 because each failure was already printed with its own.
 fn refreshed(all_ok: bool) -> Ran {
@@ -1097,8 +1116,9 @@ fn shell_run(
     execute(&shell, false)
 }
 
-/// Runs each command [`plan::refresh_secrets`] returned, and says
-/// whether every one succeeded.
+/// Runs each refresh command `plan` built -- from
+/// [`plan::refresh_secrets`] or [`plan::refresh_after_provisioning`]
+/// -- and says whether every one succeeded.
 ///
 /// Every command runs whatever happened to the one before, which
 /// is what `refresh_secrets` asks of a caller: a secrets file the
@@ -1125,13 +1145,27 @@ fn shell_run(
 /// `cat` as if the input were complete, and then a short file is
 /// the one kept. A failed hook says the secrets are current, which
 /// the guest guarantees by running the hook only after the rename.
+///
+/// **What is kept is bounded**, at [`RELAY_LIMIT`] bytes a stream.
+/// The guest already relays at most 64 KiB of a hook's output, but
+/// the agent has root in the guest and can change that, so the
+/// bound that protects this machine's memory is the one here.
 fn run_refresh(commands: &[RemoteCommand]) -> bool {
     let mut all_ok = true;
     for cmd in commands {
-        let outcome = match capture_output(cmd) {
-            Ok(out) => {
+        let mut status = None;
+        let outcome = match capture_capped(cmd) {
+            Ok(capped) => {
+                status = Some(capped.output.status);
+                let out = &capped.output;
                 print_lines(&term::relay(&out.stdout));
                 eprint_lines(&term::relay(&out.stderr));
+                if capped.truncated {
+                    eprint_lines(&format!(
+                        "bombyx: the guest printed more than \
+                         {RELAY_LIMIT} bytes; the rest was not shown\n"
+                    ));
+                }
                 remote::RefreshOutcome::from_code(out.status.code())
             }
             Err(e) => {
@@ -1142,6 +1176,17 @@ fn run_refresh(commands: &[RemoteCommand]) -> bool {
         if let Some(message) = outcome.message() {
             all_ok = false;
             eprint_lines(&format!("{message}\n"));
+            // The guest's own error, relayed above, names the file
+            // it could not write. A failure before the guest ran --
+            // `ssh` exits 255 when it cannot connect -- names
+            // nothing, and the status is then the only clue.
+            if let (remote::RefreshOutcome::WriteFailed, Some(status)) =
+                (outcome, status)
+            {
+                eprint_lines(&format!(
+                    "bombyx: that command ended with {status}\n"
+                ));
+            }
         }
     }
     all_ok

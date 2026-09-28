@@ -289,19 +289,26 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
             credential.as_bytes(),
         ));
     }
-    if let Some(secrets) = staged.secrets() {
-        cmds.push(match &cfg.hooks.secrets_refreshed {
-            Some(hook) => {
-                remote::refresh_secrets_then_hook(cfg, secrets.as_bytes(), hook)
-            }
-            None => remote::refresh_in_guest(
-                cfg,
-                GuestHomeFile::Secrets,
-                secrets.as_bytes(),
-            ),
-        });
-    }
+    cmds.extend(secrets_command(cfg, staged));
     cmds
+}
+
+/// The command that rewrites the secrets file, carrying the
+/// `secrets_refreshed` hook when one is configured, or `None` when
+/// nothing was staged.
+///
+/// Shared by [`refresh_secrets`] and [`refresh_after_provisioning`],
+/// which differ only in whether the credential goes too.
+fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
+    let secrets = staged.secrets()?;
+    Some(match &cfg.hooks.secrets_refreshed {
+        Some(hook) => remote::refresh_secrets_then_hook(cfg, secrets, hook),
+        None => remote::refresh_in_guest(
+            cfg,
+            GuestHomeFile::Secrets,
+            secrets.as_bytes(),
+        ),
+    })
 }
 
 /// Returns the refresh that follows a provisioning run: the `up`
@@ -310,10 +317,13 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
 /// The project's `secrets_refreshed` hook is the one place it
 /// copies its secrets, so it runs after provisioning as well as
 /// after a rewrite in an existing guest. It rides on the secrets
-/// command, so this is [`refresh_secrets`] -- when a hook is
-/// configured. Without one it is empty: provisioning has just
-/// placed both files, and rewriting them would repeat that for the
-/// price of a `vagrant ssh`.
+/// command, so this is that one command when a hook is configured,
+/// and nothing otherwise.
+///
+/// Provisioning has just written both files, so rewriting the
+/// secrets here serves only to carry the hook. The credential has
+/// no hook, so rewriting it would cost a `vagrant ssh` and change
+/// nothing; it is left out.
 ///
 /// The hook runs *after* the project's own provisioning script, so
 /// that script cannot rely on the copy the hook makes; one that
@@ -327,7 +337,7 @@ pub fn refresh_after_provisioning(
     staged: &Staged,
 ) -> Vec<RemoteCommand> {
     if cfg.hooks.secrets_refreshed.is_some() {
-        refresh_secrets(cfg, staged)
+        secrets_command(cfg, staged).into_iter().collect()
     } else {
         Vec::new()
     }
@@ -1573,12 +1583,18 @@ mod tests {
     #[test]
     fn provisioning_is_followed_by_the_hook_when_one_is_configured() {
         // The hook is the one place a project copies its secrets,
-        // so it follows a provisioning run too, through the same
-        // refresh an existing guest gets.
+        // so it follows a provisioning run too, on the secrets
+        // command. The credential is not sent again: provisioning
+        // has just written it, and a second `vagrant ssh` would buy
+        // nothing.
         let (cfg, staged) = staged_project_with_hook(true);
-        assert_eq!(
-            refresh_after_provisioning(&cfg, &staged),
-            refresh_secrets(&cfg, &staged)
+        let cmds = refresh_after_provisioning(&cfg, &staged);
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        let script = script(&cmds[0]);
+        assert!(script.contains("refresh-env.sh"), "{script}");
+        assert!(
+            !script.contains(GuestHomeFile::Credential.path()),
+            "{script}"
         );
     }
 
