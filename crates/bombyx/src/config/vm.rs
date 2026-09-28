@@ -102,6 +102,40 @@ impl fmt::Display for Provider {
     }
 }
 
+/// The operating system the guest runs.
+///
+/// An enum for the reason [`Provider`] is one: an unknown value
+/// fails while the config is read rather than on the VM host.
+/// `Linux` is the default, so a config with no `guest` key means
+/// what it meant before the key existed.
+///
+/// `Windows` boots over vagrant's `winssh` communicator but is not
+/// provisioned yet: the generated Vagrantfile stops at provisioning
+/// with a message naming GitHub issue #141, which ports the guest
+/// scripts. `docs/windows-guest-box.md` records the box it was
+/// tested with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Guest {
+    /// A Linux guest, provisioned by `account.sh` and
+    /// `bootstrap.sh`.
+    #[default]
+    Linux,
+    /// A Windows guest. Boots, and refuses provisioning.
+    Windows,
+}
+
+impl Guest {
+    /// The lowercase name serde parses from the config file.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::Windows => "windows",
+        }
+    }
+}
+
 /// The guest CPU model the generated Vagrantfile selects.
 ///
 /// A closed set rather than a free string, for the same reason
@@ -253,6 +287,10 @@ pub struct Vm {
     /// itself logs in with. A [`GuestUser`], so the name rules
     /// have run against whatever is in here.
     pub guest_user: GuestUser,
+
+    /// The operating system the guest runs. [`Guest::Linux`] when
+    /// the key is absent.
+    pub guest: Guest,
 }
 
 /// The `[vm]` table as it parses, before its one cross-field rule.
@@ -283,6 +321,8 @@ struct VmFields {
     hostname: Option<Hostname>,
     #[serde(default)]
     guest_user: GuestUser,
+    #[serde(default)]
+    guest: Guest,
 }
 
 /// Refuses a libvirt-only field set on another provider.
@@ -339,6 +379,7 @@ impl TryFrom<VmFields> for Vm {
             cpu_mode: fields.cpu_mode,
             hostname: fields.hostname,
             guest_user: fields.guest_user,
+            guest: fields.guest,
         })
     }
 }
@@ -1464,6 +1505,46 @@ mod tests {
         let msg = err.message();
         assert!(msg.contains("unknown variant `custom`"), "{msg}");
         assert!(msg.contains("host-passthrough"), "{msg}");
+    }
+
+    /// A `[vm]` table with a `guest` line, or none when `guest` is
+    /// `None`.
+    fn vm_with_guest(guest: Option<&str>) -> Result<Vm, toml::de::Error> {
+        let line =
+            guest.map_or(String::new(), |g| format!("guest = \"{g}\"\n"));
+        toml::from_str::<Vm>(&format!(
+            "box = \"b\"\ncpus = 2\nmemory = 2048\n{line}"
+        ))
+    }
+
+    #[test]
+    fn guest_parses_its_two_values_and_nothing_else() {
+        assert_eq!(vm_with_guest(Some("linux")).unwrap().guest, Guest::Linux);
+        assert_eq!(
+            vm_with_guest(Some("windows")).unwrap().guest,
+            Guest::Windows
+        );
+        // A closed set, refused while the config is read. The
+        // serde spelling is lowercase, like `provider`.
+        for bad in ["Windows", "win", "macos", ""] {
+            let err = vm_with_guest(Some(bad)).expect_err(bad);
+            let msg = err.message();
+            assert!(msg.contains("unknown variant"), "{bad}: {msg}");
+            assert!(msg.contains("windows"), "{bad}: {msg}");
+        }
+    }
+
+    #[test]
+    fn guest_defaults_to_linux_when_the_key_is_absent() {
+        // Every config written before the key existed describes a
+        // Linux guest, and must go on meaning that.
+        assert_eq!(vm_with_guest(None).unwrap().guest, Guest::Linux);
+    }
+
+    #[test]
+    fn guest_as_str_is_the_config_spelling() {
+        assert_eq!(Guest::Linux.as_str(), "linux");
+        assert_eq!(Guest::Windows.as_str(), "windows");
     }
 
     #[test]

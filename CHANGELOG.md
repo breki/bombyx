@@ -26,6 +26,10 @@ and this project adheres to
   escaping, failing or slow hook makes `up` and `provision` exit non-zero, and
   `shell` warns and opens anyway. The config refuses a hook without an
   `env_file`, and a path that cannot name a file.
+- A `guest` key under `[vm]`, `"linux"` by default. `guest = "windows"` boots a
+  Windows guest over vagrant's `winssh` communicator, with a 900 s boot timeout
+  and the box's remote desktop forward switched off, but bombyx cannot provision
+  one yet: `up` stops at provisioning with a message naming GitHub issue #141.
 
 ### Changed
 

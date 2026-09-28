@@ -165,6 +165,7 @@ classDiagram
     +Option~CpuMode~ cpu_mode
     +Option~Hostname~ hostname
     +GuestUser guest_user
+    +Guest guest
   }
   class Source {
     +RepoUrl repo
@@ -185,6 +186,11 @@ classDiagram
     <<enumeration>>
     Libvirt
     Hyperv
+  }
+  class Guest {
+    <<enumeration>>
+    Linux
+    Windows
   }
   class Registry {
     +Option~String~ host
@@ -214,6 +220,7 @@ classDiagram
   Project *-- Hooks : hooks
   Project ..> Config : one entry becomes one
   Vm --> Provider
+  Vm --> Guest
   Source *-- RepoToken : repo_token
   Registry ..> HostOrigin : ranked to produce one
 ```
