@@ -183,6 +183,18 @@ for tools that are not present:
   Prefer `--dry-run` for argv-level checks, and say so
   explicitly when a claim rests on a dry run rather than a
   real run against the VM host.
+- **Use a VM box only from an official source.** That means
+  one the OS vendor publishes, or one we build from the
+  vendor's own installation image. A community box does not
+  qualify, however popular it is. Check a box's source
+  before building on it, including one already in vagrant's
+  cache.
+- **Reach a VM host service from a guest through a reverse
+  tunnel.** On frosti the guest's traffic to the VM host is
+  filtered, and opening a port there needs root.
+  `vagrant ssh -- -N -R <port>:<addr>:<port>` in the project
+  directory makes `localhost:<port>` inside the guest reach
+  `<addr>:<port>` on the VM host, with no firewall change.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
 - **Do not grep canon prose for a phrase.** Every markdown
@@ -825,6 +837,12 @@ For any script that runs more than ~30 seconds
   VM answers. Start it in the background and read the log when
   the notification arrives. `status`, `doctor` and the teardown
   commands are quick enough to run in front.
+
+  **Wrap each such run in `timeout`**, sized from the box's
+  measured first boot, because a provisioner that hangs sends no
+  notification and no output. The generated Vagrantfile's
+  `boot_timeout` comment records a Windows first boot of up to
+  385 s.
 
 ## Lints: `doc_markdown` allowlist via `clippy.toml`
 
