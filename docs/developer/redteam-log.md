@@ -4,6 +4,27 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-28-up-stages-secrets-for-a-boot-that-reads-none
+
+**Category:** Security
+
+`bombyx up` on a VM that exists but is stopped runs the same plan
+as a first `up`, so `write_then` stages `bombyx.env` and the git
+credential in the project directory on the VM host for the whole
+`vagrant up`. Vagrant usually does not provision an existing
+machine, so usually nothing reads those copies; since #125 the
+secrets reach the guest through the refresh that follows the boot.
+
+Skipping the staging whenever the status probe says the machine
+exists is wrong. vagrant-libvirt's `up` provisions an existing
+machine whose `.vagrant/machines/default/<provider>/action_provision`
+marker is missing -- a first `up` killed partway, or a `vagrant up
+--no-provision` by hand -- and that provision then refuses for want
+of the files. The fix has to follow the marker, not the probe: have
+the staging writes on the VM host test for it and stage only when
+it is absent. Found as RT-1 on PR #126; the probe-based fix was
+reverted after its second round (RT-3 there).
+
 ### rt-2026-09-25-the-root-script-runs-in-the-projects-environment
 
 **Category:** Security
@@ -61,13 +82,13 @@ rather than folded into a branch that had already had three
 review stages. Found as RT-12.
 
 The proposed constructor does not close this alone. `plan` is
-handed `Staged::default()` for the eight verbs
-`Action::needs_staged_files` excludes, because each must work
-after the operator deleted the secrets file. A value pairing a
-`Config` with its read `Staged` cannot exist for those calls, so
-`plan` would take an `Option` of it and the three write arms
-would panic on `None` instead. Decide what those eight verbs are
-handed first.
+handed `Staged::default()` for the seven verbs
+`Action::staged_read` skips, and for `shell` when its best-effort
+read fails, because each must work after the operator deleted
+the secrets file. A value pairing a `Config` with its read
+`Staged` cannot exist for those calls, so `plan` would take an
+`Option` of it and the three write arms would panic on `None`
+instead. Decide what those calls are handed first.
 
 ### rt-2026-09-13-cross-key-rule-count-stated-in-six-places
 

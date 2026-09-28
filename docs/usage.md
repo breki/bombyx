@@ -99,16 +99,21 @@ bombyx up        # or: bombyx shell
 ```
 
 Both commands write the file over its copy in the guest,
-`~/.bombyx-env` in the agent's home, before they do anything else
-there. When the config names a `repo_token`, they rewrite the git
-credential built from it too. Nothing is fetched or checked out,
-so the work in the guest's clone is not touched. `up` on a running
-VM does only this. A `shell` that cannot read the file, or cannot
-write the copy, warns and opens the shell anyway.
+`~/.bombyx-env` in the agent's home: `shell` before the shell
+opens, and `up` once the VM is up. When the config names a
+`repo_token`, they rewrite the git credential built from it too.
+Nothing is fetched or checked out, so the work in the guest's
+clone is not touched. `up` on a running VM does only this. When a
+rewrite fails, `up` exits non-zero, and `shell` warns and opens
+the shell anyway. A `shell` that cannot read your `env_file` on
+the workstation also warns and opens.
 
 bombyx sends each file down a pipe, through `ssh` and then
-`vagrant ssh`, so the VM host never stores it.
-[trust-boundary.md](trust-boundary.md) describes the route.
+`vagrant ssh`, so the refresh itself stores nothing on the VM host.
+An `up` that has to boot the VM also stages the files on the VM
+host for the length of the boot, as every boot does, and refreshes
+afterwards. [trust-boundary.md](trust-boundary.md) describes both
+routes.
 
 Only those two copies change:
 
@@ -121,6 +126,11 @@ Only those two copies change:
   `provision`**, because the provisioning script is what uses the
   file, and `bootstrap.sh` is what tells `git` about the
   credential.
+- **So does removing one.** `up` and `shell` send only the files
+  the config names, so taking `env_file` or `repo_token` out
+  leaves the guest's copy in place, and `git` keeps sending a
+  token you meant to withdraw. `provision` deletes the copies the
+  config no longer names.
 
 ## reset and snapshot
 

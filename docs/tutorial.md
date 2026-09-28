@@ -342,8 +342,8 @@ in `[source]` names a file on the machine you are typing on,
 usually the project's untracked `.env`, which bombyx carries into
 the guest; your provisioning script then links it into place from
 `$BOMBYX_ENV_FILE`. A link keeps it current, because `up` and
-`shell` rewrite the guest's copy whenever you change the file here.
-The sample config explains this in full.
+`shell` rewrite the guest's copy each time you run them. The sample
+config explains this in full.
 
 Alongside it, `repo_token` and `repo_user` clone a private
 repository over `https` instead, authenticating with a token that

@@ -35,6 +35,7 @@ pub use quote::{quote_remote_path, shell_quote};
 pub use write::{write_file, write_file_of_hidden_size};
 
 use crate::config::{Config, Provider, Transport};
+use crate::vagrantfile::GuestHomeFile;
 
 /// Environment variable carrying the VM host's SSH alias into
 /// the `vagrant` process on the host.
@@ -1156,17 +1157,13 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// first -- vagrant 2.4.9's `ssh_run.rb` shows it.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
-    let user = shell_quote(cfg.vm.guest_user.as_str());
-    let guest = format!(
-        "if id -u {user} >/dev/null 2>&1; \
-         then exec sudo -u {user} -H -- sh -c {script} sh {project}; \
-         else echo \"bombyx: this guest has no account {user}, so it \
-         was never provisioned for it; run bombyx provision, or \
-         bombyx destroy then bombyx up if provisioning refuses. \
-         Opening a shell as $(id -un) instead.\" >&2; \
-         exec \"$SHELL\" -l; fi",
-        script = shell_quote(r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#),
-        project = shell_quote(cfg.project.as_str()),
+    let guest = as_guest_user(
+        cfg,
+        r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#,
+        cfg.project.as_str(),
+        "run bombyx provision, or bombyx destroy then bombyx up if \
+         provisioning refuses. Opening a shell as $(id -un) instead.",
+        "exec \"$SHELL\" -l",
     );
     vagrant_in(
         cfg,
@@ -1176,8 +1173,65 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
     )
 }
 
-/// Builds the command that writes `contents` over `name`, a path
-/// relative to the agent's home, inside the running project VM.
+/// The guest command that runs `script` as the agent's account,
+/// with `arg` as its `$1`, or reports the account missing and runs
+/// `otherwise`.
+///
+/// Shared by [`shell_into_vm`] and [`refresh_in_guest`], so the
+/// account switch is written once. `shell_into_vm`'s doc gives the
+/// reasons for each part: the login account's passwordless `sudo`,
+/// `-H` setting `HOME` from the passwd entry, and the `id -u` check
+/// for a guest never provisioned for the account.
+///
+/// `script` and `arg` are quoted here. `advice` and `otherwise` are
+/// fixed text the callers write, placed as they stand: `advice`
+/// inside the double quotes of an `echo`, so the guest expands a
+/// `$(...)` in it and it must hold no `"`, and `otherwise` as the
+/// command that runs in the account's place.
+fn as_guest_user(
+    cfg: &Config,
+    script: &str,
+    arg: &str,
+    advice: &str,
+    otherwise: &str,
+) -> String {
+    let user = shell_quote(cfg.vm.guest_user.as_str());
+    format!(
+        "if id -u {user} >/dev/null 2>&1; \
+         then exec sudo -u {user} -H -- sh -c {script} sh {arg}; \
+         else echo \"bombyx: this guest has no account {user}, so it \
+         was never provisioned for it; {advice}\" >&2; \
+         {otherwise}; fi",
+        script = shell_quote(script),
+        arg = shell_quote(arg),
+    )
+}
+
+/// The script the agent's account runs to take a refreshed file on
+/// its standard input, with the file's home-relative path as `$1`.
+///
+/// **It writes beside the file and renames**, so the guest's
+/// working copy is replaced by whatever `cat` received, or not at
+/// all. Writing in place would truncate it before the first new
+/// byte arrived, so a full disk or a failed `chmod` would leave an
+/// empty file. A failure in the guest keeps the old copy. A
+/// stream cut short on the workstation side still ends `cat` as if
+/// the input were complete, and then the short file is the one
+/// renamed into place; `run_refresh` in the binary says so to the
+/// operator rather than promising the old copy survived.
+///
+/// `mv` within one directory is a rename, and a `.env` linked to
+/// the path follows it. The new file is never at a readable mode:
+/// `umask 077` makes `cat` create the temporary at 0600, and the
+/// rename carries that mode over the old copy's. `cat >` onto a
+/// temporary that already exists keeps its mode instead, so
+/// `chmod` fixes a stale `.new` the agent loosened. On any failure
+/// the temporary goes, so a half-written copy does not sit in the
+/// home.
+const REFRESH_SCRIPT: &str = r#"t="$HOME/$1.new"; umask 077; if cat > "$t" && chmod 600 "$t" && mv -f -- "$t" "$HOME/$1"; then exit 0; fi; rm -f -- "$t"; exit 1"#;
+
+/// Builds the command that writes `contents` over `file` in the
+/// agent's home, inside the running project VM.
 ///
 /// Nothing is staged on the VM host. The contents travel on the
 /// command's standard input, which `ssh` forwards to the VM host,
@@ -1194,65 +1248,47 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
 /// a libvirt host: a payload holding a CR and a control byte
 /// arrives with the same SHA-256 it left with.
 ///
-/// **The guest half is `account.sh`'s `place`.** The login
-/// account switches to the agent's with `sudo -u`, as
-/// [`shell_into_vm`] does, and the agent writes the file itself.
-/// So a link the agent left at that path reaches only what the
-/// agent could already reach. `-H` sets `HOME` from the passwd
-/// entry, which names the home `account.sh` wrote into. `umask
-/// 077` keeps a new file from existing at a readable mode even
-/// briefly, and `chmod` corrects a copy the agent loosened since.
+/// **The agent's own account writes the file**, as it does in
+/// `account.sh`'s `place`. The login account switches to it with
+/// `sudo -u`, as [`shell_into_vm`] does, so a link the agent left
+/// at that path reaches only what the agent could already reach.
+/// `-H` sets `HOME` from the passwd entry, which names the home
+/// `account.sh` wrote into. Unlike `place`, which writes over the
+/// file, the script writes beside it and renames; `REFRESH_SCRIPT`
+/// says why, and how the mode stays at 0600.
 ///
 /// A guest without the account was never provisioned for it, so
 /// there is no copy to refresh, and it says so and fails rather
 /// than write the file anywhere else.
+///
+/// `file` decides the payload's form too: the credential's size is
+/// hidden from a dry run ([`GuestHomeFile::hides_size`]), so no
+/// caller can send it with the count showing. Its path travels as
+/// `$1`, so the script is one text for both files.
 #[must_use]
 pub fn refresh_in_guest(
     cfg: &Config,
-    name: &str,
+    file: GuestHomeFile,
     contents: &[u8],
 ) -> RemoteCommand {
-    refresh_command(cfg, name).with_stdin(contents)
-}
-
-/// [`refresh_in_guest`] for a payload whose size a dry run must
-/// not print.
-///
-/// The same command, so the file lands the same way. `Stdin` says
-/// which payloads those are.
-#[must_use]
-pub fn refresh_in_guest_of_hidden_size(
-    cfg: &Config,
-    name: &str,
-    contents: &[u8],
-) -> RemoteCommand {
-    refresh_command(cfg, name).with_stdin_of_hidden_size(contents)
-}
-
-/// The command both refresh builders send their payload down.
-///
-/// The name travels as `$1`, a separate argument, so the script is
-/// one text for every file, as [`shell_into_vm`]'s is for every
-/// project.
-fn refresh_command(cfg: &Config, name: &str) -> RemoteCommand {
-    let user = shell_quote(cfg.vm.guest_user.as_str());
-    let guest = format!(
-        "if id -u {user} >/dev/null 2>&1; \
-         then exec sudo -u {user} -H -- sh -c {script} sh {name}; \
-         else echo \"bombyx: this guest has no account {user}, so it \
-         was never provisioned for it; run bombyx provision.\" >&2; \
-         exit 1; fi",
-        script = shell_quote(
-            r#"umask 077 && cat > "$HOME/$1" && chmod 600 "$HOME/$1""#
-        ),
-        name = shell_quote(name),
+    let guest = as_guest_user(
+        cfg,
+        REFRESH_SCRIPT,
+        file.path(),
+        "run bombyx provision.",
+        "exit 1",
     );
-    vagrant_in(
+    let cmd = vagrant_in(
         cfg,
         &cfg.remote_project_dir(),
         &["ssh", "--no-tty", "-c", &guest],
         Tty::NoPty,
-    )
+    );
+    if file.hides_size() {
+        cmd.with_stdin_of_hidden_size(contents)
+    } else {
+        cmd.with_stdin(contents)
+    }
 }
 
 #[cfg(test)]
@@ -1532,30 +1568,95 @@ mod tests {
 
     #[test]
     fn a_refresh_writes_the_file_as_the_agent_in_its_home() {
-        // The guest half is `account.sh`'s `place` again: the agent
-        // writes the file itself, under `umask 077`, so the contents
-        // never exist at a readable mode, and `chmod` corrects a copy
-        // the agent loosened since. The name travels as `$1`, so the
+        // The agent's own account writes the file, as in
+        // `account.sh`'s `place`; the two `sh` tests below hold what
+        // `REFRESH_SCRIPT` does. The name travels as `$1`, so the
         // script is one text for both files. A guest without the
         // account says so and fails rather than writing anywhere
         // else.
-        let guest = "if id -u 'agent' >/dev/null 2>&1; \
-                     then exec sudo -u 'agent' -H -- sh -c \
-                     'umask 077 && cat > \"$HOME/$1\" && \
-                     chmod 600 \"$HOME/$1\"' sh '.bombyx-env'; \
-                     else echo \"bombyx: this guest has no account \
-                     'agent', so it was never provisioned for it; \
-                     run bombyx provision.\" >&2; exit 1; fi";
-        let c = refresh_in_guest(&cfg(), ".bombyx-env", b"K=v\n");
+        let guest = format!(
+            "if id -u 'agent' >/dev/null 2>&1; \
+             then exec sudo -u 'agent' -H -- sh -c {} sh '.bombyx-env'; \
+             else echo \"bombyx: this guest has no account \
+             'agent', so it was never provisioned for it; \
+             run bombyx provision.\" >&2; exit 1; fi",
+            shell_quote(REFRESH_SCRIPT)
+        );
+        let c = refresh_in_guest(&cfg(), GuestHomeFile::Secrets, b"K=v\n");
         assert_eq!(
             remote_script(&c),
             format!(
                 "cd ~/'vms/myproject' && {} vagrant 'ssh' '--no-tty' \
                  '-c' {}",
                 vagrant_env(),
-                shell_quote(guest)
+                shell_quote(&guest)
             )
         );
+    }
+
+    /// Runs [`REFRESH_SCRIPT`] under `sh` with `HOME` at `home`,
+    /// feeding it `input`, and returns whether it succeeded.
+    ///
+    /// Unix only, like both of its callers: the script needs a
+    /// POSIX `sh`, and a helper nothing calls is a dead-code error.
+    #[cfg(unix)]
+    fn run_refresh_script(home: &std::path::Path, input: &[u8]) -> bool {
+        use std::io::Write as _;
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", REFRESH_SCRIPT, "sh", ".bombyx-env"])
+            .env("HOME", home)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh starts");
+        child
+            .stdin
+            .take()
+            .expect("a piped stdin")
+            .write_all(input)
+            .expect("the script reads its input");
+        child.wait().expect("sh finishes").success()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refresh_replaces_the_file_whole_at_mode_600() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let home = tempfile::tempdir().expect("a temp dir");
+        let target = home.path().join(".bombyx-env");
+        std::fs::write(&target, "OLD=1\n").expect("an earlier copy");
+        std::fs::set_permissions(
+            &target,
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .expect("loosened by the agent");
+        assert!(run_refresh_script(home.path(), b"NEW=2\n"));
+        assert_eq!(std::fs::read(&target).expect("the file"), b"NEW=2\n");
+        let mode = std::fs::metadata(&target)
+            .expect("meta")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "mode {mode:o}");
+        let left: Vec<_> = std::fs::read_dir(home.path())
+            .expect("the home")
+            .map(|e| e.expect("an entry").file_name())
+            .collect();
+        assert_eq!(left, [".bombyx-env"], "a temporary file was left");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refresh_that_cannot_write_keeps_the_copy_it_had() {
+        // A write that fails in the guest -- a full disk, here a
+        // directory where the new file would go -- must leave the
+        // guest's working copy alone, because `bombyx shell` opens
+        // anyway and the secrets it had must still work there.
+        let home = tempfile::tempdir().expect("a temp dir");
+        let target = home.path().join(".bombyx-env");
+        std::fs::write(&target, "OLD=1\n").expect("an earlier copy");
+        std::fs::create_dir(home.path().join(".bombyx-env.new"))
+            .expect("a directory in the way");
+        assert!(!run_refresh_script(home.path(), b"NEW=2\n"));
+        assert_eq!(std::fs::read(&target).expect("the file"), b"OLD=1\n");
     }
 
     #[test]
@@ -1566,7 +1667,7 @@ mod tests {
         // one, and the contents are the command's standard input,
         // never an argument.
         let secret = b"JIRA_TOKEN=s3cr3t-value\r\n";
-        let c = refresh_in_guest(&cfg(), ".bombyx-env", secret);
+        let c = refresh_in_guest(&cfg(), GuestHomeFile::Secrets, secret);
         assert!(opts_before_host(&c).is_empty(), "{:?}", c.args);
         assert!(raw_script(&c).contains("'--no-tty'"), "{c}");
         let stdin = c.stdin.as_ref().expect("the file is on stdin");
@@ -1583,23 +1684,17 @@ mod tests {
     fn a_refreshed_credential_hides_its_size() {
         // The credential is fixed text plus one token, so its
         // length measures the token; `Stdin` says why that stays out
-        // of a dry run.
-        let c = refresh_in_guest_of_hidden_size(
+        // of a dry run. The file picks the form, so no caller can
+        // send the credential with its count showing.
+        let c = refresh_in_guest(
             &cfg(),
-            ".bombyx-git-credentials",
+            GuestHomeFile::Credential,
             b"https://u:t@h\n",
         );
         let stdin = c.stdin.as_ref().expect("the file is on stdin");
         assert_eq!(stdin.bytes(), b"https://u:t@h\n");
         assert!(!stdin.size_may_be_shown());
-        assert_eq!(
-            remote_script(&c.without_payload()),
-            remote_script(&refresh_in_guest(
-                &cfg(),
-                ".bombyx-git-credentials",
-                b"",
-            ))
-        );
+        assert!(raw_script(&c).contains(".bombyx-git-credentials"), "{c}");
     }
 
     #[test]

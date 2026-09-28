@@ -364,6 +364,10 @@ pub struct Config {
 /// Everything bombyx reads off the workstation and stages on
 /// the VM host for one run.
 ///
+/// The same contents also feed the refresh that `up` and `shell`
+/// run on a VM that already exists, which pipes them into the
+/// guest without staging them anywhere.
+///
 /// Both parts come out of the single file `source.env_file`
 /// names, and the invariant is that either both came from one
 /// [`Config::read_staged`] call or there is nothing here at
@@ -374,8 +378,7 @@ pub struct Config {
 /// `Default` is the second state rather than a hole in the
 /// first. It is what an action that must keep working after the
 /// operator deleted the file gets, and
-/// `crate::plan::Action::needs_staged_files` says which those
-/// are.
+/// `crate::plan::Action::staged_read` says which those are.
 #[derive(Debug, Default)]
 pub struct Staged {
     /// The project's secrets, as the file holds them.

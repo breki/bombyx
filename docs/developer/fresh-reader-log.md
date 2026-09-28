@@ -6,6 +6,23 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-28-whether-vagrant-reprovisions-has-five-homes
+
+**Category:** Comprehension
+
+Five places state whether `vagrant up` provisions a machine that
+already exists, in five versions: `Action::Provision` and
+`Action::Up` in `plan.rs` say it never does, the clap help for
+`Up` in `main.rs` says "is not provisioned again", `up_run` says
+"usually", and `listing::refreshes_secrets_after_up` names the
+exception -- vagrant provisions an existing machine whose
+provision marker is missing. The last is the measured behaviour
+(RT-3 on PR #126). State the rule once there, with the exception,
+and point the other four at it or soften them to "normally".
+Escalated rather than applied: it is a consolidation of five
+copies, and one of them is clap help, which the prose stage may
+not edit. Found as FR-2 on PR #126.
+
 ### fr-2026-09-25-the-shell-ignores-an-env-home
 
 **Category:** Behaviour

@@ -235,18 +235,22 @@ pub fn takes_fresh_snapshot(state: Option<&VmState>) -> bool {
 /// Whether `bombyx up` should rewrite the secrets inside the
 /// guest once the machine is up, given its state before the boot.
 ///
-/// Vagrant provisions a machine only when it creates it, and
-/// provisioning is what writes the secrets. So an `up` that
-/// creates the machine ([`VmState::is_absent`]) has just written
-/// them, and every other `up` -- one that boots a stopped machine,
-/// or finds it running and boots nothing -- would leave the guest
-/// with whatever an older provision wrote. An unconfirmed state
-/// refreshes: if the machine was in fact created, the refresh
-/// writes the same bytes again, which costs one round trip and
-/// nothing else.
+/// Provisioning is what writes the secrets, and `vagrant up`
+/// provisions a machine it creates. An existing machine it
+/// provisions only when the machine never finished a provision --
+/// vagrant keeps a marker file per machine for that -- which is
+/// the exception. So an `up` that creates the machine
+/// ([`VmState::is_absent`]) has just written them, and an `up` that
+/// boots a stopped machine would usually leave the guest with
+/// whatever an older provision wrote. Where it did provision, or
+/// where an unconfirmed state turns out to have been a first boot,
+/// the refresh writes the same bytes again, which costs one round
+/// trip and nothing else.
 ///
-/// This is the decision the binary's `up_run` acts on, kept here
-/// for the reason [`takes_fresh_snapshot`] gives.
+/// This decides the boot path only. The binary's `up_run` handles
+/// a machine that is already running before it asks, by refreshing
+/// and stopping. The policy is kept here for the reason
+/// [`takes_fresh_snapshot`] gives.
 #[must_use]
 pub fn refreshes_secrets_after_up(state: Option<&VmState>) -> bool {
     !state.is_some_and(VmState::is_absent)
