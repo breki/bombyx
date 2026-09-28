@@ -377,9 +377,8 @@ where
     F: Fn(&RemoteCommand) -> Result<ProbeResult, String> + Sync,
 {
     let groups = group_by_host(&configs);
-    let replies = ask_every_host(&groups, &run);
     let mut states: BTreeMap<ProjectName, VmState> = BTreeMap::new();
-    for (group, reply) in groups.iter().zip(replies) {
+    for (group, reply) in ask_every_host(&groups, &run) {
         // The match produces both the parsed states and the
         // reason to give a project the host said nothing useful
         // about, so the two cannot describe different replies.
@@ -406,12 +405,16 @@ where
             // vagrant did answer about keeps its state, so one
             // project's problem cannot overwrite a sibling's row.
             //
-            // The guess is worth little here: the marker is
-            // printed before the `Vagrantfile` guard by `printf`,
-            // a shell builtin, so a project always has a block
-            // and an empty one says only that vagrant wrote
-            // nothing to stdout. `sh: vagrant: not found` is on
-            // stderr, and it is the sentence the operator needs.
+            // The guess -- the `Unknown` text above -- is worth
+            // little next to the host's stderr:
+            //
+            // - The marker comes from `printf`, a shell builtin,
+            //   so it prints even when `vagrant` is missing. The
+            //   block is then empty, and `sh: vagrant: not found`
+            //   on stderr is the sentence the operator needs.
+            // - When `mktemp -d` fails, the script exits before
+            //   printing any marker, so every project on the host
+            //   gets the host's stderr as its reason.
             let state = match (state, &host_reason) {
                 (VmState::Unknown(_), Some(why)) => {
                     VmState::Unknown(why.clone())
@@ -431,7 +434,11 @@ where
 }
 
 /// Runs every group's status command at once, one thread per
-/// host, and returns the replies in group order.
+/// host, and returns each group with its reply, in group order.
+///
+/// Each reply travels with its group rather than by position, so
+/// no change here can hand one host's words to another host's
+/// projects.
 ///
 /// At once because the hosts are independent machines: asked in
 /// turn, each host would add its connection and its vagrant calls
@@ -441,21 +448,27 @@ where
 ///
 /// A panic in `run` is a bug rather than a host's failure, so it
 /// is raised again here instead of being reported as a row.
-fn ask_every_host<F>(
-    groups: &[HostGroup<'_>],
+fn ask_every_host<'g, 'a, F>(
+    groups: &'g [HostGroup<'a>],
     run: &F,
-) -> Vec<Result<ProbeResult, String>>
+) -> Vec<(&'g HostGroup<'a>, Result<ProbeResult, String>)>
 where
     F: Fn(&RemoteCommand) -> Result<ProbeResult, String> + Sync,
 {
     std::thread::scope(|scope| {
         let handles: Vec<_> = groups
             .iter()
-            .map(|group| scope.spawn(move || run(&group.status_command())))
+            .map(|group| {
+                (group, scope.spawn(move || run(&group.status_command())))
+            })
             .collect();
         handles
             .into_iter()
-            .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))
+            .map(|(group, h)| {
+                let reply =
+                    h.join().unwrap_or_else(|p| std::panic::resume_unwind(p));
+                (group, reply)
+            })
             .collect()
     })
 }
@@ -486,13 +499,15 @@ pub fn offline_entries(configs: Vec<Config>) -> Vec<Entry> {
 /// would report something about a project the host never said,
 /// and the parser does not need to know what could produce one.
 ///
-/// A marker with no lines after it is [`VmState::NotCreated`]:
-/// the `if [ -f Vagrantfile ]` guard in
-/// [`remote::vagrant_status_many`] emitted the marker and never
-/// ran vagrant. A block that carries lines but names no state is
-/// [`VmState::Unknown`], because vagrant answered with something
-/// this parser does not recognise and inventing a state would be
-/// a claim bombyx cannot support.
+/// A block holding the `remote::NEVER_BUILT` line is
+/// [`VmState::NotCreated`]: the `if [ -f Vagrantfile ]` guard in
+/// [`remote::vagrant_status_many`] found no Vagrantfile and never
+/// ran vagrant. A block with no lines at all is
+/// [`VmState::Unknown`], because the host said nothing, which is
+/// not the same as saying the VM was never built. A block that
+/// carries lines but names no state is unknown too, because
+/// vagrant answered with something this parser does not recognise
+/// and inventing a state would be a claim bombyx cannot support.
 #[must_use]
 fn parse_states(reply: &str) -> BTreeMap<ProjectName, VmState> {
     let mut out = BTreeMap::new();
@@ -914,8 +929,8 @@ mod tests {
     #[test]
     fn the_hosts_are_asked_at_the_same_time() {
         // Each call waits for the other host's call to start. Asked
-        // one after another, the first call gives up waiting and
-        // its host reports nothing about its project.
+        // one after another, the first call gives up after five
+        // seconds and reports `alone` instead of `running`.
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::time::{Duration, Instant};
 

@@ -49,8 +49,7 @@ and this project adheres to
   myproject`, and a script that ran it unattended now needs `--yes`: `bombyx
   destroy myproject --yes`.
 - `bombyx list` asks every host at once, and each host runs `vagrant status` for
-  its projects at the same time, so the listing takes about as long as the
-  slowest single check rather than their sum.
+  up to four of its projects at the same time rather than one after another.
 
 ### Fixed
 

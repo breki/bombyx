@@ -4,6 +4,28 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-28-remote-tests-own-file
+
+**Category:** Module Size
+
+`crates/bombyx/src/remote.rs` holds about 1,590 lines of code
+and, from line 1588, about 1,630 lines of `mod tests`. A second
+module, `listing_script_tests` (from line 3224, unix only), runs
+the listing script through a real `sh`. So the tests are longer
+than the code, and a reader looking for the tests of
+`vagrant_status_many` has two places to check, 1,600 lines
+apart.
+
+They would move to `crates/bombyx/src/remote/tests.rs`, with
+`listing_script_tests` as a `#[cfg(unix)]` submodule inside it.
+`remote` already has submodules, so the move adds no structure.
+
+Deferred on 2026-09-28: a move of about 1,700 lines is outside
+issue #115, which added the second module (PR #133). Found as
+AQ-3.
+
+---
+
 ### aq-2026-09-25-staging-tests-in-the-renderers-module
 
 **Category:** Module Size

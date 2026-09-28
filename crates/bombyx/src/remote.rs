@@ -450,8 +450,9 @@ fn transport(cfg: &Config, script: &str, tty: Tty) -> RemoteCommand {
 /// structural rather than something each builder remembers.
 /// `bombyx list` asks every host at once but prints nothing until
 /// the slowest has answered, so an unbounded wait on one host is a
-/// wait for the whole table -- and the documents promise that a
-/// machine which does not answer costs the others nothing.
+/// wait for the whole table. `docs/usage.md` under `## list`
+/// promises that a machine which cannot be reached does not hold
+/// up the others; these options are what bound that wait.
 ///
 /// Every variant named, so a third route is a compile error here
 /// rather than one that quietly takes the `ssh` arm.
@@ -641,6 +642,22 @@ pub(crate) const LISTING_MARKER: &str = "##bombyx ";
 /// machine it could not ask.
 pub(crate) const NEVER_BUILT: &str = "##bombyx-never-built";
 
+/// How many `vagrant status` calls a listing script runs at once
+/// on one host.
+///
+/// One call takes about 2 seconds of wall time, 2.6 CPU-seconds
+/// and 80 MB at its peak, measured with `/usr/bin/time -v` on an
+/// 8-core libvirt host with vagrant 2.4.9. The host is also
+/// running the VMs. So a host with many projects gets them in
+/// batches rather than all together, at the cost of one call's
+/// wall time per extra batch.
+///
+/// Four is a judgement call rather than a measured optimum: a
+/// batch of four costs about 10 CPU-seconds and 320 MB, which
+/// leaves most of such a host to its guests, and it covers every
+/// host bombyx has been run against in one batch.
+const STATUS_BATCH: usize = 4;
+
 /// Builds the one command that asks a VM host what every
 /// project on it is doing.
 ///
@@ -668,6 +685,8 @@ pub(crate) const NEVER_BUILT: &str = "##bombyx-never-built";
 /// printf '##bombyx %s\n' 'web'
 /// if [ -f ~/'vms/web/Vagrantfile' ]; then
 ///   ( cd ~/'vms/web' && ... vagrant 'status' '--machine-readable' )
+/// else
+///   printf '##bombyx-never-built\n'
 /// fi
 /// ```
 ///
@@ -686,21 +705,33 @@ pub(crate) const NEVER_BUILT: &str = "##bombyx-never-built";
 /// the host answered nothing, which is a different thing and
 /// reads as unknown.
 ///
-/// **The fragments run at the same time.** Each `vagrant status`
-/// spends about two seconds loading plugins and asking the
-/// provider, so fragments run in turn would cost a host two
-/// seconds per project. The script starts every fragment in the
-/// background, with its stdout in its own file under a
-/// `mktemp -d` directory, waits for all of them, then prints the
-/// files in the order the projects arrived:
+/// **The fragments run in batches, `STATUS_BATCH` at a time.**
+/// Each `vagrant status` spends about two seconds of wall time
+/// loading plugins and asking the provider (`STATUS_BATCH` gives
+/// the measured cost), so fragments run in turn would cost a host
+/// two seconds per project. The script starts a batch of
+/// fragments in the background, each with its stdout in its own
+/// file under a `mktemp -d` directory, waits for the batch, starts
+/// the next, then prints the files in the order the projects
+/// arrived. With five projects:
 ///
 /// ```sh
 /// t=$(mktemp -d) || exit 1; trap 'rm -rf "$t"' EXIT
 /// trap 'exit 1' HUP INT TERM
-/// ( <web fragment> ) > "$t/0" & p0=$!
-/// ( <api fragment> ) > "$t/1" & p1=$!
-/// wait "$p0"; wait "$p1"; s=$?; cat "$t/0" "$t/1"; exit "$s"
+/// ( <p0 fragment> ) > "$t/0" & p0=$!
+/// ( <p1 fragment> ) > "$t/1" & p1=$!
+/// ( <p2 fragment> ) > "$t/2" & p2=$!
+/// ( <p3 fragment> ) > "$t/3" & p3=$!
+/// wait "$p0"; wait "$p1"; wait "$p2"; wait "$p3"
+/// ( <p4 fragment> ) > "$t/4" & p4=$!
+/// wait "$p4"; s=$?; cat "$t/0" "$t/1" "$t/2" "$t/3" "$t/4"
+/// exit "$s"
 /// ```
+///
+/// `&` starts a fragment in the background and `$!` is the
+/// process id it got, which is what `wait` takes. `s=$?` comes
+/// before `cat` because `cat` would replace `$?` with its own
+/// status.
 ///
 /// The files are what keep one project's block from landing
 /// inside another's, so the reply reads exactly as it would if
@@ -713,13 +744,19 @@ pub(crate) const NEVER_BUILT: &str = "##bombyx-never-built";
 /// trap runs it.
 ///
 /// Running together is safe for vagrant because the fragments
-/// ask about different machines. vagrant locks each machine
-/// with a non-blocking `flock` and refuses with `MachineLocked`
-/// when another process holds it, so two calls about the *same*
-/// machine would fail; the shared machine-index lock blocks
-/// instead, so calls about different machines only queue on it
-/// briefly. Each project has its own directory, so no two
-/// fragments ever name one machine.
+/// ask about different machines. vagrant keeps a machine index,
+/// its registry of every machine on the host under
+/// `~/.vagrant.d/data/machine-index`, and `vagrant status` updates
+/// the machine's entry there. It locks that entry with a
+/// non-blocking `flock` and refuses with `MachineLocked` when
+/// another process holds it, so two calls about the *same* machine
+/// fail. The lock on the index file itself blocks instead, so
+/// calls about different machines only queue on it briefly. That
+/// comes from `lock_machine` and `with_index_lock` in vagrant
+/// 2.4.9's `machine_index.rb`, and was measured: parallel calls
+/// about one machine failed 8 times in 12, about two different
+/// machines 0 times in 20. Each project has its own directory, so
+/// no two fragments ever name one machine.
 ///
 /// **The script's exit status answers for the last fragment
 /// only**: the last `wait` is the one `$?` records. So the status
@@ -741,27 +778,28 @@ pub(crate) fn vagrant_status_many(
 ) -> RemoteCommand {
     use std::fmt::Write as _;
 
-    let configs: Vec<&Config> =
-        std::iter::once(cfg).chain(rest.iter().copied()).collect();
     let mut script = String::from(
         "t=$(mktemp -d) || exit 1; trap 'rm -rf \"$t\"' EXIT; \
          trap 'exit 1' HUP INT TERM; ",
     );
-    for (i, project) in configs.iter().enumerate() {
+    // One pass writes each fragment, its `wait` and its file, so
+    // the three cannot disagree about a project's index. The waits
+    // are flushed after every `STATUS_BATCH` fragments, so the next
+    // batch starts only when this one has finished.
+    let mut waits = String::new();
+    let mut files = String::new();
+    let projects = std::iter::once(cfg).chain(rest.iter().copied());
+    for (i, project) in projects.enumerate() {
         let fragment = status_fragment(project);
         let _ = write!(script, "( {fragment} ) > \"$t/{i}\" & p{i}=$!; ");
+        let _ = write!(waits, "wait \"$p{i}\"; ");
+        let _ = write!(files, " \"$t/{i}\"");
+        if (i + 1) % STATUS_BATCH == 0 {
+            script.push_str(&waits);
+            waits.clear();
+        }
     }
-    let waits: Vec<String> = (0..configs.len())
-        .map(|i| format!("wait \"$p{i}\""))
-        .collect();
-    let files: Vec<String> =
-        (0..configs.len()).map(|i| format!("\"$t/{i}\"")).collect();
-    let _ = write!(
-        script,
-        "{waits}; s=$?; cat {files}; exit \"$s\"",
-        waits = waits.join("; "),
-        files = files.join(" "),
-    );
+    let _ = write!(script, "{waits}s=$?; cat{files}; exit \"$s\"");
     unattended(cfg, &script)
 }
 
@@ -3143,11 +3181,11 @@ fi
     #[test]
     fn a_listing_command_carries_the_unattended_connection_options() {
         // `list` prints nothing until every host has answered, so
-        // an unbounded wait on one is a wait for the whole table
-        // -- and the documents promise a machine that does not
-        // answer costs the others nothing. Without `BatchMode` an
-        // `ssh` wanting a password waits for input nobody is there
-        // to give.
+        // an unbounded wait on one is a wait for the whole table,
+        // and `docs/usage.md` promises an unreachable machine does
+        // not hold up the others. Without `BatchMode` an `ssh`
+        // wanting a password waits for input nobody is there to
+        // give.
         let cmd = vagrant_status_many(&cfg(), &[]);
         let argv = cmd.args.join(" ");
         for opt in [
@@ -3237,35 +3275,58 @@ mod listing_script_tests {
     ///
     /// The wait is what makes the test fail when the calls run one
     /// after another: the first call never sees the others start.
-    /// It finishes in the reverse of the start order, so a script
-    /// that printed each reply as it arrived would get the order
-    /// wrong.
+    /// `EXPECT` is the number of projects to wait for.
+    ///
+    /// The stub delays `p1` by 0.6 s and `p2` by 0.3 s, so with the
+    /// names `p1`, `p2`, `p3` the replies finish in reverse order,
+    /// and a script that printed each reply as it arrived would get
+    /// the order wrong. A test using this stub must use those
+    /// names, or it loses that order check.
     const STUB: &str = r#"#!/bin/sh
 name=$(basename "$PWD")
 touch "$MARKS/$name"
 started() { ls "$MARKS" | wc -l; }
 i=0
-while [ "$(started)" -lt 3 ] && [ "$i" -lt 50 ]; do
+while [ "$(started)" -lt "$EXPECT" ] && [ "$i" -lt 50 ]; do
     sleep 0.1; i=$((i + 1))
 done
 case $name in p1) sleep 0.6 ;; p2) sleep 0.3 ;; esac
-if [ "$(started)" -ge 3 ]; then state=running; else state=alone; fi
+if [ "$(started)" -ge "$EXPECT" ]; then state=running; else state=alone; fi
 echo "1,default,state,$state"
 "#;
 
-    #[test]
-    fn a_host_asks_about_its_projects_at_the_same_time() {
+    /// A `vagrant` that notes how many calls were running when it
+    /// started, in `seen.<project>`, then answers after a pause
+    /// long enough for every call of one batch to overlap.
+    const COUNTING_STUB: &str = r#"#!/bin/sh
+name=$(basename "$PWD")
+touch "$MARKS/run.$name"
+ls "$MARKS" | grep -c '^run\.' > "$MARKS/seen.$name"
+sleep 0.5
+rm "$MARKS/run.$name"
+echo "1,default,state,running"
+"#;
+
+    /// Runs the listing script for `names`, one built project
+    /// each, with `stub` as `vagrant`. Returns the marks directory
+    /// the stub wrote to, inside the `TempDir` that holds it.
+    fn run_listing(
+        stub: &str,
+        names: &[&str],
+    ) -> (TempDir, std::path::PathBuf, std::process::Output) {
         let home = TempDir::new().unwrap();
         let bin = home.path().join("bin");
         let marks = home.path().join("marks");
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(&marks).unwrap();
-        let stub = bin.join("vagrant");
-        std::fs::write(&stub, STUB).unwrap();
-        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
-            .unwrap();
+        let vagrant = bin.join("vagrant");
+        std::fs::write(&vagrant, stub).unwrap();
+        std::fs::set_permissions(
+            &vagrant,
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
 
-        let names = ["p1", "p2", "p3"];
         let configs: Vec<Config> = names
             .iter()
             .map(|name| {
@@ -3290,20 +3351,61 @@ echo "1,default,state,$state"
             .env("HOME", home.path())
             .env("PATH", path)
             .env("MARKS", &marks)
+            .env("EXPECT", names.len().to_string())
             .output()
             .unwrap();
+        (home, marks, out)
+    }
 
-        let expected = names
+    /// The reply bombyx expects when every project says `running`.
+    fn all_running(names: &[&str]) -> String {
+        names
             .iter()
             .map(|n| format!("{LISTING_MARKER}{n}\n1,default,state,running\n"))
             .collect::<Vec<_>>()
-            .concat();
+            .concat()
+    }
+
+    #[test]
+    fn a_host_asks_about_its_projects_at_the_same_time() {
+        let names = ["p1", "p2", "p3"];
+        let (_home, _marks, out) = run_listing(STUB, &names);
         assert_eq!(
             String::from_utf8_lossy(&out.stdout),
-            expected,
+            all_running(&names),
             "stderr: {}",
             String::from_utf8_lossy(&out.stderr)
         );
         assert!(out.status.success(), "{out:?}");
+    }
+
+    #[test]
+    fn a_host_runs_at_most_a_batch_of_calls_at_once() {
+        // One more project than a batch holds, so an uncapped
+        // script runs them all together and one call sees five.
+        let names = ["p1", "p2", "p3", "p4", "p5"];
+        assert_eq!(names.len(), STATUS_BATCH + 1);
+        let (_home, marks, out) = run_listing(COUNTING_STUB, &names);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            all_running(&names),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let seen: Vec<usize> = names
+            .iter()
+            .map(|n| {
+                std::fs::read_to_string(marks.join(format!("seen.{n}")))
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            seen.iter().max(),
+            Some(&STATUS_BATCH),
+            "calls running at each start: {seen:?}"
+        );
     }
 }
