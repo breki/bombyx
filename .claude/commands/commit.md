@@ -102,6 +102,14 @@ separate.
      not split a subsection or left a duplicate
      `### <kind>` heading -- the hazard the bullet above
      warns about.
+   - **A bullet that states a speed or size figure
+     quotes a measurement from this session**, or it
+     leaves the figure out. "Takes about as long as one
+     check" is a claim about timing, and writing it from
+     how the code should behave is how an unmeasured
+     promise reaches the release notes. `CLAUDE.md`
+     under **Print the variable before claiming what it
+     holds** is the general rule.
    - Skip only for commits with no user-observable
      effect: pure refactors, internal tooling, test-
      only changes, CI/lint config tweaks invisible to
