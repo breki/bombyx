@@ -106,14 +106,18 @@ impl fmt::Display for Provider {
 ///
 /// An enum for the reason [`Provider`] is one: an unknown value
 /// fails while the config is read rather than on the VM host.
-/// `Linux` is the default, so a config with no `guest` key means
-/// what it meant before the key existed.
+/// `Linux` is the default, so a config with no `guest` key builds a
+/// Linux guest.
 ///
 /// `Windows` boots over vagrant's `winssh` communicator but is not
-/// provisioned yet: the generated Vagrantfile stops at provisioning
-/// with a message naming GitHub issue #141, which ports the guest
-/// scripts. `docs/windows-guest-box.md` records the box it was
-/// tested with.
+/// provisioned yet: `up` and `scratch` boot the VM, and they and
+/// `provision` then fail with a message naming GitHub issue #141,
+/// which ports the guest scripts (`plan::unprovisioned_guest`). The
+/// registry's `parse` refuses a Windows project that names a
+/// `deploy_key`, an `env_file` or a `repo_token`, or a key that only
+/// works beside one (`repo_user`, the `secrets_refreshed` hook),
+/// because nothing on the guest would receive them.
+/// `docs/windows-guest-box.md` records the box it was tested with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Guest {
@@ -121,19 +125,8 @@ pub enum Guest {
     /// `bootstrap.sh`.
     #[default]
     Linux,
-    /// A Windows guest. Boots, and refuses provisioning.
+    /// A Windows guest. Boots, but is not provisioned.
     Windows,
-}
-
-impl Guest {
-    /// The lowercase name serde parses from the config file.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Linux => "linux",
-            Self::Windows => "windows",
-        }
-    }
 }
 
 /// The guest CPU model the generated Vagrantfile selects.
@@ -190,10 +183,11 @@ impl CpuMode {
 /// `box`, `cpus` and `memory` are required: the base image is the
 /// one thing bombyx cannot invent, and a size it chose would be
 /// wrong on both a laptop and a workstation. `provider`, `disk`,
-/// `cpu_mode` and `hostname` are optional -- `provider` defaults to
-/// libvirt, an absent `disk` leaves the box's own disk size, an
-/// absent `cpu_mode` takes bombyx's default, and an absent
-/// `hostname` lets bombyx derive a name.
+/// `cpu_mode`, `hostname`, `guest_user` and `guest` are optional --
+/// `provider` defaults to libvirt, an absent `disk` leaves the box's
+/// own disk size, an absent `cpu_mode` takes bombyx's default, an
+/// absent `hostname` lets bombyx derive a name, `guest_user`
+/// defaults to `agent`, and `guest` defaults to Linux.
 ///
 /// Serde reads the table through the private `VmFields`, whose
 /// `#[serde(deny_unknown_fields)]` turns a key it does not
@@ -285,7 +279,9 @@ pub struct Vm {
     /// clone, the project's script and `bombyx shell` to it, so
     /// the agent never works as `vagrant`, the account Vagrant
     /// itself logs in with. A [`GuestUser`], so the name rules
-    /// have run against whatever is in here.
+    /// have run against whatever is in here. A Windows guest has no
+    /// provisioner yet, so it does not use this until GitHub issue
+    /// #141.
     pub guest_user: GuestUser,
 
     /// The operating system the guest runs. [`Guest::Linux`] when
@@ -1539,12 +1535,6 @@ mod tests {
         // Every config written before the key existed describes a
         // Linux guest, and must go on meaning that.
         assert_eq!(vm_with_guest(None).unwrap().guest, Guest::Linux);
-    }
-
-    #[test]
-    fn guest_as_str_is_the_config_spelling() {
-        assert_eq!(Guest::Linux.as_str(), "linux");
-        assert_eq!(Guest::Windows.as_str(), "windows");
     }
 
     #[test]

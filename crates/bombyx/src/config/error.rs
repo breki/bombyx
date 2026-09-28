@@ -282,4 +282,32 @@ pub enum ConfigError {
         /// The project whose table pairs them.
         project: String,
     },
+
+    /// A project with `guest = "windows"` names a secret for the
+    /// guest: a `deploy_key`, an `env_file` or a `repo_token`, or a
+    /// key that only works beside one (`repo_user`, the
+    /// `secrets_refreshed` hook).
+    ///
+    /// bombyx cannot provision a Windows guest yet, so the secret
+    /// would be read on the workstation and copied to the VM host
+    /// for a guest that never receives it. A rule spanning `[vm]`,
+    /// `[source]` and `[hooks]`, checked in the registry's `parse` like
+    /// [`ConfigError::HookWithoutEnvFile`]. GitHub issue #141 lifts
+    /// it when the Windows guest scripts exist.
+    #[error(
+        "invalid config in {}: project \"{project}\" sets {keys}, \
+         but [projects.\"{project}\".vm] sets guest = \
+         \"windows\", and bombyx cannot provision a Windows guest yet \
+         (bombyx issue #141) -- remove them for now",
+        .path.display()
+    )]
+    WindowsGuestSecret {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project whose tables pair them.
+        project: String,
+        /// Every key to remove, backticked and comma-joined, so
+        /// one message lists all the operator removes.
+        keys: String,
+    },
 }

@@ -327,6 +327,11 @@ sequenceDiagram
   guest-->>op: VM ready
 ```
 
+This is the sequence for a Linux guest. A Windows guest
+(`guest = "windows"`) stops after `create from box`: its Vagrantfile
+carries no provisioner, and bombyx then fails the command with a
+message naming GitHub issue #141.
+
 The order matters in three places. bombyx creates the directory
 first, because the writes redirect into it. `vagrant up` runs
 next, because it reads the Vagrantfile those writes produced. The

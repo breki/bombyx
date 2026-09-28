@@ -4,6 +4,26 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-28-windows-refusal-after-source-rules
+
+**Category:** Correctness
+
+The registry's `parse` refuses a Windows project that names a
+`deploy_key`, an `env_file` or a `repo_token`
+(`ConfigError::WindowsGuestSecret`). `[source]`'s own pairing rules
+run inside `Source::try_from`, while the table parses, which is
+before that check. So a Windows project with `repo_token` alone is
+first told to add `repo_user`, then `env_file` (and, with an ssh
+`repo`, to use an https URL), and only then to remove all of them.
+
+A fix would check `vm.guest` before `[source]` deserializes, for
+example by reading `[source]` into its raw fields for a Windows
+project. Deferred on 2026-09-28: GitHub issue #141 removes the
+Windows refusal, and this detour with it. Found as RT-2 in the
+second red-team round on PR #142.
+
+---
+
 ### rt-2026-09-28-listing-temp-file-loses-a-block
 
 **Category:** Correctness

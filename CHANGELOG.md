@@ -29,7 +29,12 @@ and this project adheres to
 - A `guest` key under `[vm]`, `"linux"` by default. `guest = "windows"` boots a
   Windows guest over vagrant's `winssh` communicator, with a 900 s boot timeout
   and the box's remote desktop forward switched off, but bombyx cannot provision
-  one yet: `up` stops at provisioning with a message naming GitHub issue #141.
+  one yet: `up` and `scratch` boot the VM, and they and `provision` then fail
+  with a message naming GitHub issue #141.
+  A Windows project that names a `deploy_key`, an `env_file` or a `repo_token`,
+  or a key that only works beside one (`repo_user`, the `secrets_refreshed`
+  hook), is refused while the config is read, because nothing would receive
+  them.
 
 ### Changed
 

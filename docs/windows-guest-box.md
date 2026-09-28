@@ -8,7 +8,9 @@ about it.
 The work is tracked in GitHub issue #138, in four parts. #135 chose
 this box. #136 added the `guest = "windows"` key: the Vagrantfile
 boots the guest over `winssh` with the remote desktop forward
-switched off, and provisioning stops with a message. #141 ports
+switched off; `up`, `provision` and `scratch` then fail with a
+message naming #141, and a Windows project may not name secrets.
+#141 ports
 the guest scripts to PowerShell. #137 makes `shell`, the secrets
 refresh and the hook work on a Windows guest. The later parts
 build on the findings below.
@@ -105,8 +107,9 @@ alone.
 
 ## What a run on frosti showed
 
-Run on 2026-09-28 against frosti (vagrant 2.4.9, vagrant-libvirt
-0.12.2), with no bombyx involved. The Vagrantfile was:
+Run on 2026-09-28 against frosti, the project's own Linux libvirt
+VM host (vagrant 2.4.9, vagrant-libvirt 0.12.2), with no bombyx
+involved. The Vagrantfile was:
 
 ```ruby
 Vagrant.configure(2) do |config|
