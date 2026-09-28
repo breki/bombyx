@@ -424,10 +424,10 @@ Keeping the Debian box would mean installing `git` into it and
 repackaging it, which this tutorial does not cover.
 
 The table key is the project name, so nothing inside the table
-repeats it. It is `--project myproject`, given on every command,
-that selects this table: bombyx opens no file in the project's
-directory, and so cannot infer which project you mean from where
-you happen to be standing.
+repeats it. It is the name you give each command, as in
+`bombyx up myproject`, that selects this table: bombyx opens no
+file in the project's directory, and so cannot infer which
+project you mean from where you happen to be standing.
 
 Leave `provider = "libvirt"` as it is. Deleting the line amounts
 to the same thing, since libvirt is what bombyx assumes when the
@@ -629,7 +629,7 @@ From any directory -- bombyx reads nothing out of the project's,
 so where you stand makes no difference:
 
 ```bash
-bombyx --project myproject doctor
+bombyx doctor myproject
 ```
 
 `doctor` changes nothing, and runs every check rather than
@@ -648,7 +648,7 @@ Every bombyx command accepts `--dry-run`, which prints the exact
 shell it would run and touches nothing:
 
 ```console
-$ bombyx --project myproject --dry-run up
+$ bombyx --dry-run up myproject
 ```
 
 `up` amounts to seven `ssh` commands, and bombyx runs nothing on
@@ -662,8 +662,8 @@ project that sets `env_file` or `repo_token` gets an eighth or
 ninth command, staging that file.
 
 **Read the plan; never pipe it into a shell.**
-`bombyx --dry-run up | sh` writes the generated files empty --
-or not at all, depending on the shell -- and can leave
+`bombyx --dry-run up myproject | sh` writes the generated files
+empty -- or not at all, depending on the shell -- and can leave
 `vagrant up` running against an empty Vagrantfile, with a zero
 exit that reads as success. The file sizes the plan reports change
 with almost every release, so run the command to see the figures
@@ -675,13 +675,12 @@ especially so for `destroy`.
 
 ### Boot it
 
-Every command from here on takes `--project myproject`. The
-examples leave it out so that the line under discussion stays
-readable; typed without it, bombyx stops and says the argument is
+As with `doctor`, `up` takes the project name as its first
+argument; typed without it, bombyx stops and says the argument is
 required.
 
 ```bash
-bombyx --project myproject up
+bombyx up myproject
 ```
 
 The first run downloads the box on the host and takes a while;
@@ -691,7 +690,7 @@ provisioners run only on this first `up`, when the VM is created.
 Then get in:
 
 ```bash
-bombyx shell
+bombyx shell myproject
 ```
 
 This is `ssh -t` through to `vagrant ssh` on the host. Vagrant
@@ -715,7 +714,7 @@ made a mess, which is why it must not be overwritten quietly.
 When you do want to move it, ask for it explicitly:
 
 ```bash
-bombyx snapshot
+bombyx snapshot myproject
 ```
 
 This replaces the existing snapshot without asking, and `reset`
@@ -733,16 +732,16 @@ snapshot** covers both.
 Here is the loop you will actually use:
 
 ```bash
-bombyx --project myproject shell   # work in the VM
-bombyx --project myproject down    # halt it when you are done
-bombyx --project myproject up      # boot again, fast, caches warm
-bombyx --project myproject reset   # roll back to the snapshot
+bombyx shell myproject   # work in the VM
+bombyx down myproject    # halt it when you are done
+bombyx up myproject      # boot again, fast, caches warm
+bombyx reset myproject   # roll back to the snapshot
 ```
 
 When you change `.bombyx/provision.sh`, use `provision`, not `up`:
 
 ```bash
-bombyx provision
+bombyx provision myproject
 ```
 
 The reason is that `up` provisions a VM only when it first creates
@@ -757,20 +756,21 @@ For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM rather than your project one:
 
 ```bash
-bombyx scratch pr-1234    # boot a fresh VM under that name
-bombyx discard pr-1234    # destroy it and remove its directory
+bombyx scratch myproject pr-1234  # boot a fresh VM under that name
+bombyx discard myproject pr-1234  # destroy it and remove its directory
 ```
 
-And to remove the project VM entirely, naming it as confirmation:
+And to remove the project VM entirely:
 
 ```bash
 bombyx destroy myproject
 ```
 
 `destroy` prints the resolved `<host>:<directory>` it is about to
-remove; check that target, not the name you typed.
-[usage.md](usage.md) under **destroy and discard** explains why
-the name alone proves little.
+remove, then asks you to type the project name. Check that target
+before you answer: it is the part that tells you which machine
+and which directory are about to go. [usage.md](usage.md) under
+**destroy and discard** covers `--yes`, for a script.
 
 ## When something goes wrong
 
@@ -779,7 +779,7 @@ tool-shaped. It skips the remaining host checks once SSH itself
 fails, rather than making you wait on a dead host for each one:
 
 ```console
-$ bombyx doctor
+$ bombyx doctor myproject
   local   ssh               ok    OpenSSH_for_Windows_9.5p2 3.8.2 in C:\Windo...
   vmhost  ssh               FAIL  ssh: Could not resolve hostname vmhost: No ...
   vmhost  login shell       skip  no ssh
@@ -834,7 +834,7 @@ One habit is worth borrowing. When you check whether a bombyx
 command succeeded, do not pipe it through `tee` or `tail`: a shell
 pipeline reports only its last command's status, so a failed run
 reads as a pass. Redirect to a file instead
-(`bombyx provision > run.log 2>&1`) and print `$?`.
+(`bombyx provision myproject > run.log 2>&1`) and print `$?`.
 
 ## Where to go next
 

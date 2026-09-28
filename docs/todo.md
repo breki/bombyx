@@ -451,3 +451,16 @@ files reaching the VM host are the two that bombyx generates. bombyx generates
 three: the Vagrantfile, bootstrap.sh and account.sh (the diagram above that
 paragraph lists all three). Found while working #125.
 
+### destroy-missing-dir-fails
+
+**Summary:** destroy fails at cd when the project dir was never created
+
+destroy of a project whose VM directory was never created fails: `bombyx destroy
+<p> --yes` against a registered project with no ~/vms/<p> on the host prints
+`sh: cd: can't cd to /home/igor/vms/<p>` and exits 2, where docs/usage.md says
+destroy and discard are re-runnable and leave nothing stranded. With the
+directory present but no VM, it succeeds and removes the directory. Seen on
+frosti (local transport) on 2026-09-28 while verifying #116; the teardown
+commands in plan.rs/remote.rs are untouched by that change, so it predates it.
+Not checked over ssh.
+

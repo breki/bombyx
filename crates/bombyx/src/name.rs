@@ -17,9 +17,10 @@
 //! so the two share their rules by construction rather than by
 //! being kept in step. What differs is where the value comes
 //! from: a scratch name is typed on the command line, and a
-//! project name is a table key in the operator's registry file.
-//! They are separate types so a function taking one cannot be
-//! handed the other. [`ProjectName`] carries the extra impls a
+//! project name arrives from two places, the command line's
+//! first argument and the table keys in the operator's registry
+//! file. They are separate types so a function taking one cannot
+//! be handed the other. [`ProjectName`] carries the extra impls a
 //! map key needs -- serde, ordering, and `Borrow<str>` for
 //! lookups -- and [`ScratchName`] needs none of them.
 
@@ -99,12 +100,11 @@ pub fn check_segment(value: &str) -> Result<(), NameError> {
 /// [`check_segment`]: a single path segment, with no traversal,
 /// no separator, no leading dash, not empty and not over
 /// [`MAX_NAME_LEN`]. It is the key of a `[projects.<name>]`
-/// table in the
-/// operator's registry, and bombyx joins it onto `remote_root`
-/// to build the directory it creates on the VM host with
-/// `mkdir` and deletes with `rm -rf`.
+/// table in the operator's registry, and bombyx joins it onto
+/// `remote_root` to build the directory it creates on the VM host
+/// with `mkdir` and deletes with `rm -rf`.
 ///
-/// The `--project` argument becomes one of these before it
+/// The project argument becomes one of these before it
 /// reaches `crate::config`, and that is why the rule matters
 /// for a name that was merely asked for. Every "no such
 /// project" message tells the operator to add

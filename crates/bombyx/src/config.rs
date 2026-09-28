@@ -45,10 +45,10 @@
 //! **`project` is checked in two places**, because two
 //! different values carry it. The table key in the registry is
 //! a [`ProjectName`], checked as serde builds the map. The
-//! `--project` argument is a plain string the operator typed,
-//! and the binary turns it into a [`ProjectName`] before it
-//! calls anything here -- so a name no table key could hold is
-//! refused before a message can advise writing one.
+//! project argument is a plain string the operator typed, and
+//! clap turns it into a [`ProjectName`] while it parses the
+//! command line -- so a name no table key could hold is refused
+//! before a message can advise writing one.
 //!
 //! So there is no separate function to call. `Config` has
 //! public fields, and a caller assigning to one gets the same
@@ -842,6 +842,17 @@ impl Config {
     #[must_use]
     pub fn remote_project_dir(&self) -> String {
         format!("{}/{}", self.root(), self.project)
+    }
+
+    /// Returns what `destroy` removes, as `<host>:<dir>`, e.g.
+    /// `vmhost:~/vms/myproject`.
+    ///
+    /// The one rendering of that target, so every message naming
+    /// it shows the same text: it is what the operator checks
+    /// before confirming.
+    #[must_use]
+    pub fn destroy_target(&self) -> String {
+        format!("{}:{}", self.host, self.remote_project_dir())
     }
 
     /// Returns the name the guest should answer to.

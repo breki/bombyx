@@ -37,6 +37,17 @@ and this project adheres to
 - `script` now refuses a path that cannot name a file: a final `.` or a trailing
   `/`. `bootstrap.sh` refused both in the guest already, and a final `.` with
   the misleading reason that it points outside the clone.
+- **BREAKING:** Every VM subcommand takes the project as its first positional
+  argument, as in `bombyx up myproject` and `bombyx scratch myproject pr-1234`.
+  The `-p`/`--project` flag is gone and is now a usage error; `list` and
+  `self-update` take no project.
+- **BREAKING:** `destroy` no longer takes the project name a second time. It
+  prints the `<host>:<directory>` it is about to remove, then asks you to type
+  the project name. `--yes` skips the question, and when stdin or stderr is not
+  a terminal `destroy` refuses without it. `--dry-run` asks nothing. So
+  `bombyx --project myproject destroy myproject` becomes `bombyx destroy
+  myproject`, and a script that ran it unattended now needs `--yes`: `bombyx
+  destroy myproject --yes`.
 
 ### Fixed
 

@@ -109,28 +109,28 @@ handle private repositories and secrets --
 `repo_token`, and [docs/trust-boundary.md](docs/trust-boundary.md)
 explains what putting a credential in the VM costs.
 
-Name the project on every command but `list`: `bombyx --project
-myproject up`.
+Every command but `list` and `self-update` takes the project as its
+first argument: `bombyx up myproject`.
 
 ## Use
 
 ```bash
-bombyx doctor             # check the preconditions, change nothing
-bombyx up                 # write the generated files, boot the VM
-bombyx provision          # re-run provisioning in the guest
-bombyx shell              # open a shell inside the VM
-bombyx status             # vagrant status on the host
-bombyx reset              # restore the fresh-install snapshot
-bombyx snapshot           # replace the fresh-install snapshot
-bombyx down               # halt the VM
-bombyx destroy myproject  # destroy the VM and remove its dir
-                          # (every line above takes --project)
+bombyx doctor myproject     # check the preconditions, change nothing
+bombyx up myproject         # write the generated files, boot the VM
+bombyx provision myproject  # re-run provisioning in the guest
+bombyx shell myproject      # open a shell inside the VM
+bombyx status myproject     # vagrant status on the host
+bombyx reset myproject      # restore the fresh-install snapshot
+bombyx snapshot myproject   # replace the fresh-install snapshot
+bombyx down myproject       # halt the VM
+bombyx destroy myproject    # destroy the VM and remove its dir,
+                            # after you type the name to confirm
 
-bombyx scratch pr-1234    # boot a throwaway VM
-bombyx discard pr-1234    # destroy it
+bombyx scratch myproject pr-1234  # boot a throwaway VM
+bombyx discard myproject pr-1234  # destroy it
 
-bombyx list               # every project and its VM state
-bombyx self-update        # update this binary to the newest release
+bombyx list                 # every project and its VM state
+bombyx self-update          # update this binary to the newest release
 ```
 
 bombyx keeps two lifecycles separate on purpose:
@@ -141,8 +141,9 @@ bombyx keeps two lifecycles separate on purpose:
   external PRs -- nothing survives, which is the point.
 
 Every command accepts `--dry-run`, which prints the exact `ssh`
-invocation instead of running it. Run `bombyx doctor` first on a new
-host. [docs/usage.md](docs/usage.md) is the full reference.
+invocation instead of running it. Run `bombyx doctor myproject`
+first on a new host. [docs/usage.md](docs/usage.md) is the full
+reference.
 
 ## Updating
 
@@ -163,7 +164,7 @@ download-and-verify that `self-update` automates.
 ```bash
 cargo xtask validate      # full quality gate
 cargo xtask test [filter] # tests only
-cargo run -p bombyx -- --dry-run up
+cargo run -p bombyx -- --dry-run up myproject
 ```
 
 ```powershell

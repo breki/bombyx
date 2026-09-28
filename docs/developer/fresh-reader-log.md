@@ -6,6 +6,32 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-28-destroy-help-leans-on-undefined-terms
+
+**Category:** Comprehension
+
+The `destroy` subcommand's clap help in
+`crates/bombyx/src/bin/bombyx/main.rs` says it "discards the warm
+caches the persistent lifecycle exists to keep". Both terms are
+defined only in `docs/usage.md`, which a `bombyx destroy --help`
+reader never sees. Plain words would serve: it discards the VM's
+disk and everything installed on it, which is what makes a later
+`up` fast. Logged rather than fixed in the #116 review, because
+editing clap help changes the program's output and the
+comprehension stage does not touch it.
+
+### fr-2026-09-28-flatten-comment-narrates-history
+
+**Category:** Comprehension
+
+The comment above `Cmd::Vm` in `crates/bombyx/src/bin/bombyx/main.rs`
+says the `--help` listing "does change: `self-update` now heads it
+instead of sitting between `destroy` and `scratch`". "Now" compares
+against a listing a newcomer never saw. State the current fact:
+`self-update` and `list` come first because a flattened enum adds
+its subcommands where it is flattened. Deferred from the #116
+review, which did not touch those lines.
+
 ### fr-2026-09-28-gem-versions-point-at-a-check-that-omits-them
 
 **Category:** Comprehension

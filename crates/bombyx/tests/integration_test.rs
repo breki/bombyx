@@ -118,7 +118,7 @@ fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
 /// well, and every test that reaches `Config::load_project`
 /// fails until it is. Reaching the load is the rule, not
 /// building a fixture: `main` returns before it for `--help`,
-/// `--version`, `self-update` and a missing `--project`, so
+/// `--version`, `self-update` and a missing project, so
 /// those stay green with a registry sitting unread beside
 /// them.
 const REQUIRED_TABLES: &str = "\n[vm]\n\
@@ -200,15 +200,13 @@ fn path_with(first: &std::path::Path) -> std::ffi::OsString {
 /// `config.toml`, passing on one machine and failing on the
 /// next.
 ///
-/// `--project` is added here rather than in each test because
-/// every VM subcommand requires it, and every fixture names the
-/// same project. A test about the argument itself builds its own
-/// command.
+/// Every fixture names the same project, `myproject`, and each
+/// test passes it after the subcommand, where a VM subcommand
+/// takes it as its first positional argument.
 fn bombyx_in(dir: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("bombyx").unwrap();
     cmd.current_dir(dir.path());
     cmd.env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME));
-    cmd.args(["--project", "myproject"]);
     cmd
 }
 
@@ -259,7 +257,7 @@ fn no_value_from_the_config_reaches_the_printed_plan() {
             registry("host = \"vmhost.invalid\"\n", "")
         ),
     );
-    let lines = dry_run(&dir, &["--dry-run", "up"]);
+    let lines = dry_run(&dir, &["--dry-run", "up", "myproject"]);
     let plan = lines.join("\n");
     assert!(!plan.contains("hunter2"), "{plan}");
     // And the value really is in the file being sent, so the
@@ -284,7 +282,7 @@ fn shell_probes_the_machine_before_it_opens() {
     // can refuse a missing or stopped VM with one plain line rather
     // than the VM host's `cd` error. The dry run shows that order.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "shell"]);
+    let lines = dry_run(&dir, &["--dry-run", "shell", "myproject"]);
     assert_eq!(programs(&lines), vec!["ssh", "ssh"]);
     assert!(lines[0].contains("vagrant 'status'"), "{}", lines[0]);
     assert!(lines[1].contains("vagrant 'ssh' '-c'"), "{}", lines[1]);
@@ -295,7 +293,7 @@ fn up_makes_the_dir_writes_the_files_then_boots() {
     // Order is the assertion: a `contains` check would pass
     // even if the boot ran before the writes.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "up"]);
+    let lines = dry_run(&dir, &["--dry-run", "up", "myproject"]);
     // `up` probes the machine's state before it acts, so line 0 is
     // the status check and the boot plan follows it. Booting a
     // machine that is already running would rewrite files and stage
@@ -338,7 +336,7 @@ fn snapshot_replaces_the_snapshot_it_finds() {
     // The binary's own view of the on-demand command: `-f`, and
     // one step, so nothing else on the host is touched.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "snapshot"]);
+    let lines = dry_run(&dir, &["--dry-run", "snapshot", "myproject"]);
     assert_eq!(programs(&lines), vec!["ssh"]);
     assert!(
         lines[0].ends_with(&format!(
@@ -357,7 +355,7 @@ fn up_keeps_the_tilde_expandable() {
     // `~`, so the boot would run somewhere the generated
     // Vagrantfile is not.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "up"]);
+    let lines = dry_run(&dir, &["--dry-run", "up", "myproject"]);
     assert!(
         lines.iter().all(|l| !l.contains("'~/")),
         "no path may be quoted with the tilde inside: {lines:?}"
@@ -377,7 +375,7 @@ fn up_over_ssh_runs_nothing_on_the_workstation() {
     // called. Windows never takes the local route anyway, so
     // the drive-letter hazard this covers lives only here.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "up"]);
+    let lines = dry_run(&dir, &["--dry-run", "up", "myproject"]);
     assert!(programs(&lines).iter().all(|p| *p == "ssh"), "{lines:?}");
 }
 
@@ -397,7 +395,7 @@ fn a_config_file_in_the_working_directory_is_not_read() {
             std::fs::write(dir.path().join(name), contents).unwrap();
 
             let out = bombyx_in(&dir)
-                .args(["--dry-run", "status"])
+                .args(["--dry-run", "status", "myproject"])
                 .assert()
                 .success();
             let stdout =
@@ -425,7 +423,7 @@ fn the_user_config_host_reaches_the_ssh_command_in_silence() {
     // Then the line is noise and the rule is false.
     let dir = project_dir();
     let out = bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
@@ -442,7 +440,7 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
     // keeps running the script it cloned when it was created and
     // `up` reports success.
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "provision"]);
+    let lines = dry_run(&dir, &["--dry-run", "provision", "myproject"]);
     assert_eq!(programs(&lines), vec!["ssh"; 5]);
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
@@ -458,7 +456,8 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
 #[test]
 fn scratch_writes_into_a_project_scoped_dir() {
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "scratch", "pr-1234"]);
+    let lines =
+        dry_run(&dir, &["--dry-run", "scratch", "myproject", "pr-1234"]);
     assert_eq!(programs(&lines), vec!["ssh"; 5]);
     assert!(lines[0].contains("mkdir -p ~/'vms/scratch/myproject/pr-1234'"));
     assert!(
@@ -472,35 +471,25 @@ fn scratch_writes_into_a_project_scoped_dir() {
 }
 
 #[test]
-fn destroy_needs_the_project_name_to_confirm() {
-    // A bare `destroy` must refuse, name what to type, and name
-    // the target -- the target is the part the operator can
-    // check, since `project` comes from the same file that
-    // picks the directory.
+fn destroy_off_a_terminal_refuses_without_yes() {
+    // The test's stdin is a pipe, so there is nobody to type the
+    // project name. `destroy` must refuse rather than read the
+    // pipe, say that `--yes` is the way round, and name the
+    // target, which is the part the operator can check.
     let dir = project_dir();
     bombyx_in(&dir)
-        .args(["--dry-run", "destroy"])
+        .args(["destroy", "myproject"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "re-run the same command with \"myproject\"",
-        ));
-}
-
-#[test]
-fn destroy_rejects_a_mismatched_project_name() {
-    let dir = project_dir();
-    bombyx_in(&dir)
-        .args(["--dry-run", "destroy", "not-myproject"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("does not match"));
+        .stderr(predicate::str::contains("--yes"))
+        .stderr(predicate::str::contains("vmhost.invalid:~/vms/myproject"));
 }
 
 #[test]
 fn destroy_wires_the_subcommand_through_to_a_teardown() {
     // The unit tests pin the exact command strings; this checks
-    // the CLI reaches them and prints the resolved target.
+    // the CLI reaches them and prints the resolved target. A dry
+    // run destroys nothing, so it asks for no confirmation.
     let dir = project_dir();
     let out = bombyx_in(&dir)
         .args(["--dry-run", "destroy", "myproject"])
@@ -510,11 +499,14 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
     assert_eq!(stdout.lines().count(), 2, "{stdout:?}");
     assert!(stdout.contains("rm -rf ~/'vms/myproject'"));
-    // The target the operator can check against reality.
+    // The target the operator can check against reality, in the
+    // conditional: a dry run destroys nothing, so it must not say
+    // it is destroying.
     assert!(
-        stderr.contains("vmhost.invalid:~/vms/myproject"),
+        stderr.contains("would destroy vmhost.invalid:~/vms/myproject"),
         "must name the target: {stderr:?}"
     );
+    assert!(!stderr.contains("destroying"), "{stderr:?}");
 }
 
 /// `doctor` run for real, not as a dry run.
@@ -555,7 +547,7 @@ fn doctor_fails_and_says_which_check_failed() {
     if let Some(stub) = &stub {
         cmd.env("PATH", path_with(stub));
     }
-    let out = cmd.args(["doctor"]).assert().failure();
+    let out = cmd.args(["doctor", "myproject"]).assert().failure();
     let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
 
     // Exactly one check failed, and it is the host one. The
@@ -593,7 +585,7 @@ fn doctor_fails_and_says_which_check_failed() {
 #[test]
 fn doctor_dry_run_lists_read_only_probes() {
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "doctor"]);
+    let lines = dry_run(&dir, &["--dry-run", "doctor", "myproject"]);
     // One line per probe, and every probe accounted for. An
     // embedded newline in a script would split the dry run and,
     // worse, could smuggle a second command past a reader.
@@ -635,7 +627,7 @@ fn doctor_dry_run_prints_exactly_the_commands_a_live_run_sends() {
     // runner would not use. Compared against the library's own
     // rendering of `host_probes`, through the real CLI.
     let dir = project_dir();
-    let printed = dry_run(&dir, &["--dry-run", "doctor"]);
+    let printed = dry_run(&dir, &["--dry-run", "doctor", "myproject"]);
     let cfg_dir = TempDir::new().unwrap();
     let cfg = load_cfg(cfg_dir.path());
     let expected: Vec<String> =
@@ -655,7 +647,7 @@ fn a_dangerous_remote_root_is_refused_at_load() {
     for root in ["~/..", "/.", "~/.", "/", "~", "vms"] {
         let dir = project_dir_with(&format!("remote_root = {root:?}\n"));
         bombyx_in(&dir)
-            .args(["--dry-run", "up"])
+            .args(["--dry-run", "up", "myproject"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("remote_root"));
@@ -671,7 +663,7 @@ fn scratch_rejects_a_traversing_name() {
     // hands to `rm -rf`.
     let dir = project_dir();
     bombyx_in(&dir)
-        .args(["--dry-run", "scratch", "../../../../etc"])
+        .args(["--dry-run", "scratch", "myproject", "../../../../etc"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid VM name"));
@@ -683,7 +675,7 @@ fn discard_rejects_a_traversing_name() {
     // recoverable.
     let dir = project_dir();
     bombyx_in(&dir)
-        .args(["--dry-run", "discard", ".."])
+        .args(["--dry-run", "discard", "myproject", ".."])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid VM name"));
@@ -693,7 +685,7 @@ fn discard_rejects_a_traversing_name() {
 fn scratch_rejects_an_empty_name() {
     let dir = project_dir();
     bombyx_in(&dir)
-        .args(["--dry-run", "scratch", ""])
+        .args(["--dry-run", "scratch", "myproject", ""])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid VM name"));
@@ -712,7 +704,7 @@ fn a_host_cannot_smuggle_an_ssh_option() {
         &registry("host = \"-oProxyCommand=curl evil\"\n", ""),
     );
     let out = bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .failure();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
@@ -744,7 +736,7 @@ fn the_sample_config_loads_as_shipped() {
     write_user_config(&dir, sample);
 
     bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .success()
         .stdout(predicate::str::contains("vagrant 'status'"));
@@ -757,7 +749,7 @@ fn a_typo_in_the_config_is_reported() {
     // whether or not `deny_unknown_fields` were set.
     let dir = project_dir_with("remote_rot = \"x\"\n");
     bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("remote_rot"));
@@ -772,7 +764,7 @@ fn no_host_anywhere_says_to_add_one() {
     std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
     write_user_config(&dir, &registry("", ""));
     bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("no VM host configured"))
@@ -788,7 +780,7 @@ fn an_entrys_own_host_wins_and_the_notice_names_the_entry() {
     // operator to work out which line is in force.
     let dir = project_dir_with("host = \"from-entry.invalid\"\n");
     let out = bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .success()
         .stderr(predicate::str::contains(
@@ -819,7 +811,7 @@ fn the_notice_names_the_file_the_host_really_came_from() {
     let out = bombyx_in(&dir)
         .args(["--dry-run", "--config"])
         .arg(&elsewhere)
-        .arg("status")
+        .args(["status", "myproject"])
         .assert()
         .success();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
@@ -832,44 +824,45 @@ fn the_notice_names_the_file_the_host_really_came_from() {
 
 #[test]
 fn a_vm_command_without_a_project_is_refused() {
-    // clap cannot mark a global argument required for some
-    // subcommands and not others, so `main` states the
-    // requirement itself. The message has to name the table,
-    // because an operator who has never passed the argument does
-    // not know what a project name is here.
+    // clap owns the requirement: a missing project is a usage
+    // error that names the argument, before any config is read.
     let dir = project_dir();
-    Command::cargo_bin("bombyx")
-        .unwrap()
-        .current_dir(dir.path())
-        .env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME))
+    bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("--project is required"));
+        .code(2)
+        .stderr(predicate::str::contains("PROJECT"));
+}
+
+#[test]
+fn the_old_project_flag_is_refused() {
+    // Dropped outright rather than kept as an alias, so a script
+    // still spelling it fails loudly instead of acting on a
+    // project it no longer names.
+    let dir = project_dir();
+    bombyx_in(&dir)
+        .args(["--project", "myproject", "--dry-run", "status"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--project"));
 }
 
 #[test]
 fn a_malformed_project_name_does_not_blame_the_registry() {
-    // The name came from `--project`, and the registry cannot
-    // carry a bad one: a table key is a `ProjectName`, refused
-    // while the file parses. So naming the file here would send
-    // the operator to edit the one place the value is not. The
-    // context line names the argument and the `NameError` under
-    // it quotes the value, so between them the operator learns
-    // what to retype without the name appearing twice.
-    // Its own command, not `bombyx_in`: that helper appends
-    // `--project myproject`, so this would be asserting about a
-    // second occurrence and clap's last-one-wins.
+    // The name came from the command line, and the registry
+    // cannot carry a bad one: a table key is a `ProjectName`,
+    // refused while the file parses. So naming the file here
+    // would send the operator to edit the one place the value is
+    // not. clap names the argument and the `NameError` quotes
+    // the value, so between them the operator learns what to
+    // retype.
     let dir = project_dir();
-    let out = Command::cargo_bin("bombyx")
-        .unwrap()
-        .current_dir(dir.path())
-        .env(CONFIG_DIR_ENV, dir.path().join(CONFIG_HOME))
-        .args(["--project", "../etc", "--dry-run", "status"])
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "status", "../etc"])
         .assert()
-        .failure();
+        .code(2);
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(stderr.contains("invalid --project value"), "{stderr}");
+    assert!(stderr.contains("PROJECT"), "{stderr}");
     assert!(stderr.contains("got \"../etc\""), "{stderr}");
     assert!(!stderr.contains(USER_CONFIG_FILE), "{stderr}");
 }
@@ -905,7 +898,7 @@ fn the_config_flag_names_the_registry_file() {
     let out = bombyx_in(&dir)
         .args(["--dry-run", "--config"])
         .arg(&elsewhere)
-        .arg("status")
+        .args(["status", "myproject"])
         .assert()
         .success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
@@ -915,7 +908,7 @@ fn the_config_flag_names_the_registry_file() {
 #[test]
 fn status_sends_exactly_one_command() {
     let dir = project_dir();
-    let lines = dry_run(&dir, &["--dry-run", "status"]);
+    let lines = dry_run(&dir, &["--dry-run", "status", "myproject"]);
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("vagrant 'status'"));
 }
@@ -928,7 +921,7 @@ fn a_missing_registry_says_what_to_create() {
     let dir = TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
     bombyx_in(&dir)
-        .args(["--dry-run", "status"])
+        .args(["--dry-run", "status", "myproject"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("no registry file"))
