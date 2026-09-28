@@ -68,8 +68,10 @@ use.
   stops working. The one VM built here reported the full 10 days
   although the box was built earlier, so the grace seems to start at
   first boot, and `destroy` then `up` should start it again; a
-  second VM was not built to confirm that. #136 holds the decision
-  on who activates.
+  second VM was not built to confirm that. bombyx will not activate
+  the guest itself, because activating contacts Microsoft: #141
+  records the decision that the operator activates, with bombyx
+  warning at `up`.
 - **After activation** it runs 180 days, and a Server evaluation can
   be converted to a licensed edition with a product key.
 - **For routine use** the guest needs a licence of its own: a
