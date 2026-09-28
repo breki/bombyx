@@ -163,13 +163,6 @@ it costs a full multi-gate run each time the hint is skipped. A
 the restart, and the step names already exist in `validate.rs`'s
 step list. Raised by the workflow retrospective, 2026-09-03.
 
-### destroy-confirmation-shape
-
-**Summary:** what destroy's positional becomes
-
-Step 7 of 7; GitHub issue #27. Depends on project-selection-flag. One design
-question, undecided.
-
 ### config-tests-own-file
 
 **Summary:** config.rs and registry.rs tests into their own files
