@@ -26,6 +26,7 @@ its first argument, which picks a `[projects.<name>]` table in
 your own `config.toml`:
 
 ```bash
+bombyx doctor myproject     # check the preconditions, change nothing
 bombyx up myproject         # write the generated files, boot the VM
 bombyx provision myproject  # re-run provisioning in the guest
 bombyx shell myproject      # open a shell inside the VM
@@ -33,6 +34,8 @@ bombyx status myproject     # vagrant status on the host
 bombyx reset myproject      # restore the fresh-install snapshot
 bombyx snapshot myproject   # replace the fresh-install snapshot
 bombyx down myproject       # halt the VM
+bombyx destroy myproject    # destroy the VM and remove its dir,
+                            # after you type the name to confirm
 
 bombyx scratch myproject pr-1234  # boot a throwaway VM
 bombyx discard myproject pr-1234  # destroy it

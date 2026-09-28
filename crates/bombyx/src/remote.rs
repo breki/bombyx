@@ -758,13 +758,17 @@ fn status_fragment(cfg: &Config) -> String {
 /// the format string, so a `%` or `'` in the name cannot be read as
 /// a conversion or end the string early -- the reason
 /// `status_fragment` does the same.
+///
+/// It names the verb to run, not a whole command line, for the
+/// reason `listing::shell_refusal` gives: a reconstructed command
+/// drops `--config` and every other argument the operator gave.
 #[must_use]
 pub fn status_or_never_built(cfg: &Config, tty: Tty) -> RemoteCommand {
     let dir = cfg.remote_project_dir();
     let script = format!(
         "if [ -f {vagrantfile} ]; then {run}; \
-         else printf 'bombyx: %s has no VM yet; run bombyx up to \
-         create it\\n' {name}; fi",
+         else printf 'bombyx: %s has no VM yet; run `up` to create \
+         it\\n' {name}; fi",
         vagrantfile = quote_remote_path(&format!("{dir}/Vagrantfile")),
         run = vagrant_script(cfg, &dir, &["status"]),
         name = shell_quote(cfg.project.as_str()),
@@ -2970,8 +2974,8 @@ fi
             format!(
                 "if [ -f ~/'vms/myproject/Vagrantfile' ]; then \
                  cd ~/'vms/myproject' && {env} vagrant 'status'; \
-                 else printf 'bombyx: %s has no VM yet; run bombyx up \
-                 to create it\\n' 'myproject'; fi"
+                 else printf 'bombyx: %s has no VM yet; run `up` to \
+                 create it\\n' 'myproject'; fi"
             )
         );
     }

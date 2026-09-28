@@ -20,6 +20,7 @@
 //! point the config loader at a file of the caller's choosing.
 
 pub mod config;
+pub mod confirm;
 pub mod doctor;
 pub mod hostkeys;
 pub mod listing;

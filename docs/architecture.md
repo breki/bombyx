@@ -74,8 +74,7 @@ a guest that already exists, they pass through the VM host on a
 pipe and are not stored there at all. The workstation reads only
 `config.toml`, which is why each command names the project
 instead of inferring it from the working directory.
-`docs/trust-boundary.md`
-explains the reasoning.
+`docs/trust-boundary.md` explains the reasoning.
 
 ## Library modules
 
@@ -92,6 +91,9 @@ flowchart TD
   main --> listing
   main --> term
   main --> tool
+  main --> confirm
+
+  confirm --> name
 
   plan --> vagrantfile
   plan --> doctor
@@ -133,7 +135,8 @@ probe commands, and `doctor` reads their output. `listing` reuses
 | `doctor` | preconditions, and what a result means |
 | `listing` | grouping by host, reading a reply, the `list` table |
 | `update` | `self-update`: download, verify, swap |
-| `name` | scratch-VM names and path segments |
+| `confirm` | whether `destroy` may go ahead, and the question it asks |
+| `name` | project and scratch-VM names, and path segments |
 | `term` | text reaching the terminal: endings, sanitizing, clipping |
 | `tool` | resolving a program, never via the working directory |
 | `run` | resolving programs, starting commands, feeding them input |

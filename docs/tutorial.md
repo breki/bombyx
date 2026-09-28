@@ -663,8 +663,7 @@ ninth command, staging that file.
 
 **Read the plan; never pipe it into a shell.**
 `bombyx --dry-run up myproject | sh` writes the generated files
-empty --
-or not at all, depending on the shell -- and can leave
+empty -- or not at all, depending on the shell -- and can leave
 `vagrant up` running against an empty Vagrantfile, with a zero
 exit that reads as success. The file sizes the plan reports change
 with almost every release, so run the command to see the figures
@@ -676,7 +675,7 @@ especially so for `destroy`.
 
 ### Boot it
 
-Every command from here on takes the project name as its first
+As with `doctor`, `up` takes the project name as its first
 argument; typed without it, bombyx stops and says the argument is
 required.
 

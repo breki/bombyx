@@ -272,12 +272,13 @@ print it at all.
 
 ## Checking that it worked
 
-The quickest check is `bombyx doctor <name>`, run from
-anywhere -- bombyx reads nothing out of a project's own
-directory. It probes every precondition in this page's first
-table plus the Vagrant provider plugin, changes nothing on the
-host, and names each failure without offering a remedy — the
-remedies are here:
+The quickest check is `bombyx doctor <name>`, where `<name>` is a
+project from your `config.toml` -- the `<name>` in
+`[projects.<name>]`. Run it from anywhere, since bombyx reads
+nothing out of a project's own directory. It probes every
+precondition in this page's first table plus the Vagrant provider
+plugin, changes nothing on the host, and names each failure
+without offering a remedy — the remedies are here:
 
 ```console
 $ bombyx doctor <name>

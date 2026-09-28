@@ -147,7 +147,12 @@ impl VmState {
 /// directory (such as `~/vms/<project>`) fails, because `up`
 /// never made it. For a stopped or destroyed VM, vagrant prints
 /// its own message. So this returns one line naming the project,
-/// the host and the command that fixes it.
+/// the host and the verb that fixes it, `up`.
+///
+/// The line names the verb, not a whole command line. A
+/// reconstructed command drops every other argument the operator
+/// gave -- `--config` above all, which would send the re-run at a
+/// different registry.
 ///
 /// A running machine opens. So does a state bombyx could not
 /// establish, because the probe failing does not prove the VM is
@@ -167,8 +172,7 @@ pub fn shell_refusal(cfg: &Config, state: Option<&VmState>) -> Option<String> {
     let project = cfg.project.as_str();
     let refuse = |what: &str| {
         Some(format!(
-            "bombyx: {project} {what} on {}; run `bombyx up {project}` \
-             first",
+            "bombyx: {project} {what} on {}; run `up` first",
             cfg.host.as_str()
         ))
     };
@@ -1233,7 +1237,7 @@ mod tests {
                 shell_refusal(&c, Some(&absent)).as_deref(),
                 Some(
                     "bombyx: vmtest has no VM on fusion-wsl; \
-                     run `bombyx up vmtest` first"
+                     run `up` first"
                 ),
                 "{absent:?}"
             );
@@ -1250,7 +1254,7 @@ mod tests {
                 Some(
                     format!(
                         "bombyx: vmtest is not running ({word}) on \
-                         fusion-wsl; run `bombyx up vmtest` first"
+                         fusion-wsl; run `up` first"
                     )
                     .as_str()
                 ),

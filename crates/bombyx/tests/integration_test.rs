@@ -499,11 +499,14 @@ fn destroy_wires_the_subcommand_through_to_a_teardown() {
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
     assert_eq!(stdout.lines().count(), 2, "{stdout:?}");
     assert!(stdout.contains("rm -rf ~/'vms/myproject'"));
-    // The target the operator can check against reality.
+    // The target the operator can check against reality, in the
+    // conditional: a dry run destroys nothing, so it must not say
+    // it is destroying.
     assert!(
-        stderr.contains("vmhost.invalid:~/vms/myproject"),
+        stderr.contains("would destroy vmhost.invalid:~/vms/myproject"),
         "must name the target: {stderr:?}"
     );
+    assert!(!stderr.contains("destroying"), "{stderr:?}");
 }
 
 /// `doctor` run for real, not as a dry run.
@@ -827,8 +830,8 @@ fn a_vm_command_without_a_project_is_refused() {
     bombyx_in(&dir)
         .args(["--dry-run", "status"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("<PROJECT>"));
+        .code(2)
+        .stderr(predicate::str::contains("PROJECT"));
 }
 
 #[test]
@@ -840,8 +843,8 @@ fn the_old_project_flag_is_refused() {
     bombyx_in(&dir)
         .args(["--project", "myproject", "--dry-run", "status"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("unexpected argument '--project'"));
+        .code(2)
+        .stderr(predicate::str::contains("--project"));
 }
 
 #[test]
@@ -857,9 +860,9 @@ fn a_malformed_project_name_does_not_blame_the_registry() {
     let out = bombyx_in(&dir)
         .args(["--dry-run", "status", "../etc"])
         .assert()
-        .failure();
+        .code(2);
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(stderr.contains("<PROJECT>"), "{stderr}");
+    assert!(stderr.contains("PROJECT"), "{stderr}");
     assert!(stderr.contains("got \"../etc\""), "{stderr}");
     assert!(!stderr.contains(USER_CONFIG_FILE), "{stderr}");
 }

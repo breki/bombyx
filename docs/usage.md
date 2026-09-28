@@ -267,9 +267,12 @@ directory your config resolved to. A name that does not match, or
 no answer at all, refuses and destroys nothing.
 
 `--yes` skips the question. `destroy` needs it wherever nobody can
-answer, because when stdin is not a terminal -- a script, a pipe
--- it refuses rather than reading the name from there. A
-`--dry-run` asks nothing, since it destroys nothing.
+answer, because it asks only when both stdin and stderr are
+terminals. Under cron, in CI, from a pipe, or with stderr
+redirected to a file, it refuses rather than asking a question
+you cannot see or reading the answer from somewhere else. A
+script started from a terminal inherits that terminal, so it
+still asks. A `--dry-run` asks nothing, since it destroys nothing.
 
 `discard` does the same for a scratch VM. Both remove the VM's
 directory after destroying the VM, and both are re-runnable, so an
@@ -306,9 +309,9 @@ things to know:
 
 ## doctor
 
-Run `bombyx doctor` first on a new host. It changes nothing, runs
-every check rather than stopping at the first failure, and exits
-non-zero if any fails:
+Run `bombyx doctor myproject` first on a new host. It changes
+nothing, runs every check rather than stopping at the first
+failure, and exits non-zero if any fails:
 
 ```console
 $ bombyx doctor myproject
@@ -328,7 +331,8 @@ failure.
 
 **Changing `provider` on a project that already has a VM does
 nothing until you destroy it** -- vagrant records the provider it
-built the machine with. Run `bombyx destroy`, then `bombyx up`.
+built the machine with. Run `bombyx destroy myproject`, then
+`bombyx up myproject`.
 
 On a machine that is its own VM host, `doctor` checks `sh` rather
 than `ssh`; [local-host.md](local-host.md) covers that route.
@@ -339,15 +343,16 @@ Every command takes `--dry-run`, which prints the exact shell it
 would run and touches nothing:
 
 ```bash
-bombyx --dry-run up
+bombyx --dry-run up myproject
 ```
 
 It is worth using whenever you are unsure what a command is about
 to do, `destroy` above all. The plan is for reading, and for
 pasting one line at a time.
 
-**Do not pipe the plan into a shell.** `bombyx --dry-run up | sh`
-writes the generated files empty, or not at all depending on
-the shell, and can leave `vagrant up` running against an empty
-Vagrantfile with a zero exit that reads as success. To run the
-commands, run bombyx without `--dry-run`.
+**Do not pipe the plan into a shell.**
+`bombyx --dry-run up myproject | sh` writes the generated files
+empty, or not at all depending on the shell, and can leave
+`vagrant up` running against an empty Vagrantfile with a zero
+exit that reads as success. To run the commands, run bombyx
+without `--dry-run`.

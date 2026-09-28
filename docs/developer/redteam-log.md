@@ -4,6 +4,27 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-28-guest-advice-names-no-project
+
+**Category:** Correctness
+
+Five messages bombyx prints still spell a whole command line with
+no project, such as `bombyx provision`, which is a usage error now
+that every VM command takes the project as its first argument:
+three in `remote.rs` (the two `run bombyx provision.` refresh
+scripts and the `run bombyx provision, or bombyx destroy then
+bombyx up` message), and the two `run bombyx destroy, then bombyx
+up.` refusals in `templates/account.sh`. None ever named
+`--project` either. Most run in a
+guest shell script, so naming the project means passing it into
+that script safely, and the change alters files bombyx writes onto
+the VM host, which wants a real run. Deferred from the #116
+review, which fixed the host-side `status` message beside it.
+Two constraints on the fix: name the verb and not a whole command
+line, as `listing::shell_refusal` explains, and use no backticks
+in the messages inside a double-quoted `echo`, where they would
+run as a command substitution.
+
 ### rt-2026-09-28-up-run-sequence-untested
 
 **Category:** Correctness

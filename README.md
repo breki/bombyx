@@ -130,7 +130,7 @@ bombyx scratch myproject pr-1234  # boot a throwaway VM
 bombyx discard myproject pr-1234  # destroy it
 
 bombyx list                 # every project and its VM state
-bombyx self-update        # update this binary to the newest release
+bombyx self-update          # update this binary to the newest release
 ```
 
 bombyx keeps two lifecycles separate on purpose:
@@ -141,8 +141,9 @@ bombyx keeps two lifecycles separate on purpose:
   external PRs -- nothing survives, which is the point.
 
 Every command accepts `--dry-run`, which prints the exact `ssh`
-invocation instead of running it. Run `bombyx doctor` first on a new
-host. [docs/usage.md](docs/usage.md) is the full reference.
+invocation instead of running it. Run `bombyx doctor myproject`
+first on a new host. [docs/usage.md](docs/usage.md) is the full
+reference.
 
 ## Updating
 
@@ -163,7 +164,7 @@ download-and-verify that `self-update` automates.
 ```bash
 cargo xtask validate      # full quality gate
 cargo xtask test [filter] # tests only
-cargo run -p bombyx -- --dry-run up
+cargo run -p bombyx -- --dry-run up myproject
 ```
 
 ```powershell

@@ -17,12 +17,13 @@
 //! post-extraction re-check in `update::asset::confirm_unchanged`,
 //! because both are decisions and neither needs a process.
 
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
 use bombyx::config::{Config, HostOrigin, Staged, Transport};
+use bombyx::confirm::{Consent, DestroyFlags, Terminals, confirm_destroy};
 use bombyx::doctor::{
     self, Finding, HostProbe, Outcome, ProbeResult, Report, VersionAnswer,
 };
@@ -190,9 +191,11 @@ enum VmCmd {
         project: ProjectArg,
         /// Destroy without asking for the project name
         ///
-        /// Needed where nobody can answer the question: when
-        /// stdin is not a terminal, as in a script, `destroy`
-        /// refuses without it.
+        /// Needed where nobody can answer the question: when stdin
+        /// or stderr is not a terminal, as under cron, in CI, from
+        /// a pipe or with stderr redirected to a file, `destroy`
+        /// refuses without it. A script started from a terminal
+        /// still asks.
         #[arg(long)]
         yes: bool,
     },
@@ -376,7 +379,7 @@ fn run() -> Result<Ran> {
     // Required and checked by clap, so it is a `ProjectName` by
     // now. `Config::load_project` takes the checked value and
     // cannot be reached with anything else.
-    let project = vm.project().clone();
+    let project = vm.project();
 
     // `Config::load_project` takes a path, so the machine whose
     // environment names no config directory is answered here,
@@ -384,14 +387,14 @@ fn run() -> Result<Ran> {
     // in the library beside the message for a registry file
     // that is simply absent.
     let registry =
-        registry.ok_or_else(|| Config::no_config_directory(&project))?;
+        registry.ok_or_else(|| Config::no_config_directory(project))?;
 
     // No arm names the registry file here. Every error that
     // could want one names it already: a value breaking its
     // type's rule is refused by serde and arrives as
     // `ConfigError::Parse`, which carries the path and the
     // line.
-    let (cfg, host_origin) = Config::load_project(&project, &registry)?;
+    let (cfg, host_origin) = Config::load_project(project, &registry)?;
 
     // Say which source the host came from, using the winner
     // the library reports rather than re-testing the sources
@@ -450,12 +453,19 @@ fn run() -> Result<Ran> {
 
     let action = action_of(&vm)?;
     if let VmCmd::Destroy { yes, .. } = vm {
-        let target = format!("{}:{}", cfg.host, cfg.remote_project_dir());
         let stdin = std::io::stdin();
-        let consent = Consent::of(yes, cli.dry_run, stdin.is_terminal());
+        let flags = DestroyFlags {
+            yes,
+            dry_run: cli.dry_run,
+        };
+        let terminals = Terminals {
+            stdin: stdin.is_terminal(),
+            stderr: std::io::stderr().is_terminal(),
+        };
+        let consent = Consent::of(flags, terminals);
         confirm_destroy(
-            cfg.project.as_str(),
-            &target,
+            &cfg.project,
+            &cfg.destroy_target(),
             consent,
             &mut stdin.lock(),
             &mut std::io::stderr(),
@@ -803,90 +813,6 @@ fn action_of(cmd: &VmCmd) -> Result<Action> {
 
 fn vm_name(raw: &str) -> Result<ScratchName> {
     ScratchName::parse(raw).with_context(|| format!("invalid VM name {raw:?}"))
-}
-
-/// How `destroy` gets the operator's go-ahead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Consent {
-    /// `--yes`, or a dry run, which destroys nothing: there is
-    /// nothing to ask.
-    Given,
-    /// stdin is a terminal, so somebody can type the project name.
-    Ask,
-    /// Nobody can answer and `--yes` was not passed.
-    Refused,
-}
-
-impl Consent {
-    /// The consent a `destroy` run has, from its flags and from
-    /// whether stdin is a terminal.
-    ///
-    /// A pipe is refused rather than read. A script that pipes
-    /// the project name in has typed it into the script, which is
-    /// what `--yes` says in plain words, and a pipe that happens to
-    /// carry the right text is not an operator who read the
-    /// target.
-    fn of(yes: bool, dry_run: bool, interactive: bool) -> Self {
-        if yes || dry_run {
-            Self::Given
-        } else if interactive {
-            Self::Ask
-        } else {
-            Self::Refused
-        }
-    }
-}
-
-/// Prints the `<host>:<dir>` about to be destroyed and, when
-/// `consent` says to, asks for `project` to be typed back.
-///
-/// The target is the part worth reading. The project name came
-/// from the command line a moment earlier, so typing it again
-/// proves little on its own; what the operator can check against
-/// reality is which machine and which directory the config
-/// resolved to, and the prompt shows that before it asks.
-///
-/// `input` and `out` are stdin and stderr in a real run, and a
-/// test hands in its own.
-fn confirm_destroy(
-    project: &str,
-    target: &str,
-    consent: Consent,
-    input: &mut dyn BufRead,
-    out: &mut dyn Write,
-) -> Result<()> {
-    match consent {
-        Consent::Given => {}
-        Consent::Refused => bail!(
-            "destroy asks you to type the project name, and stdin \
-             is not a terminal: pass --yes to destroy {target} \
-             without asking"
-        ),
-        Consent::Ask => {
-            write!(
-                out,
-                "bombyx: this destroys {target}\n\
-                 type the project name to confirm: "
-            )?;
-            out.flush()?;
-            let mut answer = String::new();
-            if input.read_line(&mut answer)? == 0 {
-                bail!("no answer; refusing to destroy {target}");
-            }
-            // `trim`, so a line ending of `\r\n` from a Windows
-            // console compares equal.
-            let answer = answer.trim();
-            if answer != project {
-                bail!(
-                    "{answer:?} does not match the project being \
-                     destroyed ({project:?}); refusing to destroy \
-                     {target}"
-                );
-            }
-        }
-    }
-    writeln!(out, "bombyx: destroying {target}")?;
-    Ok(())
 }
 
 /// What running a command list came to.
@@ -1440,102 +1366,4 @@ fn local_tool(name: &str, version_arg: Option<&str>) -> Finding {
 fn exit_status_byte(status: ExitStatus) -> u8 {
     let code = status.code().unwrap_or(1);
     u8::try_from(code).unwrap_or(1)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Consent, confirm_destroy};
-
-    const TARGET: &str = "vmhost:~/vms/myproject";
-
-    /// Runs the prompt with `typed` as stdin and returns the result
-    /// with everything written to stderr.
-    fn ask(typed: &str) -> (anyhow::Result<()>, String) {
-        let mut out = Vec::new();
-        let result = confirm_destroy(
-            "myproject",
-            TARGET,
-            Consent::Ask,
-            &mut typed.as_bytes(),
-            &mut out,
-        );
-        (result, String::from_utf8(out).unwrap())
-    }
-
-    #[test]
-    fn yes_or_a_dry_run_gives_consent_and_a_terminal_asks() {
-        for (yes, dry_run, interactive) in [
-            (true, false, false),
-            (false, true, false),
-            (true, true, true),
-        ] {
-            assert_eq!(
-                Consent::of(yes, dry_run, interactive),
-                Consent::Given,
-                "yes={yes} dry_run={dry_run} interactive={interactive}"
-            );
-        }
-        assert_eq!(Consent::of(false, false, true), Consent::Ask);
-        assert_eq!(Consent::of(false, false, false), Consent::Refused);
-    }
-
-    #[test]
-    fn the_prompt_shows_the_target_before_it_asks() {
-        let (result, out) = ask("myproject\n");
-        result.unwrap();
-        let asked = out.find("type the project name").unwrap();
-        assert!(out[..asked].contains(TARGET), "{out}");
-        assert!(out.ends_with(&format!("destroying {TARGET}\n")), "{out}");
-    }
-
-    #[test]
-    fn a_windows_line_ending_still_matches() {
-        ask("myproject\r\n").0.unwrap();
-    }
-
-    #[test]
-    fn a_wrong_name_refuses_and_names_the_target() {
-        let (result, out) = ask("other\n");
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("does not match"), "{err}");
-        assert!(err.contains(TARGET), "{err}");
-        assert!(!out.contains("destroying"), "{out}");
-    }
-
-    #[test]
-    fn no_answer_refuses() {
-        let err = ask("").0.unwrap_err().to_string();
-        assert!(err.contains("no answer"), "{err}");
-    }
-
-    #[test]
-    fn refused_consent_says_to_pass_yes_and_reads_nothing() {
-        let mut out = Vec::new();
-        let err = confirm_destroy(
-            "myproject",
-            TARGET,
-            Consent::Refused,
-            &mut "myproject\n".as_bytes(),
-            &mut out,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("--yes") && err.contains(TARGET), "{err}");
-        assert!(out.is_empty(), "nothing is printed or asked: {out:?}");
-    }
-
-    #[test]
-    fn given_consent_asks_nothing_and_names_the_target() {
-        let mut out = Vec::new();
-        confirm_destroy(
-            "myproject",
-            TARGET,
-            Consent::Given,
-            &mut "".as_bytes(),
-            &mut out,
-        )
-        .unwrap();
-        let out = String::from_utf8(out).unwrap();
-        assert_eq!(out, format!("bombyx: destroying {TARGET}\n"));
-    }
 }

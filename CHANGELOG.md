@@ -43,8 +43,11 @@ and this project adheres to
   `self-update` take no project.
 - **BREAKING:** `destroy` no longer takes the project name a second time. It
   prints the `<host>:<directory>` it is about to remove, then asks you to type
-  the project name. `--yes` skips the question, and when stdin is not a terminal
-  `destroy` refuses without it. `--dry-run` asks nothing.
+  the project name. `--yes` skips the question, and when stdin or stderr is not
+  a terminal `destroy` refuses without it. `--dry-run` asks nothing. So
+  `bombyx --project myproject destroy myproject` becomes `bombyx destroy
+  myproject`, and a script that ran it unattended now needs `--yes`: `bombyx
+  destroy myproject --yes`.
 
 ### Fixed
 

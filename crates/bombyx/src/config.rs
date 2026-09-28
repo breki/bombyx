@@ -844,6 +844,17 @@ impl Config {
         format!("{}/{}", self.root(), self.project)
     }
 
+    /// Returns what `destroy` removes, as `<host>:<dir>`, e.g.
+    /// `vmhost:~/vms/myproject`.
+    ///
+    /// The one rendering of that target, so every message naming
+    /// it shows the same text: it is what the operator checks
+    /// before confirming.
+    #[must_use]
+    pub fn destroy_target(&self) -> String {
+        format!("{}:{}", self.host, self.remote_project_dir())
+    }
+
     /// Returns the name the guest should answer to.
     ///
     /// The project's own `[vm]` `hostname` when it sets one, and
