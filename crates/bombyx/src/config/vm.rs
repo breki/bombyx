@@ -115,7 +115,10 @@ impl fmt::Display for Provider {
 /// a Windows project that names a `deploy_key`, an `env_file` or a
 /// `repo_token`, or a key that only works beside one (`repo_user`,
 /// the `secrets_refreshed` hook). It also refuses a `script` that is
-/// not a `.ps1` file and a `guest_user` Windows cannot hold.
+/// not a `.ps1` file, a `guest_user` Windows cannot hold, and an
+/// `[env]` name that, compared without regard to case as Windows
+/// compares, is bombyx's own or changes what its guest scripts do,
+/// or differs only in case from another `[env]` name.
 /// `docs/windows-guest-box.md` records the box the recipe in
 /// `boxes/windows-server-2025/` builds for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -275,14 +278,13 @@ pub struct Vm {
 
     /// The account the agent works as inside the guest.
     ///
-    /// `agent` when the key is absent. The Vagrantfile's
-    /// privileged provisioner creates the account and hands the
-    /// clone, the project's script and `bombyx shell` to it, so
-    /// the agent never works as `vagrant`, the account Vagrant
-    /// itself logs in with. A [`GuestUser`], so the name rules
-    /// have run against whatever is in here. A Windows guest has no
-    /// provisioner yet, so it does not use this until GitHub issue
-    /// #141.
+    /// `agent` when the key is absent. The guest's account script,
+    /// `account.sh` as root on Linux or `account.ps1` as vagrant's
+    /// administrator login on Windows, creates the account and hands
+    /// the clone and the project's script to it, so the agent never
+    /// works as `vagrant`, the account Vagrant itself logs in with.
+    /// On Linux `bombyx shell` works as it too. A [`GuestUser`], so
+    /// the name rules have run against whatever is in here.
     pub guest_user: GuestUser,
 
     /// The operating system the guest runs. [`Guest::Linux`] when

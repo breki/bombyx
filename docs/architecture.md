@@ -367,12 +367,15 @@ clears the environment, so `account.sh` passes
 `BOMBYX_PRESERVE_ENV`, the list of every name in the Vagrantfile's
 `env:` hash, to `sudo --preserve-env`. The `[env]` table may not
 set the names `config/env.rs` reserves, because each changes what
-one of the scripts does. `HOME` is accepted on purpose and moves
-the clone. `config/env.rs` and `config.toml.sample` list the
+one of the scripts does. On a Linux guest `HOME` is accepted on
+purpose and moves the clone. On a Windows guest `HOME` only moves
+git's `~/.gitconfig`, so it is refused, along with a further list
+of Windows' own variables, and every name is compared without
+regard to case. `config/env.rs` and `config.toml.sample` list the
 reserved names, and `docs/trust-boundary.md` describes the
 isolation model this arrangement serves.
 
-A Windows guest has the same two steps in PowerShell, with three
+A Windows guest has the same two steps in PowerShell, with four
 differences:
 
 - **The hand-over is an SSH login.** Windows has no `sudo -u`.
@@ -380,9 +383,10 @@ differences:
   It creates the agent's account, an administrator too, and its
   profile, authorizes a key it makes in the guest, and runs
   `bootstrap.ps1` through `ssh agent@localhost`. The login streams
-  the output and returns the exit code. A scheduled task and
-  `Start-Process -Credential` were tried first and failed from
-  vagrant's session.
+  the output and returns the exit code. From vagrant's session,
+  Windows refuses an S4U scheduled task, and
+  `Start-Process -Credential` returns neither output nor an exit
+  code, so neither can do the hand-over.
 - **Every value arrives base64-encoded.** vagrant's `winssh` shell
   provisioner writes each `env:` value into the script it runs as
   `$env:NAME="value"` and escapes nothing, so a `"` or a `$` in a
@@ -392,8 +396,9 @@ differences:
 - **git is installed by bombyx.** The box has none, so
   `account.ps1` downloads one pinned MinGit release under
   `C:\Program Files\bombyx\git` and refuses a download whose
-  SHA-256 differs from the pin. The project's `script` must be a
-  `.ps1` file, which `bootstrap.ps1` runs with `powershell -File`.
+  SHA-256 differs from the pin.
+- **The project's `script` must be a `.ps1` file**, which
+  `bootstrap.ps1` runs with `powershell -File`.
 
 ## Why three stages and not one
 

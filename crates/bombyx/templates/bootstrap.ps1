@@ -71,6 +71,9 @@ try {
     $Ref = Need 'BOMBYX_REF'
     $Script = Need 'BOMBYX_SCRIPT'
     $User = Need 'BOMBYX_GUEST_USER'
+    # The Vagrantfile always sets BOMBYX_PROJECT; the fallback mirrors
+    # bootstrap.sh's, where it keeps `set -u` from aborting, and gives
+    # a hand run of this script a folder name.
     $Project = $env:BOMBYX_PROJECT
     if ([string]::IsNullOrEmpty($Project)) {
         $Project = 'project'
@@ -173,13 +176,16 @@ try {
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
         Refuse "$Script is not a regular file."
     }
+    # `-ne` ignores case, as `ScriptPath::is_powershell` does, so
+    # `Setup.PS1` passes.
     if ([IO.Path]::GetExtension($full) -ne '.ps1') {
         Refuse ("$Script is not a .ps1 file, and a Windows guest runs " +
             'the script with PowerShell.')
     }
     # Every step from the script up to the clone, the script
-    # included. The loop stops at the clone folder, whose path is
-    # one character shorter than $root.
+    # included. The clone folder itself is not checked: its path is
+    # one character shorter than $root, and it is the folder this
+    # script cloned into, under the agent's own profile.
     $step = $full
     while ($step.Length -ge $root.Length) {
         $item = Get-Item -LiteralPath $step -Force

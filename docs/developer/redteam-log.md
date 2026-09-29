@@ -4,6 +4,51 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-29-bare-ps1-script-checks-disagree
+
+**Category:** Correctness
+
+`ScriptPath::is_powershell` refuses a script named `.ps1` with nothing
+before the extension, while `bootstrap.ps1` would accept one, because
+`[IO.Path]::GetExtension('.ps1')` returns `.ps1`. The config refusal makes
+the case unreachable today; the two checks still disagree on it. Raised by
+fresh-reader in the #145 review, after stage 2 had closed.
+
+### rt-2026-09-29-windows-ssh-repo-boots-then-fails
+
+**Category:** Correctness
+
+The config accepts an ssh `repo` for a Windows project, yet the clone
+cannot succeed: the Windows guest is handed no git host keys and
+`bootstrap.ps1` runs Windows' ssh with `BatchMode=yes`, so it fails with
+"Host key verification failed" after the boot. The config could refuse
+a non-https `repo` for Windows until GitHub issue #141's second part adds
+host-key pinning. Deferred in the #145 review by the operator's choice,
+because the guest already refuses it, only late.
+
+### rt-2026-09-29-windows-guest-user-misses-groups-and-devices
+
+**Category:** Correctness
+
+`WINDOWS_BUILT_IN_USERS` and `account.ps1`'s copy refuse four built-in
+accounts, but Windows also cannot give an agent account a built-in
+group's name (`users`, `guests`, `administrators`, `replicator`) or a
+DOS device name (`con`, `prn`, `aux`, `nul`, `com1`-`com9`,
+`lpt1`-`lpt9`), which cannot be a profile folder. A project name that is
+a device name cannot be the clone folder either. Each fails in the guest
+after the boot. Deferred in the #145 review by the operator's choice.
+
+### rt-2026-09-29-windows-script-backslash-traversal
+
+**Category:** Correctness
+
+`check_inside_clone` splits a `script` on `/` only, so a Windows
+`script` such as `..\setup.ps1` or `C:\x.ps1` passes the config and is
+refused by `bootstrap.ps1` in the guest, after the boot. For a Windows
+project the config could refuse a `\` or a `:` in `script`. Deferred in
+the #145 review by the operator's choice; not a security gap, because
+the guest refuses it.
+
 ### rt-2026-09-29-box-build-answer-file-delete-is-fatal
 
 **Category:** Correctness

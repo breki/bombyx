@@ -216,9 +216,11 @@ memory = "8GB"
 # agent's account as an administrator, installs git, clones the
 # project and runs `script`, which must be a `.ps1` file. On
 # Windows, `guest_user` is at most 20 characters and names none of
-# the box's built-in accounts. A Windows project may not name a
-# `deploy_key`, an `env_file` or a `repo_token` yet, or a key that
-# only works beside one (`repo_user`, the `secrets_refreshed` hook),
+# the box's built-in accounts, and its `[env]` names are compared
+# without regard to case (see the `[env]` table below). A Windows
+# project may not name a `deploy_key`, an `env_file` or a
+# `repo_token` yet, or a key that only works beside one
+# (`repo_user`, the `secrets_refreshed` hook),
 # because the Windows scripts place no secret yet (GitHub issue
 # #141). Use the box built from Microsoft's ISO by the recipe in
 # boxes/windows-server-2025/, added as `bombyx/windows-server-2025`;
@@ -513,13 +515,27 @@ script = ".bombyx/provision.sh"   # path inside the clone
 #
 #   PATH  IFS  BASH_ENV  ENV  SHELLOPTS  BASHOPTS
 #   LD_PRELOAD  LD_LIBRARY_PATH
-#   GIT_SSH_COMMAND  GIT_CONFIG_COUNT  GIT_CONFIG_GLOBAL
-#   GIT_CONFIG_SYSTEM  GIT_DIR  GIT_WORK_TREE
+#   GIT_SSH_COMMAND  GIT_CONFIG_COUNT  GIT_CONFIG_PARAMETERS
+#   GIT_CONFIG_GLOBAL  GIT_CONFIG_SYSTEM  GIT_DIR  GIT_WORK_TREE
+#   GIT_EXEC_PATH  GIT_TEMPLATE_DIR  XDG_CONFIG_HOME
 #   SUDO_USER
 #
 # `SUDO_USER` is on the list for `account.sh`, the guest script
 # that runs as root first: it reads that name to find where
 # Vagrant staged the uploads.
+#
+# A Windows guest (`guest = "windows"`) reads names without
+# regard to case, so there the prefix and the list above are
+# compared that way too -- `bombyx_script` and `Path` are
+# refused -- and so are the names that change which programs,
+# folders and git config its own scripts use:
+#
+#   PATHEXT  PSMODULEPATH  PROGRAMFILES  PROGRAMDATA
+#   SYSTEMROOT  WINDIR  COMSPEC  USERNAME  USERPROFILE  TEMP  TMP
+#   HOME  HOMEDRIVE  HOMEPATH  PSEXECUTIONPOLICYPREFERENCE
+#
+# Two `[env]` names that differ only in case are refused there
+# too, because Windows reads them as one variable.
 #
 # Set any of those inside your own script, where they do what
 # you meant. Two of them are the ones worth knowing about:
@@ -527,10 +543,11 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # nothing at all, and `GIT_CONFIG_COUNT` outranks the git
 # config bombyx writes on your checkout.
 #
-# `HOME` is accepted and is the one to think about before
-# writing. bombyx clones into `$HOME/<project>`, the directory
-# named after this table's project, so setting `HOME` here moves
-# the clone, and your script's working directory with it. That is
+# On a Linux guest `HOME` is accepted and is the one to think
+# about before writing. bombyx clones into `$HOME/<project>`,
+# the directory named after this table's project, so setting
+# `HOME` here moves the clone, and your script's working
+# directory with it. That is
 # measured rather than assumed: a provision with `HOME` pointing
 # at a second directory cloned into that directory instead. The
 # value has to be absolute, exist, be writable and searchable,

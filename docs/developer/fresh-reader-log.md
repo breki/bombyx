@@ -6,6 +6,30 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-29-windows-env-refusal-message-reads-twice
+
+**Category:** Comprehension
+
+The message for `ConfigError::WindowsGuestEnv` renders as "... and there
+the name is, compared without regard to case as Windows compares it, a
+name bombyx refuses on every guest or one its Windows scripts rely on;
+set it inside your own script instead". The core "the name is ... a name"
+is split by a long clause, and it never names the entry the name matched.
+Something like "Windows reads `Path` as `PATH`, which bombyx or its
+Windows scripts rely on" would land on the first read. Logged rather than
+fixed in the #145 review, because the message is program output and the
+comprehension stage changes prose only.
+
+### fr-2026-09-29-account-ps1-255-message-assumes-ssh
+
+**Category:** Comprehension
+
+`account.ps1` prints "the SSH login ... failed, so bootstrap.ps1 did not
+run" for exit code 255, but a `bootstrap.ps1` or project script exiting
+255 gets the same message. A comment now says so; the message itself
+could say "ssh or the remote script exited 255". Logged rather than fixed
+in the #145 review, because the message is guest output.
+
 ### fr-2026-09-29-box-build-hides-its-build-folder
 
 **Category:** Comprehension

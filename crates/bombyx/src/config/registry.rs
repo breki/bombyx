@@ -411,6 +411,101 @@ pub(super) fn heading(name: &str, tail: &str) -> String {
     format!("[projects.{name:?}{tail}]")
 }
 
+/// Refuses what a Windows guest cannot take from `project`.
+///
+/// Four rules that only `[vm]`'s `guest = "windows"` switches on,
+/// each spanning more than one table, so they run here rather than
+/// in a newtype.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::WindowsGuestUser`],
+/// [`ConfigError::WindowsGuestEnv`],
+/// [`ConfigError::WindowsGuestScript`] or
+/// [`ConfigError::WindowsGuestSecret`], the first that applies.
+fn refuse_windows_mismatch(
+    key: &ProjectName,
+    project: &Project,
+    path: &Path,
+) -> Result<(), ConfigError> {
+    // A name Windows cannot hold would fail only in the guest, after
+    // the boot.
+    let user = &project.vm.guest_user;
+    if let Some(reason) = user.windows_refusal() {
+        return Err(ConfigError::WindowsGuestUser {
+            path: path.to_path_buf(),
+            project: key.as_str().to_owned(),
+            user: user.as_str().to_owned(),
+            reason,
+        });
+    }
+    // Windows reads environment names without regard to case, so a
+    // name that differs only in case from one bombyx or its scripts
+    // rely on changes what they do.
+    // Two names that differ only in case are one variable there, so
+    // one of the two values would vanish without a word.
+    let mut seen = std::collections::BTreeSet::new();
+    for name in project.env.keys() {
+        let reason = name.windows_refusal().or_else(|| {
+            (!seen.insert(name.as_str().to_ascii_uppercase())).then_some(
+                "differs only in case from another [env] name, and \
+                 Windows reads the two as one variable",
+            )
+        });
+        if let Some(reason) = reason {
+            return Err(ConfigError::WindowsGuestEnv {
+                path: path.to_path_buf(),
+                project: key.as_str().to_owned(),
+                name: name.as_str().to_owned(),
+                reason,
+            });
+        }
+    }
+    // bootstrap.ps1 runs the script with `powershell -File`, which
+    // runs a `.ps1` file and nothing else.
+    let script = &project.source.script;
+    if !script.is_powershell() {
+        return Err(ConfigError::WindowsGuestScript {
+            path: path.to_path_buf(),
+            project: key.as_str().to_owned(),
+            script: script.as_str().to_owned(),
+        });
+    }
+    // The Windows scripts place no secret yet, so a secret would be
+    // read and copied to the VM host with nothing on the guest to
+    // receive it. `parse` checks this before the hook rule, whose
+    // advice -- add an `env_file` -- this rule would refuse next,
+    // and every key that goes with a secret is named. A known gap,
+    // accepted until #141's second part: a `repo_token` without
+    // `repo_user` is first told by the `[source]` parse to add
+    // `repo_user`, then told here to remove both.
+    let source = &project.source;
+    let token = source.repo_token.is_some();
+    let named: Vec<String> = [
+        ("deploy_key", source.deploy_key.is_some()),
+        ("env_file", source.env_file.is_some()),
+        ("repo_token", token),
+        ("repo_user", token),
+        (
+            "secrets_refreshed",
+            project.hooks.secrets_refreshed.is_some(),
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, set)| *set)
+    .map(|(secret, _)| format!("`{secret}`"))
+    .collect();
+    if named.is_empty() {
+        Ok(())
+    } else {
+        Err(ConfigError::WindowsGuestSecret {
+            path: path.to_path_buf(),
+            project: key.as_str().to_owned(),
+            keys: named.join(", "),
+        })
+    }
+}
+
 /// Parses `source` as the registry read from `path`.
 ///
 /// The only way to build a [`Registry`], so the path in an
@@ -444,56 +539,8 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
                 path,
             )?;
         }
-        // A Windows guest's scripts place no secret yet, so a
-        // secret for it would be read and copied to the VM host
-        // with nothing on the guest to receive it. Checked before
-        // the hook rule, whose advice -- add an `env_file` -- this
-        // rule would refuse next, and every key that goes with a
-        // secret is named. A known gap, accepted until #141: a
-        // `repo_token` without `repo_user` is first told by the
-        // `[source]` parse to add `repo_user`, then told here to
-        // remove both.
         if project.vm.guest == super::Guest::Windows {
-            let user = &project.vm.guest_user;
-            if let Some(reason) = user.windows_refusal() {
-                return Err(ConfigError::WindowsGuestUser {
-                    path: path.to_path_buf(),
-                    project: key.as_str().to_owned(),
-                    user: user.as_str().to_owned(),
-                    reason,
-                });
-            }
-            let script = &project.source.script;
-            if !script.is_powershell() {
-                return Err(ConfigError::WindowsGuestScript {
-                    path: path.to_path_buf(),
-                    project: key.as_str().to_owned(),
-                    script: script.as_str().to_owned(),
-                });
-            }
-            let source = &project.source;
-            let token = source.repo_token.is_some();
-            let named: Vec<String> = [
-                ("deploy_key", source.deploy_key.is_some()),
-                ("env_file", source.env_file.is_some()),
-                ("repo_token", token),
-                ("repo_user", token),
-                (
-                    "secrets_refreshed",
-                    project.hooks.secrets_refreshed.is_some(),
-                ),
-            ]
-            .into_iter()
-            .filter(|(_, set)| *set)
-            .map(|(secret, _)| format!("`{secret}`"))
-            .collect();
-            if !named.is_empty() {
-                return Err(ConfigError::WindowsGuestSecret {
-                    path: path.to_path_buf(),
-                    project: key.as_str().to_owned(),
-                    keys: named.join(", "),
-                });
-            }
+            refuse_windows_mismatch(key, project, path)?;
         }
         // The hook runs after the secrets refresh and at no other
         // time, and a project with no `env_file` has no refresh.

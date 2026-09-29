@@ -249,7 +249,7 @@ pub use env::{EnvName, EnvValue};
 pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
-pub use guest_user::GuestUser;
+pub use guest_user::{GuestUser, WindowsUserRefusal};
 pub use hooks::{HookPath, Hooks};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -1724,12 +1724,13 @@ mod load_project_tests {
         // Windows caps a local account name at 20 characters, and
         // these names are the box's own built-in accounts. The
         // rules `GuestUser` applies to every guest still run first.
-        for user in [
-            "a23456789012345678901",
-            "administrator",
-            "guest",
-            "defaultaccount",
-            "wdagutilityaccount",
+        use crate::config::WindowsUserRefusal::{BuiltIn, TooLong};
+        for (user, why) in [
+            ("a23456789012345678901", TooLong),
+            ("administrator", BuiltIn),
+            ("guest", BuiltIn),
+            ("defaultaccount", BuiltIn),
+            ("wdagutilityaccount", BuiltIn),
         ] {
             let src = windows_registry_with_source_key("").replacen(
                 "guest = \"windows\"\n",
@@ -1738,7 +1739,10 @@ mod load_project_tests {
             );
             let err = load(&src, "myproject").expect_err(user);
             assert!(
-                matches!(err, ConfigError::WindowsGuestUser { .. }),
+                matches!(
+                    err,
+                    ConfigError::WindowsGuestUser { reason, .. } if reason == why
+                ),
                 "{user}: {err:?}"
             );
             let text = err.to_string();
@@ -1746,6 +1750,8 @@ mod load_project_tests {
                 assert!(text.contains(part), "{user}: {part}: {text}");
             }
         }
+        // The too-long message states the limit the check applies.
+        assert!(TooLong.to_string().contains("20"), "{TooLong}");
         // Twenty characters is the longest name Windows accepts.
         let src = windows_registry_with_source_key("").replacen(
             "guest = \"windows\"\n",
@@ -1756,8 +1762,112 @@ mod load_project_tests {
     }
 
     #[test]
+    fn a_windows_guest_refuses_an_env_name_windows_reads_regardless_of_case() {
+        // Windows matches environment names without regard to case,
+        // so on a Windows guest `bombyx_script` overwrites
+        // `BOMBYX_SCRIPT`, and `Path` or `ProgramFiles` changes which
+        // programs bombyx's own guest scripts run.
+        for name in [
+            "bombyx_script",
+            "Bombyx_Repo",
+            "Path",
+            "path",
+            "PathExt",
+            "PSModulePath",
+            "ProgramFiles",
+            "ProgramData",
+            "SystemRoot",
+            "windir",
+            "ComSpec",
+            "USERNAME",
+            "userprofile",
+            "Temp",
+            "tmp",
+            "git_dir",
+            "Git_Ssh_Command",
+            "git_config_parameters",
+            "git_exec_path",
+            "Git_Template_Dir",
+            "PSExecutionPolicyPreference",
+            "ld_preload",
+            "HOME",
+            "Home",
+            "HomeDrive",
+            "homepath",
+            "Xdg_Config_Home",
+        ] {
+            let src = format!(
+                "{}\n[projects.myproject.env]\n{name} = \"x\"\n",
+                windows_registry_with_source_key("")
+            );
+            let err = load(&src, "myproject").expect_err(name);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestEnv { .. }),
+                "{name}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", name] {
+                assert!(text.contains(part), "{name}: {part}: {text}");
+            }
+        }
+        // An ordinary name loads, in any case.
+        for name in ["MY_VAR", "my_var"] {
+            let src = format!(
+                "{}\n[projects.myproject.env]\n{name} = \"x\"\n",
+                windows_registry_with_source_key("")
+            );
+            load(&src, "myproject").expect(name);
+        }
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_two_env_names_that_differ_only_in_case() {
+        // Windows reads `FOO` and `foo` as one variable, so one of the
+        // two values would vanish without a word.
+        let src = format!(
+            "{}\n[projects.myproject.env]\nFOO = \"a\"\nfoo = \"b\"\n",
+            windows_registry_with_source_key("")
+        );
+        let err = load(&src, "myproject").expect_err("FOO and foo");
+        assert!(
+            matches!(err, ConfigError::WindowsGuestEnv { .. }),
+            "{err:?}"
+        );
+        // Linux keeps them apart, so there the pair loads.
+        let src = format!(
+            "{}\n[projects.myproject.env]\nFOO = \"a\"\nfoo = \"b\"\n",
+            registry_with_source_key("")
+        );
+        load(&src, "myproject").expect("FOO and foo on Linux");
+    }
+
+    #[test]
+    fn every_guest_refuses_git_config_parameters() {
+        // git reads `GIT_CONFIG_PARAMETERS` as `git -c` on every call,
+        // so a `url.<x>.insteadOf` there would clone another repository.
+        let src = format!(
+            "{}\n[projects.myproject.env]\nGIT_CONFIG_PARAMETERS = \"x\"\n",
+            registry_with_source_key("")
+        );
+        load(&src, "myproject").expect_err("GIT_CONFIG_PARAMETERS on Linux");
+    }
+
+    #[test]
+    fn a_linux_guest_keeps_env_names_case_sensitive() {
+        // Linux reads `Path` and `PATH` as two names, so only the
+        // exact spellings stay refused there.
+        for name in ["Path", "bombyx_thing", "ProgramFiles"] {
+            let src = format!(
+                "{}\n[projects.myproject.env]\n{name} = \"x\"\n",
+                registry_with_source_key("")
+            );
+            load(&src, "myproject").expect(name);
+        }
+    }
+
+    #[test]
     fn a_windows_guest_refuses_every_secret_while_the_file_is_read() {
-        // Nothing provisions a Windows guest yet, so a key, a
+        // The Windows scripts place no secret yet, so a key, a
         // secrets file or a token would be read on the workstation
         // and copied to the VM host for nothing. Each is refused by
         // name, and the message points at the issue that lifts it.

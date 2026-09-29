@@ -9,11 +9,10 @@
 //!
 //! Windows has no `sudo -u`, so the hand-over is an SSH login from
 //! the guest to itself, as the agent, with a key [`ACCOUNT`] makes
-//! in the guest. A scheduled task with an S4U logon was refused
-//! ("Access is denied"), and `Start-Process -Credential` failed
-//! with no output and no exit code, both from vagrant's SSH
-//! session on the box `docs/windows-guest-box.md` records. The
-//! loopback login streams the output and returns the exit code.
+//! in the guest. From vagrant's SSH session, Windows refuses a
+//! scheduled task with an S4U logon ("Access is denied"), and
+//! `Start-Process -Credential` returns neither output nor an exit
+//! code. The loopback login returns both, so it is the route.
 //!
 //! Neither script carries a config value. Each arrives as an
 //! environment variable, as on Linux, but **base64-encoded**:
@@ -127,7 +126,8 @@ pub(super) fn provisioning(cfg: &Config) -> String {
     # base64, which holds no character PowerShell reads inside
     # double quotes. account.ps1 decodes them. The last two are
     # read from the vagrant process on the VM host, which bombyx
-    # sets, and encoded here as vagrant reads this file.
+    # sets, and encoded here as vagrant reads this file:
+    # `pack(\"m0\")` is Ruby's base64 with no newline.
     env: {{
 {env}    }}
 ",

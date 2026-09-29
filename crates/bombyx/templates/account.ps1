@@ -40,8 +40,8 @@ $MinGitSha256 =
 # of the account it logs in as.
 $Staging = Join-Path $env:USERPROFILE '.bombyx-staging'
 # Everything bombyx installs. Under Program Files, so only an
-# administrator can change it: the agent is one, but no other
-# account on the guest is.
+# administrator can change it: the agent and vagrant's login account,
+# and no other account the box ships enabled.
 $InstallDir = Join-Path $env:ProgramFiles 'bombyx'
 $GitDir = Join-Path $InstallDir 'git'
 $Bootstrap = Join-Path $InstallDir 'bootstrap.ps1'
@@ -76,21 +76,40 @@ function Refuse([string] $Why) {
     exit 1
 }
 
-# The value of environment variable `name`, decoded from base64.
-# An empty value arrives as no variable at all, because Windows
-# deletes a variable set to the empty string, so a missing one
-# decodes to the empty string.
-function Decode([string] $Name) {
+# The reason given when the Vagrantfile and this script disagree.
+$VersionSkew = 'The generated Vagrantfile and this script came from ' +
+    'different versions of bombyx.'
+
+# The raw base64 value of environment variable `name`, refusing one
+# that is not base64. An empty value arrives as no variable at all,
+# because Windows deletes a variable set to the empty string, so a
+# missing one is the empty string. The hand-over pastes the value
+# between single quotes, and base64 holds no quote, so this check is
+# what keeps that paste safe. `\z` rather than `$`, which would also
+# match before a final newline. The value is decoded here too, so one
+# the pattern admits but base64 does not, such as a length that is
+# not a multiple of four, is refused here rather than in the agent's
+# hand-over.
+function Get-Base64Env([string] $Name) {
     $raw = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrEmpty($raw)) {
         return ''
     }
-    if ($raw -cnotmatch '^[A-Za-z0-9+/]*={0,2}$') {
-        Refuse ("$Name is not base64. The generated Vagrantfile and " +
-            'this script came from different versions of bombyx.')
+    if ($raw -cnotmatch '^[A-Za-z0-9+/]*={0,2}\z') {
+        Refuse "$Name is not base64. $VersionSkew"
     }
+    try {
+        [void][Convert]::FromBase64String($raw)
+    } catch {
+        Refuse "$Name is not base64. $VersionSkew"
+    }
+    return $raw
+}
+
+# The value of environment variable `name`, decoded from base64.
+function Decode([string] $Name) {
     return [Text.Encoding]::UTF8.GetString(
-        [Convert]::FromBase64String($raw))
+        [Convert]::FromBase64String((Get-Base64Env $Name)))
 }
 
 # Grants `sid`, SYSTEM and the administrators full control of
@@ -155,8 +174,7 @@ try {
     $Preserve = Decode 'BOMBYX_PRESERVE_ENV'
     if ($Preserve -cnotmatch '^[A-Za-z_][A-Za-z0-9_]*(,[A-Za-z_][A-Za-z0-9_]*)*$') {
         Refuse ('BOMBYX_PRESERVE_ENV is missing or holds something ' +
-            'other than variable names. The generated Vagrantfile and ' +
-            'this script came from different versions of bombyx.')
+            "other than variable names. $VersionSkew")
     }
 
     $staged = Join-Path $Staging 'bootstrap.ps1'
@@ -215,6 +233,10 @@ try {
         New-Profile $sid $User
     }
     $AgentHome = (Get-ItemProperty -LiteralPath $profileKey).ProfileImagePath
+    # The profile must sit at the plain name. Any other path means a
+    # folder of that name existed before the account, owned by
+    # whoever made it, and the hand-over key and the clone would then
+    # go into a profile beside a folder bombyx does not control.
     $expected = Join-Path (Split-Path -Parent $env:USERPROFILE) $User
     if ($AgentHome -ne $expected -or
         -not (Test-Path -LiteralPath $AgentHome -PathType Container)) {
@@ -351,22 +373,18 @@ try {
 
     # The script the login runs: each preserved variable set from
     # its base64, then bootstrap.ps1. The names matched the pattern
-    # above and each value is base64 checked by Decode's pattern, so
-    # neither can close the quotes it is pasted into. Written to the
+    # above and each value passed Get-Base64Env's check, so neither
+    # can close the quotes it is pasted into. Written to the
     # agent's home, protected before it holds anything.
     $handover = Join-Path $AgentHome '.bombyx-handover.ps1'
     Set-Content -LiteralPath $handover -Value '' -Encoding ASCII
     Protect $handover $sid
     $body = New-Object Text.StringBuilder
+    # So that a failure while setting a variable ends the hand-over
+    # rather than running bootstrap.ps1 without it.
+    [void]$body.AppendLine('$ErrorActionPreference = ''Stop''')
     foreach ($name in $Preserve -split ',') {
-        $raw = [Environment]::GetEnvironmentVariable($name)
-        if ($null -eq $raw) {
-            $raw = ''
-        }
-        if ($raw -cnotmatch '^[A-Za-z0-9+/]*={0,2}$') {
-            Refuse ("$name is not base64. The generated Vagrantfile " +
-                'and this script came from different versions of bombyx.')
-        }
+        $raw = Get-Base64Env $name
         [void]$body.AppendLine(
             "`$env:$name = [Text.Encoding]::UTF8.GetString(" +
             "[Convert]::FromBase64String('$raw'))")
@@ -379,8 +397,9 @@ try {
 
     # The hand-over. BatchMode keeps ssh from asking for anything,
     # -n gives it no stdin, and -T asks for no terminal. The remote
-    # command reaches cmd.exe, sshd's default shell here, and holds
-    # no character cmd.exe reads.
+    # command reaches sshd's default shell, cmd.exe unless the box
+    # names another, and holds no character that cmd.exe or
+    # PowerShell reads.
     #
     # ssh's stderr is not redirected: with `2>&1`, Windows' ssh
     # client and PowerShell 5.1 stop after the first line of output
@@ -395,6 +414,10 @@ try {
         -ExecutionPolicy Bypass -File $handover
     $code = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
+    # ssh exits 255 when the connection or the login fails, so 255 is
+    # read as that. A remote script exiting 255 is read the same way,
+    # which is why the message says what to check rather than what
+    # happened.
     if ($code -eq 255) {
         [Console]::Error.WriteLine(
             "bombyx: the SSH login to $User@localhost failed, so " +

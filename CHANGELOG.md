@@ -34,7 +34,11 @@ and this project adheres to
   clone the project into the agent's home over an SSH login as the agent, and
   run `script`, which must be a `.ps1` file. Provisioning prints how long an
   unactivated Windows evaluation has left. On a Windows guest, `guest_user` is
-  at most 20 characters and names none of the box's built-in accounts.
+  at most 20 characters and names none of the box's built-in accounts, and
+  `[env]` names are compared without regard to case, as Windows compares them:
+  one matching a name bombyx reserves, or Windows' own `PATHEXT`,
+  `PROGRAMFILES`, `USERNAME`, `HOME` and others, is refused, and so are two
+  names that differ only in case.
   A Windows project that names a `deploy_key`, an `env_file` or a `repo_token`,
   or a key that only works beside one (`repo_user`, the `secrets_refreshed`
   hook), is refused while the config is read, because the Windows scripts
@@ -71,6 +75,12 @@ and this project adheres to
   destroy myproject --yes`.
 - `bombyx list` asks every host at once, and each host runs `vagrant status` for
   up to four of its projects at the same time rather than one after another.
+- **BREAKING:** `[env]` now refuses `GIT_CONFIG_PARAMETERS`, `GIT_EXEC_PATH`,
+  `GIT_TEMPLATE_DIR` and `XDG_CONFIG_HOME` on every guest, Linux included. Each
+  changes which repository `bootstrap.sh`'s git clones or which programs it
+  runs: the first as `git -c` does, the next two by choosing git's helper
+  programs and the hooks a clone runs, the last by moving git's global config.
+  Set any of them inside your own script instead.
 
 ### Fixed
 

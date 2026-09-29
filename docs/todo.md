@@ -326,6 +326,13 @@ its own `PATH` and `IFS` instead, but only if it restores the operator's
 values before it execs the project's script. Raised as RT-4(b) on PR #65 and
 rejected there for that reason.
 
+A deny list cannot keep up, because git, PowerShell and Windows each read more
+variables than any list names; the #145 review added four git names and a
+Windows list and still found more. The objection above has an answer: a script
+can set `PATH` and the git variables only on the processes it starts itself,
+such as its own `git clone`, so the project's script still receives the
+operator's values.
+
 ### bootstrap-harness-runs-the-script
 
 **Summary:** run the script, do not match its text

@@ -12,7 +12,7 @@ The Windows-guest work is tracked in GitHub issue #138, in parts that
 are each an issue of their own. Issue #136 added the
 `guest = "windows"` key. Issue #141 ports the guest scripts to
 PowerShell: its first part added `account.ps1` and `bootstrap.ps1`,
-and its second places the secrets.
+and its second part, still to come, places the secrets.
 Issue #144 is this box. Issue #137 makes `shell`, the secrets refresh
 and the hook work on a Windows guest.
 
@@ -211,6 +211,11 @@ The box is an evaluation, licensed for testing, not for routine use.
 
 - **`vagrant ssh -c` runs Windows PowerShell 5.1**, because the box's
   Vagrantfile sets `config.winssh.shell = "powershell"`.
+- **A plain `ssh` command runs under sshd's default shell**, which is
+  `cmd.exe` unless `HKLM:\SOFTWARE\OpenSSH\DefaultShell` names
+  another. Which one this box uses was not checked. `account.ps1`'s
+  hand-over command holds no character that `cmd.exe` or PowerShell
+  reads, so it works under either.
 - **PowerShell writes progress records to stderr as CLIXML**
   (`#< CLIXML` and an `<Objs>` block) when modules load for the first
   time. bombyx prints a host's stderr as the reason for a failure, so a

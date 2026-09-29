@@ -7,9 +7,11 @@
 //! then hands every name on to `bootstrap.sh` through
 //! `sudo --preserve-env`. So two sets of names are refused: the
 //! ones bombyx sets itself, and the ones that change what those
-//! scripts do. `HOME` changes where `bootstrap.sh` clones and is
-//! accepted anyway, because honouring it moves the clone, which
-//! is a decision rather than an accident.
+//! scripts do. On a Linux guest `HOME` changes where
+//! `bootstrap.sh` clones and is accepted anyway, because honouring
+//! it moves the clone, which is a decision rather than an accident.
+//! A Windows guest refuses a longer set, compared without regard to
+//! case; see `EnvName::windows_refusal`.
 //!
 //! Two newtypes, one for a name and one for a value, because
 //! the two carry different rules. A name becomes a shell
@@ -84,7 +86,15 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 /// - `GIT_CONFIG_COUNT` is treated as `git -c`, which outranks
 ///   every config file -- so it beats the `core.sshCommand` the
 ///   script writes on the clone, which `GIT_CONFIG_GLOBAL`
-///   cannot do.
+///   cannot do. `GIT_CONFIG_PARAMETERS` is git's own form of
+///   `git -c`, read on every call, so a `url.<x>.insteadOf` in it
+///   would clone another repository than `repo` names.
+///   `XDG_CONFIG_HOME` moves git's global config as
+///   `GIT_CONFIG_GLOBAL` does.
+/// - `GIT_EXEC_PATH` decides which `git-*` helper programs git
+///   runs, `git-remote-https` among them, and `GIT_TEMPLATE_DIR`
+///   which hooks a clone copies in and then runs. Either would run
+///   a program from outside the project's tree.
 /// - `GIT_DIR` and `GIT_WORK_TREE` outrank `git -C`, so every
 ///   `git -C "$CLONE_DIR"` here would act on a repository the
 ///   `[env]` table names while the clone itself was left alone.
@@ -115,7 +125,7 @@ pub(crate) const RESERVED_PREFIX: &str = "BOMBYX_";
 ///
 /// Keeping a list is a maintenance cost, and `docs/todo.md`
 /// holds the alternative to it as `bootstrap-sets-own-path`.
-const NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO: [&str; 15] = [
+const NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO: [&str; 19] = [
     "PATH",
     "IFS",
     "BASH_ENV",
@@ -126,10 +136,14 @@ const NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO: [&str; 15] = [
     "LD_LIBRARY_PATH",
     "GIT_SSH_COMMAND",
     "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
     "GIT_CONFIG_GLOBAL",
     "GIT_CONFIG_SYSTEM",
     "GIT_DIR",
     "GIT_WORK_TREE",
+    "GIT_EXEC_PATH",
+    "GIT_TEMPLATE_DIR",
+    "XDG_CONFIG_HOME",
     "SUDO_USER",
 ];
 
@@ -167,6 +181,78 @@ checked_str_try_from!(
     FieldError,
     check_name
 );
+
+/// Names that change what a Windows guest's own scripts do, in
+/// upper case. Not all are names the scripts read: some act through
+/// PowerShell, `cmd.exe` or git. They decide which PowerShell, git
+/// and modules run, which folders the scripts use, which account
+/// they check they run as, and which git config applies. `HOME` is
+/// here although Linux allows it: `bootstrap.ps1` takes its folder
+/// from `USERPROFILE`, so on Windows `HOME` only moves git's
+/// `~/.gitconfig`, as `HOMEDRIVE` and `HOMEPATH` also can.
+/// `PSEXECUTIONPOLICYPREFERENCE` holds PowerShell's execution policy
+/// for the process, which outranks the `-ExecutionPolicy Bypass` the
+/// hand-over starts with, so it could stop `bootstrap.ps1` running.
+///
+/// Windows matches a name without regard to case, so
+/// [`EnvName::windows_refusal`] compares against these upper-cased.
+const WINDOWS_NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO: [&str; 16] = [
+    "PATH",
+    "PATHEXT",
+    "PSMODULEPATH",
+    "PROGRAMFILES",
+    "PROGRAMDATA",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "USERNAME",
+    "USERPROFILE",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "PSEXECUTIONPOLICYPREFERENCE",
+];
+
+impl EnvName {
+    /// Why a Windows guest cannot take this name, or `None` when it
+    /// can.
+    ///
+    /// Windows matches environment names without regard to case,
+    /// and vagrant sets the `[env]` entries after bombyx's names from
+    /// `[source]` and `[vm]`. So on a Windows guest `bombyx_script`
+    /// overwrites `BOMBYX_SCRIPT`,
+    /// and `Path` changes which PowerShell runs. `check_name`
+    /// compares exactly, which is right for Linux; this compares
+    /// upper-cased, against [`RESERVED_PREFIX`],
+    /// `NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO` and the Windows
+    /// names. The registry's `parse` asks it for a Windows project.
+    #[must_use]
+    pub(crate) fn windows_refusal(&self) -> Option<&'static str> {
+        let upper = self.0.to_ascii_uppercase();
+        if upper.starts_with(RESERVED_PREFIX) {
+            Some(
+                "starts with `BOMBYX_` in some case, and Windows reads \
+                 names without regard to case, so it would overwrite one \
+                 of bombyx's own variables",
+            )
+        } else if NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO
+            .contains(&upper.as_str())
+            || WINDOWS_NAMES_THAT_CHANGE_WHAT_THE_GUEST_SCRIPTS_DO
+                .contains(&upper.as_str())
+        {
+            Some(
+                "is, compared without regard to case as Windows compares \
+                 it, a name bombyx refuses on every guest or one its \
+                 Windows scripts rely on; set it inside your own script \
+                 instead",
+            )
+        } else {
+            None
+        }
+    }
+}
 
 /// The value of a variable the guest's shell will carry.
 ///
@@ -380,8 +466,16 @@ mod tests {
             // this stays a list of names and needs no prefix
             // rule.
             "GIT_CONFIG_COUNT",
+            // git's own form of `git -c`, read on every call.
+            "GIT_CONFIG_PARAMETERS",
             "GIT_DIR",
             "GIT_WORK_TREE",
+            // Where git finds its helpers, and the hooks a clone
+            // copies in and runs.
+            "GIT_EXEC_PATH",
+            "GIT_TEMPLATE_DIR",
+            // Moves git's global config, as `GIT_CONFIG_GLOBAL` does.
+            "XDG_CONFIG_HOME",
             // Read by `account.sh`, as root, to find the home
             // the staged uploads landed in. Vagrant applies the
             // `env:` prefix after `sudo` has set it, so an

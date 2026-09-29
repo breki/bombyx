@@ -355,6 +355,32 @@ pub enum ConfigError {
         /// The account name, as the config spells it.
         user: String,
         /// Which Windows rule the name breaks.
+        reason: super::WindowsUserRefusal,
+    },
+
+    /// A project with `guest = "windows"` names an `[env]` entry a
+    /// Windows guest cannot take: one that, compared without regard
+    /// to case as Windows compares, is bombyx's own or changes what
+    /// its guest scripts do, or one that differs only in case from
+    /// another `[env]` name, which Windows reads as the same variable.
+    ///
+    /// A rule on `[env]` that only `[vm]`'s `guest` switches on, so
+    /// it runs in the registry's `parse`, after `EnvName`'s own
+    /// rules have passed.
+    #[error(
+        "invalid config in {}: project \"{project}\" sets `{name}` in \
+         [projects.\"{project}\".env], but [projects.\"{project}\".vm] \
+         sets guest = \"windows\", and there the name {reason}",
+        .path.display()
+    )]
+    WindowsGuestEnv {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project naming the variable.
+        project: String,
+        /// The variable's name, as the config spells it.
+        name: String,
+        /// Which rule the name breaks.
         reason: &'static str,
     },
 }
