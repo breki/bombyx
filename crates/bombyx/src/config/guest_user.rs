@@ -1,8 +1,9 @@
 //! The account the agent works as inside the guest.
 //!
-//! The generated Vagrantfile's privileged provisioner creates
-//! this account, and every later step -- the clone, the project's
-//! own script, `bombyx shell` -- runs as it. Vagrant keeps logging
+//! The guest's account script -- `account.sh` on Linux,
+//! `account.ps1` on Windows -- creates this account, and every
+//! later step -- the clone, the project's own script,
+//! `bombyx shell` -- runs as it. Vagrant keeps logging
 //! in as the box's own SSH user, usually `vagrant`, which is an
 //! account this one never is.
 
@@ -29,6 +30,22 @@ const MAX_GUEST_USER_LEN: usize = 32;
 /// that account is what this setting is for.
 const REFUSED_GUEST_USERS: [&str; 2] = ["root", "vagrant"];
 
+/// The longest local account name Windows accepts.
+const MAX_WINDOWS_GUEST_USER_LEN: usize = 20;
+
+/// The accounts a Windows guest is born with, lower-cased as a
+/// [`GuestUser`] must be.
+///
+/// Taking one would hand the agent an account the box already
+/// uses, which is what `REFUSED_GUEST_USERS` keeps it from on
+/// every guest.
+const WINDOWS_BUILT_IN_USERS: [&str; 4] = [
+    "administrator",
+    "guest",
+    "defaultaccount",
+    "wdagutilityaccount",
+];
+
 /// A validated guest account name.
 ///
 /// A *newtype* in the shape `super::source::RepoUrl` describes:
@@ -44,7 +61,10 @@ const REFUSED_GUEST_USERS: [&str; 2] = ["root", "vagrant"];
 /// quote or backtick gives that shell nothing to split or expand.
 /// The set also has no `.`, which matters because `sudo` skips a
 /// file in `/etc/sudoers.d` whose name contains one, and the
-/// account's sudoers file is named after it.
+/// account's sudoers file is named after it. On Windows,
+/// `account.ps1` puts the name into the command line its SSH
+/// hand-over sends to `cmd.exe`, and the set gives `cmd.exe`
+/// nothing to read there either.
 ///
 /// `#[serde(try_from = "String")]` is what makes the check run
 /// while the config file is being read.
@@ -75,6 +95,54 @@ checked_str_try_from!(
     FieldError,
     check_guest_user
 );
+
+/// Which Windows rule a [`GuestUser`] breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsUserRefusal {
+    /// Longer than Windows allows a local account name.
+    TooLong,
+    /// One of the accounts a Windows guest is born with.
+    BuiltIn,
+}
+
+impl std::fmt::Display for WindowsUserRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLong => write!(
+                f,
+                "must be at most {MAX_WINDOWS_GUEST_USER_LEN} characters"
+            ),
+            Self::BuiltIn => {
+                f.write_str("must not name one of the box's built-in accounts")
+            }
+        }
+    }
+}
+
+impl GuestUser {
+    /// Why a Windows guest cannot hold this account, or `None` when
+    /// it can.
+    ///
+    /// A method rather than a rule in [`GuestUser::parse`], because
+    /// only a Windows guest has it and the name is read before the
+    /// config says which guest it is for. The registry's `parse`
+    /// asks it once `[vm]`'s `guest` is known.
+    ///
+    /// `account.ps1` keeps its own copy of these rules and of
+    /// `REFUSED_GUEST_USERS`, and `bootstrap.ps1` a copy of the name
+    /// pattern, which they check in the guest. Nothing ties the
+    /// three copies together, so a change to one belongs in all.
+    #[must_use]
+    pub(crate) fn windows_refusal(&self) -> Option<WindowsUserRefusal> {
+        if self.0.len() > MAX_WINDOWS_GUEST_USER_LEN {
+            Some(WindowsUserRefusal::TooLong)
+        } else if WINDOWS_BUILT_IN_USERS.contains(&self.0.as_str()) {
+            Some(WindowsUserRefusal::BuiltIn)
+        } else {
+            None
+        }
+    }
+}
 
 impl Default for GuestUser {
     /// `agent`, the name bombyx uses when the config sets none.

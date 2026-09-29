@@ -539,19 +539,12 @@ fn run() -> Result<Ran> {
     // structs, and a live run never builds their command lines
     // twice.
     if cli.dry_run {
-        let ran = execute(&plan(&action, &cfg, tty, &staged), true)?;
-        return Ok(refuse_unprovisioned(&cfg, &action).unwrap_or(ran));
+        return execute(&plan(&action, &cfg, tty, &staged), true);
     }
     if matches!(action, Action::Doctor) {
         return Ok(doctor_run(&cfg));
     }
-    let ran = execute(&plan(&action, &cfg, tty, &staged), false)?;
-    if ran.ok()
-        && let Some(refused) = refuse_unprovisioned(&cfg, &action)
-    {
-        return Ok(refused);
-    }
-    Ok(ran)
+    execute(&plan(&action, &cfg, tty, &staged), false)
 }
 
 /// Checks for a newer release and installs it.
@@ -932,10 +925,7 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// `secrets_refreshed` hook is configured -- then the snapshot:
 /// the shape of a first `up`, which is the honest description when
 /// the state is unknown ahead of time. `bombyx shell --dry-run`
-/// prints the refresh an existing guest gets. A guest bombyx cannot
-/// provision ([`plan::unprovisioned_guest`]) is known from the
-/// config alone, so its dry run stops after the boot and fails as
-/// the live run does.
+/// prints the refresh an existing guest gets.
 fn up_run(
     cfg: &Config,
     tty: Tty,
@@ -951,15 +941,6 @@ fn up_run(
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(boot);
-        // A guest bombyx cannot provision stops after the boot, in
-        // the dry run as in the live one: no refresh, no snapshot,
-        // and the same failure.
-        if plan::unprovisioned_guest(cfg, &Action::Up).is_some() {
-            execute(&cmds, true)?;
-            return Ok(
-                refuse_unprovisioned(cfg, &Action::Up).unwrap_or(Ran::Ok)
-            );
-        }
         cmds.extend(plan::refresh_after_provisioning(cfg, staged));
         cmds.push(snapshot);
         return execute(&cmds, true);
@@ -967,9 +948,6 @@ fn up_run(
     let state = probe_state(cfg);
     let refresh = plan::refresh_secrets(cfg, staged);
     if state.as_ref().is_some_and(listing::VmState::is_running) {
-        if let Some(refused) = refuse_unprovisioned(cfg, &Action::Up) {
-            return Ok(refused);
-        }
         if refresh.is_empty() {
             eprint_lines(&format!(
                 "bombyx: {} is already running; up did nothing\n",
@@ -999,11 +977,6 @@ fn up_run(
     let booted = execute(&boot, false)?;
     if !booted.ok() {
         return Ok(booted);
-    }
-    // Before the refresh and the snapshot: an unprovisioned guest
-    // has no account to refresh and no clean install to save.
-    if let Some(refused) = refuse_unprovisioned(cfg, &Action::Up) {
-        return Ok(refused);
     }
     // After the boot, because the guest must be up to take the
     // files. A boot that provisioned is followed, when a hook is
@@ -1058,20 +1031,12 @@ fn provision_run(
     let mut cmds = plan(&Action::Provision, cfg, tty, staged);
     let after = plan::refresh_after_provisioning(cfg, staged);
     if dry_run {
-        if plan::unprovisioned_guest(cfg, &Action::Provision).is_some() {
-            execute(&cmds, true)?;
-            return Ok(refuse_unprovisioned(cfg, &Action::Provision)
-                .unwrap_or(Ran::Ok));
-        }
         cmds.extend(after);
         return execute(&cmds, true);
     }
     let provisioned = execute(&cmds, false)?;
     if !provisioned.ok() {
         return Ok(provisioned);
-    }
-    if let Some(refused) = refuse_unprovisioned(cfg, &Action::Provision) {
-        return Ok(refused);
     }
     Ok(refreshed(run_refresh(&after)))
 }
@@ -1085,17 +1050,6 @@ fn provision_run(
 /// is 1 because each failure was already printed with its own.
 fn refreshed(all_ok: bool) -> Ran {
     if all_ok { Ran::Ok } else { Ran::Failed(1) }
-}
-
-/// Prints why `action` cannot report success for this guest, and
-/// the failure it returns instead, or `None` when it can.
-///
-/// [`plan::unprovisioned_guest`] decides; this only prints it. Exit
-/// status 1, because the message was already printed.
-fn refuse_unprovisioned(cfg: &Config, action: &Action) -> Option<Ran> {
-    let why = plan::unprovisioned_guest(cfg, action)?;
-    eprint_lines(&format!("bombyx: {why}\n"));
-    Some(Ran::Failed(1))
 }
 
 /// Asks the VM host what the project's machine is doing.

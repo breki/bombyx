@@ -249,7 +249,7 @@ pub use env::{EnvName, EnvValue};
 pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
-pub use guest_user::GuestUser;
+pub use guest_user::{GuestUser, WindowsUserRefusal};
 pub use hooks::{HookPath, Hooks};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
@@ -1660,13 +1660,16 @@ mod load_project_tests {
         assert_eq!(cfg.hooks, Hooks::default());
     }
 
-    /// [`registry_with_source_key`] for a Windows guest.
+    /// [`registry_with_source_key`] for a Windows guest, whose
+    /// script is PowerShell.
     fn windows_registry_with_source_key(extra: &str) -> String {
-        registry_with_source_key(extra).replacen(
-            "[projects.myproject.vm]\n",
-            "[projects.myproject.vm]\nguest = \"windows\"\n",
-            1,
-        )
+        registry_with_source_key(extra)
+            .replacen(
+                "[projects.myproject.vm]\n",
+                "[projects.myproject.vm]\nguest = \"windows\"\n",
+                1,
+            )
+            .replacen("vagrant/provision.sh", "vagrant/provision.ps1", 1)
     }
 
     #[test]
@@ -1677,8 +1680,194 @@ mod load_project_tests {
     }
 
     #[test]
+    fn a_windows_guest_refuses_a_script_powershell_cannot_run() {
+        // bootstrap.ps1 runs the script with `powershell -File`,
+        // which runs a `.ps1` file and nothing else. Accepting
+        // another would boot a VM whose provisioning then fails.
+        for script in ["setup.sh", "setup.cmd", "setup", "setup.ps1.txt"] {
+            let src = windows_registry_with_source_key("").replacen(
+                "vagrant/provision.ps1",
+                script,
+                1,
+            );
+            let err = load(&src, "myproject").expect_err(script);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestScript { .. }),
+                "{script}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", script, ".ps1"] {
+                assert!(text.contains(part), "{script}: {part}: {text}");
+            }
+        }
+        // Windows matches an extension without regard to case.
+        let src = windows_registry_with_source_key("").replacen(
+            "vagrant/provision.ps1",
+            "vagrant/Setup.PS1",
+            1,
+        );
+        load(&src, "myproject").expect("an upper-case .PS1 must load");
+    }
+
+    #[test]
+    fn a_linux_guest_runs_a_script_of_any_name() {
+        let src = registry_with_source_key("").replacen(
+            "vagrant/provision.sh",
+            "setup",
+            1,
+        );
+        load(&src, "myproject").expect("a Linux script needs no extension");
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_a_guest_user_windows_cannot_hold() {
+        // Windows caps a local account name at 20 characters, and
+        // these names are the box's own built-in accounts. The
+        // rules `GuestUser` applies to every guest still run first.
+        use crate::config::WindowsUserRefusal::{BuiltIn, TooLong};
+        for (user, why) in [
+            ("a23456789012345678901", TooLong),
+            ("administrator", BuiltIn),
+            ("guest", BuiltIn),
+            ("defaultaccount", BuiltIn),
+            ("wdagutilityaccount", BuiltIn),
+        ] {
+            let src = windows_registry_with_source_key("").replacen(
+                "guest = \"windows\"\n",
+                &format!("guest = \"windows\"\nguest_user = \"{user}\"\n"),
+                1,
+            );
+            let err = load(&src, "myproject").expect_err(user);
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::WindowsGuestUser { reason, .. } if reason == why
+                ),
+                "{user}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", user] {
+                assert!(text.contains(part), "{user}: {part}: {text}");
+            }
+        }
+        // The too-long message states the limit the check applies.
+        assert!(TooLong.to_string().contains("20"), "{TooLong}");
+        // Twenty characters is the longest name Windows accepts.
+        let src = windows_registry_with_source_key("").replacen(
+            "guest = \"windows\"\n",
+            "guest = \"windows\"\nguest_user = \"a2345678901234567890\"\n",
+            1,
+        );
+        load(&src, "myproject").expect("a 20-character name must load");
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_an_env_name_windows_reads_regardless_of_case() {
+        // Windows matches environment names without regard to case,
+        // so on a Windows guest `bombyx_script` overwrites
+        // `BOMBYX_SCRIPT`, and `Path` or `ProgramFiles` changes which
+        // programs bombyx's own guest scripts run.
+        for name in [
+            "bombyx_script",
+            "Bombyx_Repo",
+            "Path",
+            "path",
+            "PathExt",
+            "PSModulePath",
+            "ProgramFiles",
+            "ProgramData",
+            "SystemRoot",
+            "windir",
+            "ComSpec",
+            "USERNAME",
+            "userprofile",
+            "Temp",
+            "tmp",
+            "git_dir",
+            "Git_Ssh_Command",
+            "git_config_parameters",
+            "git_exec_path",
+            "Git_Template_Dir",
+            "PSExecutionPolicyPreference",
+            "ld_preload",
+            "HOME",
+            "Home",
+            "HomeDrive",
+            "homepath",
+            "Xdg_Config_Home",
+        ] {
+            let src = format!(
+                "{}\n[projects.myproject.env]\n{name} = \"x\"\n",
+                windows_registry_with_source_key("")
+            );
+            let err = load(&src, "myproject").expect_err(name);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestEnv { .. }),
+                "{name}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", name] {
+                assert!(text.contains(part), "{name}: {part}: {text}");
+            }
+        }
+        // An ordinary name loads, in any case.
+        for name in ["MY_VAR", "my_var"] {
+            let src = format!(
+                "{}\n[projects.myproject.env]\n{name} = \"x\"\n",
+                windows_registry_with_source_key("")
+            );
+            load(&src, "myproject").expect(name);
+        }
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_two_env_names_that_differ_only_in_case() {
+        // Windows reads `FOO` and `foo` as one variable, so one of the
+        // two values would vanish without a word.
+        let src = format!(
+            "{}\n[projects.myproject.env]\nFOO = \"a\"\nfoo = \"b\"\n",
+            windows_registry_with_source_key("")
+        );
+        let err = load(&src, "myproject").expect_err("FOO and foo");
+        assert!(
+            matches!(err, ConfigError::WindowsGuestEnv { .. }),
+            "{err:?}"
+        );
+        // Linux keeps them apart, so there the pair loads.
+        let src = format!(
+            "{}\n[projects.myproject.env]\nFOO = \"a\"\nfoo = \"b\"\n",
+            registry_with_source_key("")
+        );
+        load(&src, "myproject").expect("FOO and foo on Linux");
+    }
+
+    #[test]
+    fn every_guest_refuses_git_config_parameters() {
+        // git reads `GIT_CONFIG_PARAMETERS` as `git -c` on every call,
+        // so a `url.<x>.insteadOf` there would clone another repository.
+        let src = format!(
+            "{}\n[projects.myproject.env]\nGIT_CONFIG_PARAMETERS = \"x\"\n",
+            registry_with_source_key("")
+        );
+        load(&src, "myproject").expect_err("GIT_CONFIG_PARAMETERS on Linux");
+    }
+
+    #[test]
+    fn a_linux_guest_keeps_env_names_case_sensitive() {
+        // Linux reads `Path` and `PATH` as two names, so only the
+        // exact spellings stay refused there.
+        for name in ["Path", "bombyx_thing", "ProgramFiles"] {
+            let src = format!(
+                "{}\n[projects.myproject.env]\n{name} = \"x\"\n",
+                registry_with_source_key("")
+            );
+            load(&src, "myproject").expect(name);
+        }
+    }
+
+    #[test]
     fn a_windows_guest_refuses_every_secret_while_the_file_is_read() {
-        // Nothing provisions a Windows guest yet, so a key, a
+        // The Windows scripts place no secret yet, so a key, a
         // secrets file or a token would be read on the workstation
         // and copied to the VM host for nothing. Each is refused by
         // name, and the message points at the issue that lifts it.

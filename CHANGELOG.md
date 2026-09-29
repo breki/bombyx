@@ -28,13 +28,21 @@ and this project adheres to
   `env_file`, and a path that cannot name a file.
 - A `guest` key under `[vm]`, `"linux"` by default. `guest = "windows"` boots a
   Windows guest over vagrant's `winssh` communicator, with a 900 s boot timeout
-  and a box's remote desktop forward switched off, but bombyx cannot provision
-  one yet: `up` and `scratch` boot the VM, and they and `provision` then fail
-  with a message naming GitHub issue #141.
+  and a box's remote desktop forward switched off, and provisions it with two
+  PowerShell scripts, `account.ps1` and `bootstrap.ps1`. They create the
+  agent's account as an administrator, install a pinned, hash-checked MinGit,
+  clone the project into the agent's home over an SSH login as the agent, and
+  run `script`, which must be a `.ps1` file. Provisioning prints how long an
+  unactivated Windows evaluation has left. On a Windows guest, `guest_user` is
+  at most 20 characters and names none of the box's built-in accounts, and
+  `[env]` names are compared without regard to case, as Windows compares them:
+  one matching a name bombyx reserves, or Windows' own `PATHEXT`,
+  `PROGRAMFILES`, `USERNAME`, `HOME` and others, is refused, and so are two
+  names that differ only in case.
   A Windows project that names a `deploy_key`, an `env_file` or a `repo_token`,
   or a key that only works beside one (`repo_user`, the `secrets_refreshed`
-  hook), is refused while the config is read, because nothing would receive
-  them.
+  hook), is refused while the config is read, because the Windows scripts
+  place no secret yet.
 - A recipe that builds the Windows guest box from Microsoft's own Windows Server
   2025 evaluation ISO, in `boxes/windows-server-2025/`. `build.sh` downloads the
   ISO over HTTPS and refuses one whose SHA-256 differs from the pin, installs
@@ -67,6 +75,12 @@ and this project adheres to
   destroy myproject --yes`.
 - `bombyx list` asks every host at once, and each host runs `vagrant status` for
   up to four of its projects at the same time rather than one after another.
+- **BREAKING:** `[env]` now refuses `GIT_CONFIG_PARAMETERS`, `GIT_EXEC_PATH`,
+  `GIT_TEMPLATE_DIR` and `XDG_CONFIG_HOME` on every guest, Linux included. Each
+  changes which repository `bootstrap.sh`'s git clones or which programs it
+  runs: the first as `git -c` does, the next two by choosing git's helper
+  programs and the hooks a clone runs, the last by moving git's global config.
+  Set any of them inside your own script instead.
 
 ### Fixed
 

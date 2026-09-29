@@ -288,17 +288,17 @@ pub enum ConfigError {
     /// key that only works beside one (`repo_user`, the
     /// `secrets_refreshed` hook).
     ///
-    /// bombyx cannot provision a Windows guest yet, so the secret
-    /// would be read on the workstation and copied to the VM host
-    /// for a guest that never receives it. A rule spanning `[vm]`,
-    /// `[source]` and `[hooks]`, checked in the registry's `parse` like
-    /// [`ConfigError::HookWithoutEnvFile`]. GitHub issue #141 lifts
-    /// it when the Windows guest scripts exist.
+    /// The Windows guest scripts do not place secrets yet, so the
+    /// secret would be read on the workstation and copied to the
+    /// VM host for a guest that never receives it. A rule spanning
+    /// `[vm]`, `[source]` and `[hooks]`, checked in the registry's
+    /// `parse` like [`ConfigError::HookWithoutEnvFile`]. GitHub
+    /// issue #141 lifts it when the scripts place them.
     #[error(
         "invalid config in {}: project \"{project}\" sets {keys}, \
          but [projects.\"{project}\".vm] sets guest = \
-         \"windows\", and bombyx cannot provision a Windows guest yet \
-         (bombyx issue #141) -- remove them for now",
+         \"windows\", and bombyx cannot place secrets in a Windows \
+         guest yet (bombyx issue #141) -- remove them for now",
         .path.display()
     )]
     WindowsGuestSecret {
@@ -309,5 +309,78 @@ pub enum ConfigError {
         /// Every key to remove, backticked and comma-joined, so
         /// one message lists all the operator removes.
         keys: String,
+    },
+
+    /// A project with `guest = "windows"` names a `script` that is
+    /// not a `.ps1` file.
+    ///
+    /// The Windows bootstrap script runs the project's script with
+    /// `powershell -File`, which refuses any other file, so the VM
+    /// would boot and its provisioning then fail. A rule spanning
+    /// `[vm]` and `[source]`, checked in the registry's `parse`.
+    #[error(
+        "invalid config in {}: project \"{project}\" sets script = \
+         \"{script}\", but [projects.\"{project}\".vm] sets guest = \
+         \"windows\", and a Windows guest runs the script with \
+         PowerShell, which needs a .ps1 file",
+        .path.display()
+    )]
+    WindowsGuestScript {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project naming the script.
+        project: String,
+        /// The script, as the config spells it.
+        script: String,
+    },
+
+    /// A project with `guest = "windows"` names a `guest_user`
+    /// that a Windows guest cannot hold: longer than Windows allows
+    /// a local account name, or one of the box's built-in accounts.
+    ///
+    /// A rule on `guest_user` that only `[vm]`'s `guest` switches
+    /// on, so it runs in the registry's `parse`, after
+    /// `GuestUser`'s own rules have passed.
+    #[error(
+        "invalid config in {}: project \"{project}\" sets guest_user = \
+         \"{user}\", but [projects.\"{project}\".vm] sets guest = \
+         \"windows\", and on Windows guest_user {reason}",
+        .path.display()
+    )]
+    WindowsGuestUser {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project naming the account.
+        project: String,
+        /// The account name, as the config spells it.
+        user: String,
+        /// Which Windows rule the name breaks.
+        reason: super::WindowsUserRefusal,
+    },
+
+    /// A project with `guest = "windows"` names an `[env]` entry a
+    /// Windows guest cannot take: one that, compared without regard
+    /// to case as Windows compares, is bombyx's own or changes what
+    /// its guest scripts do, or one that differs only in case from
+    /// another `[env]` name, which Windows reads as the same variable.
+    ///
+    /// A rule on `[env]` that only `[vm]`'s `guest` switches on, so
+    /// it runs in the registry's `parse`, after `EnvName`'s own
+    /// rules have passed.
+    #[error(
+        "invalid config in {}: project \"{project}\" sets `{name}` in \
+         [projects.\"{project}\".env], but [projects.\"{project}\".vm] \
+         sets guest = \"windows\", and there the name {reason}",
+        .path.display()
+    )]
+    WindowsGuestEnv {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project naming the variable.
+        project: String,
+        /// The variable's name, as the config spells it.
+        name: String,
+        /// Which rule the name breaks.
+        reason: &'static str,
     },
 }

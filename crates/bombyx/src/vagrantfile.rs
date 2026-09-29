@@ -30,6 +30,8 @@ use crate::config::{
 };
 use crate::hostkeys;
 
+mod windows;
+
 /// The script that clones the project and runs the project's own
 /// script, as the agent, shipped to the host unchanged.
 ///
@@ -599,8 +601,8 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
 ///
 /// The guest's operating system picks the provisioners: a Linux
 /// guest gets `linux_provisioning`, and a Windows guest gets
-/// `guest_block`'s settings and none, because bombyx cannot
-/// provision Windows yet and says so itself after the boot.
+/// `guest_block`'s settings and the PowerShell provisioners the
+/// `windows` submodule renders.
 ///
 /// **The block below configures a provider; it does not select
 /// one.** Vagrant applies it only to the provider it has
@@ -668,8 +670,9 @@ Vagrant.configure(\"2\") do |config|
         guest = guest_block(vm.guest, vm.provider),
         provisioning = match vm.guest {
             Guest::Linux => linux_provisioning(cfg, staged),
-            // No provisioner: `plan::unprovisioned_guest` holds why.
-            Guest::Windows => String::new(),
+            // `staged` carries no secret for a Windows project: the
+            // config refuses one, because these scripts place none.
+            Guest::Windows => windows::provisioning(cfg),
         },
     )
 }
@@ -1116,6 +1119,11 @@ fn credential_block(staged: bool) -> String {
 /// Every file bombyx *generates* for the project directory on
 /// the VM host, as `(name, contents)` pairs.
 ///
+/// The two scripts depend on the guest: [`ACCOUNT`] and
+/// [`BOOTSTRAP`] for a Linux guest, and their PowerShell
+/// counterparts, `account.ps1` and `bootstrap.ps1`, for a Windows
+/// guest.
+///
 /// Not every file that lands there. A `staged` carrying secrets
 /// sends one more and one carrying a credential sends another,
 /// and neither is generated here: the first comes off the
@@ -1141,11 +1149,19 @@ fn credential_block(staged: bool) -> String {
 /// Whenever [`render`] does, and for the same reason.
 #[must_use]
 pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 3] {
-    [
-        (VAGRANTFILE_NAME, render(cfg, staged)),
-        (BOOTSTRAP_NAME, BOOTSTRAP.to_owned()),
-        (ACCOUNT_NAME, ACCOUNT.to_owned()),
-    ]
+    let vagrantfile = (VAGRANTFILE_NAME, render(cfg, staged));
+    match cfg.vm.guest {
+        Guest::Linux => [
+            vagrantfile,
+            (BOOTSTRAP_NAME, BOOTSTRAP.to_owned()),
+            (ACCOUNT_NAME, ACCOUNT.to_owned()),
+        ],
+        Guest::Windows => [
+            vagrantfile,
+            (windows::BOOTSTRAP_NAME, windows::BOOTSTRAP.to_owned()),
+            (windows::ACCOUNT_NAME, windows::ACCOUNT.to_owned()),
+        ],
+    }
 }
 
 // The shell text of `bootstrap.sh` is linted in
@@ -1164,6 +1180,7 @@ mod account_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use std::num::NonZeroU32;
 
     use crate::config::{
@@ -2208,30 +2225,140 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_windows_vagrantfile_carries_no_provisioner() {
-        // bombyx cannot provision a Windows guest, and says so
-        // itself after the boot (`plan::unprovisioned_guest`).
-        // vagrant runs a provisioner on the first `up` only, so one
-        // here would fail that `up` and let every later one succeed.
-        let out = rendered_for(&cfg_windows());
-        assert_eq!(out.matches("config.vm.provision").count(), 0, "{out}");
+    /// A Windows project the config accepts: no secret, and a
+    /// PowerShell script.
+    fn cfg_windows_plain() -> Config {
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.vm.guest = Guest::Windows;
+        cfg.source.script =
+            ScriptPath::parse("vagrant/provision.ps1").expect("a valid path");
+        cfg
     }
 
     #[test]
-    fn a_windows_vagrantfile_uploads_no_file_and_no_secret() {
-        // Nothing provisions a Windows guest yet, so a key, a
-        // secrets file or a credential uploaded to it would sit
-        // in the login account's home with nothing to move it.
+    fn a_windows_vagrantfile_stages_bootstrap_and_runs_account() {
+        // The shell provisioner runs one script, account.ps1, so
+        // bootstrap.ps1 is uploaded ahead of it. The destination is
+        // relative: vagrant expands no `~` on a Windows guest, and
+        // SFTP resolves a relative path against the login home.
+        let out = rendered_for(&cfg_windows_plain());
+        let upload = "  config.vm.provision \"file\",\n    \
+             source: File.expand_path(\"bootstrap.ps1\", __dir__),\n    \
+             destination: \".bombyx-staging/bootstrap.ps1\"\n";
+        assert!(out.contains(upload), "{out}");
+        let run = "  config.vm.provision \"shell\",\n    \
+             path: \"account.ps1\",\n";
+        assert!(out.contains(run), "{out}");
+        assert!(
+            out.find(upload) < out.find(run),
+            "the upload must come first: {out}"
+        );
+        assert_eq!(out.matches("config.vm.provision").count(), 2, "{out}");
+        for absent in [ACCOUNT_NAME, BOOTSTRAP_NAME, "privileged"] {
+            assert!(!out.contains(absent), "{absent} rendered: {out}");
+        }
+    }
+
+    #[test]
+    fn a_windows_provisioner_hands_every_value_over_as_base64() {
+        // vagrant pastes each env value into the script as
+        // `$env:NAME="value"` and escapes nothing, so a `"` would
+        // end the string and a `$` or a backtick would be read by
+        // PowerShell. Measured with vagrant 2.4.9 on frosti. The
+        // config refuses a `"` in a value already; base64 holds
+        // none of the three.
+        let mut cfg = cfg_windows_plain();
+        let tricky = "it's $x `n $(whoami)";
+        cfg.env.insert(
+            EnvName::parse("MY_VAR").expect("a valid name"),
+            EnvValue::parse(tricky).expect("a valid value"),
+        );
+        let out = rendered_for(&cfg);
+        for (name, value) in [
+            (GUEST_USER_ENV, "agent"),
+            (REPO_ENV, cfg.source.repo.as_str()),
+            (REF_ENV, cfg.source.git_ref.as_str()),
+            (SCRIPT_ENV, "vagrant/provision.ps1"),
+            (PROJECT_ENV, cfg.project.as_str()),
+            ("MY_VAR", tricky),
+        ] {
+            let line = format!(
+                "\"{name}\" => \"{}\"",
+                windows::base64(value.as_bytes())
+            );
+            assert_eq!(out.matches(&line).count(), 1, "{line}: {out}");
+        }
+        assert!(!out.contains(tricky), "{out}");
+        // The two values vagrant reads from its own environment
+        // are encoded by Ruby, as the Vagrantfile is read.
+        for name in [crate::remote::VM_HOST_ENV, crate::remote::VM_HOSTNAME_ENV]
+        {
+            let line = format!(
+                "\"{name}\" => [ENV.fetch(\"{name}\", \"unknown\")].pack(\"m0\")"
+            );
+            assert!(out.contains(&line), "{line}: {out}");
+        }
+    }
+
+    #[test]
+    fn a_windows_preserve_list_names_every_variable_the_hash_sets() {
+        // account.ps1 hands the agent exactly the names this list
+        // gives, so a name the hash sets and the list leaves out
+        // would never reach the project's script.
+        let mut cfg = cfg_windows_plain();
+        cfg.env.insert(
+            EnvName::parse("MY_VAR").expect("a valid name"),
+            EnvValue::parse("1").expect("a valid value"),
+        );
+        let out = rendered_for(&cfg);
+        let list = windows::preserve_list(&cfg.env);
+        let line = format!(
+            "\"{PRESERVE_ENV}\" => \"{}\"",
+            windows::base64(list.as_bytes())
+        );
+        assert!(out.contains(&line), "{line}: {out}");
+        let hash = &out[out.find("env: {").expect("an env hash")..];
+        let set: BTreeSet<&str> = hash
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix('"'))
+            .filter_map(|l| l.split('"').next())
+            .filter(|n| *n != PRESERVE_ENV)
+            .collect();
+        let listed: BTreeSet<&str> = list.split(',').collect();
+        assert_eq!(set, listed, "{list}");
+    }
+
+    #[test]
+    fn a_windows_guest_gets_the_powershell_scripts() {
+        let cfg = cfg_windows_plain();
+        let files = files(&cfg, &cfg.staged_for_tests());
+        let names: Vec<&str> = files.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            names,
+            [
+                VAGRANTFILE_NAME,
+                windows::BOOTSTRAP_NAME,
+                windows::ACCOUNT_NAME
+            ]
+        );
+        assert_eq!(files[1].1, windows::BOOTSTRAP);
+        assert_eq!(files[2].1, windows::ACCOUNT);
+    }
+
+    #[test]
+    fn a_windows_vagrantfile_uploads_no_secret() {
+        // The Windows scripts place no secret yet, and the config
+        // refuses one for a Windows project. A `Config` built by
+        // hand can still carry one, and none of it may reach the
+        // guest, where nothing would move it out of the login
+        // account's home.
         let out = rendered_for(&cfg_windows());
         for absent in [
-            "config.vm.provision \"file\"",
-            ACCOUNT_NAME,
-            BOOTSTRAP_NAME,
-            "privileged: true",
             DEPLOY_KEY_STAGED_PATH,
             ENV_FILE_STAGED_PATH,
             CREDENTIAL_STAGED_PATH,
+            "deploy-key",
+            "git-credentials",
             KEY,
         ] {
             assert!(!out.contains(absent), "{absent} rendered: {out}");

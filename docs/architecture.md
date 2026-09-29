@@ -29,7 +29,7 @@ flowchart LR
   end
 
   subgraph host["VM host"]
-    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh, account.sh<br/>bombyx.env (staged, with env_file)<br/>bombyx.git-credentials (staged, with repo_token)"]
+    dir["~/vms/{project}<br/>Vagrantfile, bootstrap.sh, account.sh<br/>(bootstrap.ps1, account.ps1 for Windows)<br/>bombyx.env (staged, with env_file)<br/>bombyx.git-credentials (staged, with repo_token)"]
     vg["vagrant"]
   end
 
@@ -328,9 +328,10 @@ sequenceDiagram
 ```
 
 This is the sequence for a Linux guest. A Windows guest
-(`guest = "windows"`) stops after `create from box`: its Vagrantfile
-carries no provisioner, and bombyx then fails the command with a
-message naming GitHub issue #141.
+(`guest = "windows"`) follows it with `bootstrap.ps1` and
+`account.ps1` in place of the two shell scripts, and stages no
+credentials, because its scripts place none yet (GitHub issue
+#141).
 
 The order matters in three places. bombyx creates the directory
 first, because the writes redirect into it. `vagrant up` runs
@@ -366,10 +367,38 @@ clears the environment, so `account.sh` passes
 `BOMBYX_PRESERVE_ENV`, the list of every name in the Vagrantfile's
 `env:` hash, to `sudo --preserve-env`. The `[env]` table may not
 set the names `config/env.rs` reserves, because each changes what
-one of the scripts does. `HOME` is accepted on purpose and moves
-the clone. `config/env.rs` and `config.toml.sample` list the
+one of the scripts does. On a Linux guest `HOME` is accepted on
+purpose and moves the clone. On a Windows guest `HOME` only moves
+git's `~/.gitconfig`, so it is refused, along with a further list
+of Windows' own variables, and every name is compared without
+regard to case. `config/env.rs` and `config.toml.sample` list the
 reserved names, and `docs/trust-boundary.md` describes the
 isolation model this arrangement serves.
+
+A Windows guest has the same two steps in PowerShell, with four
+differences:
+
+- **The hand-over is an SSH login.** Windows has no `sudo -u`.
+  `account.ps1` runs as vagrant's login account, an administrator.
+  It creates the agent's account, an administrator too, and its
+  profile, authorizes a key it makes in the guest, and runs
+  `bootstrap.ps1` through `ssh agent@localhost`. The login streams
+  the output and returns the exit code. From vagrant's session,
+  Windows refuses an S4U scheduled task, and
+  `Start-Process -Credential` returns neither output nor an exit
+  code, so neither can do the hand-over.
+- **Every value arrives base64-encoded.** vagrant's `winssh` shell
+  provisioner writes each `env:` value into the script it runs as
+  `$env:NAME="value"` and escapes nothing, so a `"` or a `$` in a
+  value would be read by PowerShell. `account.ps1` decodes each
+  name `BOMBYX_PRESERVE_ENV` lists and sets it for the agent's
+  login.
+- **git is installed by bombyx.** The box has none, so
+  `account.ps1` downloads one pinned MinGit release under
+  `C:\Program Files\bombyx\git` and refuses a download whose
+  SHA-256 differs from the pin.
+- **The project's `script` must be a `.ps1` file**, which
+  `bootstrap.ps1` runs with `powershell -File`.
 
 ## Why three stages and not one
 

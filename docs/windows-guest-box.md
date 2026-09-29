@@ -11,8 +11,8 @@ runs on a real VM host showed about it.
 The Windows-guest work is tracked in GitHub issue #138, in parts that
 are each an issue of their own. Issue #136 added the
 `guest = "windows"` key. Issue #141 ports the guest scripts to
-PowerShell: its first part is PR #145, not merged yet, so the scripts
-it adds, `account.ps1` and `bootstrap.ps1`, are not in this tree.
+PowerShell: its first part added `account.ps1` and `bootstrap.ps1`,
+and its second part, still to come, places the secrets.
 Issue #144 is this box. Issue #137 makes `shell`, the secrets refresh
 and the hook work on a Windows guest.
 
@@ -34,10 +34,10 @@ vagrant box add --name bombyx/windows-server-2025 \
 ```
 
 A project then names `box = "bombyx/windows-server-2025"` with
-`guest = "windows"`. Until PR #145 lands, `up`, `provision` and
-`scratch` boot such a guest and then fail, because bombyx cannot
-provision a Windows guest yet. The statements below about
-`account.ps1` describe that PR's script.
+`guest = "windows"`. `up` then boots the VM, creates the agent's
+account, installs git, clones the project and runs its `.ps1` script,
+through `account.ps1` and `bootstrap.ps1` in
+`crates/bombyx/templates/`.
 
 The build needs `qemu-system-x86_64`, `qemu-img`, `xorriso`, `curl`,
 `sha256sum` and `tar` on the VM host, the operator in the `kvm` group,
@@ -151,11 +151,11 @@ Read from a VM made from the box, on 2026-09-29:
   it, sshd reads every administrator's keys from one shared file,
   `C:\ProgramData\ssh\administrators_authorized_keys`. Without it,
   sshd reads the account's own `.ssh\authorized_keys`, which is where
-  vagrant writes the key it swaps in, and where PR #145's
-  `account.ps1` writes the key it uses to log in as the agent. The
-  stock config's `AllowGroups administrators "openssh users"` stays,
-  so only members of those two groups may log in over SSH; the agent
-  account PR #145 creates is an administrator.
+  vagrant writes the key it swaps in, and where `account.ps1` writes
+  the key it uses to log in as the agent. The stock config's
+  `AllowGroups administrators "openssh users"` stays, so only members
+  of those two groups may log in over SSH; the agent account that
+  `account.ps1` creates is an administrator.
 - **sshd's firewall rule open on every network profile.** Server 2025
   ships the rule limited to the Private profile, and the libvirt
   network is Public, where the port would stay closed and vagrant
@@ -176,15 +176,15 @@ Read from a VM made from the box, on 2026-09-29:
   list, and no service outside Windows' own folders. The kernel,
   `lsass`, `winlogon`, `sshd` and `powershell` all carry a valid
   `Microsoft Windows` signature.
-- **git is not installed**; PR #145's `account.ps1` installs it.
+- **git is not installed**; `account.ps1` installs it.
 
 ## Licence
 
 The box is an evaluation, licensed for testing, not for routine use.
 
 - **Each VM starts its own grace**, because sysprep resets it. On a
-  VM made from the box, PR #145's `account.ps1` reported at provisioning
-  that the evaluation was not activated, with about 9 days left.
+  VM made from the box, `account.ps1` reported at provisioning that
+  the evaluation was not activated, with about 9 days left.
 - **Unactivated, it shuts down after 10 days.** Microsoft's
   Evaluation Center page says: "Evaluation versions of Windows Server
   must be activated over the internet in the first 10 days to avoid
@@ -194,8 +194,8 @@ The box is an evaluation, licensed for testing, not for routine use.
   audited some minutes after its first boot. Nothing ran `slmgr` or
   entered a key: Windows' own automatic activation reached Microsoft
   through libvirt's NAT. How soon it does so was not measured. bombyx
-  does not activate the guest itself; PR #145's `account.ps1` prints
-  the days left while a guest is unactivated.
+  does not activate the guest itself; `account.ps1` prints the days
+  left while a guest is unactivated.
 - **After activation** it runs 180 days, and a Server evaluation can
   be converted to a licensed edition with a product key.
 - **For routine use** the guest needs a licence of its own: a Visual
@@ -211,6 +211,11 @@ The box is an evaluation, licensed for testing, not for routine use.
 
 - **`vagrant ssh -c` runs Windows PowerShell 5.1**, because the box's
   Vagrantfile sets `config.winssh.shell = "powershell"`.
+- **A plain `ssh` command runs under sshd's default shell**, which is
+  `cmd.exe` unless `HKLM:\SOFTWARE\OpenSSH\DefaultShell` names
+  another. Which one this box uses was not checked. `account.ps1`'s
+  hand-over command holds no character that `cmd.exe` or PowerShell
+  reads, so it works under either.
 - **PowerShell writes progress records to stderr as CLIXML**
   (`#< CLIXML` and an `<Objs>` block) when modules load for the first
   time. bombyx prints a host's stderr as the reason for a failure, so a
