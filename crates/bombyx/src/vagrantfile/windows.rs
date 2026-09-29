@@ -24,10 +24,13 @@
 use std::collections::BTreeMap;
 
 use super::{
-    GUEST_USER_ENV, PRESERVE_ENV, PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV,
-    ruby_string,
+    CREDENTIAL_PRESENT_ENV, DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, GIT_HOST_ENV,
+    GUEST_USER_ENV, HOST_KEYS_FORMAT_ENV, HOST_KEYS_URL_ENV, PRESERVE_ENV,
+    PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV, credential_block,
+    deploy_key_block, deploy_key_env, env_file_block, ruby_string,
 };
-use crate::config::{Config, EnvName, EnvValue};
+use crate::config::{Config, EnvName, EnvValue, Staged};
+use crate::hostkeys;
 use crate::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
 
 /// The script that clones the project and runs its script, as the
@@ -56,28 +59,48 @@ pub(crate) const ACCOUNT_NAME: &str = "account.ps1";
 /// `$env:USERPROFILE`, which is that same home.
 const BOOTSTRAP_STAGED_PATH: &str = ".bombyx-staging/bootstrap.ps1";
 
+/// Where the deploy key is staged, relative to the login home for
+/// the reason [`BOOTSTRAP_STAGED_PATH`] gives. [`ACCOUNT`] places it
+/// as the agent's `.ssh\bombyx-deploy-key`.
+pub(super) const DEPLOY_KEY_STAGED_PATH: &str = ".bombyx-staging/deploy-key";
+
+/// Where the secrets file is staged. [`ACCOUNT`] places it as the
+/// agent's `.bombyx-env`.
+pub(super) const ENV_FILE_STAGED_PATH: &str = ".bombyx-staging/env";
+
+/// Where the git credential is staged. [`ACCOUNT`] places it as the
+/// agent's `.bombyx-git-credentials`.
+pub(super) const CREDENTIAL_STAGED_PATH: &str =
+    ".bombyx-staging/git-credentials";
+
 /// The names bombyx sets for a Windows guest, in the order the
-/// Vagrantfile lists them.
-///
-/// Fewer than on Linux: the deploy key, the secrets file, the git
-/// credential and the git host's ssh keys are not handed to a
-/// Windows guest yet, because its scripts do not place them.
-const ENV_NAMES: [&str; 7] = [
+/// Vagrantfile lists them: the same as on Linux.
+const ENV_NAMES: [&str; 13] = [
     GUEST_USER_ENV,
     REPO_ENV,
     REF_ENV,
     SCRIPT_ENV,
     PROJECT_ENV,
+    DEPLOY_KEY_ENV,
+    ENV_FILE_PRESENT_ENV,
+    CREDENTIAL_PRESENT_ENV,
+    GIT_HOST_ENV,
+    HOST_KEYS_URL_ENV,
+    HOST_KEYS_FORMAT_ENV,
     VM_HOST_ENV,
     VM_HOSTNAME_ENV,
 ];
 
 /// The provisioners that set up a Windows guest: the upload of
 /// [`BOOTSTRAP`], then [`ACCOUNT`].
-pub(super) fn provisioning(cfg: &Config) -> String {
+pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     use std::fmt::Write as _;
 
     let source = &cfg.source;
+    // `None` when `repo` reaches the server by something other than
+    // ssh, and when it names a host bombyx has no key source for.
+    let host_keys = source.repo.ssh_host().and_then(hostkeys::for_host);
+    let flag = |present: bool| if present { "1" } else { "0" };
     let mut env = String::new();
     // Writing to a `String` cannot fail, so the results are dropped.
     let mut entry = |name: &str, value: &str| {
@@ -94,6 +117,19 @@ pub(super) fn provisioning(cfg: &Config) -> String {
     entry(REF_ENV, source.git_ref.as_str());
     entry(SCRIPT_ENV, source.script.as_str());
     entry(PROJECT_ENV, cfg.project.as_str());
+    // Each "0" too, so the guest removes a copy an earlier provision
+    // left rather than keeping a credential the config dropped.
+    entry(DEPLOY_KEY_ENV, deploy_key_env(source.deploy_key.as_ref()));
+    entry(ENV_FILE_PRESENT_ENV, flag(staged.secrets().is_some()));
+    entry(CREDENTIAL_PRESENT_ENV, flag(staged.credential().is_some()));
+    // Empty when bombyx does not know the git host; bootstrap.ps1
+    // then accepts the key it is offered on first connection.
+    entry(GIT_HOST_ENV, host_keys.map_or("", |k| k.host()));
+    entry(HOST_KEYS_URL_ENV, host_keys.map_or("", |k| k.url()));
+    entry(
+        HOST_KEYS_FORMAT_ENV,
+        host_keys.map_or("", |k| k.format().as_str()),
+    );
     for (name, value) in &cfg.env {
         entry(name.as_str(), value.as_str());
     }
@@ -115,7 +151,7 @@ pub(super) fn provisioning(cfg: &Config) -> String {
     source: File.expand_path({bootstrap}, __dir__),
     destination: {staged}
 
-  config.vm.provision \"shell\",
+{deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
     path: {account},
     # As the account vagrant logs in as, an administrator:
     # account.ps1 creates the agent's account and hands
@@ -134,6 +170,16 @@ pub(super) fn provisioning(cfg: &Config) -> String {
         bootstrap = ruby_string(BOOTSTRAP_NAME),
         staged = ruby_string(BOOTSTRAP_STAGED_PATH),
         account = ruby_string(ACCOUNT_NAME),
+        deploy_key = deploy_key_block(
+            source.deploy_key.as_ref(),
+            DEPLOY_KEY_STAGED_PATH
+        ),
+        env_file =
+            env_file_block(staged.secrets().is_some(), ENV_FILE_STAGED_PATH),
+        credential = credential_block(
+            staged.credential().is_some(),
+            CREDENTIAL_STAGED_PATH
+        ),
     )
 }
 

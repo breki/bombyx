@@ -329,9 +329,9 @@ sequenceDiagram
 
 This is the sequence for a Linux guest. A Windows guest
 (`guest = "windows"`) follows it with `bootstrap.ps1` and
-`account.ps1` in place of the two shell scripts, and stages no
-credentials, because its scripts place none yet (GitHub issue
-#141).
+`account.ps1` in place of the two shell scripts. It stages the
+same credentials, and gets no refresh while it runs (GitHub issue
+#137).
 
 The order matters in three places. bombyx creates the directory
 first, because the writes redirect into it. `vagrant up` runs

@@ -670,9 +670,9 @@ Vagrant.configure(\"2\") do |config|
         guest = guest_block(vm.guest, vm.provider),
         provisioning = match vm.guest {
             Guest::Linux => linux_provisioning(cfg, staged),
-            // `staged` carries no secret for a Windows project: the
-            // config refuses one, because these scripts place none.
-            Guest::Windows => windows::provisioning(cfg),
+            // The Windows provisioners upload the same staged
+            // secrets, to the Windows staging paths.
+            Guest::Windows => windows::provisioning(cfg, staged),
         },
     )
 }
@@ -781,9 +781,16 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
       \"{hostname_env}\" => ENV.fetch(\"{hostname_env}\", \"unknown\"){project_env}
     }}
 ",
-        deploy_key = deploy_key_block(source.deploy_key.as_ref()),
-        env_file = env_file_block(staged.secrets().is_some()),
-        credential = credential_block(staged.credential().is_some()),
+        deploy_key = deploy_key_block(
+            source.deploy_key.as_ref(),
+            DEPLOY_KEY_STAGED_PATH
+        ),
+        env_file =
+            env_file_block(staged.secrets().is_some(), ENV_FILE_STAGED_PATH),
+        credential = credential_block(
+            staged.credential().is_some(),
+            CREDENTIAL_STAGED_PATH
+        ),
         repo_env = REPO_ENV,
         ref_env = REF_ENV,
         script_env = SCRIPT_ENV,
@@ -1006,7 +1013,7 @@ fn cpu_mode_setting(provider: Provider, mode: Option<CpuMode>) -> String {
 /// fine. Only a `~/`-anchored key reaches it. That is a broken
 /// environment on the VM host rather than anything a config can
 /// cause, so it is recorded rather than guarded.
-fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
+fn deploy_key_block(key: Option<&DeployKeyPath>, dest: &str) -> String {
     let Some(key) = key else {
         return String::new();
     };
@@ -1030,7 +1037,7 @@ fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
 
 ",
         key = ruby_string(key.as_str()),
-        dest = ruby_string(DEPLOY_KEY_STAGED_PATH),
+        dest = ruby_string(dest),
     )
 }
 
@@ -1053,7 +1060,7 @@ fn deploy_key_block(key: Option<&DeployKeyPath>) -> String {
 /// The `source:` is resolved against the Vagrantfile's own
 /// directory rather than the process's. Vagrant runs the file
 /// through `Kernel.load`, so `__dir__` names that directory.
-fn env_file_block(staged: bool) -> String {
+fn env_file_block(staged: bool, dest: &str) -> String {
     if !staged {
         return String::new();
     }
@@ -1065,8 +1072,8 @@ fn env_file_block(staged: bool) -> String {
   # means the last run stopped early. docs/trust-boundary.md
   # says what keeping a copy inside the guest costs.
   #
-  # The destination is expanded by a shell inside the guest, so
-  # it lands in the real home of the account vagrant logs in as.
+  # It lands in the staging directory of the account vagrant logs
+  # in as, and the account script moves it on.
   bombyx_env_file = File.expand_path({name}, __dir__)
   if File.exist?(bombyx_env_file)
     config.vm.provision \"file\",
@@ -1076,7 +1083,7 @@ fn env_file_block(staged: bool) -> String {
 
 ",
         name = ruby_string(ENV_FILE_NAME),
-        dest = ruby_string(ENV_FILE_STAGED_PATH),
+        dest = ruby_string(dest),
     )
 }
 
@@ -1094,7 +1101,7 @@ fn env_file_block(staged: bool) -> String {
 /// because the clone that needs it runs inside that same
 /// script. (Not the script's first network call: the git host's
 /// published ssh keys are fetched before it, over https.)
-fn credential_block(staged: bool) -> String {
+fn credential_block(staged: bool, dest: &str) -> String {
     if !staged {
         return String::new();
     }
@@ -1112,7 +1119,7 @@ fn credential_block(staged: bool) -> String {
 
 ",
         name = ruby_string(CREDENTIAL_FILE_NAME),
-        dest = ruby_string(CREDENTIAL_STAGED_PATH),
+        dest = ruby_string(dest),
     )
 }
 
@@ -2345,23 +2352,104 @@ mod tests {
         assert_eq!(files[2].1, windows::ACCOUNT);
     }
 
+    /// What `name` is handed over as in a Windows Vagrantfile, decoded
+    /// from its base64, or `None` when the hash does not set it.
+    fn windows_value(out: &str, name: &str) -> Option<String> {
+        let prefix = format!("\"{name}\" => \"");
+        let start = out.find(&prefix)? + prefix.len();
+        let end = start + out[start..].find('"')?;
+        let encoded = &out[start..end];
+        // Only the values this module encodes are read back, so a
+        // round trip through the encoder identifies each one.
+        [
+            "0",
+            "1",
+            "",
+            "github.com",
+            "https://api.github.com/meta",
+            "json",
+        ]
+        .into_iter()
+        .find(|plain| windows::base64(plain.as_bytes()) == encoded)
+        .map(str::to_owned)
+    }
+
     #[test]
-    fn a_windows_vagrantfile_uploads_no_secret() {
-        // The Windows scripts place no secret yet, and the config
-        // refuses one for a Windows project. A `Config` built by
-        // hand can still carry one, and none of it may reach the
-        // guest, where nothing would move it out of the login
-        // account's home.
+    fn a_windows_vagrantfile_uploads_each_staged_secret() {
+        // The Windows scripts place the deploy key, the secrets file
+        // and the git credential, so each staged one is uploaded into
+        // the login home's staging directory, where account.ps1 finds
+        // it, and the guest is told which are coming.
         let out = rendered_for(&cfg_windows());
-        for absent in [
-            DEPLOY_KEY_STAGED_PATH,
-            ENV_FILE_STAGED_PATH,
-            CREDENTIAL_STAGED_PATH,
-            "deploy-key",
-            "git-credentials",
-            KEY,
+        for dest in [
+            windows::DEPLOY_KEY_STAGED_PATH,
+            windows::ENV_FILE_STAGED_PATH,
+            windows::CREDENTIAL_STAGED_PATH,
         ] {
-            assert!(!out.contains(absent), "{absent} rendered: {out}");
+            let line = format!("      destination: {}\n", ruby_string(dest));
+            assert_eq!(out.matches(&line).count(), 1, "{dest}: {out}");
+        }
+        for name in
+            [DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, CREDENTIAL_PRESENT_ENV]
+        {
+            assert_eq!(
+                windows_value(&out, name).as_deref(),
+                Some("1"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_windows_vagrantfile_with_no_secret_uploads_none() {
+        // Told "0", the guest removes a copy an earlier provision left.
+        let out = rendered_for(&cfg_windows_plain());
+        for dest in [
+            windows::DEPLOY_KEY_STAGED_PATH,
+            windows::ENV_FILE_STAGED_PATH,
+            windows::CREDENTIAL_STAGED_PATH,
+        ] {
+            assert!(!out.contains(dest), "{dest}: {out}");
+        }
+        for name in
+            [DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, CREDENTIAL_PRESENT_ENV]
+        {
+            assert_eq!(
+                windows_value(&out, name).as_deref(),
+                Some("0"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_windows_github_clone_over_ssh_is_told_where_the_keys_are() {
+        // bootstrap.ps1 fetches the published keys and checks strictly,
+        // as bootstrap.sh does, so it needs the host, URL and format.
+        let mut cfg = cfg_windows_plain();
+        cfg.source.repo = RepoUrl::parse("git@github.com:you/private.git")
+            .expect("a valid fixture URL");
+        let out = rendered_for(&cfg);
+        assert_eq!(
+            windows_value(&out, GIT_HOST_ENV).as_deref(),
+            Some("github.com")
+        );
+        assert_eq!(
+            windows_value(&out, HOST_KEYS_URL_ENV).as_deref(),
+            Some("https://api.github.com/meta")
+        );
+        assert_eq!(
+            windows_value(&out, HOST_KEYS_FORMAT_ENV).as_deref(),
+            Some("json")
+        );
+        // An https clone opens no ssh connection, so it gets none.
+        let out = rendered_for(&cfg_windows_plain());
+        for name in [GIT_HOST_ENV, HOST_KEYS_URL_ENV, HOST_KEYS_FORMAT_ENV] {
+            assert_eq!(
+                windows_value(&out, name).as_deref(),
+                Some(""),
+                "{name}"
+            );
         }
     }
 

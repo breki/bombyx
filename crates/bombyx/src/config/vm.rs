@@ -110,11 +110,11 @@ impl fmt::Display for Provider {
 /// Linux guest.
 ///
 /// `Windows` boots over vagrant's `winssh` communicator and is
-/// provisioned by `account.ps1` and `bootstrap.ps1`. Those place no
-/// secret yet (GitHub issue #141), so the registry's `parse` refuses
-/// a Windows project that names a `deploy_key`, an `env_file` or a
-/// `repo_token`, or a key that only works beside one (`repo_user`,
-/// the `secrets_refreshed` hook). It also refuses a `script` that is
+/// provisioned by `account.ps1` and `bootstrap.ps1`, which place the
+/// deploy key, the secrets file and the git credential. A running
+/// Windows guest gets no secrets refresh yet (GitHub issue #137), so
+/// the registry's `parse` refuses the `secrets_refreshed` hook, which
+/// rides on that refresh. It also refuses a `script` that is
 /// not a `.ps1` file, a `guest_user` Windows cannot hold, and an
 /// `[env]` name that, compared without regard to case as Windows
 /// compares, is bombyx's own or changes what its guest scripts do,

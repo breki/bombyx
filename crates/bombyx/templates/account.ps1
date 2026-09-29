@@ -60,9 +60,22 @@ $SshKeygen = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh-keygen.exe'
 $AdministratorsSid = 'S-1-5-32-544'
 $SystemSid = 'S-1-5-18'
 
+# The credentials this script has placed in the agent's profile,
+# which Refuse removes, as account.sh does.
+$Placed = New-Object System.Collections.ArrayList
+
 # Prints `why` to stderr with bombyx's prefix and exits 1. Removes
-# the staging directory first, as account.sh does.
+# the staging directory and any credential already placed first, as
+# account.sh does.
 function Refuse([string] $Why) {
+    foreach ($path in $Placed) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $path) {
+            [Console]::Error.WriteLine(
+                "bombyx: A CREDENTIAL IS STILL AT $path, because it " +
+                'could not be removed. Remove it in the guest.')
+        }
+    }
     if (Test-Path -LiteralPath $Staging) {
         Remove-Item -LiteralPath $Staging -Recurse -Force `
             -ErrorAction SilentlyContinue
@@ -131,6 +144,31 @@ function Protect([string] $Path, [string] $Sid) {
     if ($LASTEXITCODE -ne 0) {
         Refuse "could not make $Path the agent's: $out"
     }
+}
+
+# Moves the staged file `stagedName` to `target` in the agent's
+# profile when `present` is "1", readable by the agent, SYSTEM and
+# the administrators alone. The file is created empty and protected
+# before it holds the secret, so no moment leaves it with the
+# folder's inherited permissions. When `present` is "1" and nothing
+# was staged, a stale copy is removed, and bootstrap.ps1 refuses the
+# missing file. When it is "0", bootstrap.ps1 removes the copy.
+function Place([string] $Present, [string] $StagedName, [string] $Target,
+        [string] $Sid) {
+    if ($Present -ne '1') {
+        return
+    }
+    $source = Join-Path $Staging $StagedName
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
+        return
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) |
+        Out-Null
+    [void]$Placed.Add($Target)
+    [IO.File]::WriteAllBytes($Target, [byte[]]@())
+    Protect $Target $Sid
+    [IO.File]::WriteAllBytes($Target, [IO.File]::ReadAllBytes($source))
 }
 
 # Asks Windows to create the account's profile, which it otherwise
@@ -298,6 +336,15 @@ try {
         [Environment]::SetEnvironmentVariable(
             'Path', "$machinePath;$gitCmd", 'Machine')
     }
+
+    # The credentials, while the staging directory still holds them,
+    # at the paths bootstrap.ps1 reads.
+    Place (Decode 'BOMBYX_DEPLOY_KEY') 'deploy-key' `
+        (Join-Path $AgentHome '.ssh\bombyx-deploy-key') $sid
+    Place (Decode 'BOMBYX_ENV_FILE_PRESENT') 'env' `
+        (Join-Path $AgentHome '.bombyx-env') $sid
+    Place (Decode 'BOMBYX_GIT_CRED_PRESENT') 'git-credentials' `
+        (Join-Path $AgentHome '.bombyx-git-credentials') $sid
 
     # bootstrap.ps1, installed afresh on every provision so the
     # agent's own edits to an earlier copy never run.

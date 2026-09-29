@@ -1866,78 +1866,48 @@ mod load_project_tests {
     }
 
     #[test]
-    fn a_windows_guest_refuses_every_secret_while_the_file_is_read() {
-        // The Windows scripts place no secret yet, so a key, a
-        // secrets file or a token would be read on the workstation
-        // and copied to the VM host for nothing. Each is refused by
-        // name, and the message points at the issue that lifts it.
+    fn a_windows_guest_takes_every_secret() {
+        // The Windows scripts place the deploy key, the secrets file
+        // and the git credential, so the config takes each of them.
         for (key, lines) in [
             ("deploy_key", "deploy_key = \"~/.secrets/k\""),
             ("env_file", "env_file = \"~/.secrets/x.env\""),
-            // A token needs an `env_file`, so it never comes alone,
-            // and both are named in the one message.
             (
                 "repo_token",
                 "env_file = \"~/.secrets/x.env\"\n\
                  repo_token = \"TOKEN\"\nrepo_user = \"x-token-auth\"",
             ),
         ] {
-            let err =
+            let (cfg, _) =
                 load(&windows_registry_with_source_key(lines), "myproject")
-                    .expect_err(key);
+                    .unwrap_or_else(|err| panic!("{key}: {err}"));
+            assert_eq!(cfg.vm.guest, crate::config::Guest::Windows, "{key}");
+        }
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_the_secrets_refreshed_hook() {
+        // The hook runs after the secrets refresh on a running guest,
+        // and a Windows guest gets no refresh yet (GitHub issue
+        // #137), so the hook would never run. Refused whether or not
+        // an `env_file` is named: "add an env_file", the other hook
+        // error's advice, would not make it run.
+        for env_file in ["env_file = \"~/.secrets/x.env\"", ""] {
+            let src = format!(
+                "{}\n[projects.myproject.hooks]\n\
+                 secrets_refreshed = \".bombyx/refresh-env.ps1\"\n",
+                windows_registry_with_source_key(env_file)
+            );
+            let err = load(&src, "myproject").expect_err(env_file);
             assert!(
-                matches!(err, ConfigError::WindowsGuestSecret { .. }),
-                "{key}: {err:?}"
+                matches!(err, ConfigError::WindowsGuestHook { .. }),
+                "{env_file}: {err:?}"
             );
             let text = err.to_string();
-            for part in ["myproject", key, "#141"] {
-                assert!(text.contains(part), "{key}: {part}: {text}");
+            for part in ["myproject", "secrets_refreshed", "#137"] {
+                assert!(text.contains(part), "{part}: {text}");
             }
         }
-    }
-
-    #[test]
-    fn a_windows_refusal_names_every_key_the_operator_removes() {
-        // One message, so removing what it names leaves a config
-        // that loads. `repo_user` needs `repo_token`, and the hook
-        // needs `env_file`, so each rides along with its partner
-        // rather than failing on the next run.
-        let src = format!(
-            "{}\n[projects.myproject.hooks]\n\
-             secrets_refreshed = \".bombyx/refresh-env.sh\"\n",
-            windows_registry_with_source_key(
-                "env_file = \"~/.secrets/x.env\"\n\
-                 repo_token = \"TOKEN\"\nrepo_user = \"x-token-auth\""
-            )
-        );
-        let err = load(&src, "myproject").expect_err("must be refused");
-        assert!(
-            matches!(err, ConfigError::WindowsGuestSecret { .. }),
-            "{err:?}"
-        );
-        let text = err.to_string();
-        for part in ["env_file", "repo_token", "repo_user", "secrets_refreshed"]
-        {
-            assert!(text.contains(part), "{part}: {text}");
-        }
-    }
-
-    #[test]
-    fn a_windows_hook_without_an_env_file_gets_the_windows_refusal() {
-        // "Add an env_file", the hook error's advice, would only be
-        // refused next, so a Windows project is told the rule that
-        // actually applies.
-        let src = format!(
-            "{}\n[projects.myproject.hooks]\n\
-             secrets_refreshed = \".bombyx/refresh-env.sh\"\n",
-            windows_registry_with_source_key("")
-        );
-        let err = load(&src, "myproject").expect_err("must be refused");
-        assert!(
-            matches!(err, ConfigError::WindowsGuestSecret { .. }),
-            "{err:?}"
-        );
-        assert!(err.to_string().contains("secrets_refreshed"), "{err}");
     }
 
     #[test]

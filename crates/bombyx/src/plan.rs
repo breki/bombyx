@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::{Config, DeployKeyPath, Staged};
+use crate::config::{Config, DeployKeyPath, Guest, Staged};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -282,6 +282,11 @@ pub fn plan(
 #[must_use]
 pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
     let mut cmds = Vec::new();
+    // The commands below are POSIX; [`unrefreshed_secrets`] holds
+    // what a Windows guest gets instead.
+    if cfg.vm.guest == Guest::Windows {
+        return cmds;
+    }
     if let Some(credential) = staged.credential() {
         cmds.push(remote::refresh_in_guest(
             cfg,
@@ -291,6 +296,28 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
     }
     cmds.extend(secrets_command(cfg, staged));
     cmds
+}
+
+/// What to tell the operator when a running guest's secrets were
+/// not refreshed, or `None` when [`refresh_secrets`] refreshes them.
+///
+/// A Windows guest gets its secrets when it is provisioned, and no
+/// refresh while it runs until GitHub issue #137, because the
+/// refresh commands are POSIX. So `up` and `shell` print this where
+/// a Linux guest would be refreshed, rather than leaving a rotated
+/// token unmentioned.
+#[must_use]
+pub fn unrefreshed_secrets(
+    cfg: &Config,
+    staged: &Staged,
+) -> Option<&'static str> {
+    let staged_any =
+        staged.secrets().is_some() || staged.credential().is_some();
+    (cfg.vm.guest == Guest::Windows && staged_any).then_some(
+        "the secrets in a running Windows guest are not refreshed yet \
+         (bombyx issue #137), so this VM keeps the ones it was provisioned \
+         with; `bombyx provision` rewrites them",
+    )
 }
 
 /// The command that rewrites the secrets file, carrying the
@@ -1498,6 +1525,34 @@ mod tests {
                  status: {removing}"
             );
         }
+    }
+
+    #[test]
+    fn a_windows_guest_gets_no_refresh_and_a_note_saying_so() {
+        // The refresh commands are POSIX, and a running Windows guest
+        // gets no refresh until GitHub issue #137. So nothing is sent,
+        // and the note tells the operator what does rewrite them.
+        for credential in [false, true] {
+            let (mut cfg, staged) = staged_project(credential);
+            cfg.vm.guest = crate::config::Guest::Windows;
+            assert!(refresh_secrets(&cfg, &staged).is_empty());
+            let note = unrefreshed_secrets(&cfg, &staged)
+                .expect("a Windows guest with staged secrets gets a note");
+            for part in ["provision", "#137"] {
+                assert!(note.contains(part), "{part}: {note}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_linux_guest_is_refreshed_and_gets_no_note() {
+        let (cfg, staged) = staged_project(true);
+        assert!(!refresh_secrets(&cfg, &staged).is_empty());
+        assert_eq!(unrefreshed_secrets(&cfg, &staged), None);
+        // Nothing staged, nothing to note, whatever the guest.
+        let mut win = Config::for_tests();
+        win.vm.guest = crate::config::Guest::Windows;
+        assert_eq!(unrefreshed_secrets(&win, &win.staged_for_tests()), None);
     }
 
     #[test]

@@ -948,6 +948,7 @@ fn up_run(
     let state = probe_state(cfg);
     let refresh = plan::refresh_secrets(cfg, staged);
     if state.as_ref().is_some_and(listing::VmState::is_running) {
+        print_unrefreshed(cfg, staged);
         if refresh.is_empty() {
             eprint_lines(&format!(
                 "bombyx: {} is already running; up did nothing\n",
@@ -984,6 +985,7 @@ fn up_run(
     // the credential; one that did not provision gets the whole
     // refresh.
     let after = if listing::refreshes_secrets_after_up(state.as_ref()) {
+        print_unrefreshed(cfg, staged);
         refresh
     } else {
         plan::refresh_after_provisioning(cfg, staged)
@@ -1103,10 +1105,19 @@ fn shell_run(
         eprint_lines(&format!("{refusal}\n"));
         return Ok(Ran::Failed(1));
     }
+    print_unrefreshed(cfg, staged);
     if !run_refresh(&refresh) {
         eprint_lines("bombyx: opening the shell anyway\n");
     }
     execute(&shell, false)
+}
+
+/// Prints why a guest's secrets were not refreshed, when
+/// [`plan::unrefreshed_secrets`] says they were not.
+fn print_unrefreshed(cfg: &Config, staged: &Staged) {
+    if let Some(note) = plan::unrefreshed_secrets(cfg, staged) {
+        eprint_lines(&format!("bombyx: {note}\n"));
+    }
 }
 
 /// Runs each refresh command `plan` built -- from

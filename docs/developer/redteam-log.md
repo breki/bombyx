@@ -14,18 +14,6 @@ before the extension, while `bootstrap.ps1` would accept one, because
 the case unreachable today; the two checks still disagree on it. Raised by
 fresh-reader in the #145 review, after stage 2 had closed.
 
-### rt-2026-09-29-windows-ssh-repo-boots-then-fails
-
-**Category:** Correctness
-
-The config accepts an ssh `repo` for a Windows project, yet the clone
-cannot succeed: the Windows guest is handed no git host keys and
-`bootstrap.ps1` runs Windows' ssh with `BatchMode=yes`, so it fails with
-"Host key verification failed" after the boot. The config could refuse
-a non-https `repo` for Windows until GitHub issue #141's second part adds
-host-key pinning. Deferred in the #145 review by the operator's choice,
-because the guest already refuses it, only late.
-
 ### rt-2026-09-29-windows-guest-user-misses-groups-and-devices
 
 **Category:** Correctness

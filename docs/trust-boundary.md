@@ -87,10 +87,16 @@ differences:
 - **The hand-over is an SSH login from the guest to itself** as the
   agent, with a key `account.ps1` makes in the guest and keeps in the
   login account's home, rather than `sudo -u`.
-- **No secret is staged.** The config refuses a `deploy_key`, an
-  `env_file` and a `repo_token` for a Windows project, and the guest
-  verifies no git host key. GitHub issue #141's second part, not yet
-  written, adds staging the secrets and verifying the host key.
+- **The same secrets, protected by ACL.** `account.ps1` places the
+  deploy key, the secrets file and the git credential in the agent's
+  profile, each created empty and limited to the agent, SYSTEM and
+  the administrators before it holds the secret: the counterpart of
+  mode `0600`. `bootstrap.ps1` pins the git host's published keys as
+  `bootstrap.sh` does.
+- **No refresh while the guest runs.** `up` and `shell` do not
+  rewrite a running Windows guest's secrets; they say so, and
+  `bombyx provision` rewrites them. GitHub issue #137 adds the
+  refresh, and the `secrets_refreshed` hook is refused until then.
 - **Every `env:` value travels base64-encoded**, because vagrant's
   Windows provisioner pastes it into the script unescaped. `[env]`
   names are compared without regard to case, as Windows compares

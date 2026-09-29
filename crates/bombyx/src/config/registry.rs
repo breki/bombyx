@@ -422,7 +422,7 @@ pub(super) fn heading(name: &str, tail: &str) -> String {
 /// Returns [`ConfigError::WindowsGuestUser`],
 /// [`ConfigError::WindowsGuestEnv`],
 /// [`ConfigError::WindowsGuestScript`] or
-/// [`ConfigError::WindowsGuestSecret`], the first that applies.
+/// [`ConfigError::WindowsGuestHook`], the first that applies.
 fn refuse_windows_mismatch(
     key: &ProjectName,
     project: &Project,
@@ -471,39 +471,17 @@ fn refuse_windows_mismatch(
             script: script.as_str().to_owned(),
         });
     }
-    // The Windows scripts place no secret yet, so a secret would be
-    // read and copied to the VM host with nothing on the guest to
-    // receive it. `parse` checks this before the hook rule, whose
-    // advice -- add an `env_file` -- this rule would refuse next,
-    // and every key that goes with a secret is named. A known gap,
-    // accepted until #141's second part: a `repo_token` without
-    // `repo_user` is first told by the `[source]` parse to add
-    // `repo_user`, then told here to remove both.
-    let source = &project.source;
-    let token = source.repo_token.is_some();
-    let named: Vec<String> = [
-        ("deploy_key", source.deploy_key.is_some()),
-        ("env_file", source.env_file.is_some()),
-        ("repo_token", token),
-        ("repo_user", token),
-        (
-            "secrets_refreshed",
-            project.hooks.secrets_refreshed.is_some(),
-        ),
-    ]
-    .into_iter()
-    .filter(|(_, set)| *set)
-    .map(|(secret, _)| format!("`{secret}`"))
-    .collect();
-    if named.is_empty() {
-        Ok(())
-    } else {
-        Err(ConfigError::WindowsGuestSecret {
+    // The hook runs after the secrets refresh on a running guest,
+    // and a Windows guest gets no refresh yet (#137). `parse` checks
+    // this before the hook rule, whose advice -- add an `env_file` --
+    // would not make the hook run.
+    if project.hooks.secrets_refreshed.is_some() {
+        return Err(ConfigError::WindowsGuestHook {
             path: path.to_path_buf(),
             project: key.as_str().to_owned(),
-            keys: named.join(", "),
-        })
+        });
     }
+    Ok(())
 }
 
 /// Parses `source` as the registry read from `path`.

@@ -11,8 +11,8 @@ runs on a real VM host showed about it.
 The Windows-guest work is tracked in GitHub issue #138, in parts that
 are each an issue of their own. Issue #136 added the
 `guest = "windows"` key. Issue #141 ports the guest scripts to
-PowerShell: its first part added `account.ps1` and `bootstrap.ps1`,
-and its second part, still to come, places the secrets.
+PowerShell: `account.ps1` and `bootstrap.ps1` create the agent's
+account, place its secrets, clone the project and run its script.
 Issue #144 is this box. Issue #137 makes `shell`, the secrets refresh
 and the hook work on a Windows guest.
 
@@ -220,6 +220,17 @@ The box is an evaluation, licensed for testing, not for routine use.
   (`#< CLIXML` and an `<Objs>` block) when modules load for the first
   time. bombyx prints a host's stderr as the reason for a failure, so a
   guest command sets `$ProgressPreference = 'SilentlyContinue'` first.
+- **git clones with MinGit's own ssh, not Windows'.** Driven by git
+  over pipes from the hand-over's session, which has no console,
+  Windows' `System32\OpenSSH\ssh.exe` authenticates, sends
+  `git-upload-pack` and then moves no data, so the clone hangs.
+  MinGit's `usr\bin\ssh.exe` completes. The hand-over itself still
+  uses Windows' client, where no git pipe is involved.
+- **Windows PowerShell 5.1 mangles two kinds of native argument.** It
+  passes an argument holding a double quote without escaping it, and
+  drops an empty-string argument altogether. `bootstrap.ps1` writes
+  the ssh command with an escaped space instead of quotes, and passes
+  `'""'` where git needs an empty value.
 - **vagrant expands no `~` on a Windows guest**, so an upload's
   destination is relative to the login home.
 - **The default `/vagrant` synced folder fails** on a Windows guest,
