@@ -699,13 +699,15 @@ const BOX_RDP_HOST_PORT: u16 = 53389;
 /// Packer templates forward the guest's remote desktop, port 3389, to
 /// host port 53389 on every address of the VM host. So the override
 /// below switches that forward off whichever box is named; with no
-/// such forward it does nothing. Such a box adds the forward inside a provider override,
-/// which vagrant applies after the top-level config, so a top-level
+/// such forward it does nothing.
+///
+/// Such a box adds the forward inside a provider override, which
+/// vagrant applies after the top-level config, so a top-level
 /// `disabled: true` loses to it. The override below carries the id
 /// vagrant derives for that forward. vagrant builds that id from the
 /// host IP, the protocol and the host port; such a box sets no host
-/// IP, so the id is `tcp53389`. This Vagrantfile loads after the box's,
-/// so it wins.
+/// IP, so the id is `tcp53389`. This Vagrantfile loads after the
+/// box's, so it wins.
 fn guest_block(guest: Guest, provider: Provider) -> String {
     let rdp = BOX_RDP_HOST_PORT;
     match guest {

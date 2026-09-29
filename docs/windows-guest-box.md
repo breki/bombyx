@@ -142,10 +142,9 @@ Read from a VM made from the box, on 2026-09-29:
   (135) listen, but no enabled inbound rule admits them on that
   profile. The only other TCP allow rule, for Delivery Optimization,
   Windows' peer-to-peer download of updates, has nothing listening
-  behind it. So
-  over the network the well-known `vagrant` password meets sshd
-  alone, which refuses it. This was read from the firewall's rules;
-  no login was tried from another VM.
+  behind it. So over the network the well-known `vagrant` password
+  meets sshd alone, which refuses it. This was read from the
+  firewall's rules; no login was tried from another VM.
 - **Host keys generated per VM** at its first sshd start, RSA, ECDSA
   and Ed25519 only; the DSA key is not offered.
 - **The administrators block in `sshd_config` commented out.** With
