@@ -183,6 +183,18 @@ for tools that are not present:
   Prefer `--dry-run` for argv-level checks, and say so
   explicitly when a claim rests on a dry run rather than a
   real run against the VM host.
+- **Use a VM box only from an official source.** That means
+  one the OS vendor publishes, or one we build from the
+  vendor's own installation image. A community box does not
+  qualify, however popular it is. Check a box's source
+  before building on it, including one already in vagrant's
+  cache.
+- **Reach a VM host service from a guest through a reverse
+  tunnel.** On frosti the guest's traffic to the VM host is
+  filtered, and opening a port there needs root.
+  `vagrant ssh -- -N -R <port>:<addr>:<port>` in the project
+  directory makes `localhost:<port>` inside the guest reach
+  `<addr>:<port>` on the VM host, with no firewall change.
 - **Scripting**: use PowerShell, Bash, or Rust (`xtask`).
   Keep non-trivial logic in `xtask` -- see "Shell wrappers".
 - **Do not grep canon prose for a phrase.** Every markdown
@@ -233,7 +245,9 @@ for tools that are not present:
   line over 80 columns or two words run together. Extend the
   anchor to the end of the line and reflow the whole span in the
   one edit. Rust has the same hazard, and rustfmt does not repair
-  a fused token inside a string.
+  a fused token inside a string. A scripted replace, such as
+  Python's `str.replace`, has it too: its old and new text also
+  end at a newline.
 - **Print the variable before claiming what it holds.** A claim
   about what a variable, a file or a platform actually contains
   needs the command that read it, in the same breath --
@@ -280,7 +294,9 @@ for tools that are not present:
     Bash, and verify with `ssh-keygen -y -P '' -f <key>`.
   - **`pgrep -f <pattern>` matches its own invocation**, so a
     count is inflated and a dead process looks alive. Count with
-    `ps -eo comm | grep -c '^name'` instead.
+    `ps -eo comm | grep -c '^name'` instead. `pkill -f` matches
+    the same way and kills the shell that runs it, so stop a
+    process by a PID read from `ps -eo pid,comm`.
   - **A Windows OpenSSH host may run the command under
     PowerShell**, whichever shell you wrote it for: the server
     uses the shell named by `DefaultShell` under
@@ -825,6 +841,17 @@ For any script that runs more than ~30 seconds
   VM answers. Start it in the background and read the log when
   the notification arrives. `status`, `doctor` and the teardown
   commands are quick enough to run in front.
+
+  **Wrap each such run in `timeout`**, sized from the box's
+  measured first boot, because a provisioner that hangs sends no
+  notification and no output. The generated Vagrantfile's
+  `boot_timeout` comment records a Windows first boot of up to
+  385 s.
+
+  **Leave buffering filters out of a Monitor pipeline.** `tr`,
+  `sed` without `-u` and `cut` hold their output until a buffer
+  fills, so the lines never reach the monitor and it expires
+  silent. Let `grep --line-buffered` be the only filter.
 
 ## Lints: `doc_markdown` allowlist via `clippy.toml`
 
