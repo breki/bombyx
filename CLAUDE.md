@@ -245,7 +245,9 @@ for tools that are not present:
   line over 80 columns or two words run together. Extend the
   anchor to the end of the line and reflow the whole span in the
   one edit. Rust has the same hazard, and rustfmt does not repair
-  a fused token inside a string.
+  a fused token inside a string. A scripted replace, such as
+  Python's `str.replace`, has it too: its old and new text also
+  end at a newline.
 - **Print the variable before claiming what it holds.** A claim
   about what a variable, a file or a platform actually contains
   needs the command that read it, in the same breath --
