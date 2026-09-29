@@ -674,12 +674,13 @@ Vagrant.configure(\"2\") do |config|
     )
 }
 
-/// The host port the Windows box forwards the guest's remote
-/// desktop to, which `guest_block` switches off.
+/// The host port some Windows boxes, those built from gusztavvargadr's
+/// Packer templates, forward the guest's remote desktop to, which
+/// `guest_block` switches off.
 ///
 /// Rendered as both the forward's `host:` and its `id:`: vagrant
 /// identifies the forward by an id built from this port, so a
-/// `host:` and an `id:` that disagree leave the box's forward in
+/// `host:` and an `id:` that disagree leave such a box's forward in
 /// place.
 const BOX_RDP_HOST_PORT: u16 = 53389;
 
@@ -693,16 +694,17 @@ const BOX_RDP_HOST_PORT: u16 = 53389;
 /// here.
 ///
 /// The box `docs/windows-guest-box.md` describes forwards no port.
-/// Boxes built from gusztavvargadr's Packer templates forward the
-/// guest's remote desktop, port 3389, to host port 53389 on every
-/// address of the VM host, so the override below switches that
-/// forward off whichever box is named; with no such forward it does
-/// nothing. Such a box adds the forward inside a provider override,
+/// But bombyx boots whatever box the config names, and community
+/// Windows boxes on the Vagrant registry built from gusztavvargadr's
+/// Packer templates forward the guest's remote desktop, port 3389, to
+/// host port 53389 on every address of the VM host. So the override
+/// below switches that forward off whichever box is named; with no
+/// such forward it does nothing. Such a box adds the forward inside a provider override,
 /// which vagrant applies after the top-level config, so a top-level
 /// `disabled: true` loses to it. The override below carries the id
 /// vagrant derives for that forward. vagrant builds that id from the
-/// host IP, the protocol and the host port; the box sets no host IP,
-/// so the id is `tcp53389`. This Vagrantfile loads after the box's,
+/// host IP, the protocol and the host port; such a box sets no host
+/// IP, so the id is `tcp53389`. This Vagrantfile loads after the box's,
 /// so it wins.
 fn guest_block(guest: Guest, provider: Provider) -> String {
     let rdp = BOX_RDP_HOST_PORT;

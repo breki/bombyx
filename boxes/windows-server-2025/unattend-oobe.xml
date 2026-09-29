@@ -4,9 +4,9 @@
   of each VM made from the box. It completes Windows' setup with no
   questions, so sshd answers and vagrant can log in.
 
-  @ADMIN_PASSWORD@ is replaced by build.sh with the same random password
-  as in Autounattend.xml, which is kept nowhere. The vagrant account and
-  its keys survive sysprep and need no entry here.
+  It carries no password. stage.ps1 disables the built-in Administrator
+  before sysprep, so setup has no password to set, and the vagrant
+  account and its keys survive sysprep and need no entry here.
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend"
     xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
@@ -30,12 +30,6 @@
     <component name="Microsoft-Windows-Shell-Setup"
         processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
         language="neutral" versionScope="nonSxS">
-      <UserAccounts>
-        <AdministratorPassword>
-          <Value>@ADMIN_PASSWORD@</Value>
-          <PlainText>true</PlainText>
-        </AdministratorPassword>
-      </UserAccounts>
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
         <ProtectYourPC>3</ProtectYourPC>

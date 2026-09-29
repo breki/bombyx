@@ -1,16 +1,20 @@
 # Windows guest box
 
-bombyx uses a Windows box only when it is built from an official
-Microsoft source. Microsoft publishes no Vagrant box or libvirt image
-for Windows Server, so bombyx builds its own from Microsoft's
-evaluation ISO, with the recipe in `boxes/windows-server-2025/`. This
-file records what that box holds, how it is built, and what runs on a
-real VM host showed about it.
+This project uses a Windows box only when it is built from an
+official Microsoft source. That is a rule for the operator, not a
+check: bombyx boots whatever box the config names. Microsoft publishes
+no Vagrant box or libvirt image for Windows Server, so the recipe in
+`boxes/windows-server-2025/` builds one from Microsoft's evaluation
+ISO. This file records what that box holds, how it is built, and what
+runs on a real VM host showed about it.
 
-The Windows-guest work is tracked in GitHub issue #138. #136 added the
-`guest = "windows"` key, #141 ports the guest scripts to PowerShell,
-#144 built this box, and #137 makes `shell`, the secrets refresh and
-the hook work on a Windows guest.
+The Windows-guest work is tracked in GitHub issue #138, in parts that
+are each an issue of their own. Issue #136 added the
+`guest = "windows"` key. Issue #141 ports the guest scripts to
+PowerShell: its first part is PR #145, not merged yet, so the scripts
+it adds, `account.ps1` and `bootstrap.ps1`, are not in this tree.
+Issue #144 is this box. Issue #137 makes `shell`, the secrets refresh
+and the hook work on a Windows guest.
 
 ## What the guest is for
 
@@ -30,11 +34,23 @@ vagrant box add --name bombyx/windows-server-2025 \
 ```
 
 A project then names `box = "bombyx/windows-server-2025"` with
-`guest = "windows"`. The build needs `qemu-system-x86_64`, `qemu-img`,
-`xorriso`, `curl` and vagrant on the VM host, and the operator in the
-`kvm` group. It keeps the ISO in `~/.cache/bombyx-box`, so a second
-build downloads nothing. It runs unattended; one build on frosti took
-about 80 minutes, most of it installing updates.
+`guest = "windows"`. Until PR #145 lands, `up`, `provision` and
+`scratch` boot such a guest and then fail, because bombyx cannot
+provision a Windows guest yet. The statements below about
+`account.ps1` describe that PR's script.
+
+The build needs `qemu-system-x86_64`, `qemu-img`, `xorriso`, `curl`,
+`sha256sum` and `tar` on the VM host, the operator in the `kvm` group,
+and vagrant's insecure public key. `build.sh` finds that key in
+HashiCorp's vagrant package, under `/opt/vagrant/embedded`; with
+vagrant from another source, set `VAGRANT_PUB` to the key's path. The
+build works in `~/.cache/bombyx-box`, or in the folder given as its one
+argument, and keeps the ISO there, so a second build downloads
+nothing.
+
+It runs unattended. A build on frosti, the maintainers' VM host, took
+about 80 minutes, most of it installing updates, so the time changes
+with how many updates are due that month.
 
 ## What the box is
 
@@ -74,21 +90,38 @@ as a libvirt `.box`.
 2. **The first logon** runs `first-logon.ps1`, which registers
    `stage.ps1` as a startup task running as SYSTEM and restarts. A
    startup task, because updates restart Windows several times and a
-   first-logon command runs once, and because Windows' update API
-   refuses a remote session.
-3. **`stage.ps1`** installs every update Windows Update offers,
-   drivers excepted, and restarts, until none are left. The 2026-09-28
+   first-logon command runs once. The updates are not driven over ssh
+   from `build.sh` either, because Windows' update API refuses a
+   remote session.
+3. **`stage.ps1`** installs every update Windows Update offers except
+   drivers, and restarts, until none are left. The 2026-09-28
    build took four rounds: the September cumulative update, the .NET
    Framework update and a Defender update, then a restart Windows made
    itself, then a Defender platform update, then none.
 4. **Then it sets up sshd, cleans up and generalizes**: it frees the
-   superseded update files, trims the disk, and runs sysprep, which
-   shuts the VM down. Generalizing gives each VM its own identity,
-   host keys and evaluation grace from its first boot.
+   superseded update files, trims the disk, and runs
+   `sysprep /generalize`, which shuts the VM down. Generalizing strips
+   what makes the install one particular machine: its security
+   identifier, its computer name and its evaluation clock. The next
+   boot, which is each VM's first, runs setup again as a new machine,
+   and `unattend-oobe.xml` answers that setup's questions. `stage.ps1`
+   deletes sshd's host keys first, so each VM generates its own too.
 
 Each script reports its steps on the VM's first serial port, which
-`build.sh` records in `~/.cache/bombyx-box/serial.log`. The last line
-is `BOMBYX-DONE` or `BOMBYX-FAILED: <why>`.
+`build.sh` records in `serial.log` in its work folder. A progress line
+starts with `bombyx: `. Two markers start a line with no prefix:
+`BOMBYX-DONE`, written just before sysprep runs, and
+`BOMBYX-FAILED: <why>`, written by any failed step, sysprep included.
+So a sysprep failure leaves a `BOMBYX-FAILED` line after
+`BOMBYX-DONE`. `build.sh` fails on any `BOMBYX-FAILED` line, and on a
+log with no `BOMBYX-DONE`, which means the VM shut down early or the
+time limit ran out.
+
+A stuck build can be looked at through qemu's monitor socket,
+`monitor.sock` in the `build.*` folder inside the work folder. The
+monitor command `screendump <file>.ppm` writes a picture of the VM's
+screen. Connecting to the socket needs a tool that speaks to a Unix
+socket, such as `nc -U`; the exact flags were not checked.
 
 The VM runs on emulated hardware: a q35 machine with a SATA disk and
 an e1000e network card, which Windows drives without extra drivers,
@@ -97,42 +130,61 @@ Vagrantfile asks libvirt for the same hardware.
 
 ## What the box ships
 
-Read from a VM made from the box, on 2026-09-28:
+Read from a VM made from the box, on 2026-09-29:
 
 - **sshd, running at boot**, OpenSSH 9.5, with vagrant's insecure key
   for the `vagrant` account. vagrant swaps it for a generated key at a
   VM's first boot.
-- **Password logins refused** (`PasswordAuthentication no`), so the
-  well-known `vagrant` password opens only the console.
+- **Password logins refused** (`PasswordAuthentication no`).
+- **The firewall admits TCP only to sshd.** Windows' firewall keeps
+  separate rules for three network profiles, Domain, Private and
+  Public, and it puts the libvirt network in Public. SMB (445) and RPC
+  (135) listen, but no enabled inbound rule admits them on that
+  profile. The only other TCP allow rule, for Delivery Optimization,
+  Windows' peer-to-peer download of updates, has nothing listening
+  behind it. So
+  over the network the well-known `vagrant` password meets sshd
+  alone, which refuses it. This was read from the firewall's rules;
+  no login was tried from another VM.
 - **Host keys generated per VM** at its first sshd start, RSA, ECDSA
   and Ed25519 only; the DSA key is not offered.
-- **The administrators block in `sshd_config` commented out**, so
-  sshd reads an administrator's keys from the account's own
-  `.ssh\authorized_keys`, which is where vagrant's key swap and #141's
-  hand-over key write. The stock config's
-  `AllowGroups administrators "openssh users"` stays.
+- **The administrators block in `sshd_config` commented out.** With
+  it, sshd reads every administrator's keys from one shared file,
+  `C:\ProgramData\ssh\administrators_authorized_keys`. Without it,
+  sshd reads the account's own `.ssh\authorized_keys`, which is where
+  vagrant writes the key it swaps in, and where PR #145's
+  `account.ps1` writes the key it uses to log in as the agent. The
+  stock config's `AllowGroups administrators "openssh users"` stays,
+  so only members of those two groups may log in over SSH; the agent
+  account PR #145 creates is an administrator.
 - **sshd's firewall rule open on every network profile.** Server 2025
-  ships the rule limited to the Private profile, and Windows puts a
-  VM's libvirt network in the Public one, where the port would stay
-  closed and vagrant would time out.
+  ships the rule limited to the Private profile, and the libvirt
+  network is Public, where the port would stay closed and vagrant
+  would time out.
 - **Defender on**, real-time protection enabled, no exclusions. **UAC
   on.** Remote desktop off.
-- **The built-in Administrator disabled**, with a random password
-  nobody holds; `vagrant` is the way in.
-- **Updates set to download only**, Windows' default, as SConfig
-  reports it. A VM downloads new updates but installs none by itself.
+- **The built-in Administrator disabled.** Before sysprep,
+  `stage.ps1` gives it a fresh random password, made in the guest and
+  written nowhere, so any copy of the install's password left in the
+  image is stale, and then disables it. No answer file under
+  `C:\Windows\Panther` holds a password. `vagrant` is the way in.
+- **WinRM stopped and disabled**, and its firewall rules off, because
+  bombyx reaches the guest over SSH alone.
+- **Updates set to download only**, Windows' default, as SConfig,
+  Server Core's text-mode settings menu, reports it. A VM downloads
+  new updates but installs none by itself.
 - **Nothing installed** beyond Windows: no programs in the uninstall
   list, and no service outside Windows' own folders. The kernel,
   `lsass`, `winlogon`, `sshd` and `powershell` all carry a valid
   `Microsoft Windows` signature.
-- **git is not installed**; #141's `account.ps1` installs it.
+- **git is not installed**; PR #145's `account.ps1` installs it.
 
 ## Licence
 
 The box is an evaluation, licensed for testing, not for routine use.
 
 - **Each VM starts its own grace**, because sysprep resets it. On a
-  VM made from the box, #141's `account.ps1` reported at provisioning
+  VM made from the box, PR #145's `account.ps1` reported at provisioning
   that the evaluation was not activated, with about 9 days left.
 - **Unactivated, it shuts down after 10 days.** Microsoft's
   Evaluation Center page says: "Evaluation versions of Windows Server
@@ -143,8 +195,8 @@ The box is an evaluation, licensed for testing, not for routine use.
   audited some minutes after its first boot. Nothing ran `slmgr` or
   entered a key: Windows' own automatic activation reached Microsoft
   through libvirt's NAT. How soon it does so was not measured. bombyx
-  does not activate the guest itself; #141's `account.ps1` prints the
-  days left while a guest is unactivated.
+  does not activate the guest itself; PR #145's `account.ps1` prints
+  the days left while a guest is unactivated.
 - **After activation** it runs 180 days, and a Server evaluation can
   be converted to a licensed edition with a product key.
 - **For routine use** the guest needs a licence of its own: a Visual

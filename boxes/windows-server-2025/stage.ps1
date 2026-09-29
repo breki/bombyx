@@ -6,10 +6,12 @@
 # sshd for vagrant's winssh communicator, cleans up, generalizes the
 # install and shuts the VM down, which ends the build.
 #
-# Progress goes to COM1, which build.sh records in its log. The last
-# line is `BOMBYX-DONE` when the script reached sysprep and
-# `BOMBYX-FAILED: <why>` otherwise, so build.sh can tell a finished
-# build from a failed one without opening the disk.
+# Progress goes to COM1, which build.sh records in its log. Two lines
+# end a build, each at the start of a line: `BOMBYX-DONE` when the
+# script hands the VM to sysprep, and `BOMBYX-FAILED: <why>` when a
+# step failed, sysprep included. build.sh reads a failure first, so it
+# can tell a finished build from a failed one without opening the
+# disk.
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -112,7 +114,8 @@ try {
     # Three edits to the stock config, placed at the top because
     # sshd_config takes the first value it reads:
     # - Password logins are refused, so the well-known vagrant
-    #   password opens only the console.
+    #   password does not open sshd. WinRM, the other remote logon a
+    #   server enables, is disabled below.
     # - Only the RSA, ECDSA and Ed25519 host keys are offered; DSA is
     #   a weak key type.
     # - The administrators block is commented out. With it, sshd
@@ -167,37 +170,99 @@ try {
         Fail "could not set the permissions on ${keys}: $out"
     }
 
-    # The built-in Administrator is left with a random password nobody
-    # holds, and disabled. Windows runs SetupComplete.cmd at the end of
-    # each VM's first boot, after the answer file has set that
-    # password, which also enables the account.
+    # The built-in Administrator gets a fresh random password, made here
+    # and written nowhere, and is then disabled. The install's password
+    # may survive in the image, in freed disk blocks or the page file,
+    # so replacing it leaves any such copy stale rather than trying to
+    # erase every one. WinRM is disabled too: bombyx reaches the guest
+    # over SSH alone, and WinRM would otherwise let another VM on the
+    # same network try the well-known vagrant password.
+    Say 'disabling Administrator and WinRM'
+    $bytes = New-Object byte[] 24
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    ([ADSI]'WinNT://./Administrator,user').SetPassword(
+        [Convert]::ToBase64String($bytes) + 'aA1!')
+    $bytes = $null
+    & net.exe user Administrator /active:no | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Fail "could not disable the Administrator account"
+    }
+    Stop-Service -Name WinRM -Force
+    Set-Service -Name WinRM -StartupType Disabled
+    Get-NetFirewallRule -Name 'WINRM-HTTP-In-TCP*' -ErrorAction SilentlyContinue |
+        Disable-NetFirewallRule
+
+    # Windows runs SetupComplete.cmd at the end of each VM's first boot.
+    # It disables Administrator again, as a precaution: nobody has seen
+    # setup enable the account, and the audited VMs showed it disabled.
+    # It also deletes bombyx's answer file, which holds no secret, so
+    # no file of the build is left in the VM.
+    $oobe = 'C:\Windows\Panther\bombyx-oobe.xml'
     $scripts = 'C:\Windows\Setup\Scripts'
     New-Item -ItemType Directory -Force -Path $scripts | Out-Null
     Set-Content -LiteralPath (Join-Path $scripts 'SetupComplete.cmd') `
         -Encoding ASCII -Value @(
             '@echo off',
             'rem Written by bombyx build: the vagrant account is the way in.',
-            'net user Administrator /active:no')
+            'net user Administrator /active:no',
+            "del /f /q $oobe")
 
-    # Smaller box: superseded update files go, and freed blocks are
-    # handed back to the disk image, which build.sh then copies
-    # without them.
     Say 'cleaning up'
     Unregister-ScheduledTask -TaskName 'bombyx-build' -Confirm:$false
     # This script too: PowerShell read the whole file before it ran.
     Remove-Item -LiteralPath $RoundFile, $PSCommandPath -Force
-    & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase |
-        Out-Null
-    Optimize-Volume -DriveLetter C -ReTrim
+    # The answer files setup cached from the install hold the install's
+    # Administrator password, stale since the reset above. They are
+    # removed so no file in the box names it, under 'Stop' like every
+    # step that is not clean-up for size.
+    Get-ChildItem -Path 'C:\Windows\Panther' -Recurse -Include '*.xml' -File `
+            -ErrorAction SilentlyContinue |
+        Where-Object {
+            Select-String -LiteralPath $_.FullName -Pattern '<PlainText>' `
+                -Quiet -ErrorAction SilentlyContinue
+        } |
+        ForEach-Object {
+            Say "removing $($_.FullName)"
+            Remove-Item -LiteralPath $_.FullName -Force
+        }
+    # Clean-up for size: superseded update files go, and freed blocks
+    # are handed back to the disk image, which build.sh then copies
+    # without them. Only a smaller box depends on it, so a failure of
+    # dism or of the trim is reported and the build goes on. 'Continue'
+    # inside the block, because under 'Stop' Windows PowerShell 5.1
+    # turns a redirected native stderr line into an error that ends the
+    # script.
+    $out = & {
+        $ErrorActionPreference = 'Continue'
+        & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase 2>&1
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Say "dism clean-up exited ${LASTEXITCODE}; continuing: $($out | Select-Object -Last 1)"
+    }
+    Optimize-Volume -DriveLetter C -ReTrim -ErrorAction SilentlyContinue `
+        -ErrorVariable trimError
+    if ($trimError) {
+        Say "trimming the disk failed; continuing: $trimError"
+    }
 
     # Generalize, so each VM gets its own identity and its own 10-day
     # evaluation grace from its first boot, not from the build. The
     # answer file completes that first boot's setup unattended.
-    $oobe = 'C:\Windows\Panther\bombyx-oobe.xml'
     Copy-Item -LiteralPath (Join-Path $cfg 'unattend-oobe.xml') -Destination $oobe
-    Say 'BOMBYX-DONE'
-    & "$env:SystemRoot\System32\Sysprep\sysprep.exe" /generalize /oobe `
-        /shutdown /quiet "/unattend:$oobe"
+    $Serial.WriteLine('BOMBYX-DONE')
+    # sysprep.exe is a GUI program, so `&` would neither wait for it nor
+    # set $LASTEXITCODE; Start-Process -Wait does both. Its exit status
+    # is checked because a failed sysprep would otherwise leave the VM
+    # running until build.sh's timeout. On success sysprep shuts the VM
+    # down, so this script may never see it return.
+    $sysprep = Start-Process -Wait -PassThru `
+        -FilePath "$env:SystemRoot\System32\Sysprep\sysprep.exe" `
+        -ArgumentList '/generalize', '/oobe', '/shutdown', '/quiet',
+            "/unattend:$oobe"
+    if ($sysprep.ExitCode -ne 0) {
+        Fail ("sysprep exited $($sysprep.ExitCode); see " +
+            'C:\Windows\System32\Sysprep\Panther\setuperr.log')
+    }
 } catch {
     Fail $_.Exception.Message
 }

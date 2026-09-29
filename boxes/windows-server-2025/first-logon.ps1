@@ -5,8 +5,8 @@
 #
 # A startup task rather than this logon, because installing updates
 # restarts Windows several times, and a first-logon command runs only
-# once. Windows' update API also refuses to run from a remote session,
-# which a task started by Windows is not.
+# once. The updates are not driven over ssh from build.sh either,
+# because Windows' update API refuses a remote session.
 #
 # Progress goes to COM1, which build.sh records in its log.
 #

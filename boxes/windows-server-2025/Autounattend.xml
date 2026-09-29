@@ -4,10 +4,12 @@
   Evaluation, Server Core, from Microsoft's evaluation ISO. build.sh puts
   it on the config CD, where Windows Setup finds it by its name.
 
-  @ADMIN_PASSWORD@ is replaced by build.sh with a random password that is
-  kept nowhere. The vagrant account's password is "vagrant", as vagrant
-  expects of a box; sshd refuses password logins, so it opens only the
-  console.
+  @ADMIN_PASSWORD@ is replaced by build.sh with a random password for
+  the built-in Administrator, which only the install uses; build.sh and
+  stage.ps1 say what happens to it. The vagrant account's password is
+  "vagrant", as vagrant expects of a box. The box's firewall admits TCP
+  only to sshd, which refuses password logins, so over the network that
+  password meets sshd alone.
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend"
     xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">

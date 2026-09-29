@@ -28,7 +28,7 @@ and this project adheres to
   `env_file`, and a path that cannot name a file.
 - A `guest` key under `[vm]`, `"linux"` by default. `guest = "windows"` boots a
   Windows guest over vagrant's `winssh` communicator, with a 900 s boot timeout
-  and the box's remote desktop forward switched off, but bombyx cannot provision
+  and a box's remote desktop forward switched off, but bombyx cannot provision
   one yet: `up` and `scratch` boot the VM, and they and `provision` then fail
   with a message naming GitHub issue #141.
   A Windows project that names a `deploy_key`, an `env_file` or a `repo_token`,
@@ -38,10 +38,11 @@ and this project adheres to
 - A recipe that builds the Windows guest box from Microsoft's own Windows Server
   2025 evaluation ISO, in `boxes/windows-server-2025/`. `build.sh` downloads the
   ISO over HTTPS and refuses one whose SHA-256 differs from the pin, installs
-  Server Core unattended with qemu, installs every update Windows Update offers,
-  sets up sshd for vagrant, and packages a libvirt box to add as
-  `bombyx/windows-server-2025`. One build on frosti took about 80 minutes.
-  `docs/windows-guest-box.md` records what the box holds.
+  Server Core unattended with qemu, installs every update Windows Update offers
+  except drivers, sets up sshd for vagrant, disables WinRM and the built-in
+  Administrator, and packages a libvirt box to add as
+  `bombyx/windows-server-2025`. `docs/windows-guest-box.md` records what the
+  box holds and how to build it.
 
 ### Changed
 

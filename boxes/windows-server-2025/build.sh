@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds a libvirt vagrant box of Windows Server 2025 Standard
 # Evaluation, Server Core, from Microsoft's own evaluation ISO, with
-# every update Windows Update offers installed.
+# every update Windows Update offers installed except drivers.
 #
 # Usage:
 #   boxes/windows-server-2025/build.sh [WORKDIR]
@@ -73,16 +73,20 @@ build=$(mktemp -d "$work/build.XXXXXX")
 trap 'rm -rf "$build"' EXIT
 
 # The config CD: both answer files, both build scripts and the key.
-# The Administrator password is random and written nowhere else, so
-# nobody holds it; the vagrant account is the way in.
+# The Administrator password is random and nobody holds it; the
+# vagrant account is the way in. Only the install uses this password:
+# before the box is packed, stage.ps1 replaces it with one made in the
+# guest and written nowhere, then disables the account. The random part
+# is alphanumeric, so it is safe inside XML and in a bash `${//}`
+# replacement, where `&` would stand for the matched text. The suffix
+# meets Windows' complexity rule of three character classes.
 password="$(head -c 18 /dev/urandom | base64 | tr -d '/+=')aA1!"
 mkdir "$build/cfg"
-for answer in Autounattend.xml unattend-oobe.xml; do
-    text=$(<"$here/$answer")
-    text=${text//@ADMIN_PASSWORD@/$password}
-    printf '%s\n' "$text" >"$build/cfg/$answer"
-done
-cp "$here/first-logon.ps1" "$here/stage.ps1" "$build/cfg/"
+text=$(<"$here/Autounattend.xml")
+printf '%s\n' "${text//@ADMIN_PASSWORD@/$password}" \
+    >"$build/cfg/Autounattend.xml"
+cp "$here/unattend-oobe.xml" "$here/first-logon.ps1" "$here/stage.ps1" \
+    "$build/cfg/"
 cp "$vagrant_pub" "$build/cfg/vagrant.pub"
 xorriso -as mkisofs -quiet -V BOMBYXCFG -J -r -o "$build/cfg.iso" "$build/cfg"
 rm -rf "$build/cfg"
@@ -93,8 +97,11 @@ qemu-img create -q -f qcow2 "$build/disk.qcow2" "${DISK_GB}G"
 # disk and an e1000e card. BIOS boot, so no UEFI firmware is needed on
 # the VM host. The empty disk falls through to the install CD, and
 # later boots start from the disk. qemu exits when sysprep shuts the VM
-# down. The VNC display and the monitor socket are local only, for
-# watching a build or taking a `screendump` of a stuck one.
+# down. The monitor socket is for taking a `screendump` of a stuck
+# build. It sits in the build folder, which mktemp made private,
+# because the monitor controls the VM. No VNC display: one on a TCP port
+# would let any account on the VM host reach the build VM's console,
+# where the vagrant account's password is the well-known one.
 say "installing Windows; this takes a while (log: $work/serial.log)"
 set +e
 timeout "$BUILD_TIMEOUT_S" qemu-system-x86_64 \
@@ -109,17 +116,17 @@ timeout "$BUILD_TIMEOUT_S" qemu-system-x86_64 \
     -boot order=cd \
     -netdev user,id=net -device e1000e,netdev=net \
     -serial "file:$work/serial.log" \
-    -display none -vnc 127.0.0.1:59 \
-    -monitor "unix:$work/monitor.sock,server,nowait"
+    -display none \
+    -monitor "unix:$build/monitor.sock,server,nowait"
 status=$?
 set -e
 [ "$status" -ne 124 ] ||
     die "the install ran past ${BUILD_TIMEOUT_S} s; see $work/serial.log"
 [ "$status" -eq 0 ] || die "qemu exited with status $status"
-if grep -q 'BOMBYX-FAILED' "$work/serial.log"; then
-    die "$(grep 'BOMBYX-FAILED' "$work/serial.log" | tail -n 1)"
+if grep -q '^BOMBYX-FAILED' "$work/serial.log"; then
+    die "$(grep '^BOMBYX-FAILED' "$work/serial.log" | tail -n 1)"
 fi
-grep -q 'BOMBYX-DONE' "$work/serial.log" ||
+grep -q '^BOMBYX-DONE' "$work/serial.log" ||
     die "the VM shut down before stage.ps1 finished; see $work/serial.log"
 
 say "packaging the box"
