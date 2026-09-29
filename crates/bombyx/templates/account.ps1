@@ -60,15 +60,17 @@ $SshKeygen = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh-keygen.exe'
 $AdministratorsSid = 'S-1-5-32-544'
 $SystemSid = 'S-1-5-18'
 
-# The credentials this script has placed in the agent's profile,
-# which Refuse removes, as account.sh does.
-$Placed = New-Object System.Collections.ArrayList
+# The agent-profile paths a credential may sit at, set just before
+# the first one is placed. bootstrap.ps1 removes a secret the config
+# dropped and refuses a missing one, but it never runs after a
+# refusal here, so Refuse removes all of them, as account.sh does.
+$AgentSecrets = @()
 
 # Prints `why` to stderr with bombyx's prefix and exits 1. Removes
-# the staging directory and any credential already placed first, as
+# the staging directory and every path in $AgentSecrets first, as
 # account.sh does.
 function Refuse([string] $Why) {
-    foreach ($path in $Placed) {
+    foreach ($path in $AgentSecrets) {
         Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $path) {
             [Console]::Error.WriteLine(
@@ -146,26 +148,49 @@ function Protect([string] $Path, [string] $Sid) {
     }
 }
 
-# Moves the staged file `stagedName` to `target` in the agent's
-# profile when `present` is "1", readable by the agent, SYSTEM and
-# the administrators alone. The file is created empty and protected
-# before it holds the secret, so no moment leaves it with the
-# folder's inherited permissions. When `present` is "1" and nothing
-# was staged, a stale copy is removed, and bootstrap.ps1 refuses the
-# missing file. When it is "0", bootstrap.ps1 removes the copy.
-function Place([string] $Present, [string] $StagedName, [string] $Target,
-        [string] $Sid) {
+# Puts the secret `what` at `target` in the agent's profile, or
+# takes it away, by the flag `present`. Each case refuses when a
+# copy it must remove stays, because a stale copy would pass for a
+# current one:
+#
+# - "0": the config dropped the secret. The copy is removed here,
+#   before the hand-over, so no later failure leaves it in the guest.
+# - "1" with nothing staged as `stagedName`: the copy is removed, and
+#   bootstrap.ps1 refuses the missing file.
+# - "1" with the file staged: it moves to `target`, readable by the
+#   agent, SYSTEM and the administrators alone. The file is created
+#   empty and protected before it holds the secret, so no moment
+#   leaves it with the folder's inherited permissions.
+function Place([string] $Present, [string] $What, [string] $StagedName,
+        [string] $Target, [string] $Sid) {
     if ($Present -ne '1') {
+        Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $Target) {
+            Refuse ("the config names no $What, and the copy at " +
+                "$Target could not be removed")
+        }
         return
     }
     $source = Join-Path $Staging $StagedName
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
         Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $Target) {
+            Refuse ("the configured $What did not arrive, and the copy " +
+                "at $Target from an earlier provision could not be " +
+                'removed')
+        }
         return
     }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) |
         Out-Null
-    [void]$Placed.Add($Target)
+    # Removed first, so the new file starts from the folder's
+    # inherited entries, which Protect strips. Truncating an old copy
+    # would keep any entry granted on it since the last provision.
+    Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $Target) {
+        Refuse ("could not replace $Target, the copy an earlier " +
+            'provision placed')
+    }
     [IO.File]::WriteAllBytes($Target, [byte[]]@())
     Protect $Target $Sid
     [IO.File]::WriteAllBytes($Target, [IO.File]::ReadAllBytes($source))
@@ -339,12 +364,17 @@ try {
 
     # The credentials, while the staging directory still holds them,
     # at the paths bootstrap.ps1 reads.
-    Place (Decode 'BOMBYX_DEPLOY_KEY') 'deploy-key' `
-        (Join-Path $AgentHome '.ssh\bombyx-deploy-key') $sid
-    Place (Decode 'BOMBYX_ENV_FILE_PRESENT') 'env' `
-        (Join-Path $AgentHome '.bombyx-env') $sid
-    Place (Decode 'BOMBYX_GIT_CRED_PRESENT') 'git-credentials' `
-        (Join-Path $AgentHome '.bombyx-git-credentials') $sid
+    $deployKey = Join-Path $AgentHome '.ssh\bombyx-deploy-key'
+    $envFile = Join-Path $AgentHome '.bombyx-env'
+    $gitCred = Join-Path $AgentHome '.bombyx-git-credentials'
+    $script:AgentSecrets = @($deployKey, $envFile, $gitCred)
+    # Each variable is a "1"/"0" flag, the deploy key's included. Its
+    # name lacks `_PRESENT` because it is the Linux scripts' flag too.
+    Place (Decode 'BOMBYX_DEPLOY_KEY') 'deploy key' 'deploy-key' `
+        $deployKey $sid
+    Place (Decode 'BOMBYX_ENV_FILE_PRESENT') 'env_file' 'env' $envFile $sid
+    Place (Decode 'BOMBYX_GIT_CRED_PRESENT') 'git credential for repo_token' `
+        'git-credentials' $gitCred $sid
 
     # bootstrap.ps1, installed afresh on every provision so the
     # agent's own edits to an earlier copy never run.
@@ -465,6 +495,8 @@ try {
     # read as that. A remote script exiting 255 is read the same way,
     # which is why the message says what to check rather than what
     # happened.
+    # Not a Refuse: the project's script may have exited 255 after
+    # using the secrets, and they are ones the config grants.
     if ($code -eq 255) {
         [Console]::Error.WriteLine(
             "bombyx: the SSH login to $User@localhost failed, so " +

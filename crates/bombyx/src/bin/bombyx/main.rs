@@ -938,6 +938,9 @@ fn up_run(
     // because it cannot see the machine's state.
     let snapshot =
         remote::save_snapshot_if_absent(cfg, &cfg.remote_project_dir(), tty);
+    // A dry run prints no note about unrefreshed secrets. Its output
+    // shows a first `up`, which provisions the guest with the current
+    // secrets.
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(boot);
@@ -1080,6 +1083,10 @@ fn probe_state(cfg: &Config) -> Option<listing::VmState> {
 /// Before the shell opens, the project's secrets are written over
 /// the guest's copies ([`plan::refresh_secrets`]), so a token
 /// rotated on the workstation reaches the guest with no provision.
+/// A Windows guest gets no refresh yet, and [`print_unrefreshed`]
+/// says so; the shell itself does not open in one either, because
+/// the command it sends is POSIX. GitHub issue #137 covers both.
+///
 /// A refresh that fails is a warning and the shell opens anyway,
 /// because the operator may be opening the shell to find out why.
 ///
@@ -1094,6 +1101,7 @@ fn shell_run(
     let shell = plan(&Action::Shell, cfg, tty, staged);
     let refresh = plan::refresh_secrets(cfg, staged);
     if dry_run {
+        print_unrefreshed(cfg, staged);
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(refresh);
         cmds.extend(shell);

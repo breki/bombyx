@@ -108,6 +108,14 @@ rewrite fails, `up` exits non-zero, and `shell` warns and opens
 the shell anyway. A `shell` that cannot read your `env_file` on
 the workstation also warns and opens.
 
+A Windows guest is the exception until GitHub issue #137 lands:
+`up` does not rewrite its secrets, and prints a note saying so,
+and `shell` does not open a shell in it at all. Run
+`bombyx provision myproject` instead, which places the new files
+and re-runs the project's script. Provisioning also checks the
+clone out afresh at the configured `ref`, which discards
+uncommitted work in it, so commit or push that work first.
+
 bombyx sends each file down a pipe, through `ssh` and then
 `vagrant ssh`, so the refresh itself stores nothing on the VM host.
 An `up` that has to boot the VM also stages the files on the VM

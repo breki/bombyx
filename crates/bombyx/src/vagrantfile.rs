@@ -158,7 +158,9 @@ const DEPLOY_KEY_STAGED_PATH: &str = concat!(staging_dir!(), "/deploy-key");
 /// case forgeable in exactly the direction that matters: the
 /// guest could claim a key was configured and keep a stale
 /// credential alive. Naming it always means the config
-/// answers either way.
+/// answers either way. A Windows guest reads it too, base64-encoded
+/// like every value `windows::provisioning` hands over, and is told
+/// `"0"` for the same reason.
 const DEPLOY_KEY_ENV: &str = "BOMBYX_DEPLOY_KEY";
 
 /// Repository the guest clones, as the guest's shell sees it.
@@ -310,7 +312,9 @@ const GUEST_HOME_FILES: [&str; 3] = [
 /// [`ACCOUNT`] creates the account under this name and hands
 /// [`BOOTSTRAP`] to it; [`BOOTSTRAP`] checks it is running as
 /// that account and builds its bookkeeping paths from
-/// `/home/<name>`.
+/// `/home/<name>`. That describes the Linux scripts; a Windows
+/// guest's `account.ps1` and `bootstrap.ps1` use the name the same
+/// way, with the profile folder Windows gives the account.
 const GUEST_USER_ENV: &str = "BOMBYX_GUEST_USER";
 
 /// Environment variable listing, comma-separated, every other
@@ -323,7 +327,9 @@ const GUEST_USER_ENV: &str = "BOMBYX_GUEST_USER";
 /// `[env]` table included. [`render`] builds the list from
 /// [`BOMBYX_ENV_NAMES`] and the `[env]` keys, and
 /// `the_preserve_list_names_every_variable_the_hash_sets` checks
-/// it against the hash that was actually rendered.
+/// it against the hash that was actually rendered. That describes
+/// the Linux scripts; on a Windows guest no `sudo` runs, and
+/// `windows::preserve_list` says what the list does there.
 const PRESERVE_ENV: &str = "BOMBYX_PRESERVE_ENV";
 
 /// Environment variable telling the guest that a git credential
@@ -2352,26 +2358,23 @@ mod tests {
         assert_eq!(files[2].1, windows::ACCOUNT);
     }
 
-    /// What `name` is handed over as in a Windows Vagrantfile, decoded
-    /// from its base64, or `None` when the hash does not set it.
-    fn windows_value(out: &str, name: &str) -> Option<String> {
+    /// The base64 text `name` is handed over as in a Windows
+    /// Vagrantfile, or `None` when the hash does not set it. A test
+    /// compares it against `windows::base64` of the value it expects.
+    fn windows_raw<'a>(out: &'a str, name: &str) -> Option<&'a str> {
         let prefix = format!("\"{name}\" => \"");
         let start = out.find(&prefix)? + prefix.len();
         let end = start + out[start..].find('"')?;
-        let encoded = &out[start..end];
-        // Only the values this module encodes are read back, so a
-        // round trip through the encoder identifies each one.
-        [
-            "0",
-            "1",
-            "",
-            "github.com",
-            "https://api.github.com/meta",
-            "json",
-        ]
-        .into_iter()
-        .find(|plain| windows::base64(plain.as_bytes()) == encoded)
-        .map(str::to_owned)
+        Some(&out[start..end])
+    }
+
+    /// Asserts `name` is handed over as `plain`, base64-encoded.
+    fn assert_windows_value(out: &str, name: &str, plain: &str) {
+        assert_eq!(
+            windows_raw(out, name),
+            Some(windows::base64(plain.as_bytes()).as_str()),
+            "{name} should be {plain:?}"
+        );
     }
 
     #[test]
@@ -2392,11 +2395,7 @@ mod tests {
         for name in
             [DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, CREDENTIAL_PRESENT_ENV]
         {
-            assert_eq!(
-                windows_value(&out, name).as_deref(),
-                Some("1"),
-                "{name}"
-            );
+            assert_windows_value(&out, name, "1");
         }
     }
 
@@ -2414,11 +2413,7 @@ mod tests {
         for name in
             [DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, CREDENTIAL_PRESENT_ENV]
         {
-            assert_eq!(
-                windows_value(&out, name).as_deref(),
-                Some("0"),
-                "{name}"
-            );
+            assert_windows_value(&out, name, "0");
         }
     }
 
@@ -2430,26 +2425,17 @@ mod tests {
         cfg.source.repo = RepoUrl::parse("git@github.com:you/private.git")
             .expect("a valid fixture URL");
         let out = rendered_for(&cfg);
-        assert_eq!(
-            windows_value(&out, GIT_HOST_ENV).as_deref(),
-            Some("github.com")
+        assert_windows_value(&out, GIT_HOST_ENV, "github.com");
+        assert_windows_value(
+            &out,
+            HOST_KEYS_URL_ENV,
+            "https://api.github.com/meta",
         );
-        assert_eq!(
-            windows_value(&out, HOST_KEYS_URL_ENV).as_deref(),
-            Some("https://api.github.com/meta")
-        );
-        assert_eq!(
-            windows_value(&out, HOST_KEYS_FORMAT_ENV).as_deref(),
-            Some("json")
-        );
+        assert_windows_value(&out, HOST_KEYS_FORMAT_ENV, "json");
         // An https clone opens no ssh connection, so it gets none.
         let out = rendered_for(&cfg_windows_plain());
         for name in [GIT_HOST_ENV, HOST_KEYS_URL_ENV, HOST_KEYS_FORMAT_ENV] {
-            assert_eq!(
-                windows_value(&out, name).as_deref(),
-                Some(""),
-                "{name}"
-            );
+            assert_windows_value(&out, name, "");
         }
     }
 

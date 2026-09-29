@@ -73,24 +73,6 @@ pub(super) const ENV_FILE_STAGED_PATH: &str = ".bombyx-staging/env";
 pub(super) const CREDENTIAL_STAGED_PATH: &str =
     ".bombyx-staging/git-credentials";
 
-/// The names bombyx sets for a Windows guest, in the order the
-/// Vagrantfile lists them: the same as on Linux.
-const ENV_NAMES: [&str; 13] = [
-    GUEST_USER_ENV,
-    REPO_ENV,
-    REF_ENV,
-    SCRIPT_ENV,
-    PROJECT_ENV,
-    DEPLOY_KEY_ENV,
-    ENV_FILE_PRESENT_ENV,
-    CREDENTIAL_PRESENT_ENV,
-    GIT_HOST_ENV,
-    HOST_KEYS_URL_ENV,
-    HOST_KEYS_FORMAT_ENV,
-    VM_HOST_ENV,
-    VM_HOSTNAME_ENV,
-];
-
 /// The provisioners that set up a Windows guest: the upload of
 /// [`BOOTSTRAP`], then [`ACCOUNT`].
 pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
@@ -122,8 +104,12 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     entry(DEPLOY_KEY_ENV, deploy_key_env(source.deploy_key.as_ref()));
     entry(ENV_FILE_PRESENT_ENV, flag(staged.secrets().is_some()));
     entry(CREDENTIAL_PRESENT_ENV, flag(staged.credential().is_some()));
-    // Empty when bombyx does not know the git host; bootstrap.ps1
-    // then accepts the key it is offered on first connection.
+    // Empty for an https clone, which opens no ssh connection, and
+    // for an ssh host bombyx publishes no keys for. For that host,
+    // bootstrap.ps1 accepts the key it is offered on first connection
+    // when a deploy key is configured. Without one, it adds nothing:
+    // such a clone has no credential for that host, so it could not
+    // authenticate whatever the host-key setting said.
     entry(GIT_HOST_ENV, host_keys.map_or("", |k| k.host()));
     entry(HOST_KEYS_URL_ENV, host_keys.map_or("", |k| k.url()));
     entry(
@@ -183,13 +169,14 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     )
 }
 
-/// The value of [`PRESERVE_ENV`] for a Windows guest: every name in
-/// [`ENV_NAMES`], then every `[env]` name, comma-separated.
+/// The value of [`PRESERVE_ENV`] for a Windows guest: every name
+/// bombyx sets, which is the Linux list `BOMBYX_ENV_NAMES`, then every
+/// `[env]` name, comma-separated.
 ///
 /// [`ACCOUNT`] hands the agent these names and no others. A comma
 /// cannot split a name, for the reason `super::preserve_list` gives.
 pub(super) fn preserve_list(env: &BTreeMap<EnvName, EnvValue>) -> String {
-    ENV_NAMES
+    super::BOMBYX_ENV_NAMES
         .iter()
         .copied()
         .chain(env.keys().map(EnvName::as_str))
@@ -290,6 +277,24 @@ mod tests {
                 "{name} does not parse:\n{}",
                 String::from_utf8_lossy(&out.stdout)
             );
+        }
+    }
+
+    #[test]
+    fn the_scripts_agree_on_where_each_secret_is_staged_and_placed() {
+        // The Vagrantfile uploads under a name, account.ps1 moves the
+        // file from that name to a path, and bootstrap.ps1 reads it
+        // there. A rename in one of the three strands the secret.
+        for (staged, placed) in [
+            (DEPLOY_KEY_STAGED_PATH, r"'.ssh\bombyx-deploy-key'"),
+            (ENV_FILE_STAGED_PATH, "'.bombyx-env'"),
+            (CREDENTIAL_STAGED_PATH, "'.bombyx-git-credentials'"),
+        ] {
+            let (dir, name) = staged.split_once('/').expect("a staged path");
+            assert!(ACCOUNT.contains(&format!("'{dir}'")), "{dir}");
+            assert!(ACCOUNT.contains(&format!("'{name}'")), "{name}");
+            assert!(ACCOUNT.contains(placed), "account.ps1: {placed}");
+            assert!(BOOTSTRAP.contains(placed), "bootstrap.ps1: {placed}");
         }
     }
 

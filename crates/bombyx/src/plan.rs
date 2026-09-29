@@ -282,9 +282,7 @@ pub fn plan(
 #[must_use]
 pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
     let mut cmds = Vec::new();
-    // The commands below are POSIX; [`unrefreshed_secrets`] holds
-    // what a Windows guest gets instead.
-    if cfg.vm.guest == Guest::Windows {
+    if !refreshes_running_guest(cfg) {
         return cmds;
     }
     if let Some(credential) = staged.credential() {
@@ -296,6 +294,17 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
     }
     cmds.extend(secrets_command(cfg, staged));
     cmds
+}
+
+/// Whether bombyx can rewrite this guest's secrets while it runs.
+///
+/// The refresh commands are POSIX, so a Windows guest gets none
+/// until GitHub issue #137. [`refresh_secrets`],
+/// [`refresh_after_provisioning`] and [`unrefreshed_secrets`] all ask
+/// this one question, so sending nothing and saying why cannot come
+/// apart.
+fn refreshes_running_guest(cfg: &Config) -> bool {
+    cfg.vm.guest != Guest::Windows
 }
 
 /// What to tell the operator when a running guest's secrets were
@@ -313,7 +322,7 @@ pub fn unrefreshed_secrets(
 ) -> Option<&'static str> {
     let staged_any =
         staged.secrets().is_some() || staged.credential().is_some();
-    (cfg.vm.guest == Guest::Windows && staged_any).then_some(
+    (!refreshes_running_guest(cfg) && staged_any).then_some(
         "the secrets in a running Windows guest are not refreshed yet \
          (bombyx issue #137), so this VM keeps the ones it was provisioned \
          with; `bombyx provision` rewrites them",
@@ -363,7 +372,7 @@ pub fn refresh_after_provisioning(
     cfg: &Config,
     staged: &Staged,
 ) -> Vec<RemoteCommand> {
-    if cfg.hooks.secrets_refreshed.is_some() {
+    if refreshes_running_guest(cfg) && cfg.hooks.secrets_refreshed.is_some() {
         secrets_command(cfg, staged).into_iter().collect()
     } else {
         Vec::new()
@@ -1536,6 +1545,14 @@ mod tests {
             let (mut cfg, staged) = staged_project(credential);
             cfg.vm.guest = crate::config::Guest::Windows;
             assert!(refresh_secrets(&cfg, &staged).is_empty());
+            // The other way to the same POSIX refresh: the registry
+            // refuses a hook for Windows, but a `Config` built by hand
+            // can still carry one.
+            cfg.hooks.secrets_refreshed = Some(
+                crate::config::HookPath::parse(".bombyx/refresh.ps1")
+                    .expect("a valid hook path"),
+            );
+            assert!(refresh_after_provisioning(&cfg, &staged).is_empty());
             let note = unrefreshed_secrets(&cfg, &staged)
                 .expect("a Windows guest with staged secrets gets a note");
             for part in ["provision", "#137"] {

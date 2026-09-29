@@ -38,6 +38,10 @@ function Refuse([string] $Why) {
     exit 1
 }
 
+# The reason given when the Vagrantfile and this script disagree.
+$VersionSkew = 'The generated Vagrantfile and this script came from ' +
+    'different versions of bombyx.'
+
 # The value of environment variable `name`, refusing when it is
 # unset or empty.
 function Need([string] $Name) {
@@ -86,6 +90,26 @@ function Test-SameRepo([string] $A, [string] $B) {
     return $trimmed[0] -ceq $trimmed[1]
 }
 
+# Changes `key` in the git config of the clone at `dir`: 'replace'
+# makes `value` its only value, 'add' appends `value`, and 'unset'
+# removes every value, succeeding when there was none, which git
+# reports with exit code 5. Refuses when git fails.
+function Set-CloneConfig([string] $Git, [string] $Dir, [string] $Mode,
+        [string] $Key, [string] $Value) {
+    switch ($Mode) {
+        'replace' {
+            Invoke-Native $Git -C $Dir config --replace-all $Key $Value
+        }
+        'add' { Invoke-Native $Git -C $Dir config --add $Key $Value }
+        'unset' { Invoke-Native $Git -C $Dir config --unset-all $Key }
+        default { Refuse "Set-CloneConfig has no mode `"$Mode`"." }
+    }
+    if (-not ($LASTEXITCODE -eq 0 -or
+            ($Mode -eq 'unset' -and $LASTEXITCODE -eq 5))) {
+        Refuse "could not set $Key in the clone's git config."
+    }
+}
+
 try {
     $Repo = Need 'BOMBYX_REPO'
     $Ref = Need 'BOMBYX_REF'
@@ -101,8 +125,7 @@ try {
 
     if ($User -cnotmatch '^[a-z_][a-z0-9_-]{0,19}$') {
         Refuse ("BOMBYX_GUEST_USER is `"$User`", which is not an account " +
-            'name bombyx creates. The generated Vagrantfile and this ' +
-            'script came from different versions of bombyx.')
+            "name bombyx creates. $VersionSkew")
     }
     if ($env:USERNAME -ne $User) {
         Refuse ("this script runs as $env:USERNAME, and bombyx set up " +
@@ -126,18 +149,23 @@ try {
     $Secrets = @($DeployKey, $EnvFile, $GitCred)
     # A configured file must have arrived. One the config no longer
     # names is removed, so a credential nobody granted does not stay.
+    # vagrant uploads the deploy key on every provision, but only when
+    # it finds the file at the configured VM-host path, so a missing
+    # key means the file is no longer there. bombyx stages the other
+    # two for its own vagrant run alone.
+    $rerunAdvice = 'bombyx stages it only for the length of its own ' +
+        'vagrant run, so a vagrant provision started by hand on the VM ' +
+        'host does not find it. Re-run the bombyx command instead.'
     foreach ($item in @(
-            @('BOMBYX_DEPLOY_KEY', $DeployKey, 'the configured deploy key'),
-            @('BOMBYX_ENV_FILE_PRESENT', $EnvFile, 'the env_file'),
+            @('BOMBYX_DEPLOY_KEY', $DeployKey, 'deploy key',
+                'Check it is still on the VM host and re-run.'),
+            @('BOMBYX_ENV_FILE_PRESENT', $EnvFile, 'env_file', $rerunAdvice),
             @('BOMBYX_GIT_CRED_PRESENT', $GitCred,
-                "the git credential repo_token names"))) {
-        $name, $file, $what = $item
+                "git credential for repo_token", $rerunAdvice))) {
+        $name, $file, $what, $fix = $item
         if ([Environment]::GetEnvironmentVariable($name) -eq '1') {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-                Refuse ("$what did not arrive at $file. bombyx stages " +
-                    'it only for the length of its own vagrant run, so a ' +
-                    'vagrant provision started by hand on the VM host does ' +
-                    'not find it. Re-run the bombyx command instead.')
+                Refuse "the configured $what did not arrive at $file. $fix"
             }
         } else {
             Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
@@ -182,8 +210,7 @@ try {
     if ($keysUrl -ne '') {
         if ($gitHost -eq '' -or -not $keysUrl.StartsWith('https://')) {
             Refuse ('bombyx published a key URL it cannot use: host ' +
-                "`"$gitHost`", URL `"$keysUrl`". The generated Vagrantfile " +
-                'and this script came from different versions of bombyx.')
+                "`"$gitHost`", URL `"$keysUrl`". $VersionSkew")
         }
         [Net.ServicePointManager]::SecurityProtocol =
             [Net.SecurityProtocolType]::Tls12
@@ -207,9 +234,8 @@ try {
             }
             default {
                 Refuse ("bombyx asked for $gitHost's ssh host keys in a " +
-                    "format this script does not know: `"$keysFormat`". The " +
-                    'generated Vagrantfile and this script came from ' +
-                    'different versions of bombyx.')
+                    "format this script does not know: `"$keysFormat`". " +
+                    $VersionSkew)
             }
         }
         if (-not ($lines | Where-Object { $_.StartsWith("$gitHost ") })) {
@@ -231,7 +257,8 @@ try {
     # without escaping them, so a quoted path would reach `git config`
     # split. The agent's paths hold no space, because its name has none.
     $toSlash = { param($path) $path -replace '\\', '/' }
-    $sshPath = Join-Path (Split-Path -Parent (Split-Path -Parent $Git)) 'usr\bin\ssh.exe'
+    $gitRoot = Split-Path -Parent (Split-Path -Parent $Git)
+    $sshPath = Join-Path $gitRoot 'usr\bin\ssh.exe'
     if (-not (Test-Path -LiteralPath $sshPath -PathType Leaf)) {
         Refuse ("git's ssh client is not at $sshPath. account.ps1 installs " +
             'it with git; run the bombyx command rather than this script.')
@@ -246,6 +273,11 @@ try {
             " -o UserKnownHostsFile=$(& $toSlash $KnownHosts)" +
             " -o GlobalKnownHostsFile=$(& $toSlash $EmptyFile)"
     } elseif ($env:BOMBYX_DEPLOY_KEY -eq '1') {
+        # A key and no published key source: `accept-new` records the
+        # host on first sight and refuses a change afterwards. With
+        # neither, ssh keeps its default, as in bootstrap.sh: such a
+        # clone has no credential either, so it could not authenticate
+        # whatever this said.
         $gitSsh += ' -o StrictHostKeyChecking=accept-new'
     }
     # For bombyx's own git calls only: BatchMode makes ssh fail rather
@@ -316,40 +348,24 @@ try {
     # The clone's own config carries the ssh command and the helper,
     # so the agent's later fetches and pushes use the same key and
     # credential. Unset when neither applies, so a config that dropped
-    # one leaves the clone without it. git exits 5 when there was
-    # nothing to unset.
-    function Set-CloneConfig([string] $Key, [string] $Value) {
-        if ($Value -ne '') {
-            Invoke-Native $Git -C $CloneDir config --replace-all $Key $Value
-            $ok = $LASTEXITCODE -eq 0
-        } else {
-            Invoke-Native $Git -C $CloneDir config --unset-all $Key
-            $ok = $LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 5
-        }
-        if (-not $ok) {
-            Refuse "could not set $Key in the clone's git config."
-        }
-    }
-    $storedSsh = ''
+    # one leaves the clone without it.
     if ($env:BOMBYX_DEPLOY_KEY -eq '1' -or $keysUrl -ne '') {
-        $storedSsh = $gitSsh
+        Set-CloneConfig $Git $CloneDir 'replace' 'core.sshCommand' $gitSsh
+    } else {
+        Set-CloneConfig $Git $CloneDir 'unset' 'core.sshCommand'
     }
-    Set-CloneConfig 'core.sshCommand' $storedSsh
     # The helper list starts with an empty entry, which clears any
     # helper git's own config names, as the `-c` pair does for bombyx's
     # calls above, so only the credential file answers the agent's
     # later fetches and pushes.
-    Set-CloneConfig 'credential.helper' ''
+    Set-CloneConfig $Git $CloneDir 'unset' 'credential.helper'
     if ($credHelper -ne '') {
-        # `'""'` for the empty entry: Windows PowerShell 5.1 drops an
-        # empty-string argument to a native program, and writes `""`,
-        # which git reads as empty, for this one.
-        foreach ($value in @('""', $credHelper)) {
-            Invoke-Native $Git -C $CloneDir config --add credential.helper $value
-            if ($LASTEXITCODE -ne 0) {
-                Refuse "could not set credential.helper in the clone's git config."
-            }
-        }
+        # The empty entry is passed as the two characters `""`.
+        # Windows PowerShell 5.1 drops an empty-string argument to a
+        # native program, but passes `""` on the command line as an
+        # empty quoted argument, which git reads as empty.
+        Set-CloneConfig $Git $CloneDir 'add' 'credential.helper' '""'
+        Set-CloneConfig $Git $CloneDir 'add' 'credential.helper' $credHelper
     }
     Remove-Item -LiteralPath Env:GIT_SSH_COMMAND -ErrorAction SilentlyContinue
 

@@ -42,10 +42,11 @@ and this project adheres to
   A Windows project may name a `deploy_key`, an `env_file` and a `repo_token`:
   `account.ps1` places each in the agent's profile, readable by the agent and
   the administrators alone, and `bootstrap.ps1` pins the git host's published
-  ssh keys, as on Linux. They are not refreshed in a running Windows guest:
-  `up` and `shell` say so, and `bombyx provision` rewrites them. The
-  `secrets_refreshed` hook is refused for a Windows project, because it rides
-  on that refresh.
+  ssh keys, as on Linux. Each provision rewrites the files afresh and removes
+  one the config no longer names. They are not refreshed in a running Windows
+  guest: `up` says so, and `bombyx provision` rewrites them, which also checks
+  the clone out afresh. The `secrets_refreshed` hook is refused for a Windows
+  project, because it rides on that refresh.
 - A recipe that builds the Windows guest box from Microsoft's own Windows Server
   2025 evaluation ISO, in `boxes/windows-server-2025/`. `build.sh` downloads the
   ISO over HTTPS and refuses one whose SHA-256 differs from the pin, installs
