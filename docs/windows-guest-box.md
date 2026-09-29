@@ -1,185 +1,229 @@
 # Windows guest box
 
-bombyx boots a Windows guest but cannot provision one yet. This
-file records the box the Windows-guest work is built and tested
-against, how it was chosen, and what a run on a real VM host showed
-about it.
+This project uses a Windows box only when it is built from an
+official Microsoft source. That is a rule for the operator, not a
+check: bombyx boots whatever box the config names. Microsoft publishes
+no Vagrant box or libvirt image for Windows Server, so the recipe in
+`boxes/windows-server-2025/` builds one from Microsoft's evaluation
+ISO. This file records what that box holds, how it is built, and what
+runs on a real VM host showed about it.
 
-The work is tracked in GitHub issue #138, in four parts. #135 chose
-this box. #136 added the `guest = "windows"` key: the Vagrantfile
-boots the guest over `winssh` with the remote desktop forward
-switched off; `up`, `provision` and `scratch` then fail with a
-message naming #141, and a Windows project may not name secrets.
-#141 ports
-the guest scripts to PowerShell. #137 makes `shell`, the secrets
-refresh and the hook work on a Windows guest. The later parts
-build on the findings below.
+The Windows-guest work is tracked in GitHub issue #138, in parts that
+are each an issue of their own. Issue #136 added the
+`guest = "windows"` key. Issue #141 ports the guest scripts to
+PowerShell: its first part is PR #145, not merged yet, so the scripts
+it adds, `account.ps1` and `bootstrap.ps1`, are not in this tree.
+Issue #144 is this box. Issue #137 makes `shell`, the secrets refresh
+and the hook work on a Windows guest.
 
 ## What the guest is for
 
 A project whose build needs Windows, such as one that targets .NET
 Framework and builds with MSBuild. Such a guest needs .NET Framework
-and the Visual Studio Build Tools; it does not need a desktop,
-because bombyx reaches every guest over SSH.
+and the Visual Studio Build Tools. It does not need a desktop, because
+bombyx reaches every guest over SSH.
 
-## The box
+## Building and adding the box
 
-`gusztavvargadr/windows-server-2022-standard-core`, version
-2607.0.0, libvirt provider, amd64.
+On the VM host, from a clone of this repository:
 
-- **What it is.** Windows Server 2022 Standard **Evaluation**, build
-  20348, with no desktop (Server Core). It is built by the
-  publisher's Packer templates
-  ([gusztavvargadr/packer](https://github.com/gusztavvargadr/packer))
-  from Microsoft's `SERVER_EVAL` ISO.
-- **Why this one.** It is the smallest of the libvirt Windows boxes
-  measured below: a 5.4 GB download, against 9.0 GB for Server 2025
-  Core and 18.4 GB for Windows 11 from the same publisher. Server
-  2022 includes .NET Framework 4.8, and the Build Tools need no
-  desktop.
+```sh
+boxes/windows-server-2025/build.sh
+vagrant box add --name bombyx/windows-server-2025 \
+    ~/.cache/bombyx-box/windows-server-2025.box
+```
 
-Sizes were measured from the Vagrant registry's download URLs on
-2026-09-28:
+A project then names `box = "bombyx/windows-server-2025"` with
+`guest = "windows"`. Until PR #145 lands, `up`, `provision` and
+`scratch` boot such a guest and then fail, because bombyx cannot
+provision a Windows guest yet. The statements below about
+`account.ps1` describe that PR's script.
 
-| Box | Download |
-|-|-|
-| `gusztavvargadr/windows-server-2022-standard-core` 2607.0.0 | 5.4 GB |
-| `jborean93/WindowsServer2022` 1.2.0 | 5.9 GB |
-| `peru/windows-server-2019-standard-x64-eval` 20240201.01 | 7.2 GB |
-| `gusztavvargadr/windows-server-core` (2025) 2607.0.0 | 9.0 GB |
-| `peru/windows-10-enterprise-x64-eval` 20240201.01 | 11.3 GB |
-| `gusztavvargadr/windows-11` 2607.1.0 | 18.4 GB |
+The build needs `qemu-system-x86_64`, `qemu-img`, `xorriso`, `curl`,
+`sha256sum` and `tar` on the VM host, the operator in the `kvm` group,
+and vagrant's insecure public key. `build.sh` finds that key in
+HashiCorp's vagrant package, under `/opt/vagrant/embedded`; with
+vagrant from another source, set `VAGRANT_PUB` to the key's path. The
+build works in `~/.cache/bombyx-box`, or in the folder given as its one
+argument, and keeps the ISO there, so a second build downloads
+nothing.
 
-## Licence
+It runs unattended. A build on frosti, the maintainers' VM host, took
+about 80 minutes, most of it installing updates, so the time changes
+with how many updates are due that month.
 
-The box is an evaluation, licensed for testing, not for routine
-use.
+## What the box is
 
-- **It arrives unactivated.** Windows reported a `LicenseStatus` of
-  2, the out-of-box grace period, with 10 days left (read from the
-  `SoftwareLicensingProduct` CIM class). The 180-day evaluation
-  starts only on activation, which contacts Microsoft's servers.
-- **Unactivated, it shuts down after 10 days.** Microsoft's
-  [Evaluation Center page][eval] says: "Evaluation versions of
-  Windows Server must activate over the internet in the first 10
-  days to avoid automatic shutdown." The guest had internet through
-  libvirt's NAT, yet had not activated itself a few minutes after
-  boot, so an agent VM needs an activation step (`slmgr /ato`) or it
-  stops working. The one VM built here reported the full 10 days
-  although the box was built earlier, so the grace seems to start at
-  first boot, and `destroy` then `up` should start it again; a
-  second VM was not built to confirm that. bombyx will not activate
-  the guest itself, because activating contacts Microsoft: #141
-  records the decision that the operator activates, with bombyx
-  warning at `up`.
-- **After activation** it runs 180 days, and a Server evaluation can
-  be converted to a licensed edition with a product key.
-- **For routine use** the guest needs a licence of its own: a
-  Visual Studio standard (annual) subscription, which covers Windows
-  for development and testing, a retail licence per VM, or a
-  licensed host. The monthly Visual Studio subscriptions cover SQL
-  Server alone for dev/test, not Windows. The subscription terms
-  were read from Microsoft's
-  [pricing page](https://visualstudio.microsoft.com/vs/pricing/) on
-  2026-09-28; the retail and host options were not checked against
-  Microsoft's terms. This is not legal advice.
+Windows Server 2025 Standard **Evaluation**, Server Core (no desktop),
+patched to the month it is built. The build on 2026-09-28 reached
+build 26100.33438, the September 2026 cumulative update.
 
-[eval]: https://www.microsoft.com/en-US/evalcenter/evaluate-windows-server-2022
+- **Where it comes from.** The ISO is Microsoft's own, fetched over
+  HTTPS from the link on Microsoft's [Evaluation Center page][eval25],
+  which redirects to build 26100.32230, Microsoft's January 2026
+  refresh. Microsoft publishes no hash for it, and no independent
+  record of this file's hash was found, so `build.sh` pins the SHA-256
+  of the first download and refuses a file that differs. The updates
+  come from Windows Update, through Windows' own update service.
+  vagrant's insecure public key is read from the vagrant install on
+  the VM host. Nothing else enters the box.
+- **Why Server 2025.** Microsoft's Server 2022 evaluation ISO was
+  never refreshed and still carries the March 2022 build, four and a
+  half years of fixes behind. The 2025 ISO was refreshed in January
+  2026, so the build has months of updates to install rather than
+  years. Server 2025 also ships the OpenSSH server installed.
+- **Why the build installs updates.** A box as the ISO ships it would
+  start every VM months behind on security fixes.
+
+[eval25]: https://www.microsoft.com/en-us/evalcenter/download-windows-server-2025
+
+## How the build works
+
+`build.sh` installs Windows into a qcow2 disk with qemu, from the ISO
+and a small config CD it makes with `xorriso`, then packages the disk
+as a libvirt `.box`.
+
+1. **Setup** reads `Autounattend.xml` from the config CD. It installs
+   the ISO's first image onto one MBR partition and creates a
+   `vagrant` administrator. `first-logon.ps1` checks the image is
+   `ServerStandardEval`, `Server Core`, and fails the build otherwise.
+2. **The first logon** runs `first-logon.ps1`, which registers
+   `stage.ps1` as a startup task running as SYSTEM and restarts. A
+   startup task, because updates restart Windows several times and a
+   first-logon command runs once. The updates are not driven over ssh
+   from `build.sh` either, because Windows' update API refuses a
+   remote session.
+3. **`stage.ps1`** installs every update Windows Update offers except
+   drivers, and restarts, until none are left. The 2026-09-28
+   build took four rounds: the September cumulative update, the .NET
+   Framework update and a Defender update, then a restart Windows made
+   itself, then a Defender platform update, then none.
+4. **Then it sets up sshd, cleans up and generalizes**: it frees the
+   superseded update files, trims the disk, and runs
+   `sysprep /generalize`, which shuts the VM down. Generalizing strips
+   what makes the install one particular machine: its security
+   identifier, its computer name and its evaluation clock. The next
+   boot, which is each VM's first, runs setup again as a new machine,
+   and `unattend-oobe.xml` answers that setup's questions. `stage.ps1`
+   deletes sshd's host keys first, so each VM generates its own too.
+
+Each script reports its steps on the VM's first serial port, which
+`build.sh` records in `serial.log` in its work folder. A progress line
+starts with `bombyx: `. Two markers start a line with no prefix:
+`BOMBYX-DONE`, written just before sysprep runs, and
+`BOMBYX-FAILED: <why>`, written by any failed step, sysprep included.
+So a sysprep failure leaves a `BOMBYX-FAILED` line after
+`BOMBYX-DONE`. `build.sh` fails on any `BOMBYX-FAILED` line, and on a
+log with no `BOMBYX-DONE`, which means the VM shut down early or the
+time limit ran out.
+
+A stuck build can be looked at through qemu's monitor socket,
+`monitor.sock` in the `build.*` folder inside the work folder. The
+monitor command `screendump <file>.ppm` writes a picture of the VM's
+screen. Connecting to the socket needs a tool that speaks to a Unix
+socket, such as `nc -U`; the exact flags were not checked.
+
+The VM runs on emulated hardware: a q35 machine with a SATA disk and
+an e1000e network card, which Windows drives without extra drivers,
+and BIOS boot, so the VM host needs no UEFI firmware. The box's own
+Vagrantfile asks libvirt for the same hardware.
 
 ## What the box ships
 
-Read from the publisher's source at the version above. The run
-below confirmed sshd, the key, the shell and the RDP forward; the
-disk, the network card and the firmware check rest on the source
-alone.
+Read from a VM made from the box, on 2026-09-29:
 
-- **OpenSSH server, enabled.** The first-boot script
-  (`src/windows/vagrant/Autounattend.ps1`) installs vagrant's
-  insecure key for the `vagrant` account and sets `sshd` to start
-  on boot. The insecure key is vagrant's well-known default key
-  pair; vagrant swaps it for a generated one on the first boot.
-  WinRM is enabled too.
-- **The box's own Vagrantfile** (`src/windows/vagrant/qemu.Vagrantfile`)
-  sets `config.vm.guest = :windows`, `config.vm.communicator =
-  'winrm'` and `config.winssh.shell = 'powershell'`. A Vagrantfile
-  that wants SSH overrides the communicator with `winssh`, which is
-  vagrant's SSH communicator for Windows guests; the Linux `ssh`
-  communicator is a different one.
-- **Emulated hardware, so no extra drivers.** It uses a SATA disk
-  and an e1000e network card, which Windows drives out of the box.
-  The faster paravirtual devices, virtio, need drivers that Windows
-  does not include.
-- **UEFI firmware on the VM host.** The box boots with OVMF, the
-  UEFI firmware for QEMU/KVM, from the `ovmf` package on Debian and
-  Ubuntu. The box's Vagrantfile looks for it at
-  `/usr/share/OVMF/OVMF_CODE_4M.fd` and
-  `/usr/share/OVMF/x64/OVMF_CODE.4m.fd`, and raises an error when
-  neither exists.
-- **A forwarded RDP port.** The box's Vagrantfile forwards guest
-  port 3389, remote desktop, to host port 53389.
+- **sshd, running at boot**, OpenSSH 9.5, with vagrant's insecure key
+  for the `vagrant` account. vagrant swaps it for a generated key at a
+  VM's first boot.
+- **Password logins refused** (`PasswordAuthentication no`).
+- **The firewall admits TCP only to sshd.** Windows' firewall keeps
+  separate rules for three network profiles, Domain, Private and
+  Public, and it puts the libvirt network in Public. SMB (445) and RPC
+  (135) listen, but no enabled inbound rule admits them on that
+  profile. The only other TCP allow rule, for Delivery Optimization,
+  Windows' peer-to-peer download of updates, has nothing listening
+  behind it. So over the network the well-known `vagrant` password
+  meets sshd alone, which refuses it. This was read from the
+  firewall's rules; no login was tried from another VM.
+- **Host keys generated per VM** at its first sshd start, RSA, ECDSA
+  and Ed25519 only; the DSA key is not offered.
+- **The administrators block in `sshd_config` commented out.** With
+  it, sshd reads every administrator's keys from one shared file,
+  `C:\ProgramData\ssh\administrators_authorized_keys`. Without it,
+  sshd reads the account's own `.ssh\authorized_keys`, which is where
+  vagrant writes the key it swaps in, and where PR #145's
+  `account.ps1` writes the key it uses to log in as the agent. The
+  stock config's `AllowGroups administrators "openssh users"` stays,
+  so only members of those two groups may log in over SSH; the agent
+  account PR #145 creates is an administrator.
+- **sshd's firewall rule open on every network profile.** Server 2025
+  ships the rule limited to the Private profile, and the libvirt
+  network is Public, where the port would stay closed and vagrant
+  would time out.
+- **Defender on**, real-time protection enabled, no exclusions. **UAC
+  on.** Remote desktop off.
+- **The built-in Administrator disabled.** Before sysprep,
+  `stage.ps1` gives it a fresh random password, made in the guest and
+  written nowhere, so any copy of the install's password left in the
+  image is stale, and then disables it. No answer file under
+  `C:\Windows\Panther` holds a password. `vagrant` is the way in.
+- **WinRM stopped and disabled**, and its firewall rules off, because
+  bombyx reaches the guest over SSH alone.
+- **Updates set to download only**, Windows' default, as SConfig,
+  Server Core's text-mode settings menu, reports it. A VM downloads
+  new updates but installs none by itself.
+- **Nothing installed** beyond Windows: no programs in the uninstall
+  list, and no service outside Windows' own folders. The kernel,
+  `lsass`, `winlogon`, `sshd` and `powershell` all carry a valid
+  `Microsoft Windows` signature.
+- **git is not installed**; PR #145's `account.ps1` installs it.
 
-## What a run on frosti showed
+## Licence
 
-Run on 2026-09-28 against frosti, the project's own Linux libvirt
-VM host (vagrant 2.4.9, vagrant-libvirt 0.12.2), with no bombyx
-involved. The Vagrantfile was:
+The box is an evaluation, licensed for testing, not for routine use.
 
-```ruby
-Vagrant.configure(2) do |config|
-  config.vm.box = "gusztavvargadr/windows-server-2022-standard-core"
-  config.vm.box_version = "2607.0.0"
-  config.vm.communicator = "winssh"
-  config.vm.synced_folder ".", "/vagrant", disabled: true
-end
-```
+- **Each VM starts its own grace**, because sysprep resets it. On a
+  VM made from the box, PR #145's `account.ps1` reported at provisioning
+  that the evaluation was not activated, with about 9 days left.
+- **Unactivated, it shuts down after 10 days.** Microsoft's
+  Evaluation Center page says: "Evaluation versions of Windows Server
+  must be activated over the internet in the first 10 days to avoid
+  automatic shutdown."
+- **It may activate itself.** Another VM made from the box reported a
+  `LicenseStatus` of 1, licensed, with 180 days left, when it was
+  audited some minutes after its first boot. Nothing ran `slmgr` or
+  entered a key: Windows' own automatic activation reached Microsoft
+  through libvirt's NAT. How soon it does so was not measured. bombyx
+  does not activate the guest itself; PR #145's `account.ps1` prints
+  the days left while a guest is unactivated.
+- **After activation** it runs 180 days, and a Server evaluation can
+  be converted to a licensed edition with a product key.
+- **For routine use** the guest needs a licence of its own: a Visual
+  Studio standard (annual) subscription, which covers Windows for
+  development and testing, a retail licence per VM, or a licensed
+  host. The monthly Visual Studio subscriptions cover SQL Server alone
+  for dev/test, not Windows. The subscription terms were read from
+  Microsoft's [pricing page](https://visualstudio.microsoft.com/vs/pricing/)
+  on 2026-09-28; the retail and host options were not checked against
+  Microsoft's terms. This is not legal advice.
 
-- **It boots and vagrant reaches it over SSH.** The first
-  `vagrant up` took 883 s including the download; a later boot took
-  40 s. vagrant replaced the insecure key, as it does for a Linux
-  guest. WinRM was not used.
-- **`vagrant ssh -c` runs Windows PowerShell 5.1** (5.1.20348.2110),
-  because of the box's `config.winssh.shell = 'powershell'`.
-- **A plain `ssh` command runs under `cmd.exe`.** sshd has no
-  `DefaultShell` set under `HKLM:\SOFTWARE\OpenSSH`, so it falls back
-  to `cmd.exe`: `%COMSPEC%` expanded and `$PSVersionTable` came back
-  as literal text. A command that reaches the guest this way crosses
-  the VM host's `sh` and then `cmd.exe` before PowerShell sees it.
-  Passing it as `powershell -NoProfile -EncodedCommand <base64>`
-  keeps both from reparsing it, because base64 holds no character
-  either reads. `-EncodedCommand` takes base64 of UTF-16LE text
-  only; base64 of UTF-8 fails to decode.
-- **The default `/vagrant` synced folder fails.** For this Windows
-  guest vagrant chose rsync (the log says `Rsyncing folder`), and
-  the guest has no rsync. On a Linux guest vagrant-libvirt uses NFS
-  instead, which is the case the test comment in
-  `disables_the_default_synced_folder` (`vagrantfile.rs`)
-  describes. bombyx's Vagrantfile disables the folder either way.
+## Facts that shape bombyx's Windows code
+
+- **`vagrant ssh -c` runs Windows PowerShell 5.1**, because the box's
+  Vagrantfile sets `config.winssh.shell = "powershell"`.
 - **PowerShell writes progress records to stderr as CLIXML**
   (`#< CLIXML` and an `<Objs>` block) when modules load for the first
-  time. bombyx prints a host's stderr as the reason for a failure, so
-  a guest command must set `$ProgressPreference = 'SilentlyContinue'`
-  first.
-- **The forwarded RDP port listens on every address.** Host port
-  53389 was bound on `0.0.0.0` and `[::]`, tunnelled to the guest's
-  RDP port, so the guest's remote desktop was reachable from the VM
-  host's network. bombyx's generated Vagrantfile switches it off
-  (#136). A top-level `disabled: true` did not: the box adds the
-  forward inside a provider override, which vagrant applies after
-  the top-level config. An override on the same provider with the
-  forward's id, `tcp53389`, left nothing listening on 53389.
-- **Resources.** 2 GB of memory by default, 921 MB of it in use at
-  idle; 8.6 GB used of a 125 GB disk.
-- **Tools.** .NET Framework 4.8 is installed (release key 528449).
-  git is not. `New-LocalUser` is available, so an account can be
-  created from PowerShell. The `vagrant` account is an
-  administrator.
+  time. bombyx prints a host's stderr as the reason for a failure, so a
+  guest command sets `$ProgressPreference = 'SilentlyContinue'` first.
+- **vagrant expands no `~` on a Windows guest**, so an upload's
+  destination is relative to the login home.
+- **The default `/vagrant` synced folder fails** on a Windows guest,
+  because vagrant chooses rsync and the guest has none. bombyx's
+  Vagrantfile disables the folder.
 
 ## Not checked
 
-- The Hyper-V variant of the box, and any VM host other than frosti.
-- Activating the evaluation, whether the guest would activate
-  itself given more time, and how often shutdowns come once the
-  10-day grace has run out.
-- Which RDP credentials the box accepts.
+- The Hyper-V provider, and any VM host other than frosti.
+- A build in any language but English (US).
 - Memory the guest needs once git, the Build Tools and a real build
   are on it.

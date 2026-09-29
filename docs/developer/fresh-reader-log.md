@@ -6,6 +6,18 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-29-box-build-hides-its-build-folder
+
+**Category:** Comprehension
+
+`boxes/windows-server-2025/build.sh` puts qemu's monitor socket, the
+only way to look at a stuck build, in a `mktemp` folder whose name it
+never prints. `docs/windows-guest-box.md` says to look for the
+`build.*` folder in the work folder, which works while one build runs.
+Printing the folder when the install starts would name it. Logged
+rather than fixed in the #144 review, because printing it changes the
+script's output and the comprehension stage changes prose only.
+
 ### fr-2026-09-28-destroy-help-leans-on-undefined-terms
 
 **Category:** Comprehension

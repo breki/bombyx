@@ -4,6 +4,19 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-29-box-build-answer-file-delete-is-fatal
+
+**Category:** Correctness
+
+`boxes/windows-server-2025/stage.ps1` deletes each answer file under
+`C:\Windows\Panther` that holds `<PlainText>` under
+`$ErrorActionPreference = 'Stop'`, so a file Windows holds locked
+fails the whole build after the update rounds. Since the build resets
+the Administrator password first, those files name only a stale
+password, so the delete may be better reported and skipped than made
+fatal. No build has hit a locked file. Raised by fresh-reader in the
+#144 review, after stage 2 had closed.
+
 ### rt-2026-09-28-windows-refusal-after-source-rules
 
 **Category:** Correctness
