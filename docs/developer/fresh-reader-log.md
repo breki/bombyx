@@ -6,6 +6,19 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-29-shell-help-promises-a-windows-refresh
+
+**Category:** Comprehension
+
+The clap help for `Shell` in `crates/bombyx/src/bin/bombyx/main.rs`
+says the command first rewrites the guest's copy of the `env_file`
+secrets and runs the `secrets_refreshed` hook. On a Windows guest it
+does neither yet; it prints a note instead. Part 2 of GitHub issue #137
+adds the refresh and the hook, which makes the help true, so the help
+waits for that change. Logged rather than fixed in the #151 review,
+because clap help is `bombyx --help` output and stage 3 changes only
+prose that a person alone reads.
+
 ### fr-2026-09-29-unrefreshed-note-hides-the-clone-reset
 
 **Category:** Comprehension

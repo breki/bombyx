@@ -49,9 +49,9 @@ and this project adheres to
   a Windows project, because it rides on that refresh.
   `bombyx shell` opens PowerShell as the agent's account, in its clone, over
   an SSH login from the guest to itself with the key provisioning made for the
-  hand-over; without the account it says so and opens a shell as the login
-  account. Windows' sshd returns no exit status for a session with a
-  terminal, so the command always exits 0 there.
+  hand-over; without the account or that key it says so and opens a shell as
+  the login account. Windows' sshd reports exit status 0 for a session with a
+  terminal, whatever it exited with, so the command always exits 0 there.
 - A recipe that builds the Windows guest box from Microsoft's own Windows Server
   2025 evaluation ISO, in `boxes/windows-server-2025/`. `build.sh` downloads the
   ISO over HTTPS and refuses one whose SHA-256 differs from the pin, installs

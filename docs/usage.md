@@ -60,6 +60,11 @@ There are two lifecycles, on purpose:
 A scratch VM lives in `<remote_root>/scratch/<project>/<name>`, so
 the same name in two projects does not collide.
 
+On a Windows guest (`guest = "windows"`), `shell` opens PowerShell as
+the agent's account, in its clone. It always exits 0 there, because
+Windows' sshd reports 0 for a session with a terminal, whatever the
+session exited with.
+
 ## up and provision
 
 `up` boots the VM: it writes the generated files, boots with
@@ -108,9 +113,9 @@ rewrite fails, `up` exits non-zero, and `shell` warns and opens
 the shell anyway. A `shell` that cannot read your `env_file` on
 the workstation also warns and opens.
 
-A Windows guest is the exception until GitHub issue #137 lands:
-`up` and `shell` do not rewrite its secrets, and print a note
-saying so. Run `bombyx provision myproject` instead, which places the new files
+A Windows guest is the exception until the secrets refresh of
+GitHub issue #137 lands: `up` and `shell` do not rewrite its
+secrets, and print a note saying so. Run `bombyx provision myproject` instead, which places the new files
 and re-runs the project's script. Provisioning also checks the
 clone out afresh at the configured `ref`, which discards
 uncommitted work in it, so commit or push that work first.

@@ -189,13 +189,45 @@ pub(super) fn preserve_list(env: &BTreeMap<EnvName, EnvValue>) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_windows_shell_uses_the_paths_the_provisioning_scripts_write() {
+        // Three files that cannot see each other agree on three paths:
+        // account.ps1 keeps the hand-over key and localhost's host key
+        // in the login account's `.ssh`, bootstrap.ps1 clones into
+        // `$env:USERPROFILE\<project>`, and shell.ps1 reads the first
+        // two and enters the third. A change to one would open no
+        // shell, or one outside the clone, and fail nothing else.
+        use crate::remote::windows::{SHELL, SHELL_NAME};
+        for text in [
+            "$LoginSsh = Join-Path $env:USERPROFILE '.ssh'",
+            "Join-Path $LoginSsh 'bombyx-handover'",
+            "Join-Path $LoginSsh 'bombyx-localhost-known-hosts'",
+        ] {
+            assert!(ACCOUNT.contains(text), "account.ps1: {text}");
+        }
+        for text in [
+            "$loginSsh = Join-Path $env:USERPROFILE '.ssh'",
+            "Join-Path $loginSsh 'bombyx-handover'",
+            "Join-Path $loginSsh 'bombyx-localhost-known-hosts'",
+            "(Join-Path `$env:USERPROFILE $projectLiteral)",
+        ] {
+            assert!(SHELL.contains(text), "{SHELL_NAME}: {text}");
+        }
+        for text in [
+            "$AgentHome = $env:USERPROFILE",
+            "$CloneDir = Join-Path $AgentHome $Project",
+        ] {
+            assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
+        }
+    }
+
     /// Passes every Windows guest script -- the two provisioning
     /// scripts and `bombyx shell`'s -- through Windows PowerShell's
     /// own parser, so a syntax error fails CI's Windows job rather
-    /// than a guest's provisioning. Windows only, because the parser ships
-    /// with Windows PowerShell. It checks syntax, not behaviour: a
-    /// real `up` against a Windows guest is what shows the scripts
-    /// work.
+    /// than a guest's provisioning. Windows only, because the parser
+    /// ships with Windows PowerShell. It checks syntax, not
+    /// behaviour: a real `up` or `shell` against a Windows guest is
+    /// what shows the scripts work.
     #[cfg(windows)]
     #[test]
     fn every_guest_script_parses_under_windows_powershell() {
@@ -203,7 +235,10 @@ mod tests {
         for (name, text) in [
             (ACCOUNT_NAME, ACCOUNT),
             (BOOTSTRAP_NAME, BOOTSTRAP),
-            ("shell.ps1", crate::remote::windows::SHELL),
+            (
+                crate::remote::windows::SHELL_NAME,
+                crate::remote::windows::SHELL,
+            ),
         ] {
             let path = dir.path().join(name);
             std::fs::write(&path, text).expect("the script is written");

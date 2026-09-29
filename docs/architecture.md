@@ -383,11 +383,11 @@ differences:
   It creates the agent's account, an administrator too, and its
   profile, authorizes a key it makes in the guest, and runs
   `bootstrap.ps1` through `ssh agent@localhost`. The login streams
-  the output and returns the exit code. `bombyx shell` reaches the
-  agent's account the same way, with a terminal. From vagrant's session,
+  the output and returns the exit code. From vagrant's session,
   Windows refuses an S4U scheduled task, and
   `Start-Process -Credential` returns neither output nor an exit
-  code, so neither can do the hand-over.
+  code, so neither can do the hand-over. `bombyx shell` reaches the
+  agent's account by the same login, with a terminal.
 - **Every value arrives base64-encoded.** vagrant's `winssh` shell
   provisioner writes each `env:` value into the script it runs as
   `$env:NAME="value"` and escapes nothing, so a `"` or a `$` in a

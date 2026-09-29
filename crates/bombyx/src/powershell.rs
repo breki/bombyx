@@ -49,9 +49,19 @@ pub(crate) fn run_encoded(script: &str) -> String {
 
 /// `script` without its blank lines and whole-line `#` comments, so
 /// the text a guest's command line carries stays short. It keeps a
-/// `#` inside a line, and it does not know about here-strings, so
-/// `script` must hold none.
+/// `#` inside a line. It reads lines, not PowerShell, so `script`
+/// must hold no here-string, whose lines it could drop, and no
+/// `<# #>` block comment, whose closing `#>` line it would drop; a
+/// debug build checks both.
 pub(crate) fn code_lines(script: &str) -> String {
+    debug_assert!(
+        !script.contains("@'") && !script.contains("@\""),
+        "code_lines cannot keep a here-string intact"
+    );
+    debug_assert!(
+        !script.contains("<#"),
+        "code_lines cannot keep a block comment intact"
+    );
     script
         .lines()
         .filter(|line| {
@@ -66,9 +76,21 @@ pub(crate) fn code_lines(script: &str) -> String {
 }
 
 /// `value` as a PowerShell single-quoted string, which expands
-/// nothing; a `'` inside it is doubled, as PowerShell reads one.
+/// nothing. PowerShell ends such a string at `'` and at the three
+/// typographic single quotes and the reversed one (U+2018 to
+/// U+201B), so each of those is doubled, as PowerShell's own
+/// `EscapeSingleQuotedStringContent` does.
 pub(crate) fn quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        if matches!(c, '\'' | '\u{2018}'..='\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
 }
 
 #[cfg(test)]
@@ -96,10 +118,27 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "block comment")]
+    fn code_lines_refuse_a_block_comment_in_a_debug_build() {
+        code_lines("<#\n# inner\n#>\n$a = 1\n");
+    }
+
+    #[test]
     fn a_quoted_value_doubles_its_single_quotes() {
         assert_eq!(quote("agent"), "'agent'");
         assert_eq!(quote("it's"), "'it''s'");
         assert_eq!(quote(""), "''");
+        // PowerShell reads four more characters as a single quote,
+        // so each is doubled too, as its own
+        // `EscapeSingleQuotedStringContent` does.
+        for c in ['\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            assert_eq!(
+                quote(&format!("a{c}b")),
+                format!("'a{c}{c}b'"),
+                "{c:?}"
+            );
+        }
     }
 
     #[test]

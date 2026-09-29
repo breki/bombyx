@@ -30,7 +30,7 @@ use crate::config::{
 };
 use crate::hostkeys;
 
-pub(crate) mod windows;
+mod windows;
 
 /// The script that clones the project and runs the project's own
 /// script, as the agent, shipped to the host unchanged.
