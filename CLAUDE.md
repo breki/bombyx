@@ -292,7 +292,9 @@ for tools that are not present:
     Bash, and verify with `ssh-keygen -y -P '' -f <key>`.
   - **`pgrep -f <pattern>` matches its own invocation**, so a
     count is inflated and a dead process looks alive. Count with
-    `ps -eo comm | grep -c '^name'` instead.
+    `ps -eo comm | grep -c '^name'` instead. `pkill -f` matches
+    the same way and kills the shell that runs it, so stop a
+    process by a PID read from `ps -eo pid,comm`.
   - **A Windows OpenSSH host may run the command under
     PowerShell**, whichever shell you wrote it for: the server
     uses the shell named by `DefaultShell` under
@@ -843,6 +845,11 @@ For any script that runs more than ~30 seconds
   notification and no output. The generated Vagrantfile's
   `boot_timeout` comment records a Windows first boot of up to
   385 s.
+
+  **Leave buffering filters out of a Monitor pipeline.** `tr`,
+  `sed` without `-u` and `cut` hold their output until a buffer
+  fills, so the lines never reach the monitor and it expires
+  silent. Let `grep --line-buffered` be the only filter.
 
 ## Lints: `doc_markdown` allowlist via `clippy.toml`
 
