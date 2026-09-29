@@ -86,7 +86,9 @@ differences:
   administrator too, the counterpart of passwordless `sudo`.
 - **The hand-over is an SSH login from the guest to itself** as the
   agent, with a key `account.ps1` makes in the guest and keeps in the
-  login account's home, rather than `sudo -u`.
+  login account's home, rather than `sudo -u`. `bombyx shell` opens
+  the agent's session over the same login, with the same key, so no
+  key for the agent leaves the guest.
 - **The same secrets, protected by ACL.** `account.ps1` places the
   deploy key, the secrets file and the git credential in the agent's
   profile, each created empty and limited to the agent, SYSTEM and

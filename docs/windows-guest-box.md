@@ -231,6 +231,23 @@ The box is an evaluation, licensed for testing, not for routine use.
   drops an empty-string argument altogether. `bootstrap.ps1` writes
   the ssh command with an escaped space instead of quotes, and passes
   `'""'` where git needs an empty value.
+- **vagrant rewrites every `'` in a `vagrant ssh -c` command** as
+  `'\''`, the POSIX idiom, for PowerShell too (vagrant 2.4.9's
+  `ssh_run.rb`), and PowerShell does not read it. bombyx sends each
+  guest command as base64, run by `Invoke-Expression`.
+- **A guest command line has a length limit.** vagrant encodes the
+  command as `-encodedCommand`'s UTF-16 base64, which multiplies it
+  by about 2.7, and sshd runs it through `cmd.exe`, whose documented
+  limit is 8191 characters; where the limit bites was not measured.
+  `bombyx shell` sent at about 20500 characters failed with `exec
+  request failed on channel 0`, and at about 5300 it works. So bombyx
+  drops a script's comments before encoding it, and encodes it as
+  UTF-8 for `Invoke-Expression` rather than as UTF-16.
+- **A session with a terminal returns no exit status.** Windows'
+  sshd reports 0 for it, whatever the session exited with: measured
+  for `vagrant ssh -c 'exit 3' -- -t` and for the loopback login
+  inside it. Without a terminal the status comes back. So
+  `bombyx shell` on a Windows guest always exits 0.
 - **vagrant expands no `~` on a Windows guest**, so an upload's
   destination is relative to the login home.
 - **The default `/vagrant` synced folder fails** on a Windows guest,

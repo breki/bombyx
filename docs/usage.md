@@ -109,9 +109,8 @@ the shell anyway. A `shell` that cannot read your `env_file` on
 the workstation also warns and opens.
 
 A Windows guest is the exception until GitHub issue #137 lands:
-`up` does not rewrite its secrets, and prints a note saying so,
-and `shell` does not open a shell in it at all. Run
-`bombyx provision myproject` instead, which places the new files
+`up` and `shell` do not rewrite its secrets, and print a note
+saying so. Run `bombyx provision myproject` instead, which places the new files
 and re-runs the project's script. Provisioning also checks the
 clone out afresh at the configured `ref`, which discards
 uncommitted work in it, so commit or push that work first.

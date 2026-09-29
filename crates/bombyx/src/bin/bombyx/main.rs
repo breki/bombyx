@@ -1084,8 +1084,7 @@ fn probe_state(cfg: &Config) -> Option<listing::VmState> {
 /// the guest's copies ([`plan::refresh_secrets`]), so a token
 /// rotated on the workstation reaches the guest with no provision.
 /// A Windows guest gets no refresh yet, and [`print_unrefreshed`]
-/// says so; the shell itself does not open in one either, because
-/// the command it sends is POSIX. GitHub issue #137 covers both.
+/// says so before its shell opens.
 ///
 /// A refresh that fails is a warning and the shell opens anyway,
 /// because the operator may be opening the shell to find out why.

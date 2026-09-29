@@ -28,13 +28,14 @@
 mod command;
 pub mod probe;
 mod quote;
+pub(crate) mod windows;
 mod write;
 
 pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::{write_file, write_file_of_hidden_size};
 
-use crate::config::{Config, HookPath, Provider, Secrets, Transport};
+use crate::config::{Config, Guest, HookPath, Provider, Secrets, Transport};
 use crate::vagrantfile::GuestHomeFile;
 
 /// Environment variable carrying the VM host's SSH alias into
@@ -1244,6 +1245,16 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// `the_shell_opens_where_the_bootstrap_script_clones` holds this
 /// spelling and `bootstrap.sh`'s together.
 ///
+/// **A Windows guest takes a different route**, because it has no
+/// `sudo -u` for an interactive session: the login account logs in
+/// to the agent's account over SSH to `localhost`, with the key
+/// `account.ps1` made for the hand-over. `templates/shell.ps1` holds
+/// the steps, including the same fallback for a missing account, and
+/// `windows` how the script travels. vagrant asks a winssh guest
+/// for no terminal, so `-t` goes after `--`, which vagrant passes to
+/// its `ssh`. Windows' sshd returns no exit status for a session
+/// with a terminal, so this route always ends 0.
+///
 /// **Three layers of single quotes nest here.** The script and
 /// its arguments are quoted for the login shell, the whole guest
 /// command is quoted once more for the VM host, and vagrant wraps
@@ -1251,6 +1262,16 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// first -- vagrant 2.4.9's `ssh_run.rb` shows it.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
+    if cfg.vm.guest == Guest::Windows {
+        // vagrant asks a winssh guest for no terminal unless `-t`
+        // reaches its `ssh`, which the arguments after `--` do.
+        return vagrant_in(
+            cfg,
+            &cfg.remote_project_dir(),
+            &["ssh", "-c", &windows::shell_command(cfg), "--", "-t"],
+            Tty::Allocate,
+        );
+    }
     let guest = as_guest_user(
         cfg,
         r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#,
@@ -1891,6 +1912,77 @@ mod tests {
         let script = remote_script(&shell_into_vm(&cfg()));
         assert!(script.contains(r#"cd "$HOME/$1""#), "{script}");
         assert!(script.contains("sh '\\''myproject'\\''"), "{script}");
+    }
+
+    #[test]
+    fn a_windows_shell_logs_in_as_the_agent_through_the_hand_over_key() {
+        // A Windows guest has no `sudo -u` for an interactive session,
+        // so the login account opens the agent's shell over the
+        // loopback login account.ps1 hands over by; shell.ps1 holds
+        // how. The script travels base64-encoded, its comments
+        // dropped, because vagrant rewrites every `'` in a PowerShell
+        // command and Windows caps the command line's length; `-- -t`
+        // asks for the terminal vagrant does not request on a winssh
+        // guest.
+        let mut cfg = cfg();
+        cfg.vm.guest = crate::config::Guest::Windows;
+        let c = shell_into_vm(&cfg);
+        assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
+        let script = format!(
+            "$User = 'agent'\n$Project = 'myproject'\n{}",
+            crate::powershell::code_lines(windows::SHELL)
+        );
+        let guest = format!(
+            "iex ([Text.Encoding]::UTF8.GetString(\
+             [Convert]::FromBase64String(\"{}\")))",
+            crate::powershell::base64(script.as_bytes())
+        );
+        assert!(!guest.contains('\''), "{guest}");
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' {} '--' '-t'",
+                vagrant_env(),
+                shell_quote(&guest)
+            )
+        );
+    }
+
+    #[test]
+    fn a_windows_shell_uses_the_paths_the_provisioning_scripts_write() {
+        // Three files that cannot see each other agree on two paths:
+        // account.ps1 keeps the hand-over key and localhost's host key
+        // in the login account's `.ssh`, bootstrap.ps1 clones into
+        // `$env:USERPROFILE\<project>`, and shell.ps1 reads the first
+        // two and enters the third. A change to one would open no
+        // shell, or one outside the clone, and fail nothing else.
+        use crate::vagrantfile::windows::{ACCOUNT, BOOTSTRAP};
+        for text in [
+            "$LoginSsh = Join-Path $env:USERPROFILE '.ssh'",
+            "Join-Path $LoginSsh 'bombyx-handover'",
+            "Join-Path $LoginSsh 'bombyx-localhost-known-hosts'",
+        ] {
+            assert!(ACCOUNT.contains(text), "account.ps1: {text}");
+        }
+        for text in [
+            "$loginSsh = Join-Path $env:USERPROFILE '.ssh'",
+            "Join-Path $loginSsh 'bombyx-handover'",
+            "Join-Path $loginSsh 'bombyx-localhost-known-hosts'",
+            "Join-Path `$env:USERPROFILE '$Project'",
+        ] {
+            assert!(windows::SHELL.contains(text), "shell.ps1: {text}");
+        }
+        // `code_lines` drops comment lines, which would cut into a
+        // here-string.
+        assert!(
+            !windows::SHELL.contains("@'") && !windows::SHELL.contains("@\"")
+        );
+        for text in [
+            "$AgentHome = $env:USERPROFILE",
+            "$CloneDir = Join-Path $AgentHome $Project",
+        ] {
+            assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
+        }
     }
 
     #[test]
