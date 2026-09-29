@@ -14,18 +14,6 @@ before the extension, while `bootstrap.ps1` would accept one, because
 the case unreachable today; the two checks still disagree on it. Raised by
 fresh-reader in the #145 review, after stage 2 had closed.
 
-### rt-2026-09-29-windows-ssh-repo-boots-then-fails
-
-**Category:** Correctness
-
-The config accepts an ssh `repo` for a Windows project, yet the clone
-cannot succeed: the Windows guest is handed no git host keys and
-`bootstrap.ps1` runs Windows' ssh with `BatchMode=yes`, so it fails with
-"Host key verification failed" after the boot. The config could refuse
-a non-https `repo` for Windows until GitHub issue #141's second part adds
-host-key pinning. Deferred in the #145 review by the operator's choice,
-because the guest already refuses it, only late.
-
 ### rt-2026-09-29-windows-guest-user-misses-groups-and-devices
 
 **Category:** Correctness
@@ -61,24 +49,6 @@ the Administrator password first, those files name only a stale
 password, so the delete may be better reported and skipped than made
 fatal. No build has hit a locked file. Raised by fresh-reader in the
 #144 review, after stage 2 had closed.
-
-### rt-2026-09-28-windows-refusal-after-source-rules
-
-**Category:** Correctness
-
-The registry's `parse` refuses a Windows project that names a
-`deploy_key`, an `env_file` or a `repo_token`
-(`ConfigError::WindowsGuestSecret`). `[source]`'s own pairing rules
-run inside `Source::try_from`, while the table parses, which is
-before that check. So a Windows project with `repo_token` alone is
-first told to add `repo_user`, then `env_file` (and, with an ssh
-`repo`, to use an https URL), and only then to remove all of them.
-
-A fix would check `vm.guest` before `[source]` deserializes, for
-example by reading `[source]` into its raw fields for a Windows
-project. Deferred on 2026-09-28: GitHub issue #141 removes the
-Windows refusal, and this detour with it. Found as RT-2 in the
-second red-team round on PR #142.
 
 ---
 

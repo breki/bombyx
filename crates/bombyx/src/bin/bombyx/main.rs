@@ -938,6 +938,9 @@ fn up_run(
     // because it cannot see the machine's state.
     let snapshot =
         remote::save_snapshot_if_absent(cfg, &cfg.remote_project_dir(), tty);
+    // A dry run prints no note about unrefreshed secrets. Its output
+    // shows a first `up`, which provisions the guest with the current
+    // secrets.
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(boot);
@@ -948,6 +951,7 @@ fn up_run(
     let state = probe_state(cfg);
     let refresh = plan::refresh_secrets(cfg, staged);
     if state.as_ref().is_some_and(listing::VmState::is_running) {
+        print_unrefreshed(cfg, staged);
         if refresh.is_empty() {
             eprint_lines(&format!(
                 "bombyx: {} is already running; up did nothing\n",
@@ -984,6 +988,7 @@ fn up_run(
     // the credential; one that did not provision gets the whole
     // refresh.
     let after = if listing::refreshes_secrets_after_up(state.as_ref()) {
+        print_unrefreshed(cfg, staged);
         refresh
     } else {
         plan::refresh_after_provisioning(cfg, staged)
@@ -1078,6 +1083,10 @@ fn probe_state(cfg: &Config) -> Option<listing::VmState> {
 /// Before the shell opens, the project's secrets are written over
 /// the guest's copies ([`plan::refresh_secrets`]), so a token
 /// rotated on the workstation reaches the guest with no provision.
+/// A Windows guest gets no refresh yet, and [`print_unrefreshed`]
+/// says so; the shell itself does not open in one either, because
+/// the command it sends is POSIX. GitHub issue #137 covers both.
+///
 /// A refresh that fails is a warning and the shell opens anyway,
 /// because the operator may be opening the shell to find out why.
 ///
@@ -1092,6 +1101,7 @@ fn shell_run(
     let shell = plan(&Action::Shell, cfg, tty, staged);
     let refresh = plan::refresh_secrets(cfg, staged);
     if dry_run {
+        print_unrefreshed(cfg, staged);
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(refresh);
         cmds.extend(shell);
@@ -1103,10 +1113,19 @@ fn shell_run(
         eprint_lines(&format!("{refusal}\n"));
         return Ok(Ran::Failed(1));
     }
+    print_unrefreshed(cfg, staged);
     if !run_refresh(&refresh) {
         eprint_lines("bombyx: opening the shell anyway\n");
     }
     execute(&shell, false)
+}
+
+/// Prints why a guest's secrets were not refreshed, when
+/// [`plan::unrefreshed_secrets`] says they were not.
+fn print_unrefreshed(cfg: &Config, staged: &Staged) {
+    if let Some(note) = plan::unrefreshed_secrets(cfg, staged) {
+        eprint_lines(&format!("bombyx: {note}\n"));
+    }
 }
 
 /// Runs each refresh command `plan` built -- from

@@ -24,10 +24,13 @@
 use std::collections::BTreeMap;
 
 use super::{
-    GUEST_USER_ENV, PRESERVE_ENV, PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV,
-    ruby_string,
+    CREDENTIAL_PRESENT_ENV, DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, GIT_HOST_ENV,
+    GUEST_USER_ENV, HOST_KEYS_FORMAT_ENV, HOST_KEYS_URL_ENV, PRESERVE_ENV,
+    PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV, credential_block,
+    deploy_key_block, deploy_key_env, env_file_block, ruby_string,
 };
-use crate::config::{Config, EnvName, EnvValue};
+use crate::config::{Config, EnvName, EnvValue, Staged};
+use crate::hostkeys;
 use crate::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
 
 /// The script that clones the project and runs its script, as the
@@ -56,28 +59,30 @@ pub(crate) const ACCOUNT_NAME: &str = "account.ps1";
 /// `$env:USERPROFILE`, which is that same home.
 const BOOTSTRAP_STAGED_PATH: &str = ".bombyx-staging/bootstrap.ps1";
 
-/// The names bombyx sets for a Windows guest, in the order the
-/// Vagrantfile lists them.
-///
-/// Fewer than on Linux: the deploy key, the secrets file, the git
-/// credential and the git host's ssh keys are not handed to a
-/// Windows guest yet, because its scripts do not place them.
-const ENV_NAMES: [&str; 7] = [
-    GUEST_USER_ENV,
-    REPO_ENV,
-    REF_ENV,
-    SCRIPT_ENV,
-    PROJECT_ENV,
-    VM_HOST_ENV,
-    VM_HOSTNAME_ENV,
-];
+/// Where the deploy key is staged, relative to the login home for
+/// the reason [`BOOTSTRAP_STAGED_PATH`] gives. [`ACCOUNT`] places it
+/// as the agent's `.ssh\bombyx-deploy-key`.
+pub(super) const DEPLOY_KEY_STAGED_PATH: &str = ".bombyx-staging/deploy-key";
+
+/// Where the secrets file is staged. [`ACCOUNT`] places it as the
+/// agent's `.bombyx-env`.
+pub(super) const ENV_FILE_STAGED_PATH: &str = ".bombyx-staging/env";
+
+/// Where the git credential is staged. [`ACCOUNT`] places it as the
+/// agent's `.bombyx-git-credentials`.
+pub(super) const CREDENTIAL_STAGED_PATH: &str =
+    ".bombyx-staging/git-credentials";
 
 /// The provisioners that set up a Windows guest: the upload of
 /// [`BOOTSTRAP`], then [`ACCOUNT`].
-pub(super) fn provisioning(cfg: &Config) -> String {
+pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     use std::fmt::Write as _;
 
     let source = &cfg.source;
+    // `None` when `repo` reaches the server by something other than
+    // ssh, and when it names a host bombyx has no key source for.
+    let host_keys = source.repo.ssh_host().and_then(hostkeys::for_host);
+    let flag = |present: bool| if present { "1" } else { "0" };
     let mut env = String::new();
     // Writing to a `String` cannot fail, so the results are dropped.
     let mut entry = |name: &str, value: &str| {
@@ -94,6 +99,23 @@ pub(super) fn provisioning(cfg: &Config) -> String {
     entry(REF_ENV, source.git_ref.as_str());
     entry(SCRIPT_ENV, source.script.as_str());
     entry(PROJECT_ENV, cfg.project.as_str());
+    // Each "0" too, so the guest removes a copy an earlier provision
+    // left rather than keeping a credential the config dropped.
+    entry(DEPLOY_KEY_ENV, deploy_key_env(source.deploy_key.as_ref()));
+    entry(ENV_FILE_PRESENT_ENV, flag(staged.secrets().is_some()));
+    entry(CREDENTIAL_PRESENT_ENV, flag(staged.credential().is_some()));
+    // Empty for an https clone, which opens no ssh connection, and
+    // for an ssh host bombyx publishes no keys for. For that host,
+    // bootstrap.ps1 accepts the key it is offered on first connection
+    // when a deploy key is configured. Without one, it adds nothing:
+    // such a clone has no credential for that host, so it could not
+    // authenticate whatever the host-key setting said.
+    entry(GIT_HOST_ENV, host_keys.map_or("", |k| k.host()));
+    entry(HOST_KEYS_URL_ENV, host_keys.map_or("", |k| k.url()));
+    entry(
+        HOST_KEYS_FORMAT_ENV,
+        host_keys.map_or("", |k| k.format().as_str()),
+    );
     for (name, value) in &cfg.env {
         entry(name.as_str(), value.as_str());
     }
@@ -115,7 +137,7 @@ pub(super) fn provisioning(cfg: &Config) -> String {
     source: File.expand_path({bootstrap}, __dir__),
     destination: {staged}
 
-  config.vm.provision \"shell\",
+{deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
     path: {account},
     # As the account vagrant logs in as, an administrator:
     # account.ps1 creates the agent's account and hands
@@ -134,16 +156,27 @@ pub(super) fn provisioning(cfg: &Config) -> String {
         bootstrap = ruby_string(BOOTSTRAP_NAME),
         staged = ruby_string(BOOTSTRAP_STAGED_PATH),
         account = ruby_string(ACCOUNT_NAME),
+        deploy_key = deploy_key_block(
+            source.deploy_key.as_ref(),
+            DEPLOY_KEY_STAGED_PATH
+        ),
+        env_file =
+            env_file_block(staged.secrets().is_some(), ENV_FILE_STAGED_PATH),
+        credential = credential_block(
+            staged.credential().is_some(),
+            CREDENTIAL_STAGED_PATH
+        ),
     )
 }
 
-/// The value of [`PRESERVE_ENV`] for a Windows guest: every name in
-/// [`ENV_NAMES`], then every `[env]` name, comma-separated.
+/// The value of [`PRESERVE_ENV`] for a Windows guest: every name
+/// bombyx sets, which is the Linux list `BOMBYX_ENV_NAMES`, then every
+/// `[env]` name, comma-separated.
 ///
 /// [`ACCOUNT`] hands the agent these names and no others. A comma
 /// cannot split a name, for the reason `super::preserve_list` gives.
 pub(super) fn preserve_list(env: &BTreeMap<EnvName, EnvValue>) -> String {
-    ENV_NAMES
+    super::BOMBYX_ENV_NAMES
         .iter()
         .copied()
         .chain(env.keys().map(EnvName::as_str))
@@ -244,6 +277,24 @@ mod tests {
                 "{name} does not parse:\n{}",
                 String::from_utf8_lossy(&out.stdout)
             );
+        }
+    }
+
+    #[test]
+    fn the_scripts_agree_on_where_each_secret_is_staged_and_placed() {
+        // The Vagrantfile uploads under a name, account.ps1 moves the
+        // file from that name to a path, and bootstrap.ps1 reads it
+        // there. A rename in one of the three strands the secret.
+        for (staged, placed) in [
+            (DEPLOY_KEY_STAGED_PATH, r"'.ssh\bombyx-deploy-key'"),
+            (ENV_FILE_STAGED_PATH, "'.bombyx-env'"),
+            (CREDENTIAL_STAGED_PATH, "'.bombyx-git-credentials'"),
+        ] {
+            let (dir, name) = staged.split_once('/').expect("a staged path");
+            assert!(ACCOUNT.contains(&format!("'{dir}'")), "{dir}");
+            assert!(ACCOUNT.contains(&format!("'{name}'")), "{name}");
+            assert!(ACCOUNT.contains(placed), "account.ps1: {placed}");
+            assert!(BOOTSTRAP.contains(placed), "bootstrap.ps1: {placed}");
         }
     }
 

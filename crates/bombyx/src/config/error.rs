@@ -283,32 +283,28 @@ pub enum ConfigError {
         project: String,
     },
 
-    /// A project with `guest = "windows"` names a secret for the
-    /// guest: a `deploy_key`, an `env_file` or a `repo_token`, or a
-    /// key that only works beside one (`repo_user`, the
-    /// `secrets_refreshed` hook).
+    /// A project with `guest = "windows"` names a
+    /// `secrets_refreshed` hook.
     ///
-    /// The Windows guest scripts do not place secrets yet, so the
-    /// secret would be read on the workstation and copied to the
-    /// VM host for a guest that never receives it. A rule spanning
-    /// `[vm]`, `[source]` and `[hooks]`, checked in the registry's
-    /// `parse` like [`ConfigError::HookWithoutEnvFile`]. GitHub
-    /// issue #141 lifts it when the scripts place them.
+    /// The hook runs after the secrets refresh on a running guest,
+    /// and a Windows guest gets no refresh yet, so the hook would
+    /// never run. A rule spanning `[vm]` and `[hooks]`, checked in the
+    /// registry's `parse` ahead of [`ConfigError::HookWithoutEnvFile`],
+    /// whose advice -- add an `env_file` -- would not make it run.
+    /// GitHub issue #137 lifts it with the refresh.
     #[error(
-        "invalid config in {}: project \"{project}\" sets {keys}, \
-         but [projects.\"{project}\".vm] sets guest = \
-         \"windows\", and bombyx cannot place secrets in a Windows \
-         guest yet (bombyx issue #141) -- remove them for now",
+        "invalid config in {}: project \"{project}\" sets \
+         secrets_refreshed in [projects.\"{project}\".hooks], but \
+         [projects.\"{project}\".vm] sets guest = \"windows\", and the \
+         hook does not run on a Windows guest yet (bombyx issue #137) -- \
+         remove it for now",
         .path.display()
     )]
-    WindowsGuestSecret {
+    WindowsGuestHook {
         /// The registry file holding the project.
         path: PathBuf,
-        /// The project whose tables pair them.
+        /// The project naming the hook.
         project: String,
-        /// Every key to remove, backticked and comma-joined, so
-        /// one message lists all the operator removes.
-        keys: String,
     },
 
     /// A project with `guest = "windows"` names a `script` that is
