@@ -288,9 +288,9 @@ pub enum ConfigError {
     ///
     /// The Windows hook runner starts the hook with `powershell
     /// -File`, which refuses any file but a `.ps1`, and Windows
-    /// refuses a path over 260 characters by default. Either way the
-    /// refresh would write the secrets and then report the hook
-    /// failed. A rule spanning `[vm]` and `[hooks]`, checked in the
+    /// refuses a path over 259 characters by default. Either way the
+    /// refresh would write the secrets and then report that the hook
+    /// did not run. A rule spanning `[vm]` and `[hooks]`, checked in the
     /// registry's `parse`, as [`ConfigError::WindowsGuestScript`] is
     /// for `script`.
     #[error(
@@ -308,7 +308,7 @@ pub enum ConfigError {
         /// The hook, as the config spells it.
         hook: String,
         /// Why a Windows guest cannot run it.
-        reason: &'static str,
+        reason: super::WindowsHookRefusal,
     },
 
     /// A project with `guest = "windows"` names a `script` that is

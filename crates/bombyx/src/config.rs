@@ -250,13 +250,13 @@ pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
 pub use guest_user::{GuestUser, WindowsUserRefusal};
-pub use hooks::{HookPath, Hooks};
+#[cfg(test)]
+pub(crate) use hooks::MAX_WINDOWS_HOOK_LEN;
+pub use hooks::{HookPath, Hooks, WindowsHookRefusal};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
 };
 pub(crate) use host::{is_anchored_dir, registry_place};
-#[cfg(test)]
-pub(crate) use registry::MAX_WINDOWS_HOOK_LEN;
 pub(crate) use registry::Registry;
 pub use registry::USER_CONFIG_FILE;
 pub use repo_token::{
@@ -1894,7 +1894,8 @@ mod load_project_tests {
         // Windows project's hook is held to that rule, as `script` is.
         let with_hook = |hook: &str| {
             format!(
-                "{}\n[projects.myproject.hooks]\nsecrets_refreshed = \"{hook}\"\n",
+                "{}\n[projects.myproject.hooks]\n\
+                 secrets_refreshed = \"{hook}\"\n",
                 windows_registry_with_source_key(
                     "env_file = \"~/.secrets/x.env\""
                 )
@@ -1917,9 +1918,9 @@ mod load_project_tests {
         {
             assert!(text.contains(part), "{part}: {text}");
         }
-        // Windows refuses a path over 260 characters by default, and
-        // the clone's own folder shares them, so a hook path holds 200
-        // at most; the refresh call's length budget rests on it too.
+        // With short names, the refresh call's command-line cap of 200
+        // is the tighter rule; `hooks.rs` tests the path rule, which
+        // bites first when the names are long.
         let at_limit = format!("{}.ps1", "a".repeat(196));
         assert_eq!(at_limit.len(), 200);
         load(&with_hook(&at_limit), "myproject").expect("200 characters");

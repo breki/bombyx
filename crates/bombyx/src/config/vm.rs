@@ -115,10 +115,11 @@ impl fmt::Display for Provider {
 /// `shell` refresh the last two through helpers `account.ps1`
 /// installs. The registry's `parse` refuses a `script` or a
 /// `secrets_refreshed` hook that is not a `.ps1` file, a hook path
-/// over 200 characters, a `guest_user` Windows cannot hold, and an
-/// `[env]` name that, compared without regard to case as Windows
-/// compares, is bombyx's own or changes what its guest scripts do,
-/// or differs only in case from another `[env]` name.
+/// longer than the room Windows' 259-character path leaves, 200 at
+/// most, a `guest_user` Windows cannot hold, and an `[env]` name
+/// that, compared without regard to case as Windows compares, is
+/// bombyx's own or changes what its guest scripts do, or differs only
+/// in case from another `[env]` name.
 /// `docs/windows-guest-box.md` records the box the recipe in
 /// `boxes/windows-server-2025/` builds for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]

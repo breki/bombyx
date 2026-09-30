@@ -1,11 +1,14 @@
-//! The provisioners that set up a Windows guest, and the two
+//! The provisioners that set up a Windows guest, and the four
 //! PowerShell scripts they ship.
 //!
 //! The split mirrors the Linux one. [`ACCOUNT`] runs first, as the
 //! account vagrant logs in as, which is an administrator on the
 //! box bombyx targets. It creates the agent's account, installs
 //! git, and hands [`BOOTSTRAP`] to the agent. [`BOOTSTRAP`] clones
-//! the project and runs its script, as the agent.
+//! the project and runs its script, as the agent. The other two,
+//! `REFRESH` and `HOOK`, are helpers [`ACCOUNT`] installs for later:
+//! `up` and `shell` call them to refresh a running guest's secrets
+//! and run the project's hook.
 //!
 //! Windows has no `sudo -u`, so the hand-over is an SSH login from
 //! the guest to itself, as the agent, with a key [`ACCOUNT`] makes
@@ -100,8 +103,8 @@ pub(super) const ENV_FILE_STAGED_PATH: &str = ".bombyx-staging/env";
 pub(super) const CREDENTIAL_STAGED_PATH: &str =
     ".bombyx-staging/git-credentials";
 
-/// The provisioners that set up a Windows guest: the upload of
-/// [`BOOTSTRAP`], then [`ACCOUNT`].
+/// The provisioners that set up a Windows guest: the uploads of
+/// [`BOOTSTRAP`] and the two helpers, then [`ACCOUNT`].
 pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     use std::fmt::Write as _;
 
@@ -283,18 +286,22 @@ mod tests {
         // The call's version and the helper's must agree, or every
         // refresh would be refused as coming from another bombyx.
         assert!(
-            REFRESH.contains(&format!("$Supported = {HELPER_CALL}\n")),
+            crate::powershell::has_line(
+                REFRESH,
+                &format!("$Supported = {HELPER_CALL}")
+            ),
             "{REFRESH_NAME}: $Supported"
         );
     }
 
     /// Passes every Windows guest script -- the provisioning
     /// scripts, the refresh helpers, and the calls `bombyx shell` and
-    /// the refresh send -- through Windows PowerShell's own parser, so a syntax error fails CI's Windows job rather
-    /// than a guest's provisioning. Windows only, because the parser
-    /// ships with Windows PowerShell. It checks syntax, not
-    /// behaviour: a real `up` or `shell` against a Windows guest is
-    /// what shows the scripts work.
+    /// the refresh send -- through Windows PowerShell's own parser, so
+    /// a syntax error fails CI's Windows job rather than a guest's
+    /// provisioning. Windows only, because the parser ships with
+    /// Windows PowerShell. It checks syntax, not behaviour: a real
+    /// `up` or `shell` against a Windows guest is what shows the
+    /// scripts work.
     #[cfg(windows)]
     #[test]
     fn every_guest_script_parses_under_windows_powershell() {

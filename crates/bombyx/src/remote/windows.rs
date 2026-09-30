@@ -19,9 +19,13 @@
 //! ([`code_lines`]); the template keeps them for the reader.
 //! `docs/windows-guest-box.md` records the measured lengths, and
 //! `the_longest_windows_shell_command_fits_the_guest_command_line`
-//! holds [`shell_command`] to a budget.
+//! and `the_longest_windows_refresh_command_fits_the_guest_command_line`
+//! hold [`shell_command`] and `refresh_command` to a budget of 7800.
+//! The refresh helpers themselves would not fit: sent this way, the
+//! code of `refresh.ps1` and `hook.ps1` measured about 33700
+//! characters, so `account.ps1` installs them and the call names them.
 
-use crate::config::Config;
+use crate::config::{Config, HookPath};
 use crate::powershell::{code_lines, quote, run_encoded};
 
 /// The script `bombyx shell` runs on a Windows guest; its header says
@@ -44,21 +48,23 @@ pub(crate) const REFRESH_CALL: &str =
 pub(crate) const HELPER_CALL: u32 = 1;
 
 /// The `vagrant ssh -c` text that writes `file`, arriving on
-/// standard input, over the agent's copy, then runs `hook` with
-/// `timeout` seconds to finish, when one is given.
+/// standard input, over the agent's copy, then, when `hook` names
+/// one, runs it with that many seconds to finish. The hook stays a
+/// checked [`HookPath`], whose Windows length cap the call's length
+/// budget rests on.
 pub(super) fn refresh_command(
     cfg: &Config,
     file: &str,
-    hook: Option<&str>,
-    timeout: u32,
+    hook: Option<(&HookPath, u32)>,
 ) -> String {
+    let (path, timeout) = hook.map_or(("", 0), |(p, t)| (p.as_str(), t));
     let prefix = format!(
         "$Interface = {HELPER_CALL}\n$User = {}\n$File = {}\n\
          $Project = {}\n$Hook = {}\n$Timeout = {timeout}\n",
         quote(cfg.vm.guest_user.as_str()),
         quote(file),
         quote(cfg.project.as_str()),
-        quote(hook.unwrap_or_default()),
+        quote(path),
     );
     guest_command(&prefix, REFRESH_CALL)
 }

@@ -97,9 +97,11 @@ differences:
   `bootstrap.sh` does.
 - **The refresh writes as the login account.** `up` and `shell` call
   `refresh.ps1`, which `account.ps1` installs under Program Files. It
-  runs as vagrant's login account, an administrator as the agent is,
-  writes the new file beside the old one under a fresh ACL for the
-  agent, SYSTEM and the administrators, and renames it into place.
+  runs as vagrant's login account, writes the new file beside the old
+  one under a fresh ACL for the agent, SYSTEM and the administrators,
+  and renames it into place. Writing as another account is safe here,
+  unlike on Linux, because the agent is an administrator too: a link
+  it leaves at the path leads nowhere the agent could not write.
   The `secrets_refreshed` hook then runs as the agent, over the same
   loopback login as the hand-over, from a pruned environment.
 - **Every `env:` value travels base64-encoded**, because vagrant's

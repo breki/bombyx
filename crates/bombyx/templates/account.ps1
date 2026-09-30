@@ -391,7 +391,11 @@ try {
         'git-credentials' $gitCred $sid
 
     # bootstrap.ps1 and the helpers, installed afresh on every
-    # provision so the agent's own edits to an earlier copy never run.
+    # provision. bootstrap.ps1 runs only right after, so the agent's
+    # own edits to an earlier copy never run. The helpers run between
+    # provisions, when `up` and `shell` call them, so the agent, an
+    # administrator, can change them in that time, as it could change
+    # anything else on the guest.
     Copy-Item -LiteralPath $staged -Destination $Bootstrap -Force
     foreach ($helper in $helpers) {
         Copy-Item -LiteralPath $helper[0] -Destination $helper[1] -Force

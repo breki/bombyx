@@ -93,6 +93,15 @@ pub(crate) fn quote(value: &str) -> String {
     out
 }
 
+/// Whether `text` holds `line` as a whole line. A test reading a
+/// `.ps1` template needs this rather than a search for `line` and
+/// `\n`, because `.gitattributes` checks the templates out with CRLF
+/// endings and `include_str!` keeps them.
+#[cfg(test)]
+pub(crate) fn has_line(text: &str, line: &str) -> bool {
+    text.lines().any(|l| l.trim_end() == line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -174,6 +174,14 @@ without one. The path:
 - and, checked in the guest, does not lead out of the clone
   through a symlink.
 
+On a Windows guest the hook is a `.ps1` file, which PowerShell runs
+with `-File`. It starts from the system's own variables (such as
+`SystemRoot`, `TEMP` and `USERPROFILE`), a fixed `PATH` and the two
+`BOMBYX_` names. bombyx refuses a link anywhere on its path, even one
+that stays inside the clone, and its whole path,
+`C:\Users\<guest_user>\<project>\<hook>`, must fit Windows' default
+259 characters, with the hook path itself 200 characters at most.
+
 When it runs: whenever bombyx has written `~/.bombyx-env`. That is
 after the provisioning run of the `up` that creates the VM (before
 the `fresh-install` snapshot, so `reset` returns to a guest with

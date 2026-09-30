@@ -21,7 +21,6 @@ pub(super) fn is_remote_path_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '~')
 }
 
-/// Requires a value that is not blank.
 /// Whether `path`, a path on the guest, names a `.ps1` file, the only
 /// kind `powershell -File` runs.
 ///
@@ -33,6 +32,7 @@ pub(super) fn is_powershell_file(path: &str) -> bool {
     file.len() > ".ps1".len() && file.to_ascii_lowercase().ends_with(".ps1")
 }
 
+/// Requires a value that is not blank.
 pub(super) fn check_not_empty(
     field: &'static str,
     value: &str,

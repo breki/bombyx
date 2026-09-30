@@ -423,14 +423,6 @@ pub(super) fn heading(name: &str, tail: &str) -> String {
 /// [`ConfigError::WindowsGuestEnv`],
 /// [`ConfigError::WindowsGuestScript`] or
 /// [`ConfigError::WindowsGuestHook`], the first that applies.
-/// The longest `secrets_refreshed` path a Windows guest takes. Windows
-/// refuses a path over 260 characters unless long paths are switched
-/// on, which the box leaves off, and the clone's folder in the
-/// agent's profile takes part of that. The refresh call's length
-/// budget, which `the_longest_windows_refresh_command_fits_the_guest_command_line`
-/// checks, assumes it too.
-pub(crate) const MAX_WINDOWS_HOOK_LEN: usize = 200;
-
 fn refuse_windows_mismatch(
     key: &ProjectName,
     project: &Project,
@@ -480,31 +472,19 @@ fn refuse_windows_mismatch(
         });
     }
     // The Windows hook runner starts the hook with `powershell
-    // -File` too, and the refresh call carries the path on the
-    // guest's command line, whose length budget assumes this cap.
-    if let Some(hook) = &project.hooks.secrets_refreshed {
-        let reason = if !hook.is_powershell() {
-            Some(
-                "a Windows guest runs the hook with PowerShell, which \
-                 needs a .ps1 file",
-            )
-        } else if hook.as_str().len() > MAX_WINDOWS_HOOK_LEN {
-            Some(
-                "Windows refuses a path over 260 characters by default, \
-                 which the clone's own folder shares, so a hook path \
-                 holds 200 at most",
-            )
-        } else {
-            None
-        };
-        if let Some(reason) = reason {
-            return Err(ConfigError::WindowsGuestHook {
-                path: path.to_path_buf(),
-                project: key.as_str().to_owned(),
-                hook: hook.as_str().to_owned(),
-                reason,
-            });
-        }
+    // -File` too, and the path has to fit both Windows' path limit and
+    // `MAX_WINDOWS_HOOK_LEN`, the cap the refresh call's command-line
+    // budget assumes.
+    if let Some(hook) = &project.hooks.secrets_refreshed
+        && let Some(reason) =
+            hook.windows_refusal(user.as_str().len(), key.as_str().len())
+    {
+        return Err(ConfigError::WindowsGuestHook {
+            path: path.to_path_buf(),
+            project: key.as_str().to_owned(),
+            hook: hook.as_str().to_owned(),
+            reason,
+        });
     }
     Ok(())
 }

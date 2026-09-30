@@ -7,13 +7,19 @@
 # on every provision, so bombyx's command names it rather than
 # carrying it: vagrant re-encodes a `vagrant ssh -c` command, and the
 # guest's cmd.exe caps the result's length, which a script this size
-# would not fit. The login account runs it, an administrator, as
-# account.ps1's Place writes the files at provisioning.
+# would not fit. The login account runs it, as account.ps1's `Place`
+# function writes these files at provisioning. That is safe although
+# on Linux the agent writes its own files: the agent is an
+# administrator here too, so a link it leaves at the path leads the
+# login account nowhere the agent could not write itself.
 #
-# The exit status is what bombyx's RefreshOutcome reads: 0 when the
-# file was written and the hook, if any, succeeded; 1 when the file
-# may not have been written; and hook.ps1's 90, 91 or 92 when the
-# file was written and the hook did not run, failed, or ran too long.
+# The exit status is what bombyx's RefreshOutcome reads, and every
+# step on the way keeps to one rule: 0 only when the file was
+# written and the hook, if any, succeeded; 1 while the file may not
+# have been written; and once it has been, only 0 or hook.ps1's 90,
+# 91 or 92 -- the hook did not run, failed, or ran too long. A step
+# that cannot start the next one says so and exits with the status
+# for where it stands, never 0.
 param(
     [int] $Interface,
     [string] $User,
@@ -32,6 +38,9 @@ $Supported = 1
 # RefreshOutcome's HookRefused: the file was written and the hook
 # did not start.
 $HookRefused = 90
+# hook.ps1's other two statuses, which this passes on as they are.
+$HookFailed = 91
+$HookTimedOut = 92
 
 function Fail([string] $Why, [int] $Code) {
     [Console]::Error.WriteLine("bombyx: $Why")
@@ -107,12 +116,13 @@ if ([string]::IsNullOrEmpty($Hook)) {
     exit 0
 }
 
-# The hook runs as the agent, as on Linux, over the SSH login to this
-# guest that account.ps1 hands bootstrap.ps1 over by, with the key it
-# keeps in the login account's own `.ssh`. sshd runs the command
-# under cmd.exe, and ssh.exe joins its arguments with spaces and no
-# quotes, so a path with a space would arrive split. So the agent's
-# side is one `-EncodedCommand`, UTF-16LE base64 of a short call to
+# The hook runs as the agent, as on Linux, over an SSH login from
+# this guest to itself: the login account.ps1 uses to hand
+# bootstrap.ps1 to the agent, with the key it keeps in the login
+# account's own `.ssh`. sshd runs the command under cmd.exe, and
+# ssh.exe joins its arguments with spaces and no quotes, so a path
+# with a space would arrive split. So the command ssh runs as the
+# agent is one `-EncodedCommand`, UTF-16LE base64 of a short call to
 # hook.ps1 with the path quoted inside it, and hook.ps1 takes its
 # text arguments base64-encoded too; base64 holds no character
 # cmd.exe or PowerShell reads.
@@ -131,9 +141,17 @@ $encode = {
     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text))
 }
 $escaper = [Management.Automation.Language.CodeGeneration]
-$call = "& '" + $escaper::EscapeSingleQuotedStringContent($runner) +
-    "' $(& $encode $Project) $(& $encode $Hook) $Timeout " +
-    "$(& $encode $File); exit `$LASTEXITCODE"
+# A hook.ps1 that does not start -- missing, or no longer parsing --
+# must not exit 0, which would read as a hook that succeeded, so the
+# agent's side stops on the error and exits $HookRefused.
+$runnerLiteral = "'" + $escaper::EscapeSingleQuotedStringContent($runner) +
+    "'"
+$call = "`$ErrorActionPreference = 'Stop'; " +
+    "`$global:LASTEXITCODE = $HookRefused; " +
+    "try { & $runnerLiteral $(& $encode $Project) $(& $encode $Hook) " +
+    "$Timeout $(& $encode $File) } catch { " +
+    "[Console]::Error.WriteLine('bombyx: hook.ps1 did not run: ' + `$_); " +
+    "exit $HookRefused }; exit `$LASTEXITCODE"
 $encodedCall = [Convert]::ToBase64String(
     [Text.Encoding]::Unicode.GetBytes($call))
 # ssh's output is not redirected: Windows' ssh client and PowerShell
@@ -151,5 +169,11 @@ if ($code -eq 255) {
     Fail ("the secrets are current, but the SSH login to " +
         "$User@localhost failed, so the secrets_refreshed hook did not " +
         'run; run bombyx provision.') $HookRefused
+}
+# The file is written by now, so no status may read as a failed
+# write: anything hook.ps1 does not return becomes $HookRefused.
+if (@(0, $HookRefused, $HookFailed, $HookTimedOut) -notcontains $code) {
+    Fail ("the secrets are current, but the secrets_refreshed hook's " +
+        "runner ended with status $code") $HookRefused
 }
 exit $code

@@ -75,12 +75,76 @@ impl HookPath {
     /// The key a refusal names.
     pub const FIELD: &'static str = "secrets_refreshed";
 
-    /// Whether the path names a `.ps1` file, the only kind the
-    /// Windows hook runner starts; `guards::is_powershell_file` holds
-    /// the rule.
+    /// Why a Windows guest cannot run this hook, or `None` when it
+    /// can.
+    ///
+    /// A method rather than a rule in [`HookPath::parse`], because
+    /// only a Windows guest has these rules and the path is read
+    /// before the config says which guest it is for; the registry's
+    /// `parse` asks once `[vm]`'s `guest` is known, as it asks
+    /// [`super::GuestUser::windows_refusal`].
     #[must_use]
-    pub(crate) fn is_powershell(&self) -> bool {
-        guards::is_powershell_file(&self.0)
+    pub(crate) fn windows_refusal(
+        &self,
+        user_len: usize,
+        project_len: usize,
+    ) -> Option<WindowsHookRefusal> {
+        // `C:\Users\`, the two separators around the project, and
+        // the names; the rest of Windows' limit is the hook's.
+        let clone_folder = "C:\\Users\\".len() + user_len + 1 + project_len + 1;
+        let limit = MAX_WINDOWS_HOOK_LEN
+            .min(MAX_WINDOWS_PATH_LEN.saturating_sub(clone_folder));
+        if !guards::is_powershell_file(&self.0) {
+            Some(WindowsHookRefusal::NotPowerShell)
+        } else if self.0.len() > limit {
+            Some(WindowsHookRefusal::TooLong { limit })
+        } else {
+            None
+        }
+    }
+}
+
+/// The longest `secrets_refreshed` path a Windows guest takes, whatever
+/// the names around it: the refresh call carries the path on the
+/// guest's command line, and its length budget, which
+/// `the_longest_windows_refresh_command_fits_the_guest_command_line`
+/// checks, assumes this cap.
+pub(crate) const MAX_WINDOWS_HOOK_LEN: usize = 200;
+
+/// The longest path Windows opens unless long paths are switched on,
+/// which the box leaves off: 260 characters, one of them the
+/// terminating NUL. The hook's full path in the guest has to fit.
+const MAX_WINDOWS_PATH_LEN: usize = 259;
+
+/// Which Windows rule a [`HookPath`] breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsHookRefusal {
+    /// Not a `.ps1` file, the only kind `powershell -File` runs.
+    NotPowerShell,
+    /// Longer than the room left: `MAX_WINDOWS_HOOK_LEN`, or less
+    /// when the clone folder's names are long.
+    TooLong {
+        /// The most characters the hook may hold for this project.
+        limit: usize,
+    },
+}
+
+impl std::fmt::Display for WindowsHookRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotPowerShell => f.write_str(
+                "a Windows guest runs the hook with PowerShell, which needs \
+                 a .ps1 file",
+            ),
+            Self::TooLong { limit } => write!(
+                f,
+                "the hook's path in the guest, \
+                 C:\\Users\\<guest_user>\\<project>\\<hook>, must fit the 259 \
+                 characters Windows allows by default, and the refresh \
+                 carries it on a command line of limited length, so for \
+                 this project a hook path holds {limit} characters at most"
+            ),
+        }
     }
 }
 
@@ -140,6 +204,33 @@ fn check_hook(value: &str) -> Result<(), FieldError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_hook_fits_the_path_left_after_the_clone_folder() {
+        // The hook sits at C:\Users\<user>\<project>\<hook>, and
+        // Windows refuses a path over 259 characters by default, so a
+        // long account and project name leave the hook less room than
+        // the 200 the command line allows.
+        let refusal = |user: &str, project: &str, len: usize| {
+            let hook = HookPath::parse(&format!("{}.ps1", "a".repeat(len - 4)))
+                .expect("a hook path");
+            hook.windows_refusal(user.len(), project.len())
+        };
+        // Short names: the command-line cap of 200 is the tighter one.
+        assert_eq!(refusal("agent", "myproject", 200), None);
+        assert!(refusal("agent", "myproject", 201).is_some());
+        // The longest names: 259 - 9 ("C:\Users\") - 20 - 1 - 64 - 1.
+        let (user, project) = ("u".repeat(20), "p".repeat(64));
+        assert_eq!(refusal(&user, &project, 164), None);
+        let too_long = refusal(&user, &project, 165).expect("165 is too long");
+        assert!(too_long.to_string().contains("164"), "{too_long}");
+        // A file that is not .ps1 is refused whatever its length.
+        let sh = HookPath::parse("hook.sh").expect("a hook path");
+        assert_eq!(
+            sh.windows_refusal(5, 9),
+            Some(WindowsHookRefusal::NotPowerShell)
+        );
+    }
 
     /// Parses `toml` as a `[hooks]` table.
     fn hooks(toml: &str) -> Result<Hooks, toml::de::Error> {

@@ -3,11 +3,11 @@
 # secrets file. account.ps1 installs it beside refresh.ps1, which
 # starts it over the SSH login to the agent's account.
 #
-# The arguments arrive base64-encoded, because they cross cmd.exe,
-# which sshd runs the command under: the clone's folder name, the
-# hook's path inside the clone as the config spells it, the time
-# limit in seconds, and the secrets file's name in the agent's
-# profile.
+# The three text arguments arrive base64-encoded, because they cross
+# cmd.exe, which sshd runs the command under: the clone's folder
+# name, the hook's path inside the clone as the config spells it, and
+# the secrets file's name in the agent's profile. The time limit in
+# seconds, third in order, is a plain number.
 #
 # The exit status is what bombyx's RefreshOutcome reads, as on a
 # Linux guest: 0 when the hook succeeded; 90 when it did not start,
@@ -27,6 +27,20 @@ $HookFailed = 91
 $HookTimedOut = 92
 # How much of the hook's output is relayed, as on Linux.
 $OutputCap = 65536
+
+# An error this script did not expect still ends with a status
+# RefreshOutcome reads as "the secrets are current", because
+# refresh.ps1 wrote them before starting this: 90 until Start-Process
+# has started the hook, 91 after. Without this, PowerShell would exit 1,
+# which reads as a failed write.
+$started = $false
+trap {
+    [Console]::Error.WriteLine(
+        "bombyx: the secrets_refreshed hook runner stopped: " +
+        $_.Exception.Message)
+    if ($started) { exit $HookFailed }
+    exit $HookRefused
+}
 
 function Refuse([string] $Why) {
     [Console]::Error.WriteLine("bombyx: $Why")
@@ -127,6 +141,7 @@ $process = Start-Process -FilePath $powershell -ArgumentList @(
         '-File', "`"$full`"") `
     -WorkingDirectory $clone -NoNewWindow -PassThru `
     -RedirectStandardOutput $out -RedirectStandardError $err
+$started = $true
 # Windows PowerShell 5.1 reports no exit code for a process whose
 # handle was never read.
 $null = $process.Handle
@@ -139,31 +154,39 @@ if (-not $finished) {
 }
 
 # A process the hook left may still hold the files, so they are read
-# with sharing on, and removed only if Windows lets go of them.
-$stdout = [Console]::OpenStandardOutput()
-$left = $OutputCap
-$total = 0
-foreach ($name in @($out, $err)) {
-    $stream = [IO.File]::Open($name, 'Open', 'Read', 'ReadWrite, Delete')
-    try {
-        $total += $stream.Length
-        $take = [int][Math]::Min($left, $stream.Length)
-        if ($take -gt 0) {
-            $bytes = New-Object byte[] $take
-            $read = $stream.Read($bytes, 0, $take)
-            $stdout.Write($bytes, 0, $read)
-            $left -= $read
+# with sharing on, and removed only if Windows lets go of them. The
+# hook has finished by now, so a relay that fails is said on its own
+# and leaves the hook's status as it is.
+try {
+    $stdout = [Console]::OpenStandardOutput()
+    $left = $OutputCap
+    $total = 0
+    foreach ($name in @($out, $err)) {
+        $stream = [IO.File]::Open($name, 'Open', 'Read', 'ReadWrite, Delete')
+        try {
+            $total += $stream.Length
+            $take = [int][Math]::Min($left, $stream.Length)
+            if ($take -gt 0) {
+                $bytes = New-Object byte[] $take
+                $read = $stream.Read($bytes, 0, $take)
+                $stdout.Write($bytes, 0, $read)
+                $left -= $read
+            }
+        } finally {
+            $stream.Dispose()
         }
-    } finally {
-        $stream.Dispose()
+        Remove-Item -LiteralPath $name -Force -ErrorAction SilentlyContinue
     }
-    Remove-Item -LiteralPath $name -Force -ErrorAction SilentlyContinue
-}
-$stdout.Flush()
-if ($total -gt $OutputCap) {
+    $stdout.Flush()
+    if ($total -gt $OutputCap) {
+        [Console]::Error.WriteLine(
+            "bombyx: the secrets_refreshed hook printed $total bytes; the " +
+            "rest was dropped after $OutputCap")
+    }
+} catch {
     [Console]::Error.WriteLine(
-        "bombyx: the secrets_refreshed hook printed $total bytes; the " +
-        "rest was dropped after $OutputCap")
+        "bombyx: could not relay the secrets_refreshed hook's output: " +
+        $_.Exception.Message)
 }
 
 if (-not $finished) {

@@ -4,6 +4,22 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-09-30-windows-refresh-mixed-advice
+
+**Category:** Correctness
+
+When a Windows guest needs provisioning again -- it has no
+`refresh.ps1`, its helpers take another call version, or its agent
+account is missing -- `refresh-call.ps1` or `refresh.ps1` prints
+"run bombyx provision" and exits 1. `run_refresh` in the binary then
+adds `RefreshOutcome::WriteFailed`'s "could not refresh a secrets
+file in the guest; run the command again", which cannot help. The
+fix is a status of its own for "provision needed", which
+`RefreshOutcome` maps to that advice; it adds a variant to a public
+enum. Deferred on 2026-09-30: Windows guests have not shipped, so no
+guest can be in this state yet. Found as RT-5 in the first red-team
+round on PR #152.
+
 ### rt-2026-09-29-bare-ps1-script-checks-disagree
 
 **Category:** Correctness

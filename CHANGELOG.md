@@ -47,7 +47,8 @@ and this project adheres to
   the git credential in a running Windows guest, as on Linux, through
   `refresh.ps1`, which provisioning installs under Program Files; a guest
   provisioned without it says to run `bombyx provision`. A Windows project's
-  `secrets_refreshed` hook must be a `.ps1` file of at most 200 characters, and
+  `secrets_refreshed` hook must be a `.ps1` file whose path fits Windows'
+  default 259-character limit inside the clone, 200 characters at most, and it
   runs as the agent with the same exit statuses, time limit and output cap.
   `bombyx shell` opens PowerShell as the agent's account, in its clone, over
   an SSH login from the guest to itself with the key provisioning made for the
