@@ -24,11 +24,12 @@
 //! wrong at all.** Each field named below is a newtype of
 //! bombyx's own -- `remote_root`, `host`, `repo`, `script`,
 //! `box`, `ref`, `deploy_key`, `env_file`, `repo_token`,
-//! `repo_user`, `secrets_refreshed` and `project` -- and
-//! an `[env]` entry is two more, an [`EnvName`] keying an
-//! [`EnvValue`]. No count here: the list grows, and a figure in
-//! prose costs the next reader a recount. See [`RepoUrl`] for
-//! how the pattern works.
+//! `repo_user`, `secrets_refreshed` and `project` -- an `[env]`
+//! entry is two more, an [`EnvName`] keying an [`EnvValue`], and
+//! a `vault` is three: a [`VaultDatabase`], and a [`SecretName`]
+//! keying an [`EntryPath`] per entry. No count here: the list
+//! grows, and a figure in prose costs the next reader a recount.
+//! See [`RepoUrl`] for how the pattern works.
 //!
 //! `cpus` is a `std::num::NonZeroU32`, which is the whole rule it
 //! has. That standard type follows none of that pattern -- no
@@ -86,6 +87,10 @@
 //!   holding what the guest clones.
 //! - `transport` -- whether `host` names this very machine, and
 //!   what bombyx does when it does.
+//! - `vault` -- the `[source.vault]` table: a KeePassXC database
+//!   on the workstation and the entries holding the secrets, and
+//!   the session that reads them without holding the master
+//!   password.
 //! - `vm` -- the `[vm]` table.
 //!
 //! A new field rule belongs in the module that owns the field.
@@ -112,6 +117,7 @@ mod repo_token;
 mod root;
 mod source;
 mod transport;
+mod vault;
 mod vm;
 
 pub use transport::Transport;
@@ -264,6 +270,7 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
+pub use vault::{EntryPath, SecretName, Vault, VaultDatabase, VaultError};
 pub use vm::{BoxName, CpuMode, Disk, Guest, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
@@ -380,12 +387,12 @@ pub struct Config {
 /// run on a VM that already exists, which pipes them into the
 /// guest without staging them anywhere.
 ///
-/// Both parts come out of the single file `source.env_file`
-/// names, and the invariant is that either both came from one
-/// [`Config::read_staged`] call or there is nothing here at
-/// all. The fields are private so those are the only two states
-/// a caller can produce, which matters because
-/// `crate::plan::plan` takes one on trust.
+/// Both parts come out of one source, the file `source.env_file`
+/// names or the vault `source.vault` names, and the invariant is
+/// that either both came from one [`Config::read_staged`] call
+/// or there is nothing here at all. The fields are private so
+/// those are the only two states a caller can produce, which
+/// matters because `crate::plan::plan` takes one on trust.
 ///
 /// `Default` is the second state rather than a hole in the
 /// first. It is what an action that must keep working after the
@@ -425,10 +432,11 @@ impl Staged {
 
 /// Why bombyx could not assemble what it stages for a run.
 ///
-/// Two causes, kept apart because they send the operator to
-/// different places. [`StagedError::File`] is about reaching the
-/// file at all, and [`StagedError::Token`] is about what was
-/// inside it once bombyx had.
+/// Three causes, kept apart because they send the operator to
+/// different places. [`StagedError::File`] and
+/// [`StagedError::Vault`] are about reaching the secrets at all,
+/// from the file or the vault, and [`StagedError::Token`] is
+/// about what was inside them once bombyx had.
 #[derive(Debug, Error)]
 pub enum StagedError {
     /// The file `env_file` names could not be read.
@@ -439,11 +447,19 @@ pub enum StagedError {
     /// of it.
     #[error(transparent)]
     Token(#[from] RepoTokenError),
+
+    /// The vault `source.vault` names could not be read.
+    #[error(transparent)]
+    Vault(#[from] VaultError),
 }
 
 impl Config {
-    /// Reads the file `source.env_file` names, if it names one,
-    /// and builds whatever bombyx sends alongside it.
+    /// Reads the secrets from the file `source.env_file` names or
+    /// from the vault `source.vault` names, whichever the config
+    /// has, and builds whatever bombyx sends alongside them.
+    ///
+    /// A vault asks for its master password on the terminal, and
+    /// `crate::config::Vault` says how that stays out of bombyx.
     ///
     /// The one supported way to build the [`Staged`] argument
     /// `crate::plan::plan` takes. Every part comes from here, so
@@ -464,29 +480,37 @@ impl Config {
     /// no home directory, the path is not a regular file, or the
     /// file could not be opened; and [`StagedError::Token`] when
     /// the file holds no variable of the name `repo_token`
-    /// states, or holds it empty.
+    /// states, or holds it empty; and [`StagedError::Vault`]
+    /// when the vault could not be unlocked or lacks an entry.
     pub fn read_staged<F>(&self, getenv: F) -> Result<Staged, StagedError>
     where
         F: Fn(&str) -> Option<String>,
     {
-        let Some(path) = self.source.env_file.as_ref() else {
-            // A `repo_token` with no file to read it out of is
-            // refused rather than ignored. `Source::try_from`
-            // catches it while a config file parses; this is
-            // the same pairing in a config built in code, where
-            // the fields are public. Ignoring it would render a
-            // Vagrantfile claiming a credential that nothing
-            // stages, and the guest would refuse after booting.
-            if let Some(token) = self.source.repo_token.as_ref() {
-                return Err(RepoTokenError::NoEnvFile {
-                    var: token.var.as_str().to_owned(),
+        // `Source::try_from` refuses a config naming both, so
+        // the order here only matters to one built in code.
+        let (secrets, origin) =
+            match (self.source.env_file.as_ref(), self.source.vault.as_ref()) {
+                (Some(path), _) => (path.read(&getenv)?, path.as_str()),
+                (None, Some(vault)) => (vault.read(&getenv)?, "the vault"),
+                (None, None) => {
+                    // A `repo_token` with nothing to read it out of
+                    // is refused rather than ignored.
+                    // `Source::try_from` catches it while a config
+                    // file parses; this is the same pairing in a
+                    // config built in code, where the fields are
+                    // public. Ignoring it would render a Vagrantfile
+                    // claiming a credential that nothing stages, and
+                    // the guest would refuse after booting.
+                    if let Some(token) = self.source.repo_token.as_ref() {
+                        return Err(RepoTokenError::NoEnvFile {
+                            var: token.var.as_str().to_owned(),
+                        }
+                        .into());
+                    }
+                    return Ok(Staged::default());
                 }
-                .into());
-            }
-            return Ok(Staged::default());
-        };
-        let secrets = path.read(getenv)?;
-        let credential = self.credential(&secrets, path.as_str())?;
+            };
+        let credential = self.credential(&secrets, origin)?;
         Ok(Staged {
             secrets: Some(secrets),
             credential,
@@ -540,15 +564,19 @@ impl Config {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn staged_for_tests(&self) -> Staged {
-        let Some(path) = self.source.env_file.as_ref() else {
-            // The same refusal [`Config::read_staged`] makes, so
-            // a fixture cannot build a pair no run can produce.
-            assert!(
-                self.source.repo_token.is_none(),
-                "a repo_token with no env_file is a config \
-                 read_staged refuses"
-            );
-            return Staged::default();
+        let origin = match (&self.source.env_file, &self.source.vault) {
+            (Some(path), _) => path.as_str(),
+            (None, Some(_)) => "the vault",
+            (None, None) => {
+                // The same refusal [`Config::read_staged`] makes, so
+                // a fixture cannot build a pair no run can produce.
+                assert!(
+                    self.source.repo_token.is_none(),
+                    "a repo_token with no env_file is a config \
+                     read_staged refuses"
+                );
+                return Staged::default();
+            }
         };
         let body = self.source.repo_token.as_ref().map_or_else(
             || "PLAIN=value\n".to_owned(),
@@ -560,7 +588,7 @@ impl Config {
         // is a fixture whose `repo` reaches the server by ssh,
         // since a token needs an https host to be sent to.
         let credential = self
-            .credential(&secrets, path.as_str())
+            .credential(&secrets, origin)
             .expect("the fixture's repo must have an https host");
         Staged {
             secrets: Some(secrets),
@@ -1935,6 +1963,19 @@ mod load_project_tests {
     }
 
     #[test]
+    fn a_hook_beside_a_vault_loads() {
+        // A vault is refreshed the same way a file is, so the hook
+        // has a refresh to follow.
+        load(
+            &registry_with_hook(
+                "vault = { database = \"~/s.kdbx\", entries = { A = \"a\" } }",
+            ),
+            "myproject",
+        )
+        .expect("a hook beside a vault must load");
+    }
+
+    #[test]
     fn a_hook_without_an_env_file_is_refused_while_the_file_is_read() {
         // The hook follows the secrets refresh and nothing else, so
         // with no `env_file` it could never run. The refusal names
@@ -1943,7 +1984,7 @@ mod load_project_tests {
         let err = load(&registry_with_hook(""), "myproject")
             .expect_err("a hook with no env_file must be refused");
         assert!(
-            matches!(err, ConfigError::HookWithoutEnvFile { .. }),
+            matches!(err, ConfigError::HookWithoutSecrets { .. }),
             "{err:?}"
         );
         let text = err.to_string();
@@ -2007,6 +2048,39 @@ mod load_project_tests {
         let msg = err.to_string();
         assert!(msg.contains("TOKEN"), "{msg}");
         assert!(msg.contains("env_file"), "{msg}");
+    }
+
+    #[test]
+    fn a_vault_is_where_the_secrets_come_from_when_one_is_named() {
+        // A database that is not there stops the read before any
+        // process starts, which is what lets this branch be
+        // tested without keepassxc-cli.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let missing = dir.path().join("none.kdbx");
+        let (mut cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("the fixture registry must load");
+        cfg.source.vault = Some(
+            toml::from_str(&format!(
+                "database = {:?}\n[entries]\nA = \"a\"\n",
+                missing.display().to_string()
+            ))
+            .expect("a vault table"),
+        );
+        let err = cfg
+            .read_staged(|_| None)
+            .expect_err("the database is not there");
+        if cfg!(windows) {
+            assert!(
+                matches!(err, StagedError::Vault(VaultError::Unsupported)),
+                "{err:?}"
+            );
+        } else {
+            assert!(
+                matches!(err, StagedError::Vault(VaultError::NotAFile { .. })),
+                "{err:?}"
+            );
+        }
     }
 
     /// [`load`], told what this machine is called.

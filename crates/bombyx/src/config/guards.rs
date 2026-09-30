@@ -32,6 +32,34 @@ pub(super) fn is_powershell_file(path: &str) -> bool {
     file.len() > ".ps1".len() && file.to_ascii_lowercase().ends_with(".ps1")
 }
 
+/// Requires a name a shell would accept as a variable: letters,
+/// digits and underscores, not starting with a digit.
+///
+/// Two fields name a variable inside the secrets bombyx sends:
+/// `repo_token`, and each key of `vault.entries`. The guest's
+/// project reads that file as `NAME=value` lines, so a name
+/// outside this set is one it could not look up.
+pub(super) fn check_variable_name(
+    field: &'static str,
+    value: &str,
+) -> Result<(), FieldError> {
+    check_not_empty(field, value)?;
+    check_charset(
+        field,
+        value,
+        |c| c.is_ascii_alphanumeric() || c == '_',
+        "letters, digits and underscores",
+    )?;
+    if value.starts_with(|c: char| c.is_ascii_digit()) {
+        return Err(FieldError::invalid(
+            field,
+            "must not start with a digit, which no shell \
+             would accept as a variable name",
+        ));
+    }
+    Ok(())
+}
+
 /// Requires a value that is not blank.
 pub(super) fn check_not_empty(
     field: &'static str,

@@ -176,8 +176,8 @@ Three secrets can reach the guest:
 | Secret | What it is | Named on |
 |---|---|---|
 | `deploy_key` | A private key | The VM host |
-| `env_file` | A file of secrets | The workstation |
-| `repo_token` | A git token built from a variable inside `env_file` | (derived) |
+| `env_file` or `vault` | A file of secrets, or entries in a KeePassXC database | The workstation |
+| `repo_token` | A git token built from one of those variables | (derived) |
 
 Each takes a route that keeps it off both machines' command lines
 and out of every generated file, and the VM host holds its copy
@@ -217,6 +217,29 @@ Vagrantfile: `vagrant destroy` loads the Vagrantfile too, so a
 Vagrantfile that tested the key and raised would leave a directory
 no bombyx command could tear down. bombyx knows which verb it is
 running; the Vagrantfile does not.
+
+### The vault's master password stays out of bombyx
+
+A `vault` keeps the workstation's copy of the secrets encrypted
+at rest, rather than guarded by file permissions alone. bombyx
+opens it once per run through `keepassxc-cli open`, and never
+holds the master password:
+
+```text
+bombyx --stdin--> sh (password, then cat) --pipe--> keepassxc-cli
+bombyx <---------------------stdout---------------- keepassxc-cli
+```
+
+The `sh` script reads the password from the terminal, with echo
+off, and writes it into a pipe that bombyx creates and never
+reads. It then forwards bombyx's `show` commands, one per entry
+the config names. So the decrypted values bombyx sees are those
+entries and nothing else in the database. From there the
+secrets take the `env_file` route above.
+
+This protects the copy at rest. It does not protect a run in
+progress: a process running as the operator can still read
+bombyx's memory, or the terminal, while the vault is open.
 
 ### The agent can read the credential
 

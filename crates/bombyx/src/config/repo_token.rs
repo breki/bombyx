@@ -189,8 +189,8 @@ pub enum RepoTokenError {
     /// while the file is read, and `super::Config`'s fields are
     /// public.
     #[error(
-        "`repo_token` names `{var}` and no `env_file` is set, so \
-         there is no file to read it out of"
+        "`repo_token` names `{var}` and neither `env_file` nor \
+         `vault` is set, so there is nothing to read it out of"
     )]
     NoEnvFile {
         /// The variable the config named.
@@ -468,21 +468,7 @@ pub(crate) fn credential(
 /// so accepting it would mean looking for something that cannot
 /// be there.
 fn check_token_var(value: &str) -> Result<(), FieldError> {
-    guards::check_not_empty(RepoTokenVar::FIELD, value)?;
-    guards::check_charset(
-        RepoTokenVar::FIELD,
-        value,
-        |c| c.is_ascii_alphanumeric() || c == '_',
-        "letters, digits and underscores",
-    )?;
-    if value.starts_with(|c: char| c.is_ascii_digit()) {
-        return Err(FieldError::invalid(
-            RepoTokenVar::FIELD,
-            "must not start with a digit, which no shell \
-             would accept as a variable name",
-        ));
-    }
-    Ok(())
+    guards::check_variable_name(RepoTokenVar::FIELD, value)
 }
 
 /// Every rule a `repo_user` value must pass, in one place.

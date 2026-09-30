@@ -97,7 +97,10 @@ it targets the project VM only; for a scratch VM the answer is
 ## Rotating a secret
 
 To change a value in your `env_file`, such as an expired token,
-edit the file on your workstation and run `up` or `shell`:
+edit the file on your workstation and run `up` or `shell`. With a
+`vault`, edit the entry in KeePassXC instead; `up` and `shell`
+then ask for the master password once and read every entry
+again:
 
 ```bash
 bombyx up myproject   # or: bombyx shell myproject
@@ -111,7 +114,7 @@ Nothing is fetched or checked out, so the work in the guest's
 clone is not touched. `up` on a running VM does only this. When a
 rewrite fails, `up` exits non-zero, and `shell` warns and opens
 the shell anyway. A `shell` that cannot read your `env_file` on
-the workstation also warns and opens.
+the workstation, or unlock your `vault`, also warns and opens.
 
 A Windows guest is refreshed the same way. There the refresh calls
 `refresh.ps1`, which provisioning installs, so a Windows VM

@@ -173,7 +173,12 @@ classDiagram
     +ScriptPath script
     +Option~DeployKeyPath~ deploy_key
     +Option~EnvFilePath~ env_file
+    +Option~Vault~ vault
     +Option~RepoToken~ repo_token
+  }
+  class Vault {
+    +VaultDatabase database
+    +BTreeMap~SecretName, EntryPath~ entries
   }
   class RepoToken {
     +RepoTokenVar var
@@ -222,6 +227,7 @@ classDiagram
   Vm --> Provider
   Vm --> Guest
   Source *-- RepoToken : repo_token
+  Source *-- Vault : vault
   Registry ..> HostOrigin : ranked to produce one
 ```
 

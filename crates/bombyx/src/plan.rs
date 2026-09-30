@@ -86,8 +86,9 @@ pub enum Action {
     Discard(ScratchName),
 }
 
-/// How an [`Action`] treats the file `source.env_file` names, and
-/// the git credential bombyx builds out of it.
+/// How an [`Action`] treats the secrets `source.env_file` or
+/// `source.vault` supplies, and the git credential bombyx builds
+/// out of them.
 ///
 /// [`Action::staged_read`] gives the answer for each action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,8 +105,9 @@ pub enum StagedRead {
 }
 
 impl Action {
-    /// How this action treats the file `source.env_file` names,
-    /// and the git credential bombyx builds out of it.
+    /// How this action treats the secrets `source.env_file` or
+    /// `source.vault` supplies, and the git credential bombyx
+    /// builds out of them.
     ///
     /// The caller reads that file, and reading it can fail --
     /// the operator rotated it, or moved it, or the config names
@@ -186,11 +188,12 @@ impl Action {
 /// chooses the writer.
 ///
 /// `staged` is what the caller read off the workstation: the
-/// contents of the file `source.env_file` names, and the git
-/// credential built from one variable inside it. Reading and
-/// parsing them here would put a file open in the one module
-/// whose job is to decide which commands run, and would make
-/// every test of that decision need a file on disk.
+/// secrets from the file `source.env_file` names or the vault
+/// `source.vault` names, and the git credential built from one
+/// variable inside them. Reading and parsing them here would put
+/// a file open in the one module whose job is to decide which
+/// commands run, and would make every test of that decision need
+/// a file on disk.
 #[must_use]
 pub fn plan(
     action: &Action,

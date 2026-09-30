@@ -83,6 +83,13 @@ impl Secrets {
         &self.0
     }
 
+    /// Secrets assembled from the entries of a KeePassXC
+    /// database, which `super::vault` builds in the same
+    /// `NAME=value` shape the file holds.
+    pub(super) fn from_vault(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
     /// Secrets holding `bytes`, for a test.
     ///
     /// Production code gets these out of the operator's file
@@ -233,17 +240,7 @@ impl EnvFilePath {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let Some(rest) = self.0.strip_prefix("~/") else {
-            return Ok(PathBuf::from(&self.0));
-        };
-        let home = getenv("HOME")
-            .or_else(|| getenv("USERPROFILE"))
-            .filter(|h| !h.is_empty())
-            .ok_or_else(|| EnvFileError::NoHome {
-                field: Self::FIELD,
-                value: self.0.clone(),
-            })?;
-        Ok(Path::new(&home).join(rest))
+        resolve_home(Self::FIELD, &self.0, getenv)
     }
 
     /// Reads the file this path names.
@@ -329,13 +326,64 @@ checked_str_try_from!(
 ///
 /// # Errors
 ///
-/// Returns [`FieldError::Empty`] when the value is blank, and
-/// [`FieldError::Invalid`] naming `env_file` when the value
-/// names a directory -- a bare `~`, a trailing separator, or a
-/// final `.` or `..` segment -- or is neither `~/`-anchored nor
-/// absolute on this machine.
+/// Returns what [`check_workstation_file`] returns, naming
+/// `env_file`.
 fn check(value: &str) -> Result<(), FieldError> {
-    guards::check_not_empty(EnvFilePath::FIELD, value)?;
+    check_workstation_file(EnvFilePath::FIELD, value)
+}
+
+/// Expands a leading `~/` in `value`, the path of a file on this
+/// machine that the config key `field` names.
+///
+/// [`EnvFilePath::resolve`] holds the rules. This is the body,
+/// shared with `super::vault`, whose database file sits on the
+/// same machine and is spelled the same way.
+///
+/// # Errors
+///
+/// Returns [`EnvFileError::NoHome`] naming `field` when the
+/// value needs a home directory and the environment names none.
+pub(super) fn resolve_home<F>(
+    field: &'static str,
+    value: &str,
+    getenv: F,
+) -> Result<PathBuf, EnvFileError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let Some(rest) = value.strip_prefix("~/") else {
+        return Ok(PathBuf::from(value));
+    };
+    let home = getenv("HOME")
+        .or_else(|| getenv("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .ok_or_else(|| EnvFileError::NoHome {
+            field,
+            value: value.to_owned(),
+        })?;
+    Ok(Path::new(&home).join(rest))
+}
+
+/// Checks the path of a file on this machine, which the config
+/// key `field` names.
+///
+/// Shared with `super::vault`: its database file sits on the
+/// same machine as the secrets file and is opened the same way,
+/// so the same spellings name a directory or depend on where
+/// bombyx was started.
+///
+/// # Errors
+///
+/// Returns [`FieldError::Empty`] when the value is blank, and
+/// [`FieldError::Invalid`] naming `field` when the value names a
+/// directory -- a bare `~`, a trailing separator, or a final `.`
+/// or `..` segment -- or is neither `~/`-anchored nor absolute
+/// on this machine.
+pub(super) fn check_workstation_file(
+    field: &'static str,
+    value: &str,
+) -> Result<(), FieldError> {
+    guards::check_not_empty(field, value)?;
 
     // No charset rule, unlike `deploy_key`. That path is pasted
     // into the generated Vagrantfile and quoted into a remote
@@ -367,9 +415,10 @@ fn check(value: &str) -> Result<(), FieldError> {
         || value.ends_with(std::path::is_separator)
         || matches!(last, Some("." | ".."));
     if names_a_directory {
-        return Err(invalid(
-            "names a directory rather than a file; `env_file` has \
-             to name the secrets file itself",
+        return Err(FieldError::invalid(
+            field,
+            "names a directory rather than a file; it has to name \
+             the file itself",
         ));
     }
 
@@ -380,7 +429,8 @@ fn check(value: &str) -> Result<(), FieldError> {
     // does not -- the second is relative to whichever drive the
     // process is on.
     if !value.starts_with("~/") && !Path::new(value).is_absolute() {
-        return Err(invalid(
+        return Err(FieldError::invalid(
+            field,
             "must start with `~/` or be an absolute path; a relative \
              path resolves against whatever directory bombyx was \
              started in",
@@ -388,14 +438,6 @@ fn check(value: &str) -> Result<(), FieldError> {
     }
 
     Ok(())
-}
-
-/// Builds a [`FieldError::Invalid`] naming `env_file`.
-fn invalid(reason: impl Into<String>) -> FieldError {
-    FieldError::Invalid {
-        field: EnvFilePath::FIELD,
-        reason: reason.into(),
-    }
 }
 
 #[cfg(test)]

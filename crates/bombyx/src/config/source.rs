@@ -34,6 +34,7 @@ use super::env_file::EnvFilePath;
 use super::error::FieldError;
 use super::guards;
 use super::repo_token::{RepoToken, RepoTokenVar, RepoUser};
+use super::vault::Vault;
 use crate::newtype::{
     checked_str_newtype, checked_str_parse, checked_str_try_from,
 };
@@ -81,6 +82,13 @@ pub struct Source {
     /// secrets file and the guest gets an empty
     /// `BOMBYX_ENV_FILE`.
     pub env_file: Option<EnvFilePath>,
+    /// KeePassXC database on the **workstation** holding the
+    /// project's secrets, one entry per variable.
+    ///
+    /// The other way to supply what `env_file` supplies, so a
+    /// config names one or the other. `super::Vault` says how
+    /// bombyx reads it without holding the master password.
+    pub vault: Option<Vault>,
     /// How the guest authenticates an https clone: the
     /// variable inside `env_file` holding the token, and the
     /// username it is sent under.
@@ -120,15 +128,33 @@ struct SourceFields {
     #[serde(default)]
     env_file: Option<EnvFilePath>,
     #[serde(default)]
+    vault: Option<Vault>,
+    #[serde(default)]
     repo_token: Option<RepoTokenVar>,
     #[serde(default)]
     repo_user: Option<RepoUser>,
 }
 
+impl Source {
+    /// Whether the config names a source of secrets: an
+    /// `env_file` or a `vault`.
+    ///
+    /// Every rule that asks whether a run stages secrets asks
+    /// this, so a third source is added in one place.
+    #[must_use]
+    pub fn names_secrets(&self) -> bool {
+        self.env_file.is_some() || self.vault.is_some()
+    }
+}
+
 impl TryFrom<SourceFields> for Source {
     type Error = FieldError;
 
-    /// Runs the four rules that span more than one key.
+    /// Runs the rules that span more than one key.
+    ///
+    /// `env_file` and `vault` are two sources of the same
+    /// secrets, so a config names at most one. Merging them
+    /// would need a rule for a variable both define.
     ///
     /// `repo_token` and `repo_user` are stated together or not
     /// at all. Each is useless without the other: a variable
@@ -137,9 +163,11 @@ impl TryFrom<SourceFields> for Source {
     /// and a username with no variable name has no token to go
     /// with.
     ///
-    /// `repo_token` requires `env_file`, because that file is
-    /// where the variable is read from. Without it bombyx would
-    /// have nothing to look in.
+    /// `repo_token` requires `env_file` or `vault`, because that
+    /// is where the variable is read from. Without either bombyx
+    /// would have nothing to look in. With a vault the variable
+    /// must be one of its entries, which is checked here rather
+    /// than after the operator has typed the password.
     ///
     /// `repo_token` requires an `https` repository. `git`
     /// sends the token to the server on every request, so an
@@ -153,6 +181,13 @@ impl TryFrom<SourceFields> for Source {
     /// the token into the guest and leaves the clone unable to
     /// use it.
     fn try_from(raw: SourceFields) -> Result<Self, Self::Error> {
+        if raw.env_file.is_some() && raw.vault.is_some() {
+            return Err(FieldError::invalid(
+                "vault",
+                "cannot stand beside `env_file`; both supply the \
+                 project's secrets, so name one of them",
+            ));
+        }
         match (&raw.repo_token, &raw.repo_user) {
             (Some(_), None) => {
                 return Err(FieldError::invalid(
@@ -172,12 +207,23 @@ impl TryFrom<SourceFields> for Source {
             }
             _ => {}
         }
-        if raw.repo_token.is_some() {
-            if raw.env_file.is_none() {
+        if let Some(var) = &raw.repo_token {
+            if raw.env_file.is_none() && raw.vault.is_none() {
                 return Err(FieldError::invalid(
                     RepoTokenVar::FIELD,
-                    "needs `env_file`, which is the file the \
-                     named variable is read from",
+                    "needs `env_file` or `vault`, which is where \
+                     the named variable is read from",
+                ));
+            }
+            if let Some(vault) = &raw.vault
+                && !vault.entries.keys().any(|k| k.as_str() == var.as_str())
+            {
+                return Err(FieldError::invalid(
+                    RepoTokenVar::FIELD,
+                    format!(
+                        "names `{var}`, which `vault.entries` does not \
+                         list; add `{var} = \"<entry path>\"` there"
+                    ),
                 ));
             }
             // `git` asks its credential helper for the
@@ -214,6 +260,7 @@ impl TryFrom<SourceFields> for Source {
             script: raw.script,
             deploy_key: raw.deploy_key,
             env_file: raw.env_file,
+            vault: raw.vault,
             repo_token: raw
                 .repo_token
                 .zip(raw.repo_user)
@@ -639,6 +686,53 @@ mod tests {
              {extra}"
         );
         toml::from_str(&text)
+    }
+
+    /// A `[vault]` table mapping each of `names` to an entry.
+    fn vault(names: &[&str]) -> String {
+        use std::fmt::Write as _;
+        let mut t =
+            "[vault]\ndatabase = \"~/s.kdbx\"\n[vault.entries]\n".to_owned();
+        for n in names {
+            writeln!(t, "{n} = \"e/{n}\"").expect("a String takes any write");
+        }
+        t
+    }
+
+    #[test]
+    fn a_vault_is_read_into_the_source() {
+        let source = source_with(&vault(&["A_KEY"])).expect("a vault");
+        let v = source.vault.expect("named");
+        assert_eq!(v.database.as_str(), "~/s.kdbx");
+        let e: Vec<_> = v
+            .entries
+            .iter()
+            .map(|(n, e)| (n.as_str(), e.as_str()))
+            .collect();
+        assert_eq!(e, [("A_KEY", "e/A_KEY")]);
+    }
+
+    #[test]
+    fn a_vault_and_an_env_file_are_not_named_together() {
+        let err =
+            source_with(&format!("env_file = \"~/s.env\"\n{}", vault(&["A"])))
+                .expect_err("two sources")
+                .to_string();
+        assert!(err.contains("vault") && err.contains("env_file"), "{err}");
+    }
+
+    #[test]
+    fn a_repo_token_may_name_a_vault_entry_and_nothing_else() {
+        let token = "repo_token = \"GIT\"\nrepo_user = \"x-token-auth\"\n";
+        source_with(&format!("{token}{}", vault(&["GIT", "A"])))
+            .expect("the vault lists GIT");
+        let err = source_with(&format!("{token}{}", vault(&["A"])))
+            .expect_err("the vault lacks GIT")
+            .to_string();
+        assert!(
+            err.contains("GIT") && err.contains("vault.entries"),
+            "{err}"
+        );
     }
 
     #[test]
