@@ -40,7 +40,9 @@ mod probes;
 mod readonly;
 mod report;
 
-pub use local::local_tool_finding;
+pub use local::{
+    LocalTool, local_tool_finding, local_tools, vault_platform_finding,
+};
 pub use probes::{
     HostProbe, Verdict, classify, host_findings, host_probes, probe_commands,
 };

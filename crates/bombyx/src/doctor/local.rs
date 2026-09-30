@@ -6,7 +6,69 @@ use super::{
     Finding, Outcome, ProbeResult, Scope, VersionAnswer, cannot_run,
     not_on_path,
 };
+use crate::config::{Config, Transport, VaultError};
 use crate::term::sanitize;
+
+/// A program on this workstation that a run starts, and the flag
+/// that asks it for its version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalTool {
+    /// The program's name, looked up on `PATH`.
+    pub name: &'static str,
+    /// The flag that makes it print its version, or `None` when
+    /// there is nothing worth asking.
+    pub version_arg: Option<&'static str>,
+}
+
+/// The local programs this config's runs start, and only those.
+///
+/// Checking a program no run reaches reports on something that
+/// cannot break `up`, so a report that turns red over it says
+/// nothing useful. The route decides the first: `ssh` to reach a
+/// remote host, or `sh` when the host is this machine. A `vault`
+/// adds `keepassxc-cli`, except on Windows, where bombyx refuses
+/// the vault before starting anything; `vault_platform_finding`
+/// reports that instead.
+///
+/// `windows` is a parameter rather than `cfg!(windows)` so both
+/// answers are tested on every platform.
+#[must_use]
+pub fn local_tools(cfg: &Config, windows: bool) -> Vec<LocalTool> {
+    let route = match cfg.transport() {
+        Transport::Ssh => LocalTool {
+            name: "ssh",
+            version_arg: Some("-V"),
+        },
+        Transport::Local => LocalTool {
+            name: "sh",
+            version_arg: None,
+        },
+    };
+    let mut tools = vec![route];
+    if cfg.source.vault.is_some() && !windows {
+        tools.push(LocalTool {
+            name: "keepassxc-cli",
+            version_arg: Some("--version"),
+        });
+    }
+    tools
+}
+
+/// A failure for a config naming a `vault` on a workstation that
+/// cannot open one, or `None`.
+///
+/// The message is `VaultError::Unsupported`'s, so `doctor` and
+/// the refusal an `up` would give cannot drift apart.
+#[must_use]
+pub fn vault_platform_finding(cfg: &Config, windows: bool) -> Option<Finding> {
+    (cfg.source.vault.is_some() && windows).then(|| {
+        Finding::new(
+            Scope::Local,
+            "keepassxc-cli",
+            Outcome::Fail(VaultError::Unsupported.to_string()),
+        )
+    })
+}
 
 /// The detail for a local tool, from whatever it printed.
 ///
@@ -95,6 +157,62 @@ pub fn local_tool_finding(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A config naming a vault, on the route `base` gives.
+    fn with_vault(mut cfg: Config) -> Config {
+        cfg.source.vault = Some(
+            toml::from_str("database = \"~/s.kdbx\"\n[entries]\nA = \"a\"\n")
+                .expect("a vault table"),
+        );
+        cfg
+    }
+
+    fn names(tools: &[LocalTool]) -> Vec<&'static str> {
+        tools.iter().map(|t| t.name).collect()
+    }
+
+    #[test]
+    fn each_route_checks_the_program_it_starts() {
+        let ssh = local_tools(&Config::for_tests(), false);
+        assert_eq!(
+            ssh,
+            [LocalTool {
+                name: "ssh",
+                version_arg: Some("-V")
+            }]
+        );
+        let local = local_tools(&Config::for_tests_local(), false);
+        assert_eq!(
+            local,
+            [LocalTool {
+                name: "sh",
+                version_arg: None
+            }]
+        );
+    }
+
+    #[test]
+    fn a_vault_adds_keepassxc_cli_where_bombyx_can_open_one() {
+        let tools = local_tools(&with_vault(Config::for_tests()), false);
+        assert_eq!(names(&tools), ["ssh", "keepassxc-cli"]);
+        assert_eq!(tools[1].version_arg, Some("--version"));
+        let windows = local_tools(&with_vault(Config::for_tests()), true);
+        assert_eq!(names(&windows), ["ssh"]);
+    }
+
+    #[test]
+    fn a_vault_on_windows_is_a_failure_with_the_refusal_up_gives() {
+        let cfg = with_vault(Config::for_tests());
+        let finding =
+            vault_platform_finding(&cfg, true).expect("refused on Windows");
+        assert_eq!(finding.scope, Scope::Local);
+        assert_eq!(
+            finding.outcome,
+            Outcome::Fail(VaultError::Unsupported.to_string())
+        );
+        assert!(vault_platform_finding(&cfg, false).is_none());
+        assert!(vault_platform_finding(&Config::for_tests(), true).is_none());
+    }
 
     fn ran(success: bool, stdout: &str, stderr: &str) -> ProbeResult {
         ProbeResult {
