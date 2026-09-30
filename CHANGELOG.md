@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.10.0] - 2026-09-30
+
+### Added
+
 - A `[projects.<name>.hooks]` table with one key, `secrets_refreshed`: a script
   in the clone that bombyx runs in the guest whenever it has written the
   project's secrets -- after the provisioning run of the first `up` and of
