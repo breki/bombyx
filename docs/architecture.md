@@ -386,7 +386,8 @@ differences:
   the output and returns the exit code. From vagrant's session,
   Windows refuses an S4U scheduled task, and
   `Start-Process -Credential` returns neither output nor an exit
-  code, so neither can do the hand-over.
+  code, so neither can do the hand-over. `bombyx shell` reaches the
+  agent's account by the same login, with a terminal.
 - **Every value arrives base64-encoded.** vagrant's `winssh` shell
   provisioner writes each `env:` value into the script it runs as
   `$env:NAME="value"` and escapes nothing, so a `"` or a `$` in a

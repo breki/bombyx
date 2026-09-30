@@ -28,13 +28,14 @@
 mod command;
 pub mod probe;
 mod quote;
+pub(crate) mod windows;
 mod write;
 
 pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
 pub use write::{write_file, write_file_of_hidden_size};
 
-use crate::config::{Config, HookPath, Provider, Secrets, Transport};
+use crate::config::{Config, Guest, HookPath, Provider, Secrets, Transport};
 use crate::vagrantfile::GuestHomeFile;
 
 /// Environment variable carrying the VM host's SSH alias into
@@ -1199,7 +1200,8 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// needs a TTY when invoked through a non-interactive SSH command,
 /// and an interactive shell without one is unusable whatever the
 /// local stdio looks like. Every other vagrant call decides per run.
-/// On the guest side, `vagrant ssh -c` asks for a TTY by default.
+/// On a Linux guest, `vagrant ssh -c` asks for a TTY by default; a
+/// Windows guest needs one asked for, as the last paragraph says.
 ///
 /// **The shell opens as the agent's account, in its clone.**
 /// `vagrant ssh` logs in as the box's own account, usually
@@ -1244,13 +1246,35 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// `the_shell_opens_where_the_bootstrap_script_clones` holds this
 /// spelling and `bootstrap.sh`'s together.
 ///
-/// **Three layers of single quotes nest here.** The script and
-/// its arguments are quoted for the login shell, the whole guest
-/// command is quoted once more for the VM host, and vagrant wraps
-/// it in its own `bash -l -c '...'`, rewriting each inner `'`
-/// first -- vagrant 2.4.9's `ssh_run.rb` shows it.
+/// **On a Linux guest, three layers of single quotes nest here.**
+/// The script and its arguments are quoted for the login shell, the
+/// whole guest command is quoted once more for the VM host, and
+/// vagrant wraps it in its own `bash -l -c '...'`, rewriting each
+/// inner `'` first -- vagrant 2.4.9's `ssh_run.rb` shows it.
+///
+/// **A Windows guest takes a different route**, because it has no
+/// `sudo -u` for an interactive session: the login account logs in
+/// to the agent's account over SSH to `localhost`, with the key
+/// `account.ps1` made for the hand-over. `templates/shell.ps1` holds
+/// the steps, including the same fallback for a missing account,
+/// and the module `remote::windows` says how the script travels.
+/// vagrant reaches a Windows guest through its `winssh`
+/// communicator, which the box sets, and asks such a guest for no
+/// terminal, so `-t` goes after `--`, which vagrant passes to its
+/// `ssh`. Windows' sshd reports exit status 0 for a session with a
+/// terminal, whatever it exited with, so this route always ends 0.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
+    if cfg.vm.guest == Guest::Windows {
+        // vagrant asks a winssh guest for no terminal unless `-t`
+        // reaches its `ssh`, which the arguments after `--` do.
+        return vagrant_in(
+            cfg,
+            &cfg.remote_project_dir(),
+            &["ssh", "-c", &windows::shell_command(cfg), "--", "-t"],
+            Tty::Allocate,
+        );
+    }
     let guest = as_guest_user(
         cfg,
         r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#,
@@ -1891,6 +1915,81 @@ mod tests {
         let script = remote_script(&shell_into_vm(&cfg()));
         assert!(script.contains(r#"cd "$HOME/$1""#), "{script}");
         assert!(script.contains("sh '\\''myproject'\\''"), "{script}");
+    }
+
+    #[test]
+    fn a_windows_shell_logs_in_as_the_agent_through_the_hand_over_key() {
+        // A Windows guest has no `sudo -u` for an interactive session,
+        // so the login account reaches the agent's account by an SSH
+        // login to localhost, the route account.ps1 hands bootstrap.ps1
+        // over by. shell.ps1 holds the steps. The script travels base64-encoded, its comments
+        // dropped, because vagrant rewrites every `'` in a PowerShell
+        // command and Windows caps the command line's length; `-- -t`
+        // asks for the terminal vagrant does not request on a winssh
+        // guest.
+        let mut cfg = cfg();
+        cfg.vm.guest = crate::config::Guest::Windows;
+        let c = shell_into_vm(&cfg);
+        assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
+        let script = format!(
+            "$User = 'agent'\n$Project = 'myproject'\n{}",
+            crate::powershell::code_lines(windows::SHELL)
+        );
+        let guest = format!(
+            "iex ([Text.Encoding]::UTF8.GetString(\
+             [Convert]::FromBase64String(\"{}\")))",
+            crate::powershell::base64(script.as_bytes())
+        );
+        assert!(!guest.contains('\''), "{guest}");
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' {} '--' '-t'",
+                vagrant_env(),
+                shell_quote(&guest)
+            )
+        );
+    }
+
+    #[test]
+    fn the_longest_windows_shell_command_fits_the_guest_command_line() {
+        // vagrant 2.4.9's `ssh_run.rb` prefixes the text and encodes it
+        // as UTF-16LE base64 for `powershell -encodedCommand`, and the
+        // guest's sshd runs that through `cmd.exe`, whose documented
+        // limit is 8191 characters. The budget leaves room for the
+        // `cmd.exe /c` around it. Built for the longest names the
+        // config accepts, so a template that grows fails here rather
+        // than on a guest.
+        const BUDGET: usize = 7800;
+        let longest_user = "a".repeat(20);
+        let user = crate::config::GuestUser::parse(&longest_user)
+            .expect("a plain name");
+        assert!(user.windows_refusal().is_none());
+        let longer = crate::config::GuestUser::parse(&"a".repeat(21))
+            .expect("a plain name");
+        assert!(longer.windows_refusal().is_some(), "20 is the limit");
+        let mut cfg = cfg();
+        cfg.vm.guest = crate::config::Guest::Windows;
+        cfg.vm.guest_user = user;
+        cfg.project = crate::name::ProjectName::parse(
+            &"a".repeat(crate::name::MAX_NAME_LEN),
+        )
+        .expect("a name at the limit");
+        let text = format!(
+            "$ProgressPreference = \"SilentlyContinue\"; {}",
+            windows::shell_command(&cfg)
+        );
+        let utf16: Vec<u8> =
+            text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let sent = format!(
+            "powershell -encodedCommand {}",
+            crate::powershell::base64(&utf16)
+        );
+        assert!(
+            sent.len() <= BUDGET,
+            "{} characters, over the {BUDGET} budget",
+            sent.len()
+        );
     }
 
     #[test]

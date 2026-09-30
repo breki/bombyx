@@ -27,6 +27,7 @@ pub mod listing;
 pub mod name;
 mod newtype;
 pub mod plan;
+mod powershell;
 pub mod remote;
 pub mod run;
 pub mod term;

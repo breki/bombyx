@@ -31,6 +31,7 @@ use super::{
 };
 use crate::config::{Config, EnvName, EnvValue, Staged};
 use crate::hostkeys;
+use crate::powershell::base64;
 use crate::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
 
 /// The script that clones the project and runs its script, as the
@@ -184,76 +185,61 @@ pub(super) fn preserve_list(env: &BTreeMap<EnvName, EnvValue>) -> String {
         .join(",")
 }
 
-/// The standard base64 alphabet, RFC 4648 section 4.
-const ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// `bytes` in standard base64, padded with `=`, on one line.
-///
-/// Written out rather than taken from a crate: it is a dozen lines,
-/// and a dependency would cost a cooldown and a licence review for
-/// them. PowerShell's `[Convert]::FromBase64String` reads exactly
-/// this form, and so does Ruby's `unpack("m0")`.
-pub(super) fn base64(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
-        // Each index is six bits, so it is always inside ALPHABET.
-        let sextet =
-            |shift: u32| char::from(ALPHABET[(n >> shift & 63) as usize]);
-        out.push(sextet(18));
-        out.push(sextet(12));
-        out.push(if chunk.len() > 1 { sextet(6) } else { '=' });
-        out.push(if chunk.len() > 2 { sextet(0) } else { '=' });
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn base64_matches_the_rfc_4648_test_vectors() {
-        // RFC 4648 section 10, which covers every padding case.
-        for (plain, encoded) in [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="),
-            ("fooba", "Zm9vYmE="),
-            ("foobar", "Zm9vYmFy"),
+    fn a_windows_shell_uses_the_paths_the_provisioning_scripts_write() {
+        // Three files that cannot see each other agree on three paths:
+        // account.ps1 keeps the hand-over key and localhost's host key
+        // in the login account's `.ssh`, bootstrap.ps1 clones into
+        // `$env:USERPROFILE\<project>`, and shell.ps1 reads the first
+        // two and enters the third. A change to one would open no
+        // shell, or one outside the clone, and fail nothing else.
+        use crate::remote::windows::{SHELL, SHELL_NAME};
+        for text in [
+            "$LoginSsh = Join-Path $env:USERPROFILE '.ssh'",
+            "Join-Path $LoginSsh 'bombyx-handover'",
+            "Join-Path $LoginSsh 'bombyx-localhost-known-hosts'",
         ] {
-            assert_eq!(base64(plain.as_bytes()), encoded, "{plain:?}");
+            assert!(ACCOUNT.contains(text), "account.ps1: {text}");
+        }
+        for text in [
+            "$loginSsh = Join-Path $env:USERPROFILE '.ssh'",
+            "Join-Path $loginSsh 'bombyx-handover'",
+            "Join-Path $loginSsh 'bombyx-localhost-known-hosts'",
+            "(Join-Path `$env:USERPROFILE $projectLiteral)",
+        ] {
+            assert!(SHELL.contains(text), "{SHELL_NAME}: {text}");
+        }
+        for text in [
+            "$AgentHome = $env:USERPROFILE",
+            "$CloneDir = Join-Path $AgentHome $Project",
+        ] {
+            assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
         }
     }
 
-    #[test]
-    fn base64_uses_the_two_symbols_of_the_standard_alphabet() {
-        // 0xfb 0xff encodes to `+/8=`: the last two alphabet
-        // entries, which a URL-safe variant would spell `-_`.
-        assert_eq!(base64(&[0xfb, 0xff]), "+/8=");
-    }
-
-    /// Passes both scripts through Windows PowerShell's own parser,
-    /// so a syntax error fails CI's Windows job rather than a
-    /// guest's provisioning. Windows only, because the parser ships
-    /// with Windows PowerShell. It checks syntax, not behaviour: a
-    /// real `up` against a Windows guest is what shows the scripts
-    /// work.
+    /// Passes every Windows guest script -- the two provisioning
+    /// scripts and `bombyx shell`'s -- through Windows PowerShell's
+    /// own parser, so a syntax error fails CI's Windows job rather
+    /// than a guest's provisioning. Windows only, because the parser
+    /// ships with Windows PowerShell. It checks syntax, not
+    /// behaviour: a real `up` or `shell` against a Windows guest is
+    /// what shows the scripts work.
     #[cfg(windows)]
     #[test]
-    fn both_scripts_parse_under_windows_powershell() {
+    fn every_guest_script_parses_under_windows_powershell() {
         let dir = tempfile::tempdir().expect("a temporary directory");
-        for (name, text) in
-            [(ACCOUNT_NAME, ACCOUNT), (BOOTSTRAP_NAME, BOOTSTRAP)]
-        {
+        for (name, text) in [
+            (ACCOUNT_NAME, ACCOUNT),
+            (BOOTSTRAP_NAME, BOOTSTRAP),
+            (
+                crate::remote::windows::SHELL_NAME,
+                crate::remote::windows::SHELL,
+            ),
+        ] {
             let path = dir.path().join(name);
             std::fs::write(&path, text).expect("the script is written");
             // Single-quoted, with any `'` doubled, so the path
@@ -296,17 +282,5 @@ mod tests {
             assert!(ACCOUNT.contains(placed), "account.ps1: {placed}");
             assert!(BOOTSTRAP.contains(placed), "bootstrap.ps1: {placed}");
         }
-    }
-
-    #[test]
-    fn base64_holds_no_character_powershell_reads_in_double_quotes() {
-        let all: Vec<u8> = (0..=255).collect();
-        let out = base64(&all);
-        assert!(
-            out.chars()
-                .all(|c| c.is_ascii_alphanumeric()
-                    || matches!(c, '+' | '/' | '=')),
-            "{out}"
-        );
     }
 }

@@ -2297,7 +2297,7 @@ mod tests {
         ] {
             let line = format!(
                 "\"{name}\" => \"{}\"",
-                windows::base64(value.as_bytes())
+                crate::powershell::base64(value.as_bytes())
             );
             assert_eq!(out.matches(&line).count(), 1, "{line}: {out}");
         }
@@ -2327,7 +2327,7 @@ mod tests {
         let list = windows::preserve_list(&cfg.env);
         let line = format!(
             "\"{PRESERVE_ENV}\" => \"{}\"",
-            windows::base64(list.as_bytes())
+            crate::powershell::base64(list.as_bytes())
         );
         assert!(out.contains(&line), "{line}: {out}");
         let hash = &out[out.find("env: {").expect("an env hash")..];
@@ -2360,7 +2360,7 @@ mod tests {
 
     /// The base64 text `name` is handed over as in a Windows
     /// Vagrantfile, or `None` when the hash does not set it. A test
-    /// compares it against `windows::base64` of the value it expects.
+    /// compares it against `powershell::base64` of the value it expects.
     fn windows_raw<'a>(out: &'a str, name: &str) -> Option<&'a str> {
         let prefix = format!("\"{name}\" => \"");
         let start = out.find(&prefix)? + prefix.len();
@@ -2372,7 +2372,7 @@ mod tests {
     fn assert_windows_value(out: &str, name: &str, plain: &str) {
         assert_eq!(
             windows_raw(out, name),
-            Some(windows::base64(plain.as_bytes()).as_str()),
+            Some(crate::powershell::base64(plain.as_bytes()).as_str()),
             "{name} should be {plain:?}"
         );
     }
