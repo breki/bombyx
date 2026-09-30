@@ -10,14 +10,16 @@
 //! they carry the checks that cannot be expressed as "a
 //! non-empty string".
 //!
-//! Four more keys are optional. Two of them are paths rather
+//! The other keys are optional. Two of them are paths rather
 //! than something the guest hands to `git`, so each has its own
 //! module and its own rules.
 //!
 //! `deploy_key` lives in `super::deploy_key`, and `env_file` in
 //! `super::env_file`. Each names a file on the workstation, which
 //! bombyx opens itself, so both follow
-//! `super::workstation_path`'s rules.
+//! `super::workstation_path`'s rules. `vault` lives in
+//! `super::vault`: a KeePassXC database that supplies the secrets,
+//! the key, or both.
 //!
 //! `repo_token` and `repo_user` are the other two, and they live
 //! in `super::repo_token`. Neither is a path. They name a
@@ -74,10 +76,8 @@ pub struct Source {
     /// File on the **workstation** holding the project's
     /// secrets, which bombyx carries into the guest.
     ///
-    /// The other path in this table, `deploy_key`, names a file
-    /// on the VM host. This one names one on the machine bombyx
-    /// runs on, and `super::EnvFilePath` holds why that changes
-    /// every rule.
+    /// Like `deploy_key`, a file on the machine bombyx runs on;
+    /// `super::EnvFilePath` holds the rules that follows from.
     ///
     /// `None` when the config names none. With no `vault` either,
     /// bombyx writes no secrets file and the guest gets an empty
@@ -87,7 +87,9 @@ pub struct Source {
     /// project's secrets, one entry per variable.
     ///
     /// The other way to supply what `env_file` supplies, so a
-    /// config names one or the other. The `vault` module's own
+    /// config names one or the other for the secrets; a vault that
+    /// holds only the deploy key may stand beside an `env_file`
+    /// (`Source::try_from` holds the rule). The `vault` module's own
     /// documentation says how bombyx reads it without holding the
     /// master password.
     pub vault: Option<Vault>,
@@ -139,7 +141,7 @@ struct SourceFields {
 
 impl Source {
     /// Whether the config names a source of secrets: an
-    /// `env_file` or a `vault`.
+    /// `env_file` or a `vault` with `entries`.
     ///
     /// Every rule that asks whether a run stages secrets asks
     /// this, so a third source is added in one place.
@@ -165,11 +167,13 @@ impl TryFrom<SourceFields> for Source {
 
     /// Runs the rules that span more than one key.
     ///
-    /// `env_file` and `vault` are two sources of the same
+    /// `env_file` and `vault.entries` are two sources of the same
     /// secrets, so a config names at most one. Merging them
-    /// would need a rule for a variable both define. `deploy_key`
-    /// and `vault.deploy_key` are two sources of the same key, so
-    /// the same holds for them.
+    /// would need a rule for a variable both define. A vault that
+    /// holds only the deploy key supplies no secrets, so it may
+    /// stand beside an `env_file`. `deploy_key` and
+    /// `vault.deploy_key` are two sources of the same key, so the
+    /// same holds for them.
     ///
     /// `repo_token` and `repo_user` are stated together or not
     /// at all. Each is useless without the other: a variable
@@ -180,9 +184,10 @@ impl TryFrom<SourceFields> for Source {
     ///
     /// `repo_token` requires `env_file` or `vault`, because that
     /// is where the variable is read from. Without either bombyx
-    /// would have nothing to look in. With a vault the variable
-    /// must be one of its entries, which is checked here rather
-    /// than after the operator has typed the password.
+    /// would have nothing to look in. With a vault and no
+    /// `env_file` the variable must be one of its entries, which is
+    /// checked here rather than after the operator has typed the
+    /// password.
     ///
     /// `repo_token` requires an `https` repository. `git`
     /// sends the token to the server on every request, so an
@@ -205,11 +210,13 @@ impl TryFrom<SourceFields> for Source {
                  the guest clones with, so name one of them",
             ));
         }
-        if raw.env_file.is_some() && raw.vault.is_some() {
+        if raw.env_file.is_some()
+            && raw.vault.as_ref().is_some_and(|v| !v.entries.is_empty())
+        {
             return Err(FieldError::invalid(
                 Vault::FIELD,
-                "cannot stand beside `env_file`; both supply the \
-                 project's secrets, so name one of them",
+                "cannot list `entries` beside `env_file`; both supply \
+                 the project's secrets, so name one of them",
             ));
         }
         match (&raw.repo_token, &raw.repo_user) {
@@ -239,7 +246,10 @@ impl TryFrom<SourceFields> for Source {
                      the named variable is read from",
                 ));
             }
-            if let Some(vault) = &raw.vault
+            // Only a vault that supplies the secrets holds the token;
+            // one beside an `env_file` holds the key alone.
+            if raw.env_file.is_none()
+                && let Some(vault) = &raw.vault
                 && !vault.entries.keys().any(|k| k.as_str() == var.as_str())
             {
                 return Err(FieldError::invalid(
@@ -745,6 +755,26 @@ mod tests {
         let source = source_with(KEY_ONLY_VAULT).expect("a key-only vault");
         assert!(source.names_deploy_key());
         assert!(!source.names_secrets(), "no entries, so no secrets file");
+    }
+
+    #[test]
+    fn an_env_file_may_stand_beside_a_vault_holding_only_the_key() {
+        // The vault supplies no secrets, so the two do not compete.
+        let source =
+            source_with(&format!("env_file = \"~/s.env\"\n{KEY_ONLY_VAULT}"))
+                .expect("the key from the vault, the secrets from a file");
+        assert!(source.names_secrets() && source.names_deploy_key());
+    }
+
+    #[test]
+    fn a_repo_token_is_read_from_the_env_file_beside_a_key_only_vault() {
+        // The vault holds no entries, so the token's variable lives in
+        // the file, and the vault-entries rule must not ask for it.
+        let token = "repo_token = \"GH\"\nrepo_user = \"x-token-auth\"\n";
+        source_with(&format!(
+            "env_file = \"~/s.env\"\n{token}{KEY_ONLY_VAULT}"
+        ))
+        .expect("the token from the file, the key from the vault");
     }
 
     #[test]

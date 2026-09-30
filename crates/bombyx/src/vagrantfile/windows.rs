@@ -366,9 +366,21 @@ mod tests {
         // The login account writes a refreshed file, and Windows'
         // ssh refuses a private key another account owns, so the
         // refresh hands the file to the agent as `Protect` in
-        // account.ps1 does at provisioning.
-        let owner = "    $out = & icacls.exe $target /setowner \"*$sid\" 2>&1";
-        assert!(crate::powershell::has_line(REFRESH, owner), "{owner}");
+        // account.ps1 does at provisioning. It does so on the
+        // temporary, before the secret is written and before the
+        // rename, so a failure exits 1 while the old copy stands --
+        // the status refresh.ps1's header promises.
+        let lines: Vec<&str> = REFRESH.lines().map(str::trim_end).collect();
+        let at = |line: &str| {
+            lines
+                .iter()
+                .position(|l| *l == line)
+                .unwrap_or_else(|| panic!("refresh.ps1 lacks {line:?}"))
+        };
+        let owner = at("    $out = & icacls.exe $new /setowner \"*$sid\" 2>&1");
+        let write = at("    [IO.File]::WriteAllBytes($new, $buffer.ToArray())");
+        let rename = at("        [IO.File]::Move($new, $target)");
+        assert!(owner < write && write < rename, "{owner} {write} {rename}");
     }
 
     #[test]

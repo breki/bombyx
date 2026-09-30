@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::env_file::{EnvFileError, read_capped};
+use super::env_file::{EnvFileError, read_capped, resolve_file};
 use super::error::FieldError;
 use super::workstation_path;
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
@@ -70,11 +70,19 @@ pub struct DeployKey(Vec<u8>);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct NotAKey;
 
+/// What every refusal of a [`NotAKey`] tells the operator, so the
+/// file's message and the vault's give the one reason
+/// `DeployKey::from_bytes` checks.
+pub(super) const NOT_A_KEY: &str = "does not start with a \
+    `-----BEGIN ... PRIVATE KEY-----` line; it has to be the private \
+    half of the key pair, not the `.pub` file";
+
 /// Why bombyx could not read the key `deploy_key` names.
 #[derive(Debug, Error)]
 pub enum DeployKeyError {
     /// The file could not be read, for any reason but a missing
-    /// file.
+    /// file, including a `~` with no home directory to expand it
+    /// against.
     #[error(transparent)]
     File(#[from] EnvFileError),
 
@@ -94,11 +102,7 @@ pub enum DeployKeyError {
     },
 
     /// The file does not hold a private key.
-    #[error(
-        "`deploy_key` names {path}, which does not start with a \
-         `-----BEGIN ... PRIVATE KEY-----` line; it has to be the \
-         private half of the key pair, not the `.pub` file"
-    )]
+    #[error("`deploy_key` names {path}, which {reason}", reason = NOT_A_KEY)]
     NotAKey {
         /// The path bombyx tried, after expanding `~`.
         path: PathBuf,
@@ -138,11 +142,7 @@ impl DeployKeyPath {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let path = workstation_path::resolve_home(Self::FIELD, &self.0, getenv)
-            .map_err(|e| EnvFileError::NoHome {
-                field: e.field,
-                value: e.value,
-            })?;
+        let path = resolve_file(Self::FIELD, &self.0, getenv)?;
         let bytes = match read_capped(Self::FIELD, path.clone()) {
             Ok(bytes) => bytes,
             Err(EnvFileError::Read { source, .. })

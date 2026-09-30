@@ -96,15 +96,15 @@ differences:
   mode `0600`. `bootstrap.ps1` pins the git host's published keys as
   `bootstrap.sh` does.
 - **The refresh writes as the login account.** `up` and `shell` call
-  `refresh.ps1`, which `account.ps1` installs under Program Files. It
-  runs as vagrant's login account, writes the new file beside the old
-  one under a fresh ACL for the agent, SYSTEM and the administrators,
-  renames it into place, and makes the agent its owner, because
-  Windows' `ssh` refuses a private key another account owns. Writing
-  as another account is safe here,
-  unlike on Linux, because the agent is an administrator too: a link
-  it leaves at the path leads nowhere the agent could not write.
-  The `secrets_refreshed` hook then runs as the agent, over the same
+  `refresh.ps1`, which `account.ps1` installs under Program Files.
+  It runs as vagrant's login account, writes the new file beside
+  the old one under a fresh ACL for the agent, SYSTEM and the
+  administrators, renames it into place, and makes the agent its
+  owner, because Windows' `ssh` refuses a private key another
+  account owns. Writing as another account is safe here, unlike on
+  Linux, because the agent is an administrator too: a link it
+  leaves at the path leads nowhere the agent could not write. The
+  `secrets_refreshed` hook then runs as the agent, over the same
   loopback login as the hand-over, from a pruned environment.
 - **Every `env:` value travels base64-encoded**, because vagrant's
   Windows provisioner pastes it into the script unescaped. `[env]`
@@ -181,13 +181,17 @@ Three secrets can reach the guest:
 | `env_file` or `vault` | A file of secrets, or entries in a KeePassXC database | The workstation |
 | `repo_token` | A git token built from one of those variables | (derived) |
 
-**The VM host stores no secret between runs.** The VM host is the
-machine that runs untrusted VMs, so a host compromised between runs
-should find nothing on its disk. So every secret rests on the
-workstation, and the master password of a vault is typed there and
-reaches no process on the VM host.
+**bombyx keeps no secret in the VM host's own files between
+runs.** The VM host is the machine that runs untrusted VMs, so
+every secret rests on the workstation, and the master password of
+a vault is typed there and reaches no process on the VM host.
 
-The one exception is the staging for a `vagrant` run. `vagrant`
+Two things fall outside that rule. The first is the guest's own
+copies, which no design can keep off the VM host: the guest's
+disk image and its `fresh-install` snapshot are files there, so
+root on the VM host can read every secret the guest holds.
+
+The second is the staging for a `vagrant` run. `vagrant`
 uploads a file, so bombyx writes each secret into the project
 directory on the VM host, owner-only, just before the run, and
 removes it in the same step when the run ends, whether the run
@@ -201,15 +205,16 @@ command lines and out of every generated file.
 key inside a guest that already exists, so a rotated token or key
 reaches it without a provision. That route stores nothing on the
 VM host at all; an `up` that has to boot the VM still stages the
-files for its `vagrant` run, as above, before it refreshes. Each file travels on
-a pipe: from bombyx to `ssh`, through `vagrant ssh --no-tty` on
-the VM host, and into a `cat` that the agent's account runs in the
-guest. On the VM host the file exists only in the memory of the
-processes passing it along. Nothing in the path asks for a
-terminal, because a terminal's line discipline can echo input back
-into the output. We have not checked whether Vagrant's own debug
-log (`VAGRANT_LOG=debug`, set on the VM host) records what passes
-through; the staging route has the same unknown for its upload.
+files for its `vagrant` run, as above, before it refreshes. Each
+file travels on a pipe: from bombyx to `ssh`, through `vagrant ssh
+--no-tty` on the VM host, and into a `cat` that the agent's
+account runs in the guest. On the VM host the file exists only in
+the memory of the processes passing it along. Nothing in the path
+asks for a terminal, because a terminal's line discipline can echo
+input back into the output. We have not checked whether Vagrant's
+own debug log (`VAGRANT_LOG=debug`, set on the VM host) records
+what passes through; the staging route has the same unknown for
+its upload.
 
 Whichever route a secret takes, the outcome is the same for all
 three, and it is the cost: **the agent needs the value to work, so

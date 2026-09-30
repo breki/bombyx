@@ -441,8 +441,8 @@ above it, so written below that header this one would parse as
 refused.
 
 `[vm]` and `[source]` are required, and every key within them --
-except `provider`, `deploy_key`, `env_file`, `repo_token` and
-`repo_user` -- is required too. bombyx builds the VM from `[vm]`
+except `provider`, `deploy_key`, `env_file`, `vault`, `repo_token`
+and `repo_user` -- is required too. bombyx builds the VM from `[vm]`
 and the guest clones the repository named in `[source]`, so there
 is nothing sensible for bombyx to invent on your behalf: a base
 image is a choice, and a repository bombyx made up would be cloned

@@ -510,11 +510,12 @@ pub fn vagrant_in(
 /// `name` from `dir` whether `vagrant` succeeded or not.
 ///
 /// Used for the files the VM host holds only while `vagrant` is
-/// uploading them into the guest: the project's secrets, and
-/// the git credential built from one variable inside them.
+/// uploading them into the guest: the project's secrets, the git
+/// credential built from one variable inside them, and the deploy
+/// key.
 ///
 /// Every verb that writes the generated files runs this, not
-/// only the ones that staged either. See below.
+/// only the ones that staged any of them. See below.
 ///
 /// **The removal is inside this one command rather than a step
 /// after it**, and that is the whole reason the function exists.
@@ -541,10 +542,10 @@ pub fn vagrant_in(
 /// **Every name is removed whether it was staged or not.** The
 /// caller writes the secrets file, the git credential and the
 /// deploy key only when the config names them, and a run
-/// interrupted after this
-/// step began leaves a file the next run's config may no longer
-/// mention. So the removals are unconditional and the message
-/// says the file *may* hold secrets rather than that it does.
+/// interrupted after this step began leaves a file the next run's
+/// config may no longer mention. So the removals are unconditional
+/// and the message says the file *may* hold secrets rather than
+/// that it does.
 ///
 /// The names arrive as a slice because three files travel this
 /// way. Each is removed even when the boot failed, and each
@@ -1329,7 +1330,7 @@ const REFRESH_SCRIPT: &str = r#"t="$HOME/$1.new"; umask 077; if mkdir -p -- "${t
 /// `file` decides the payload's form too: the credential's size is
 /// hidden from a dry run ([`GuestHomeFile::hides_size`]), so no
 /// caller can send it with the count showing. Its path travels as
-/// `$1`, so the script is one text for both files.
+/// `$1`, so the script is one text for every file.
 ///
 /// **A Windows guest takes the file the same way**, on stdin with
 /// no terminal, but the command calls `refresh.ps1`, which

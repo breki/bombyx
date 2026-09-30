@@ -13,8 +13,8 @@ use super::guards;
 
 /// A `~/` value with no home directory to expand it against.
 ///
-/// Its own type, rather than a variant of either field's error,
-/// so each field's module can report it in its own terms.
+/// Its own type, rather than a variant of one field's error, so
+/// each field's module can report it in its own terms.
 #[derive(Debug)]
 pub(super) struct NoHome {
     /// The config key naming the value.
@@ -60,7 +60,7 @@ where
 /// Checks the path of a file on this machine, which the config
 /// key `field` names.
 ///
-/// Both fields refuse the same spellings: those that name a
+/// Every such field refuses the same spellings: those that name a
 /// directory, and those whose meaning depends on the directory
 /// bombyx was started in.
 ///

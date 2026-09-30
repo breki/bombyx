@@ -262,8 +262,8 @@ pub enum ConfigError {
         reason: String,
     },
 
-    /// A project names a `secrets_refreshed` hook and neither an
-    /// `env_file` nor a `vault`.
+    /// A project names a `secrets_refreshed` hook and no secrets:
+    /// no `env_file`, and no `vault.entries`.
     ///
     /// The hook runs only after bombyx rewrites the secrets, so
     /// with no source of them it would never run. A rule spanning two
@@ -273,8 +273,8 @@ pub enum ConfigError {
         "invalid config in {}: [projects.\"{project}\".hooks] names \
          `secrets_refreshed`, which runs after bombyx rewrites the \
          project's secrets, but [projects.\"{project}\".source] names \
-         neither `env_file` nor `vault` -- add one, or remove the \
-         hook",
+         none: no `env_file`, and no `vault.entries` -- add one, or \
+         remove the hook",
         .path.display()
     )]
     HookWithoutSecrets {

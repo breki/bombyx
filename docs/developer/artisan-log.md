@@ -4,6 +4,20 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-09-30-workstation-file-error
+
+**Category:** Abstraction Boundaries
+
+`config::env_file` owns the capped read (`read_capped`), its cap
+and its error type, `EnvFileError`, and `config::deploy_key` now
+calls all three. So the public `DeployKeyError::File` wraps a type
+named for the other field. They would move to
+`config::workstation_path`, which already owns the path rules for
+both fields and for `vault.database`, with the error renamed to a
+field-neutral `WorkstationFileError`. Deferred because the rename
+changes a public type; the duplicated `NoHome` mapping this finding
+also named was fixed by sharing `env_file::resolve_file`.
+
 ### aq-2026-09-28-remote-tests-own-file
 
 **Category:** Module Size

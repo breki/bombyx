@@ -3,10 +3,11 @@
 //! secrets.
 //!
 //! The vault is the other source of what `super::EnvFilePath`
-//! reads. A config names one or the other, and either way bombyx
-//! ends up with a `super::Secrets` of `NAME=value` lines, so the
-//! file staged for the guest has the same shape whichever source
-//! it came from. Only bombyx's own error messages say which.
+//! reads. A config names one or the other for the secrets, and
+//! either way bombyx ends up with a `super::Secrets` of
+//! `NAME=value` lines, so the file staged for the guest has the
+//! same shape whichever source it came from. Only bombyx's own
+//! error messages say which.
 //!
 //! **bombyx never holds the master password.** It starts two
 //! processes, `keepassxc-cli open` and a small `sh` script, and
@@ -32,7 +33,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::deploy_key::{DeployKey, NotAKey};
+use super::deploy_key::{DeployKey, NOT_A_KEY, NotAKey};
 use super::env_file::Secrets;
 use super::error::FieldError;
 use super::guards;
@@ -44,8 +45,8 @@ mod session;
 /// The `[source.vault]` table: which database to open, and
 /// which entry holds each variable.
 ///
-/// Built through `VaultFields`, so a table with no entries is
-/// refused while the config parses.
+/// Built through `VaultFields`, so a table naming neither an entry
+/// nor a `deploy_key` is refused while the config parses.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "VaultFields")]
 pub struct Vault {
@@ -472,9 +473,8 @@ pub enum VaultError {
 
     /// The attachment does not hold a private key.
     #[error(
-        "the attachment `{attachment}` on \"{entry}\" does not start \
-         with a `-----BEGIN ... PRIVATE KEY-----` line; it has to be \
-         the private half of the key pair, not the `.pub` file"
+        "the attachment `{attachment}` on \"{entry}\" {reason}",
+        reason = NOT_A_KEY
     )]
     NotAKey {
         /// The entry path.
@@ -549,10 +549,10 @@ impl Vault {
         } else {
             Some(env_text(&driven.values)?)
         };
-        let deploy_key = match (&self.deploy_key, driven.key) {
-            (Some(key), Some(bytes)) => Some(checked_key(key, bytes)?),
-            _ => None,
-        };
+        let deploy_key = driven
+            .key
+            .map(|(key, bytes)| checked_key(key, bytes))
+            .transpose()?;
         Ok(VaultRead {
             secrets,
             deploy_key,
@@ -598,9 +598,10 @@ type Values<'a> = Vec<(&'a SecretName, &'a EntryPath, Vec<u8>)>;
 struct Driven<'a> {
     /// Each entry's value, as [`Values`] says.
     values: Values<'a>,
-    /// The attachment's bytes, unchecked; `Vault::read` checks their
-    /// shape.
-    key: Option<Vec<u8>>,
+    /// The key requested and its attachment's bytes, unchecked;
+    /// `Vault::read` checks their shape. One pair, so the bytes
+    /// cannot outlive or lose the request they answer.
+    key: Option<(&'a VaultKey, Vec<u8>)>,
 }
 
 /// Counts, not bytes: both halves hold secrets.
@@ -610,7 +611,7 @@ impl std::fmt::Debug for Driven<'_> {
             f,
             "Driven({} values, key: {:?} bytes)",
             self.values.len(),
-            self.key.as_ref().map(Vec::len)
+            self.key.as_ref().map(|(_, bytes)| bytes.len())
         )
     }
 }
@@ -823,7 +824,7 @@ fn drive<'a, R: Read, W: Write>(
     inp: &mut W,
     database: &Path,
     entries: &'a BTreeMap<SecretName, EntryPath>,
-    key: Option<&VaultKey>,
+    key: Option<&'a VaultKey>,
 ) -> Result<Driven<'a>, VaultError> {
     let mut out = BufReader::new(out);
     let Some(mut first) = read_until_end(&mut out, b"> ")? else {
@@ -866,7 +867,7 @@ fn drive<'a, R: Read, W: Write>(
                     attachment: key.attachment.clone(),
                 });
             }
-            Some(body)
+            Some((key, body))
         }
         None => None,
     };
@@ -1450,15 +1451,12 @@ mod tests {
                 "exit\n",
             ]);
             let mut inp = Vec::new();
-            let driven = drive(
-                &out[..],
-                &mut inp,
-                Path::new("/d/t.kdbx"),
-                &e,
-                Some(&key()),
-            )
-            .expect("the entry and the key are there");
-            assert_eq!(driven.key.as_deref(), Some(body.as_bytes()));
+            let k = key();
+            let driven =
+                drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e, Some(&k))
+                    .expect("the entry and the key are there");
+            let bytes = driven.key.as_ref().map(|(_, b)| b.as_slice());
+            assert_eq!(bytes, Some(body.as_bytes()));
             assert_eq!(
                 named(&driven.values),
                 [("G".to_owned(), b"ghp_2".to_vec())]
@@ -1479,12 +1477,13 @@ mod tests {
             &format!("{}-----BEGIN K-----\n", attachment_command(&key())),
             "exit\n",
         ]);
+        let k = key();
         let driven = drive(
             &out[..],
             &mut Vec::new(),
             Path::new("/d/t.kdbx"),
             &e,
-            Some(&key()),
+            Some(&k),
         )
         .expect("the key is there");
         assert!(driven.values.is_empty());
@@ -1497,12 +1496,13 @@ mod tests {
         // print nothing on stdout, measured against 2.7.6.
         let e = BTreeMap::new();
         let out = transcript(&[&attachment_command(&key()), "exit\n"]);
+        let k = key();
         let err = drive(
             &out[..],
             &mut Vec::new(),
             Path::new("/d/t.kdbx"),
             &e,
-            Some(&key()),
+            Some(&k),
         )
         .map(|_| ())
         .expect_err("nothing printed");

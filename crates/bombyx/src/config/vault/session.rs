@@ -49,7 +49,7 @@ const PASSWORD: &str = include_str!("../../../templates/vault-password.sh");
 pub(super) fn read<'a>(
     database: &Path,
     entries: &'a BTreeMap<SecretName, EntryPath>,
-    key: Option<&VaultKey>,
+    key: Option<&'a VaultKey>,
 ) -> Result<Driven<'a>, VaultError> {
     read_with_tty(database, entries, key, Path::new("/dev/tty"))
 }
@@ -59,7 +59,7 @@ pub(super) fn read<'a>(
 fn read_with_tty<'a>(
     database: &Path,
     entries: &'a BTreeMap<SecretName, EntryPath>,
-    key: Option<&VaultKey>,
+    key: Option<&'a VaultKey>,
     tty: &Path,
 ) -> Result<Driven<'a>, VaultError> {
     // Opened here, and closed at once, only to learn whether there
@@ -198,7 +198,8 @@ mod tests {
                 .collect();
         let driven =
             read_with_tty(&db, &entries, Some(&key), &tty).expect("unlocks");
-        assert_eq!(driven.key.as_deref(), Some(&key_bytes[..]));
+        let bytes = driven.key.as_ref().map(|(_, b)| b.as_slice());
+        assert_eq!(bytes, Some(&key_bytes[..]));
         let read: Vec<_> = driven
             .values
             .iter()

@@ -308,7 +308,7 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
 /// nothing was staged.
 ///
 /// Shared by [`refresh_secrets`] and [`refresh_after_provisioning`],
-/// which differ only in whether the credential goes too.
+/// which differ only in whether the credential and the key go too.
 fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
     let secrets = staged.secrets()?;
     Some(match &cfg.hooks.secrets_refreshed {
@@ -330,10 +330,10 @@ fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
 /// command, so this is that one command when a hook is configured,
 /// and nothing otherwise.
 ///
-/// Provisioning has just written both files, so rewriting the
-/// secrets here serves only to carry the hook. The credential has
-/// no hook, so rewriting it would cost a `vagrant ssh` and change
-/// nothing; it is left out.
+/// Provisioning has just written every file, so rewriting the
+/// secrets here serves only to carry the hook. The credential and
+/// the key have no hook, so rewriting them would cost a `vagrant
+/// ssh` each and change nothing; they are left out.
 ///
 /// The hook runs *after* the project's own provisioning script, so
 /// that script cannot rely on the copy the hook makes; one that

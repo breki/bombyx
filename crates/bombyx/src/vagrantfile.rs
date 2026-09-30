@@ -258,8 +258,8 @@ const CREDENTIAL_STAGED_PATH: &str =
 /// `crate::remote::refresh_in_guest` may write over on a machine
 /// that already exists.
 ///
-/// [`ACCOUNT`] writes both when it provisions. A closed set
-/// rather than a path, because only these two are refreshed:
+/// [`ACCOUNT`] writes all three when it provisions. A closed set
+/// rather than a path, because only these are refreshed:
 /// holding one is the proof the destination is one of them, and
 /// each carries its own answer to whether a dry run may print its
 /// size.
@@ -304,9 +304,9 @@ impl GuestHomeFile {
 ///
 /// Test-only: neither script is built from this list. It is what
 /// lets a test assert both scripts spell each path the same way,
-/// since neither file can see the other. Two of the three come
-/// from [`GuestHomeFile`], so the same test holds the refresh to
-/// the scripts' spelling.
+/// since neither file can see the other. All three come from
+/// [`GuestHomeFile`], so the same test holds the refresh to the
+/// scripts' spelling.
 #[cfg(test)]
 const GUEST_HOME_FILES: [&str; 3] = [
     GuestHomeFile::DeployKey.path(),

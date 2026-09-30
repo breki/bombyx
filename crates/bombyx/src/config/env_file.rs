@@ -35,14 +35,12 @@ use crate::newtype::{checked_str_newtype, checked_str_try_from};
 /// runs the private `check` first. So holding one is the proof
 /// that every rule in this module ran.
 ///
-/// A `PathBuf` would be the wrong representation, for a reason
-/// the opposite of `super::DeployKeyPath`'s. That path is
-/// expanded on the VM host, so `PathBuf` would answer for the
-/// wrong machine. This one is expanded here, and `PathBuf`
-/// would answer correctly -- but it has no idea what a leading
-/// `~/` means, and expanding that is [`EnvFilePath::read`]'s
-/// job. The value is stored as the operator typed it and turns
-/// into a `PathBuf` at the moment it is opened.
+/// A `String` rather than a `PathBuf`. The path is expanded on
+/// this machine, so `PathBuf` would answer for the right one --
+/// but it has no idea what a leading `~/` means, and expanding
+/// that is [`EnvFilePath::read`]'s job. So the value is stored as
+/// the operator typed it and turns into a `PathBuf` at the moment
+/// it is opened.
 ///
 /// `#[serde(try_from = "String")]` is what connects the type to
 /// the config file. Without it serde would assign the private
@@ -107,19 +105,24 @@ impl fmt::Debug for Secrets {
     }
 }
 
-/// Largest secrets file that will be read.
+/// Largest file [`read_capped`] will read: a secrets file or a
+/// deploy key.
 ///
-/// A secrets file holds a handful of `NAME=value` lines, so
-/// the limit costs a real one nothing. What it buys: the path
-/// is checked with `metadata` and opened afterwards, and
-/// whoever can write the containing directory can swap a
-/// regular file for something that never ends between those
-/// two calls. The cap bounds what bombyx holds in memory
-/// either way. `super::read::MAX_CONFIG_BYTES` is the same
+/// A secrets file holds a handful of `NAME=value` lines and a
+/// private key a few kilobytes, so the limit costs a real one
+/// nothing. What it buys: the path is checked with `metadata` and
+/// opened afterwards, and whoever can write the containing
+/// directory can swap a regular file for something that never ends
+/// between those two calls. The cap bounds what bombyx holds in
+/// memory either way. `super::read::MAX_CONFIG_BYTES` is the same
 /// number for the same reason.
 const MAX_ENV_FILE_BYTES: u64 = 64 * 1024;
 
-/// Why bombyx could not read the file `env_file` names.
+/// Why bombyx could not read a file on the workstation that
+/// `env_file` or `deploy_key` names.
+///
+/// Every variant carries the field it was read for, so the one
+/// type serves both.
 ///
 /// Separate from [`FieldError`], which belongs to a value's
 /// shape and is raised while the config is being parsed. These
@@ -172,7 +175,7 @@ pub enum EnvFileError {
     /// is the one thing they can act on.
     #[error(
         "`{field}` names {path}, which is larger than the \
-         {limit} byte limit on a secrets file"
+         {limit} byte limit on a file bombyx reads"
     )]
     TooLarge {
         /// Name of the offending field.
@@ -237,12 +240,7 @@ impl EnvFilePath {
     where
         F: Fn(&str) -> Option<String>,
     {
-        workstation_path::resolve_home(Self::FIELD, &self.0, getenv).map_err(
-            |e| EnvFileError::NoHome {
-                field: e.field,
-                value: e.value,
-            },
-        )
+        resolve_file(Self::FIELD, &self.0, getenv)
     }
 
     /// Reads the file this path names.
@@ -267,6 +265,32 @@ impl EnvFilePath {
         let path = self.resolve(getenv)?;
         read_capped(Self::FIELD, path).map(Secrets)
     }
+}
+
+/// Expands a leading `~/` in `value`, the file the config key
+/// `field` names, reporting a missing home as [`EnvFileError`].
+///
+/// Shared with `super::deploy_key`, so the two fields report it
+/// the same way.
+///
+/// # Errors
+///
+/// Returns [`EnvFileError::NoHome`] when the value needs a home
+/// directory and the environment names none.
+pub(super) fn resolve_file<F>(
+    field: &'static str,
+    value: &str,
+    getenv: F,
+) -> Result<PathBuf, EnvFileError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    workstation_path::resolve_home(field, value, getenv).map_err(|e| {
+        EnvFileError::NoHome {
+            field: e.field,
+            value: e.value,
+        }
+    })
 }
 
 /// Reads the regular file at `path`, which the config key `field`

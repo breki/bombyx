@@ -528,9 +528,8 @@ mod tests {
     }
 
     // No table of bad values here. `EnvValue` shares
-    // `check_renderable` with `box`, `repo`, `ref`, `script` and
-    // `deploy_key`, and `guards::tests::renderable_newtypes`
-    // exercises that rule set against every type it has a row
-    // for, this one included. A copy here would drift the first
-    // time a rule is added there.
+    // `check_renderable` with `box`, `repo`, `ref` and `script`,
+    // and `guards::tests::renderable_newtypes` exercises that rule
+    // set against every type it has a row for, this one included. A
+    // copy here would drift the first time a rule is added there.
 }
