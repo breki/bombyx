@@ -286,18 +286,18 @@ pub enum ConfigError {
     /// A project with `guest = "windows"` names a
     /// `secrets_refreshed` hook.
     ///
-    /// The hook runs after the secrets refresh on a running guest,
-    /// and a Windows guest gets no refresh yet, so the hook would
-    /// never run. A rule spanning `[vm]` and `[hooks]`, checked in the
-    /// registry's `parse` ahead of [`ConfigError::HookWithoutEnvFile`],
-    /// whose advice -- add an `env_file` -- would not make it run.
-    /// GitHub issue #137 lifts it with the refresh.
+    /// The Windows hook runner starts the hook with `powershell
+    /// -File`, which refuses any file but a `.ps1`, and Windows
+    /// refuses a path over 260 characters by default. Either way the
+    /// refresh would write the secrets and then report the hook
+    /// failed. A rule spanning `[vm]` and `[hooks]`, checked in the
+    /// registry's `parse`, as [`ConfigError::WindowsGuestScript`] is
+    /// for `script`.
     #[error(
         "invalid config in {}: project \"{project}\" sets \
-         secrets_refreshed in [projects.\"{project}\".hooks], but \
-         [projects.\"{project}\".vm] sets guest = \"windows\", and the \
-         hook does not run on a Windows guest yet (bombyx issue #137) -- \
-         remove it for now",
+         secrets_refreshed = \"{hook}\" in [projects.\"{project}\".hooks], \
+         but [projects.\"{project}\".vm] sets guest = \"windows\", and \
+         {reason}",
         .path.display()
     )]
     WindowsGuestHook {
@@ -305,6 +305,10 @@ pub enum ConfigError {
         path: PathBuf,
         /// The project naming the hook.
         project: String,
+        /// The hook, as the config spells it.
+        hook: String,
+        /// Why a Windows guest cannot run it.
+        reason: &'static str,
     },
 
     /// A project with `guest = "windows"` names a `script` that is

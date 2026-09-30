@@ -113,12 +113,12 @@ rewrite fails, `up` exits non-zero, and `shell` warns and opens
 the shell anyway. A `shell` that cannot read your `env_file` on
 the workstation also warns and opens.
 
-A Windows guest is the exception until the secrets refresh of
-GitHub issue #137 lands: `up` and `shell` do not rewrite its
-secrets, and print a note saying so. Run `bombyx provision myproject` instead, which places the new files
-and re-runs the project's script. Provisioning also checks the
-clone out afresh at the configured `ref`, which discards
-uncommitted work in it, so commit or push that work first.
+A Windows guest is refreshed the same way. There the refresh calls
+`refresh.ps1`, which provisioning installs, so a Windows VM
+provisioned by a bombyx without it says to run
+`bombyx provision myproject` first. Provisioning checks the clone
+out afresh at the configured `ref`, which discards uncommitted work
+in it, so commit or push that work first.
 
 bombyx sends each file down a pipe, through `ssh` and then
 `vagrant ssh`, so the refresh itself stores nothing on the VM host.

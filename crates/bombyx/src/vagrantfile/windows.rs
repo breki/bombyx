@@ -49,6 +49,22 @@ pub(crate) const ACCOUNT: &str = include_str!("../../templates/account.ps1");
 /// [`ACCOUNT`]'s name on the VM host, next to the Vagrantfile.
 pub(crate) const ACCOUNT_NAME: &str = "account.ps1";
 
+/// The secrets refresh a running guest's `up` and `shell` call,
+/// shipped to the host unchanged. [`ACCOUNT`] installs it, because
+/// it is too long to send with each call; its header says what it
+/// does.
+pub(crate) const REFRESH: &str = include_str!("../../templates/refresh.ps1");
+
+/// [`REFRESH`]'s name on the VM host, next to the Vagrantfile.
+pub(crate) const REFRESH_NAME: &str = "refresh.ps1";
+
+/// The runner [`REFRESH`] starts, as the agent, for the project's
+/// `secrets_refreshed` hook, shipped to the host unchanged.
+pub(crate) const HOOK: &str = include_str!("../../templates/hook.ps1");
+
+/// [`HOOK`]'s name on the VM host, next to the Vagrantfile.
+pub(crate) const HOOK_NAME: &str = "hook.ps1";
+
 /// Where [`BOOTSTRAP`] is staged, relative to the login home.
 ///
 /// Relative because vagrant expands no `~` on a Windows guest: the
@@ -59,6 +75,16 @@ pub(crate) const ACCOUNT_NAME: &str = "account.ps1";
 /// the one missing directory. [`ACCOUNT`] finds the file under
 /// `$env:USERPROFILE`, which is that same home.
 const BOOTSTRAP_STAGED_PATH: &str = ".bombyx-staging/bootstrap.ps1";
+
+/// Each script that travels as a plain upload, with where it is
+/// staged, relative to the login home for the reason
+/// [`BOOTSTRAP_STAGED_PATH`] gives. [`ACCOUNT`] moves each into the
+/// bombyx folder under Program Files.
+const UPLOADS: [(&str, &str); 3] = [
+    (BOOTSTRAP_NAME, BOOTSTRAP_STAGED_PATH),
+    (REFRESH_NAME, ".bombyx-staging/refresh.ps1"),
+    (HOOK_NAME, ".bombyx-staging/hook.ps1"),
+];
 
 /// Where the deploy key is staged, relative to the login home for
 /// the reason [`BOOTSTRAP_STAGED_PATH`] gives. [`ACCOUNT`] places it
@@ -127,17 +153,26 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
             name = ruby_string(name),
         );
     }
+    let mut uploads = String::new();
+    for (name, staged) in UPLOADS {
+        let _ = write!(
+            uploads,
+            "  config.vm.provision \"file\",
+    source: File.expand_path({name}, __dir__),
+    destination: {staged}
+",
+            name = ruby_string(name),
+            staged = ruby_string(staged),
+        );
+    }
     // The last entry's comma is legal Ruby, so none is trimmed.
     format!(
-        "  # bootstrap.ps1 travels as a plain upload, because the shell
-  # provisioner below runs account.ps1. It lands in the staging
-  # directory of the account vagrant logs in as, and account.ps1
-  # moves it on. The path is relative because vagrant expands no
-  # `~` on a Windows guest.
-  config.vm.provision \"file\",
-    source: File.expand_path({bootstrap}, __dir__),
-    destination: {staged}
-
+        "  # bootstrap.ps1, refresh.ps1 and hook.ps1 travel as plain
+  # uploads, because the shell provisioner below runs account.ps1.
+  # They land in the staging directory of the account vagrant logs
+  # in as, and account.ps1 moves them on. The paths are relative
+  # because vagrant expands no `~` on a Windows guest.
+{uploads}
 {deploy_key}{env_file}{credential}  config.vm.provision \"shell\",
     path: {account},
     # As the account vagrant logs in as, an administrator:
@@ -154,8 +189,6 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     env: {{
 {env}    }}
 ",
-        bootstrap = ruby_string(BOOTSTRAP_NAME),
-        staged = ruby_string(BOOTSTRAP_STAGED_PATH),
         account = ruby_string(ACCOUNT_NAME),
         deploy_key = deploy_key_block(
             source.deploy_key.as_ref(),
@@ -221,9 +254,43 @@ mod tests {
         }
     }
 
-    /// Passes every Windows guest script -- the two provisioning
-    /// scripts and `bombyx shell`'s -- through Windows PowerShell's
-    /// own parser, so a syntax error fails CI's Windows job rather
+    #[test]
+    fn account_ps1_installs_the_helpers_where_the_refresh_calls_them() {
+        // account.ps1 moves each helper from the staging directory into
+        // the bombyx folder under Program Files; refresh-call.ps1 names
+        // refresh.ps1 there, and refresh.ps1 finds hook.ps1 beside
+        // itself. A name that drifts in one file leaves the refresh
+        // calling a script that is not there.
+        use crate::remote::windows::{HELPER_CALL, REFRESH_CALL};
+        for text in [
+            "$InstallDir = Join-Path $env:ProgramFiles 'bombyx'",
+            "Join-Path $Staging 'refresh.ps1'",
+            "Join-Path $Staging 'hook.ps1'",
+            "Join-Path $InstallDir 'refresh.ps1'",
+            "Join-Path $InstallDir 'hook.ps1'",
+        ] {
+            assert!(ACCOUNT.contains(text), "{ACCOUNT_NAME}: {text}");
+        }
+        assert!(
+            REFRESH_CALL
+                .contains("Join-Path $env:ProgramFiles 'bombyx\\refresh.ps1'"),
+            "refresh-call.ps1"
+        );
+        assert!(
+            REFRESH.contains("Join-Path $PSScriptRoot 'hook.ps1'"),
+            "{REFRESH_NAME}"
+        );
+        // The call's version and the helper's must agree, or every
+        // refresh would be refused as coming from another bombyx.
+        assert!(
+            REFRESH.contains(&format!("$Supported = {HELPER_CALL}\n")),
+            "{REFRESH_NAME}: $Supported"
+        );
+    }
+
+    /// Passes every Windows guest script -- the provisioning
+    /// scripts, the refresh helpers, and the calls `bombyx shell` and
+    /// the refresh send -- through Windows PowerShell's own parser, so a syntax error fails CI's Windows job rather
     /// than a guest's provisioning. Windows only, because the parser
     /// ships with Windows PowerShell. It checks syntax, not
     /// behaviour: a real `up` or `shell` against a Windows guest is
@@ -239,6 +306,9 @@ mod tests {
                 crate::remote::windows::SHELL_NAME,
                 crate::remote::windows::SHELL,
             ),
+            (REFRESH_NAME, REFRESH),
+            (HOOK_NAME, HOOK),
+            ("refresh-call.ps1", crate::remote::windows::REFRESH_CALL),
         ] {
             let path = dir.path().join(name);
             std::fs::write(&path, text).expect("the script is written");

@@ -427,11 +427,11 @@ checked_str_try_from!(
 /// `PathBuf` answers questions about the machine bombyx was
 /// compiled for -- on Windows `\` separates directories and
 /// `C:` names a drive, on Linux neither does. This path is
-/// resolved on the guest, which is always Linux, so a `PathBuf`
-/// would answer for the wrong computer, and answer differently
-/// depending on who ran `bombyx up`. Since bombyx only checks
-/// this value and passes it along, a checked string is the
-/// honest representation.
+/// resolved on the guest, which is Linux or Windows whatever the
+/// workstation is, so a `PathBuf` would answer for the wrong
+/// computer, and answer differently depending on who ran
+/// `bombyx up`. Since bombyx only checks this value and passes it
+/// along, a checked string is the honest representation.
 ///
 /// (`std::os::unix` cannot stand in: those modules exist only
 /// when compiling *for* Unix.)
@@ -465,15 +465,10 @@ checked_str_try_from!(
 
 impl ScriptPath {
     /// Whether the path names a `.ps1` file, the only kind a
-    /// Windows guest runs.
-    ///
-    /// Windows matches an extension without regard to case, so
-    /// `Setup.PS1` counts. A file named `.ps1` alone does not: it
-    /// has no name in front of the extension.
+    /// Windows guest runs; `guards::is_powershell_file` holds the rule.
     #[must_use]
     pub(crate) fn is_powershell(&self) -> bool {
-        let file = self.0.rsplit(['/', '\\']).next().unwrap_or_default();
-        file.len() > ".ps1".len() && file.to_ascii_lowercase().ends_with(".ps1")
+        guards::is_powershell_file(&self.0)
     }
 }
 

@@ -22,6 +22,17 @@ pub(super) fn is_remote_path_char(c: char) -> bool {
 }
 
 /// Requires a value that is not blank.
+/// Whether `path`, a path on the guest, names a `.ps1` file, the only
+/// kind `powershell -File` runs.
+///
+/// Windows matches an extension without regard to case, so
+/// `Setup.PS1` counts. A file named `.ps1` alone does not: it has no
+/// name in front of the extension.
+pub(super) fn is_powershell_file(path: &str) -> bool {
+    let file = path.rsplit(['/', '\\']).next().unwrap_or_default();
+    file.len() > ".ps1".len() && file.to_ascii_lowercase().ends_with(".ps1")
+}
+
 pub(super) fn check_not_empty(
     field: &'static str,
     value: &str,

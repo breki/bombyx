@@ -219,12 +219,13 @@ memory = "8GB"
 # the box's built-in accounts, and its `[env]` names are compared
 # without regard to case (see the `[env]` table below). A
 # `deploy_key`, an `env_file` and a `repo_token` are placed in a
-# Windows guest when it is provisioned, but not refreshed while it
-# runs: `bombyx provision` rewrites them, and GitHub issue #137 adds
-# the refresh. The `secrets_refreshed` hook is refused for a Windows
-# project until then. Use the box built from Microsoft's ISO by the
-# recipe in boxes/windows-server-2025/, added as
-# `bombyx/windows-server-2025`; docs/windows-guest-box.md says how.
+# Windows guest when it is provisioned, and `up` and `shell` refresh
+# a running one, as on Linux. A Windows project's `secrets_refreshed`
+# hook must be a `.ps1` file, at most 200 characters, because Windows
+# refuses a path over 260 by default. Use the box built from
+# Microsoft's ISO by the recipe in boxes/windows-server-2025/, added
+# as `bombyx/windows-server-2025`; docs/windows-guest-box.md says
+# how.
 # That box has no git: the `box` rule above that a box has git is
 # for a Linux guest, and a Windows guest's provisioning installs
 # git.

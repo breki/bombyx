@@ -254,6 +254,14 @@ The box is an evaluation, licensed for testing, not for routine use.
   for `vagrant ssh -c 'exit 3' -- -t` and for the loopback login
   inside it. Without a terminal the status comes back. So
   `bombyx shell` on a Windows guest always exits 0.
+- **Windows PowerShell 5.1 passes `""` for `$null`** to a .NET
+  method's `string` parameter, so `[IO.File]::Replace` refuses its
+  backup path as "not of a legal form". `refresh.ps1` passes
+  `[NullString]::Value` instead.
+- **`ssh.exe` joins its command's arguments with spaces**, dropping
+  the quotes PowerShell put around one, so a path with a space
+  reaches the far side split. `refresh.ps1` sends the agent's side
+  as one `-EncodedCommand` instead.
 - **vagrant expands no `~` on a Windows guest**, so an upload's
   destination is relative to the login home.
 - **The default `/vagrant` synced folder fails** on a Windows guest,

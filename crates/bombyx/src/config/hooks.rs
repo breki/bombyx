@@ -53,8 +53,8 @@ pub struct Hooks {
 /// guest.
 ///
 /// A checked string rather than a `PathBuf` for the reason
-/// [`super::ScriptPath`] gives: the guest resolves it, and the
-/// guest is always Linux.
+/// [`super::ScriptPath`] gives: the guest resolves it, not the
+/// machine bombyx runs on.
 ///
 /// **Its own type rather than a [`super::ScriptPath`]**, although
 /// the containment rule is the same one (`guards::check_inside_clone`).
@@ -74,6 +74,14 @@ pub struct HookPath(String);
 impl HookPath {
     /// The key a refusal names.
     pub const FIELD: &'static str = "secrets_refreshed";
+
+    /// Whether the path names a `.ps1` file, the only kind the
+    /// Windows hook runner starts; `guards::is_powershell_file` holds
+    /// the rule.
+    #[must_use]
+    pub(crate) fn is_powershell(&self) -> bool {
+        guards::is_powershell_file(&self.0)
+    }
 }
 
 checked_str_parse!(
