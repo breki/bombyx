@@ -109,12 +109,15 @@ bombyx up myproject   # or: bombyx shell myproject
 Both commands write the file over its copy in the guest,
 `~/.bombyx-env` in the agent's home: `shell` before the shell
 opens, and `up` once the VM is up. When the config names a
-`repo_token`, they rewrite the git credential built from it too.
-Nothing is fetched or checked out, so the work in the guest's
-clone is not touched. `up` on a running VM does only this. When a
-rewrite fails, `up` exits non-zero, and `shell` warns and opens
-the shell anyway. A `shell` that cannot read your `env_file` on
-the workstation, or unlock your `vault`, also warns and opens.
+`repo_token`, they rewrite the git credential built from it too,
+and when it names a deploy key, the key at
+`~/.ssh/bombyx-deploy-key`. So a key you rotate reaches the guest
+the same way, without a provision. Nothing is fetched or checked
+out, so the work in the guest's clone is not touched. `up` on a
+running VM does only this. When a rewrite fails, `up` exits
+non-zero, and `shell` warns and opens the shell anyway. A `shell`
+that cannot read your `env_file` on the workstation, or unlock
+your `vault`, also warns and opens.
 
 A Windows guest is refreshed the same way. There the refresh calls
 `refresh.ps1`, which provisioning installs, so a Windows VM
@@ -130,7 +133,7 @@ host for the length of the boot, as every boot does, and refreshes
 afterwards. [trust-boundary.md](trust-boundary.md) describes both
 routes.
 
-Only those two copies change:
+Only those copies change:
 
 - **A copy your provisioning script made keeps the old values**,
   until the step that made it runs again. Put the copy in a script

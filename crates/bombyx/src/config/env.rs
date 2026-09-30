@@ -17,8 +17,8 @@
 //! the two carry different rules. A name becomes a shell
 //! variable in the guest, so it has to be spellable as one. A
 //! value is written into the generated Vagrantfile as a Ruby
-//! string, which is the rule `box`, `repo`, `ref`, `script` and
-//! `deploy_key` already carry.
+//! string, which is the rule `box`, `repo`, `ref` and `script`
+//! already carry.
 //!
 //! [`super::RepoUrl`] explains the newtype pattern in full;
 //! read that one first.

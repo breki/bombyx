@@ -93,6 +93,10 @@ try {
     $stdin = [Console]::OpenStandardInput()
     $buffer = New-Object IO.MemoryStream
     $stdin.CopyTo($buffer)
+    # The key lives in .ssh, which a guest provisioned before its
+    # config named a key does not have.
+    $dir = Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
     Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
     [IO.File]::WriteAllBytes($new, [byte[]]@())
     Protect $new $sid
@@ -107,6 +111,13 @@ try {
         [IO.File]::Move($new, $target)
     }
     Protect $target $sid
+    # The agent owns the file, as account.ps1's Protect makes it at
+    # provisioning. The login account wrote it, and Windows' ssh
+    # refuses a private key another account owns.
+    $out = & icacls.exe $target /setowner "*$sid" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "could not make $target the agent's: $out"
+    }
 } catch {
     Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
     Fail "could not write $target in the guest: $($_.Exception.Message)" 1

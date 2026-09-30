@@ -25,8 +25,7 @@
 use std::collections::BTreeMap;
 
 use crate::config::{
-    Config, CpuMode, DeployKeyPath, Disk, EnvName, EnvValue, Guest, Provider,
-    Staged,
+    Config, CpuMode, Disk, EnvName, EnvValue, Guest, Provider, Staged,
 };
 use crate::hostkeys;
 
@@ -124,14 +123,12 @@ const BOOTSTRAP_STAGED_PATH: &str = concat!(staging_dir!(), "/bootstrap.sh");
 /// **What this costs** holds what that exposes.
 const DEPLOY_KEY_STAGED_PATH: &str = concat!(staging_dir!(), "/deploy-key");
 
-/// Environment variable telling the guest that the operator's
-/// config named a `deploy_key`.
+/// Environment variable telling the guest that a deploy key is
+/// being staged for it.
 ///
-/// This flag reports the config; [`ENV_FILE_PRESENT_ENV`] and
-/// [`CREDENTIAL_PRESENT_ENV`] report what bombyx staged. The
-/// key never passes through bombyx: it is already on the VM
-/// host and vagrant uploads it, so there is nothing to stage
-/// and nothing the two answers could disagree about.
+/// Like [`ENV_FILE_PRESENT_ENV`] and [`CREDENTIAL_PRESENT_ENV`],
+/// it reports what bombyx staged, which [`render`] holds to the
+/// config.
 ///
 /// [`render`] sets it in the shell provisioner's `env:` block
 /// on every render. [`ACCOUNT`] branches on it to decide whether
@@ -239,6 +236,13 @@ const ENV_FILE_PRESENT_ENV: &str = "BOMBYX_ENV_FILE_PRESENT";
 /// clone that needs it.
 pub(crate) const CREDENTIAL_FILE_NAME: &str = "bombyx.git-credentials";
 
+/// The deploy key's name in the project directory on the VM host.
+///
+/// A third file travelling the same way as [`ENV_FILE_NAME`]: it
+/// comes off the workstation, reaches the VM host on a pipe, and
+/// `crate::plan` removes it again when the `vagrant` run ends.
+pub(crate) const DEPLOY_KEY_FILE_NAME: &str = "bombyx.deploy-key";
+
 /// Where the git credential file is staged.
 ///
 /// [`ACCOUNT`] writes it on to `~/.bombyx-git-credentials` in the
@@ -266,6 +270,8 @@ pub enum GuestHomeFile {
     /// The git credential built from `repo_token`,
     /// `~/.bombyx-git-credentials`.
     Credential,
+    /// The deploy key, `~/.ssh/bombyx-deploy-key`.
+    DeployKey,
 }
 
 impl GuestHomeFile {
@@ -278,6 +284,7 @@ impl GuestHomeFile {
         match self {
             Self::Secrets => ".bombyx-env",
             Self::Credential => ".bombyx-git-credentials",
+            Self::DeployKey => ".ssh/bombyx-deploy-key",
         }
     }
 
@@ -302,7 +309,7 @@ impl GuestHomeFile {
 /// the scripts' spelling.
 #[cfg(test)]
 const GUEST_HOME_FILES: [&str; 3] = [
-    ".ssh/bombyx-deploy-key",
+    GuestHomeFile::DeployKey.path(),
     GuestHomeFile::Secrets.path(),
     GuestHomeFile::Credential.path(),
 ];
@@ -598,6 +605,12 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
         "a config naming a repo_token must be rendered against \
          the credential built from it"
     );
+    assert_eq!(
+        cfg.source.names_deploy_key(),
+        staged.deploy_key().is_some(),
+        "a config naming a deploy_key must be rendered against \
+         the key read from it"
+    );
 }
 
 /// Builds the text of the Vagrantfile for `cfg`.
@@ -626,9 +639,9 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
 /// a real machine**. If you are the first person to try it,
 /// expect to fix something. See [`Provider`].
 ///
-/// `staged` decides whether the guest is told a secrets file and
-/// a git credential are coming, and it is the same value
-/// `crate::plan` writes those two files from. Reading
+/// `staged` decides whether the guest is told a secrets file, a
+/// git credential and a deploy key are coming, and it is the same
+/// value `crate::plan` writes those three files from. Reading
 /// `cfg.source.env_file` here instead would let the rendered
 /// Vagrantfile announce a file the plan never stages, and the
 /// guest would refuse minutes after booting.
@@ -636,9 +649,9 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
 /// # Panics
 ///
 /// Panics when `staged` did not come from `cfg`: when the
-/// config names an `env_file`, a `vault` or a `repo_token` and
-/// `staged` is missing the matching half, or when `staged`
-/// carries a half the config names nowhere.
+/// config names an `env_file`, a `vault`, a `repo_token` or a
+/// deploy key and `staged` is missing the matching part, or when
+/// `staged` carries a part the config names nowhere.
 /// [`Config::read_staged`](crate::config::Config::read_staged)
 /// builds a pair that cannot fail this.
 #[must_use]
@@ -788,7 +801,7 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
     }}
 ",
         deploy_key = deploy_key_block(
-            source.deploy_key.as_ref(),
+            staged.deploy_key().is_some(),
             DEPLOY_KEY_STAGED_PATH
         ),
         env_file =
@@ -802,7 +815,7 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
         script_env = SCRIPT_ENV,
         clone_project_env = PROJECT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
-        deploy_key_env = deploy_key_env(source.deploy_key.as_ref()),
+        deploy_key_env = if staged.deploy_key().is_some() { "1" } else { "0" },
         env_file_env_name = ENV_FILE_PRESENT_ENV,
         env_file_env = if staged.secrets().is_some() { "1" } else { "0" },
         credential_env_name = CREDENTIAL_PRESENT_ENV,
@@ -945,14 +958,6 @@ end
 "#
 }
 
-/// What [`DEPLOY_KEY_ENV`] is set to for `key`.
-///
-/// `"1"` when a key is configured and `"0"` when none is.
-/// [`DEPLOY_KEY_ENV`] says why it is never simply left out.
-fn deploy_key_env(key: Option<&DeployKeyPath>) -> &'static str {
-    if key.is_some() { "1" } else { "0" }
-}
-
 /// The libvirt disk-size line for the provider block, or nothing.
 ///
 /// `v.machine_virtual_size` sizes the disk in whole GiB. It is a
@@ -989,61 +994,63 @@ fn cpu_mode_setting(provider: Provider, mode: Option<CpuMode>) -> String {
     )
 }
 
+/// The Ruby that uploads one file bombyx staged beside the
+/// Vagrantfile.
+///
+/// `comment` is the block's own `#` lines, `var` the Ruby variable
+/// holding the path, `name` the file's name in the project
+/// directory and `dest` where it lands in the guest.
+///
+/// **The upload is conditional**, and that is not the same as
+/// tolerating a missing file. `crate::plan` writes the file just
+/// before the `vagrant` step that reads this, so a boot finds it.
+/// What the condition protects is every *other* verb:
+/// `vagrant destroy` loads this file too, and by then
+/// `crate::plan` has removed the staged copy, so a `raise` would
+/// leave a directory no bombyx command could tear down.
+/// `crate::remote::destroy_vm_if_present` holds that argument.
+///
+/// The path is resolved against the Vagrantfile's own directory
+/// rather than the process's. Vagrant runs the file through
+/// `Kernel.load`, so `__dir__` names that directory.
+fn staged_upload(comment: &str, var: &str, name: &str, dest: &str) -> String {
+    format!(
+        "{comment}  {var} = File.expand_path({name}, __dir__)
+  if File.exist?({var})
+    config.vm.provision \"file\",
+      source: {var},
+      destination: {dest}
+  end
+
+",
+        name = ruby_string(name),
+        dest = ruby_string(dest),
+    )
+}
+
 /// The Ruby that uploads the deploy key, or nothing at all.
 ///
-/// An empty string when the config names no key, so a public
+/// An empty string when nothing was staged, so a public
 /// repository's Vagrantfile carries no upload block.
 ///
 /// [`render`] places this ahead of the shell provisioner.
 /// Vagrant runs provisioners in the order the file declares
 /// them, and [`ACCOUNT`] moves the staged key on before it hands
 /// over to [`BOOTSTRAP`].
-///
-/// The upload is conditional, and that is not the same as
-/// tolerating a missing key. `crate::remote::require_file`
-/// refuses the run before this file is even written, so a boot
-/// never reaches an absent key.
-///
-/// What the condition protects is every *other* verb.
-/// `vagrant destroy` loads this file too, so a `raise` here
-/// would leave a directory that no bombyx command could tear
-/// down: teardown stops at the failing destroy and never
-/// reaches the removal that follows it.
-/// `crate::remote::destroy_vm_if_present` holds that argument.
-///
-/// One call in the block can still fail, and it is worth
-/// knowing because it fails on every verb. `File.expand_path`
-/// raises `ArgumentError: non-absolute home` when `HOME` holds
-/// an empty or relative value -- measured on ruby 3.2.3, where
-/// an *unset* `HOME` falls back to the passwd entry and is
-/// fine. Only a `~/`-anchored key reaches it. That is a broken
-/// environment on the VM host rather than anything a config can
-/// cause, so it is recorded rather than guarded.
-fn deploy_key_block(key: Option<&DeployKeyPath>, dest: &str) -> String {
-    let Some(key) = key else {
+fn deploy_key_block(staged: bool, dest: &str) -> String {
+    if !staged {
         return String::new();
-    };
-    format!(
+    }
+    staged_upload(
         "  # The credential the guest clones a private repository
-  # with. bombyx never opens the file: vagrant reads it here on
-  # the VM host and uploads it, so the workstation never holds
-  # it. docs/trust-boundary.md says what keeping it inside the
-  # guest costs.
-  #
-  # The upload is conditional so that `vagrant destroy` can
-  # still load this file after the key has gone. bombyx refuses
-  # a boot with no key of its own accord, before writing this
-  # file at all.
-  bombyx_deploy_key = File.expand_path({key})
-  if File.exist?(bombyx_deploy_key)
-    config.vm.provision \"file\",
-      source: bombyx_deploy_key,
-      destination: {dest}
-  end
-
+  # with, carried from the workstation. bombyx wrote this file
+  # beside the Vagrantfile a moment ago and removes it again when
+  # vagrant finishes. docs/trust-boundary.md says what keeping
+  # it inside the guest costs.
 ",
-        key = ruby_string(key.as_str()),
-        dest = ruby_string(dest),
+        "bombyx_deploy_key",
+        DEPLOY_KEY_FILE_NAME,
+        dest,
     )
 }
 
@@ -1056,21 +1063,11 @@ fn deploy_key_block(key: Option<&DeployKeyPath>, dest: &str) -> String {
 ///
 /// [`render`] places this ahead of the shell provisioner, so
 /// [`BOOTSTRAP`] finds the file already there.
-///
-/// The upload is conditional for the reason
-/// [`deploy_key_block`] gives: `vagrant destroy` loads this file
-/// too, and by then `crate::plan` has removed the secrets file
-/// from the VM host, so a `raise` would strand a directory no
-/// bombyx command could clear.
-///
-/// The `source:` is resolved against the Vagrantfile's own
-/// directory rather than the process's. Vagrant runs the file
-/// through `Kernel.load`, so `__dir__` names that directory.
 fn env_file_block(staged: bool, dest: &str) -> String {
     if !staged {
         return String::new();
     }
-    format!(
+    staged_upload(
         "  # The project's secrets, carried from the workstation.
   # bombyx wrote this file beside the Vagrantfile a moment ago
   # and removes it again when vagrant finishes. A run somebody
@@ -1080,27 +1077,15 @@ fn env_file_block(staged: bool, dest: &str) -> String {
   #
   # It lands in the staging directory of the account vagrant logs
   # in as, and the account script moves it on.
-  bombyx_env_file = File.expand_path({name}, __dir__)
-  if File.exist?(bombyx_env_file)
-    config.vm.provision \"file\",
-      source: bombyx_env_file,
-      destination: {dest}
-  end
-
 ",
-        name = ruby_string(ENV_FILE_NAME),
-        dest = ruby_string(dest),
+        "bombyx_env_file",
+        ENV_FILE_NAME,
+        dest,
     )
 }
 
 /// The Ruby that uploads the git credential file, or nothing at
 /// all.
-///
-/// The same shape as [`env_file_block`], and conditional for
-/// the same reason: `vagrant destroy` loads this file too, and
-/// by then `crate::plan` has removed the staged copy from the
-/// VM host, so a `raise` would strand a directory no bombyx
-/// command could clear.
 ///
 /// [`render`] places this ahead of the shell provisioner, so
 /// [`BOOTSTRAP`] finds the file already there -- which it must,
@@ -1111,21 +1096,15 @@ fn credential_block(staged: bool, dest: &str) -> String {
     if !staged {
         return String::new();
     }
-    format!(
+    staged_upload(
         "  # The credential git clones with, carried from the
   # workstation. bombyx built it from one variable inside the
   # secrets file and removes the staged copy again when vagrant
   # finishes.
-  bombyx_git_cred = File.expand_path({name}, __dir__)
-  if File.exist?(bombyx_git_cred)
-    config.vm.provision \"file\",
-      source: bombyx_git_cred,
-      destination: {dest}
-  end
-
 ",
-        name = ruby_string(CREDENTIAL_FILE_NAME),
-        dest = ruby_string(dest),
+        "bombyx_git_cred",
+        CREDENTIAL_FILE_NAME,
+        dest,
     )
 }
 
@@ -1137,15 +1116,16 @@ fn credential_block(staged: bool, dest: &str) -> String {
 /// counterparts, `account.ps1` and `bootstrap.ps1`, for a Windows
 /// guest.
 ///
-/// Not every file that lands there. A `staged` carrying secrets
-/// sends one more and one carrying a credential sends another,
-/// and neither is generated here: the first comes off the
-/// operator's workstation and the second is built from a value
-/// inside it. This module holds both names, `ENV_FILE_NAME` and
-/// `CREDENTIAL_FILE_NAME`, and `crate::plan` writes both. Not
-/// rustdoc links: those constants are crate-private, and a
-/// public page may not link to one. `crate::remote::write`'s
-/// own header lists all five.
+/// Not every file that lands there. A `staged` carrying secrets,
+/// a credential or a deploy key sends one more file for each, and
+/// none is generated here: the secrets and the key come off the
+/// operator's workstation, and the credential is built from a
+/// value inside the secrets. This module holds the three names,
+/// `ENV_FILE_NAME`, `CREDENTIAL_FILE_NAME` and
+/// `DEPLOY_KEY_FILE_NAME`, and `crate::plan` writes all three. Not
+/// rustdoc links: those constants are crate-private, and a public
+/// page may not link to one. `crate::remote::write`'s own header
+/// lists every file.
 ///
 /// The list exists once, here, and everything else reads it:
 /// `plan` to build the write commands, and the tests to check
@@ -1751,14 +1731,29 @@ mod tests {
             .find("config.vm.provision \"shell\"")
             .expect("the shell provisioner must be rendered");
         assert!(upload < shell, "the upload must come first:\n{out}");
+        // The source is the copy bombyx staged beside the
+        // Vagrantfile, never a path of the operator's: the key
+        // lives on the workstation, so the VM host has no path to
+        // name.
         assert!(
-            out.contains(&format!("File.expand_path(\"{KEY}\")")),
+            out.contains(&format!(
+                "File.expand_path(\"{DEPLOY_KEY_FILE_NAME}\", __dir__)"
+            )),
             "{out}"
         );
+        assert!(!out.contains(KEY), "the operator's path rendered:\n{out}");
         assert!(
             out.contains(&format!("destination: \"{DEPLOY_KEY_STAGED_PATH}\"")),
             "{out}"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "a config naming a deploy_key")]
+    fn a_config_naming_a_key_cannot_be_rendered_without_it() {
+        // Announcing `0` would send the guest down the branch
+        // that deletes the key an earlier provision placed.
+        let _ = render(&cfg_with_key(), &Staged::default());
     }
 
     #[test]
@@ -1769,8 +1764,9 @@ mod tests {
         // failure this repo has had before, and
         // `remote::destroy_vm_if_present` records.
         //
-        // The loud failure lives in the plan instead:
-        // `plan::tests::a_deploy_key_is_checked_before_anything_is_created`.
+        // The loud failure lives on the workstation instead:
+        // `Config::read_staged` refuses a key it cannot read,
+        // before any command runs.
         let out = rendered_for(&cfg_with_key());
         assert!(out.contains("if File.exist?"), "{out}");
         assert!(!out.contains("raise"), "a raise breaks destroy:\n{out}");

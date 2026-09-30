@@ -13,10 +13,11 @@
 //! joins them with a pipe it never reads. The script reads the
 //! password from the terminal and writes it into that pipe first.
 //! After that it forwards what bombyx writes, and bombyx writes
-//! one `show` command per entry. So the database is unlocked once
-//! per run, and the only secrets bombyx sees are the entries the
-//! config names. `session` starts the two processes and says why
-//! they are two.
+//! one `show` command per entry, and one `attachment-export` for
+//! the deploy key when the config keeps it here. So the database is
+//! unlocked once per run, and the only secrets bombyx sees are the
+//! entries and the attachment the config names. `session` starts
+//! the two processes and says why they are two.
 //!
 //! Three parts live here. The value types check the config. The
 //! protocol -- [`drive`] and the helpers it calls -- speaks to
@@ -31,6 +32,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
+use super::deploy_key::{DeployKey, NotAKey};
 use super::env_file::Secrets;
 use super::error::FieldError;
 use super::guards;
@@ -54,7 +56,13 @@ pub struct Vault {
     ///
     /// A `BTreeMap` so the secrets come out in the same order on
     /// every run, whatever order the config file lists them in.
+    ///
+    /// Empty only when [`Vault::deploy_key`] is set: a vault may
+    /// hold the key and no secrets.
     pub entries: BTreeMap<SecretName, EntryPath>,
+    /// The attachment holding the deploy key, when the key comes
+    /// from the vault rather than from the file `deploy_key` names.
+    pub deploy_key: Option<VaultKey>,
 }
 
 /// `[source.vault]` as TOML spells it.
@@ -62,27 +70,30 @@ pub struct Vault {
 #[serde(deny_unknown_fields)]
 struct VaultFields {
     database: VaultDatabase,
+    #[serde(default)]
     entries: BTreeMap<SecretName, EntryPath>,
+    deploy_key: Option<VaultKey>,
 }
 
 impl TryFrom<VaultFields> for Vault {
     type Error = FieldError;
 
-    /// Refuses a vault naming no entry. It would unlock the
-    /// database, read nothing and send an empty secrets file,
-    /// which is the outcome of naming no vault at all, reached
-    /// by a password prompt.
+    /// Refuses a vault naming neither an entry nor a key. It
+    /// would unlock the database and read nothing, which is the
+    /// outcome of naming no vault at all, reached by a password
+    /// prompt.
     fn try_from(raw: VaultFields) -> Result<Self, Self::Error> {
-        if raw.entries.is_empty() {
+        if raw.entries.is_empty() && raw.deploy_key.is_none() {
             return Err(FieldError::invalid(
                 EntryPath::FIELD,
                 "names no entry; list at least one variable and \
-                 the entry that holds it",
+                 the entry that holds it, or name a `deploy_key`",
             ));
         }
         Ok(Self {
             database: raw.database,
             entries: raw.entries,
+            deploy_key: raw.deploy_key,
         })
     }
 }
@@ -220,13 +231,107 @@ checked_str_try_from!(
 
 /// Every rule a `vault.entries` value must pass.
 fn check_entry(value: &str) -> Result<(), FieldError> {
-    guards::check_not_empty(EntryPath::FIELD, value)?;
+    check_cli_argument(EntryPath::FIELD, value)
+}
+
+/// Every rule a value bombyx quotes into a `keepassxc-cli` command
+/// line must pass, reported against the config key `field`.
+///
+/// [`EntryPath`] holds why each character is refused.
+fn check_cli_argument(
+    field: &'static str,
+    value: &str,
+) -> Result<(), FieldError> {
+    guards::check_not_empty(field, value)?;
     guards::check_charset(
-        EntryPath::FIELD,
+        field,
         value,
         |c| !c.is_control() && c != '"' && c != '\\',
         "characters other than `\"`, `\\` and control characters",
     )
+}
+
+/// `[source.vault.deploy_key]`: the entry and the attachment on it
+/// that hold the private key.
+///
+/// An attachment rather than the entry's `Password`, because a key
+/// spans lines and a `NAME=value` line cannot hold one.
+///
+/// The entry path carries [`EntryPath`]'s rules, reported against
+/// this table's own key so the message names the line at fault.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "VaultKeyFields")]
+pub struct VaultKey {
+    /// The entry the attachment hangs on.
+    pub entry: EntryPath,
+    /// The attachment's name.
+    pub attachment: AttachmentName,
+}
+
+/// `[source.vault.deploy_key]` as TOML spells it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VaultKeyFields {
+    entry: String,
+    attachment: AttachmentName,
+}
+
+impl VaultKey {
+    /// The config key the entry path is read from.
+    pub const ENTRY_FIELD: &'static str = "vault.deploy_key.entry";
+}
+
+impl TryFrom<VaultKeyFields> for VaultKey {
+    type Error = FieldError;
+
+    fn try_from(raw: VaultKeyFields) -> Result<Self, Self::Error> {
+        check_cli_argument(Self::ENTRY_FIELD, &raw.entry)?;
+        Ok(Self {
+            entry: EntryPath(raw.entry),
+            attachment: raw.attachment,
+        })
+    }
+}
+
+/// The name of an attachment on a vault entry, such as
+/// `id_ed25519`.
+///
+/// It goes into the same `keepassxc-cli` command line an
+/// [`EntryPath`] does, quoted the same way, so it carries the same
+/// rules.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct AttachmentName(String);
+
+impl AttachmentName {
+    /// The config key this type reads.
+    pub const FIELD: &'static str = "vault.deploy_key.attachment";
+
+    /// Checks `raw` and wraps it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError::Empty`] when `raw` is blank, and
+    /// [`FieldError::Invalid`] when it holds a character the
+    /// `keepassxc-cli` shell would read as syntax.
+    pub fn parse(raw: &str) -> Result<Self, FieldError> {
+        check_attachment(raw)?;
+        Ok(Self(raw.to_owned()))
+    }
+}
+
+checked_str_newtype!(AttachmentName, "The attachment name, as written.");
+
+checked_str_try_from!(
+    /// What serde calls while the config parses.
+    AttachmentName,
+    FieldError,
+    check_attachment
+);
+
+/// Every rule a `vault.deploy_key.attachment` value must pass.
+fn check_attachment(value: &str) -> Result<(), FieldError> {
+    check_cli_argument(AttachmentName::FIELD, value)
 }
 
 /// Why bombyx could not read the secrets out of the vault.
@@ -347,6 +452,37 @@ pub enum VaultError {
         entry: EntryPath,
     },
 
+    /// The attachment printed nothing.
+    ///
+    /// `keepassxc-cli` prints nothing on its standard output for a
+    /// missing entry, a missing attachment and an empty one alike,
+    /// so bombyx cannot say which. Its own message on the terminal
+    /// does.
+    #[error(
+        "\"{entry}\" gave no attachment `{attachment}`: the entry or \
+         the attachment is missing, or the attachment is empty; \
+         `keepassxc-cli` said which above"
+    )]
+    NoAttachment {
+        /// The entry path.
+        entry: EntryPath,
+        /// The attachment name.
+        attachment: AttachmentName,
+    },
+
+    /// The attachment does not hold a private key.
+    #[error(
+        "the attachment `{attachment}` on \"{entry}\" does not start \
+         with a `-----BEGIN ... PRIVATE KEY-----` line; it has to be \
+         the private half of the key pair, not the `.pub` file"
+    )]
+    NotAKey {
+        /// The entry path.
+        entry: EntryPath,
+        /// The attachment name.
+        attachment: AttachmentName,
+    },
+
     /// The entry's password spans more than one line, which a
     /// `NAME=value` line cannot hold.
     #[error(
@@ -380,13 +516,14 @@ impl Vault {
     pub const FIELD: &'static str = "vault";
 
     /// Unlocks the database once and reads every entry the
-    /// config names, as a secrets file.
+    /// config names, as a secrets file, and the deploy key when the
+    /// config names one here.
     ///
     /// # Errors
     ///
     /// Returns [`VaultError::Unsupported`] on Windows, and every
     /// other [`VaultError`] for the reason it names.
-    pub fn read<F>(&self, getenv: F) -> Result<Secrets, VaultError>
+    pub fn read<F>(&self, getenv: F) -> Result<VaultRead, VaultError>
     where
         F: Fn(&str) -> Option<String>,
     {
@@ -403,9 +540,50 @@ impl Vault {
         if let Err(source) = std::fs::File::open(&path) {
             return Err(VaultError::Unreadable { path, source });
         }
-        let values = session::read(&path, &self.entries)?;
-        env_text(&values)
+        let driven =
+            session::read(&path, &self.entries, self.deploy_key.as_ref())?;
+        // No entries means no secrets file at all, rather than an
+        // empty one: the guest is then told none is coming.
+        let secrets = if self.entries.is_empty() {
+            None
+        } else {
+            Some(env_text(&driven.values)?)
+        };
+        let deploy_key = match (&self.deploy_key, driven.key) {
+            (Some(key), Some(bytes)) => Some(checked_key(key, bytes)?),
+            _ => None,
+        };
+        Ok(VaultRead {
+            secrets,
+            deploy_key,
+        })
     }
+}
+
+/// The key the attachment `key` names, once its bytes look like
+/// one.
+///
+/// # Errors
+///
+/// Returns [`VaultError::NotAKey`] naming the entry and the
+/// attachment when they do not.
+fn checked_key(
+    key: &VaultKey,
+    bytes: Vec<u8>,
+) -> Result<DeployKey, VaultError> {
+    DeployKey::from_bytes(bytes).map_err(|NotAKey| VaultError::NotAKey {
+        entry: key.entry.clone(),
+        attachment: key.attachment.clone(),
+    })
+}
+
+/// What one unlock of the vault supplied.
+#[derive(Debug)]
+pub struct VaultRead {
+    /// The secrets, or `None` when the config maps no entry.
+    pub secrets: Option<Secrets>,
+    /// The deploy key, when `vault.deploy_key` names one.
+    pub deploy_key: Option<DeployKey>,
 }
 
 /// What a session read: each variable, the entry it came from,
@@ -414,6 +592,28 @@ impl Vault {
 /// One list rather than values beside `entries`, so a value can
 /// never be written under a name it was not read for.
 type Values<'a> = Vec<(&'a SecretName, &'a EntryPath, Vec<u8>)>;
+
+/// Everything one session read: the entries' values, and the key
+/// attachment's bytes when one was asked for.
+struct Driven<'a> {
+    /// Each entry's value, as [`Values`] says.
+    values: Values<'a>,
+    /// The attachment's bytes, unchecked; `Vault::read` checks their
+    /// shape.
+    key: Option<Vec<u8>>,
+}
+
+/// Counts, not bytes: both halves hold secrets.
+impl std::fmt::Debug for Driven<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Driven({} values, key: {:?} bytes)",
+            self.values.len(),
+            self.key.as_ref().map(Vec::len)
+        )
+    }
+}
 
 /// The attribute bombyx reads from each entry.
 const ATTRIBUTE: &str = "Password";
@@ -425,6 +625,20 @@ const ATTRIBUTE: &str = "Password";
 /// starts with `-` is still a path.
 fn show_command(entry: &EntryPath) -> String {
     format!("show -s -a {ATTRIBUTE} -- \"{}\"\n", entry.as_str())
+}
+
+/// The line bombyx writes to read the key attachment.
+///
+/// `--stdout` prints the attachment's bytes as they are, with no
+/// newline added, and the shell's prompt follows them directly.
+/// Both arguments are quoted, which [`EntryPath`] and
+/// [`AttachmentName`] make safe.
+fn attachment_command(key: &VaultKey) -> String {
+    format!(
+        "attachment-export --stdout -- \"{}\" \"{}\"\n",
+        key.entry.as_str(),
+        key.attachment.as_str()
+    )
 }
 
 /// Reads until the bytes read so far end with `end`, and returns
@@ -582,7 +796,7 @@ impl Prompt {
 
 /// Speaks to an unlocked-or-unlocking `keepassxc-cli open`:
 /// waits for the first prompt, writes one `show` per entry, and
-/// collects each value.
+/// collects each value, then reads the attachment `key` names.
 ///
 /// The wait matters. `keepassxc-cli` buffers its standard input
 /// while it reads the password, so a command written before the
@@ -609,7 +823,8 @@ fn drive<'a, R: Read, W: Write>(
     inp: &mut W,
     database: &Path,
     entries: &'a BTreeMap<SecretName, EntryPath>,
-) -> Result<Values<'a>, VaultError> {
+    key: Option<&VaultKey>,
+) -> Result<Driven<'a>, VaultError> {
     let mut out = BufReader::new(out);
     let Some(mut first) = read_until_end(&mut out, b"> ")? else {
         return Err(VaultError::Unlock {
@@ -635,6 +850,26 @@ fn drive<'a, R: Read, W: Write>(
         })?;
         values.push((name, entry, value));
     }
+    // After the entries, so their replies are read before the one
+    // reply here that has no line ending to check.
+    let key = match key {
+        Some(key) => {
+            let command = attachment_command(key);
+            inp.write_all(command.as_bytes())?;
+            inp.flush()?;
+            prompt.read_echo(&mut out, &command)?;
+            let body = read_until_end(&mut out, &prompt.bytes)?
+                .ok_or(VaultError::Closed)?;
+            if body.is_empty() {
+                return Err(VaultError::NoAttachment {
+                    entry: key.entry.clone(),
+                    attachment: key.attachment.clone(),
+                });
+            }
+            Some(body)
+        }
+        None => None,
+    };
     inp.write_all(b"exit\n")?;
     inp.flush()?;
     prompt.read_echo(&mut out, "exit\n")?;
@@ -643,7 +878,7 @@ fn drive<'a, R: Read, W: Write>(
     if !tail.is_empty() {
         return Err(VaultError::Desync);
     }
-    Ok(values)
+    Ok(Driven { values, key })
 }
 
 /// The error for a program that could not be started.
@@ -663,15 +898,15 @@ fn spawn_error(program: &'static str, source: io::Error) -> VaultError {
 ///
 /// `drive`'s own error comes first, because it says what went
 /// wrong; a failed wait only says the cleanup failed too.
-fn finish(
-    driven: Result<Values<'_>, VaultError>,
+fn finish<T>(
+    driven: Result<T, VaultError>,
     waited: [io::Result<()>; 2],
-) -> Result<Values<'_>, VaultError> {
-    let values = driven?;
+) -> Result<T, VaultError> {
+    let driven = driven?;
     for wait in waited {
         wait?;
     }
-    Ok(values)
+    Ok(driven)
 }
 
 /// Writes the values out as `NAME=value` lines, in the order
@@ -779,6 +1014,16 @@ mod tests {
             .collect()
     }
 
+    /// [`drive`] over `out` with no key asked for, returning the
+    /// values alone.
+    fn drive_values<'a>(
+        out: &[u8],
+        inp: &mut Vec<u8>,
+        e: &'a BTreeMap<SecretName, EntryPath>,
+    ) -> Result<Values<'a>, VaultError> {
+        drive(out, inp, Path::new("/d/t.kdbx"), e, None).map(|d| d.values)
+    }
+
     /// Each variable a session read, with its value.
     fn named(values: &Values<'_>) -> Vec<(String, Vec<u8>)> {
         values
@@ -873,7 +1118,7 @@ mod tests {
             "exit\n",
         ]);
         let mut inp = Vec::new();
-        let values = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let values = drive_values(&out[..], &mut inp, &e)
             .expect("both entries are there");
         assert_eq!(
             named(&values),
@@ -894,8 +1139,7 @@ mod tests {
     fn drive_reports_a_stream_that_ends_before_the_prompt_as_unlock() {
         let e = entries(&[("G", "Git token")]);
         let mut inp = Vec::new();
-        let err = drive(&b""[..], &mut inp, Path::new("/d/t.kdbx"), &e)
-            .expect_err("no prompt");
+        let err = drive_values(&b""[..], &mut inp, &e).expect_err("no prompt");
         assert!(matches!(err, VaultError::Unlock { .. }), "{err:?}");
         assert!(inp.is_empty(), "nothing is written before the prompt");
     }
@@ -904,7 +1148,7 @@ mod tests {
     fn drive_reports_a_stream_that_ends_mid_session_as_closed() {
         let e = entries(&[("G", "Git token")]);
         let mut inp = Vec::new();
-        let err = drive(&b"t.kdbx> "[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let err = drive_values(&b"t.kdbx> "[..], &mut inp, &e)
             .expect_err("stops after the prompt");
         assert!(matches!(err, VaultError::Closed), "{err:?}");
     }
@@ -917,7 +1161,7 @@ mod tests {
             "exit\n",
         ]);
         let mut inp = Vec::new();
-        let err = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let err = drive_values(&out[..], &mut inp, &e)
             .expect_err("the cut reply has no closing newline");
         assert!(matches!(err, VaultError::Desync), "{err:?}");
     }
@@ -930,7 +1174,7 @@ mod tests {
         let out = b"My Vault> show -s -a Password -- \"Git token\"\n\
                     ghp_2\nMy Vault> exit\n";
         let mut inp = Vec::new();
-        let values = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let values = drive_values(&out[..], &mut inp, &e)
             .expect("the prompt is learned, not predicted");
         assert_eq!(named(&values), [("G".to_owned(), b"ghp_2".to_vec())]);
     }
@@ -943,7 +1187,7 @@ mod tests {
         let out = b"Work> Keys> show -s -a Password -- \"Git token\"\n\
                     ghp_2\nWork> Keys> exit\n";
         let mut inp = Vec::new();
-        let values = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let values = drive_values(&out[..], &mut inp, &e)
             .expect("the rest of the prompt is learned from the echo");
         assert_eq!(named(&values), [("G".to_owned(), b"ghp_2".to_vec())]);
     }
@@ -956,8 +1200,7 @@ mod tests {
         let e = entries(&[("G", "Git token")]);
         for out in [&b"t.kdbx> ghp_2\nt.kdbx> "[..], b"t.kdbx> t.kdbx> "] {
             let mut inp = Vec::new();
-            let err = drive(out, &mut inp, Path::new("/d/t.kdbx"), &e)
-                .expect_err("no echo");
+            let err = drive_values(out, &mut inp, &e).expect_err("no echo");
             assert!(matches!(err, VaultError::Desync), "{err:?}");
         }
     }
@@ -970,7 +1213,7 @@ mod tests {
             "exit\n",
         ]);
         let mut inp = Vec::new();
-        let values = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let values = drive_values(&out[..], &mut inp, &e)
             .expect("the echo is read by its length, not up to a prompt");
         assert_eq!(named(&values), [("G".to_owned(), b"ghp_2".to_vec())]);
     }
@@ -986,7 +1229,7 @@ mod tests {
             "exit\n",
         ]);
         let mut inp = Vec::new();
-        let err = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let err = drive_values(&out[..], &mut inp, &e)
             .expect_err("B's reply does not start with B's command");
         assert!(matches!(err, VaultError::Desync), "{err:?}");
     }
@@ -999,7 +1242,7 @@ mod tests {
             "exit\n",
         ]);
         let mut inp = Vec::new();
-        let err = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
+        let err = drive_values(&out[..], &mut inp, &e)
             .expect_err("the rest of A's password is still in the stream");
         assert!(matches!(err, VaultError::Desync), "{err:?}");
     }
@@ -1043,8 +1286,7 @@ mod tests {
         let e = entries(&[("G", "Nope")]);
         let out = transcript(&["show -s -a Password -- \"Nope\"\n"]);
         let mut inp = Vec::new();
-        let err = drive(&out[..], &mut inp, Path::new("/d/t.kdbx"), &e)
-            .expect_err("missing");
+        let err = drive_values(&out[..], &mut inp, &e).expect_err("missing");
         let msg = err.to_string();
         assert!(msg.contains('G') && msg.contains("Nope"), "{msg}");
     }
@@ -1129,8 +1371,9 @@ mod tests {
     fn a_session_reports_what_drive_said_before_a_failed_wait() {
         let e = entries(&[("A", "a")]);
         let failed = || Err(io::Error::other("wait failed"));
-        let err = finish(Err(VaultError::Desync), [failed(), failed()])
-            .expect_err("drive failed");
+        let err =
+            finish::<Values<'_>>(Err(VaultError::Desync), [failed(), failed()])
+                .expect_err("drive failed");
         assert!(matches!(err, VaultError::Desync), "{err:?}");
         let err = finish(Ok(paired(&e, &[b"v"])), [Ok(()), failed()])
             .expect_err("a wait failed");
@@ -1160,6 +1403,131 @@ mod tests {
         .expect("a vault table");
         let err = vault.read(|_| None).expect_err("mode 000");
         assert!(matches!(err, VaultError::Unreadable { .. }), "{err:?}");
+    }
+
+    /// The key table the tests below ask `drive` for.
+    fn key() -> VaultKey {
+        toml::from_str("entry = \"Git/p\"\nattachment = \"id key\"\n")
+            .expect("a key table")
+    }
+
+    #[test]
+    fn the_attachment_command_quotes_both_after_a_double_dash() {
+        assert_eq!(
+            attachment_command(&key()),
+            "attachment-export --stdout -- \"Git/p\" \"id key\"\n"
+        );
+    }
+
+    #[test]
+    fn a_key_table_names_its_own_line_in_an_error() {
+        for (table, field) in [
+            (
+                "entry = \"a\\\"b\"\nattachment = \"id\"\n",
+                VaultKey::ENTRY_FIELD,
+            ),
+            (
+                "entry = \"a\"\nattachment = \"a\\\\b\"\n",
+                AttachmentName::FIELD,
+            ),
+        ] {
+            let err = toml::from_str::<VaultKey>(table)
+                .expect_err("refused")
+                .to_string();
+            assert!(err.contains(field), "{field}: {err}");
+        }
+    }
+
+    #[test]
+    fn drive_reads_the_key_attachment_after_the_entries_byte_for_byte() {
+        // No newline is added or stripped: a key file ends as its
+        // author left it, and the prompt follows its last byte.
+        for body in ["-----BEGIN K-----\nabc\n", "-----BEGIN K-----\nabc"] {
+            let e = entries(&[("G", "Git token")]);
+            let out = transcript(&[
+                "show -s -a Password -- \"Git token\"\nghp_2\n",
+                &format!("{}{body}", attachment_command(&key())),
+                "exit\n",
+            ]);
+            let mut inp = Vec::new();
+            let driven = drive(
+                &out[..],
+                &mut inp,
+                Path::new("/d/t.kdbx"),
+                &e,
+                Some(&key()),
+            )
+            .expect("the entry and the key are there");
+            assert_eq!(driven.key.as_deref(), Some(body.as_bytes()));
+            assert_eq!(
+                named(&driven.values),
+                [("G".to_owned(), b"ghp_2".to_vec())]
+            );
+            assert!(
+                String::from_utf8(inp).expect("utf8").ends_with(&format!(
+                    "{}exit\n",
+                    attachment_command(&key())
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn a_vault_may_read_the_key_alone() {
+        let e = BTreeMap::new();
+        let out = transcript(&[
+            &format!("{}-----BEGIN K-----\n", attachment_command(&key())),
+            "exit\n",
+        ]);
+        let driven = drive(
+            &out[..],
+            &mut Vec::new(),
+            Path::new("/d/t.kdbx"),
+            &e,
+            Some(&key()),
+        )
+        .expect("the key is there");
+        assert!(driven.values.is_empty());
+        assert!(driven.key.is_some());
+    }
+
+    #[test]
+    fn drive_reports_an_attachment_that_printed_nothing() {
+        // A missing entry, a missing attachment and an empty one all
+        // print nothing on stdout, measured against 2.7.6.
+        let e = BTreeMap::new();
+        let out = transcript(&[&attachment_command(&key()), "exit\n"]);
+        let err = drive(
+            &out[..],
+            &mut Vec::new(),
+            Path::new("/d/t.kdbx"),
+            &e,
+            Some(&key()),
+        )
+        .map(|_| ())
+        .expect_err("nothing printed");
+        assert!(matches!(err, VaultError::NoAttachment { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn an_attachment_that_is_not_a_private_key_is_refused_by_name() {
+        let err = checked_key(&key(), b"ssh-ed25519 AAAA op@ws\n".to_vec())
+            .expect_err("a public key");
+        assert!(matches!(err, VaultError::NotAKey { .. }), "{err:?}");
+        assert!(err.to_string().contains("id key"), "{err}");
+        let ok = b"-----BEGIN OPENSSH PRIVATE KEY-----\nx\n".to_vec();
+        assert!(checked_key(&key(), ok).is_ok());
+    }
+
+    #[test]
+    fn a_vault_with_only_a_key_is_accepted() {
+        let vault = toml::from_str::<Vault>(
+            "database = \"~/s.kdbx\"\n[deploy_key]\nentry = \"a\"\n\
+             attachment = \"id\"\n",
+        )
+        .expect("a key and no entries");
+        assert!(vault.entries.is_empty());
+        assert!(vault.deploy_key.is_some());
     }
 
     #[test]

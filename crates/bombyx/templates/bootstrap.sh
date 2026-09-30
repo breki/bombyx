@@ -568,15 +568,17 @@ fi
 
 if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # The config named a key, so the upload must have happened.
-    # Failing here rather than carrying on: a missing file
-    # means the key went away on the VM host after bombyx
-    # checked for it, and the alternative is a clone that
-    # authenticates with nothing and a guest that reports
-    # success.
+    # Failing here rather than carrying on: bombyx stages the key
+    # only for its own vagrant run, so a missing file means a
+    # provisioner nobody started through bombyx, and the
+    # alternative is a clone that authenticates with nothing and
+    # a guest that reports success.
     if [ ! -f "$DEPLOY_KEY" ]; then
         refuse "the configured deploy key did not arrive at" \
-            "$DEPLOY_KEY. Check it is still on the VM host" \
-            "and re-run."
+            "$DEPLOY_KEY. bombyx stages that file only for the" \
+            "length of its own vagrant run, so a vagrant" \
+            "provision started by hand on the VM host does not" \
+            "find it. Re-run the bombyx command instead."
     fi
 
     # The key is tightened where it landed, not moved out of

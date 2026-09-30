@@ -30,7 +30,7 @@ use super::{
     CREDENTIAL_PRESENT_ENV, DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, GIT_HOST_ENV,
     GUEST_USER_ENV, HOST_KEYS_FORMAT_ENV, HOST_KEYS_URL_ENV, PRESERVE_ENV,
     PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV, credential_block,
-    deploy_key_block, deploy_key_env, env_file_block, ruby_string,
+    deploy_key_block, env_file_block, ruby_string,
 };
 use crate::config::{Config, EnvName, EnvValue, Staged};
 use crate::hostkeys;
@@ -131,7 +131,7 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     entry(PROJECT_ENV, cfg.project.as_str());
     // Each "0" too, so the guest removes a copy an earlier provision
     // left rather than keeping a credential the config dropped.
-    entry(DEPLOY_KEY_ENV, deploy_key_env(source.deploy_key.as_ref()));
+    entry(DEPLOY_KEY_ENV, flag(staged.deploy_key().is_some()));
     entry(ENV_FILE_PRESENT_ENV, flag(staged.secrets().is_some()));
     entry(CREDENTIAL_PRESENT_ENV, flag(staged.credential().is_some()));
     // Empty for an https clone, which opens no ssh connection, and
@@ -194,7 +194,7 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
 ",
         account = ruby_string(ACCOUNT_NAME),
         deploy_key = deploy_key_block(
-            source.deploy_key.as_ref(),
+            staged.deploy_key().is_some(),
             DEPLOY_KEY_STAGED_PATH
         ),
         env_file =
@@ -358,6 +358,28 @@ mod tests {
             assert!(ACCOUNT.contains(&format!("'{name}'")), "{name}");
             assert!(ACCOUNT.contains(placed), "account.ps1: {placed}");
             assert!(BOOTSTRAP.contains(placed), "bootstrap.ps1: {placed}");
+        }
+    }
+
+    #[test]
+    fn a_refreshed_file_is_made_the_agents_as_account_ps1_makes_it() {
+        // The login account writes a refreshed file, and Windows'
+        // ssh refuses a private key another account owns, so the
+        // refresh hands the file to the agent as `Protect` in
+        // account.ps1 does at provisioning.
+        let owner = "    $out = & icacls.exe $target /setowner \"*$sid\" 2>&1";
+        assert!(crate::powershell::has_line(REFRESH, owner), "{owner}");
+    }
+
+    #[test]
+    fn a_refresh_creates_the_folder_a_key_needs() {
+        // The key lives in `.ssh`, which a guest provisioned before
+        // its config named a key does not have.
+        for line in [
+            "    $dir = Split-Path -Parent $target",
+            "    New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+        ] {
+            assert!(crate::powershell::has_line(REFRESH, line), "{line}");
         }
     }
 }

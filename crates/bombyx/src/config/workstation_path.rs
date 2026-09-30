@@ -1,9 +1,10 @@
 //! A path to a file on the workstation: the machine bombyx runs
 //! on, as opposed to the VM host.
 //!
-//! Two fields name one, `env_file` and `vault.database`, and both
-//! are spelled and opened the same way. So their rules live here,
-//! and each field's module states only what differs.
+//! Three fields name one, `env_file`, `deploy_key` and
+//! `vault.database`, and all three are spelled and opened the same
+//! way. So their rules live here, and each field's module states
+//! only what differs.
 
 use std::path::{Path, PathBuf};
 
@@ -76,12 +77,12 @@ pub(super) fn check_file(
 ) -> Result<(), FieldError> {
     guards::check_not_empty(field, value)?;
 
-    // No charset rule, unlike `deploy_key`. That path is pasted
-    // into the generated Vagrantfile and quoted into a remote
-    // shell, so a `"` or a `$` in it changes what runs. This one
-    // reaches neither: bombyx opens it on this machine, or hands
-    // it to a program as one argument, and no shell reads it. A
-    // file name holding a space or a quote is legal here.
+    // No charset rule, unlike the values written into the
+    // generated Vagrantfile or quoted into a remote shell, where
+    // a `"` or a `$` changes what runs. This path reaches
+    // neither: bombyx opens it on this machine, or hands it to a
+    // program as one argument, and no shell reads it. A file
+    // name holding a space or a quote is legal here.
 
     // Every spelling that names a directory rather than a file,
     // reported together and separately from the anchoring rule

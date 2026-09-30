@@ -14,12 +14,10 @@
 //! than something the guest hands to `git`, so each has its own
 //! module and its own rules.
 //!
-//! `deploy_key` lives in `super::deploy_key`. It names a file on
-//! the VM host, which `vagrant` opens.
-//!
-//! `env_file` lives in `super::env_file`. It names a file on the
-//! workstation, which bombyx opens itself -- and that difference
-//! is what makes its rules unlike the other path's.
+//! `deploy_key` lives in `super::deploy_key`, and `env_file` in
+//! `super::env_file`. Each names a file on the workstation, which
+//! bombyx opens itself, so both follow
+//! `super::workstation_path`'s rules.
 //!
 //! `repo_token` and `repo_user` are the other two, and they live
 //! in `super::repo_token`. Neither is a path. They name a
@@ -43,8 +41,8 @@ use crate::newtype::{
 ///
 /// The guest clones this itself, so the first three keys are
 /// not paths on the workstation or the VM host -- see
-/// `docs/trust-boundary.md`. `deploy_key` is the exception,
-/// and its own module says why.
+/// `docs/trust-boundary.md`. `deploy_key` and `env_file` are the
+/// exceptions, and their own modules say why.
 /// **Serde does not read this struct.** It reads the private
 /// `SourceFields` below, whose fields carry the `rename` and
 /// `default` attributes, and converts. So a new key is declared
@@ -63,12 +61,15 @@ pub struct Source {
     pub git_ref: GitRef,
     /// Provisioning script to run, relative to the clone root.
     pub script: ScriptPath,
-    /// Private key on the VM host that the guest clones a
-    /// private repository with.
+    /// Private key on the **workstation** that the guest clones
+    /// a private repository with, which bombyx carries into the
+    /// guest.
     ///
     /// `None` when the config names none, which is what a
-    /// public repository wants: `vagrant` then uploads nothing
-    /// and the guest clones without a credential.
+    /// public repository wants: bombyx then stages nothing and
+    /// the guest clones without a credential. `vault.deploy_key`
+    /// is the other way to name the key, and a config names at
+    /// most one.
     pub deploy_key: Option<DeployKeyPath>,
     /// File on the **workstation** holding the project's
     /// secrets, which bombyx carries into the guest.
@@ -144,7 +145,18 @@ impl Source {
     /// this, so a third source is added in one place.
     #[must_use]
     pub fn names_secrets(&self) -> bool {
-        self.env_file.is_some() || self.vault.is_some()
+        self.env_file.is_some()
+            || self.vault.as_ref().is_some_and(|v| !v.entries.is_empty())
+    }
+
+    /// Whether the config names a deploy key.
+    ///
+    /// The one question every rule about staging the key asks, so
+    /// the vault's form of it is answered in the same place.
+    #[must_use]
+    pub fn names_deploy_key(&self) -> bool {
+        self.deploy_key.is_some()
+            || self.vault.as_ref().is_some_and(|v| v.deploy_key.is_some())
     }
 }
 
@@ -155,7 +167,9 @@ impl TryFrom<SourceFields> for Source {
     ///
     /// `env_file` and `vault` are two sources of the same
     /// secrets, so a config names at most one. Merging them
-    /// would need a rule for a variable both define.
+    /// would need a rule for a variable both define. `deploy_key`
+    /// and `vault.deploy_key` are two sources of the same key, so
+    /// the same holds for them.
     ///
     /// `repo_token` and `repo_user` are stated together or not
     /// at all. Each is useless without the other: a variable
@@ -182,6 +196,15 @@ impl TryFrom<SourceFields> for Source {
     /// the token into the guest and leaves the clone unable to
     /// use it.
     fn try_from(raw: SourceFields) -> Result<Self, Self::Error> {
+        if raw.deploy_key.is_some()
+            && raw.vault.as_ref().is_some_and(|v| v.deploy_key.is_some())
+        {
+            return Err(FieldError::invalid(
+                "vault.deploy_key",
+                "cannot stand beside `deploy_key`; both name the key \
+                 the guest clones with, so name one of them",
+            ));
+        }
         if raw.env_file.is_some() && raw.vault.is_some() {
             return Err(FieldError::invalid(
                 Vault::FIELD,
@@ -711,6 +734,28 @@ mod tests {
             .map(|(n, e)| (n.as_str(), e.as_str()))
             .collect();
         assert_eq!(e, [("A_KEY", "e/A_KEY")]);
+    }
+
+    /// A `[vault]` table holding only the deploy key.
+    const KEY_ONLY_VAULT: &str = "[vault]\ndatabase = \"~/s.kdbx\"\n\
+        [vault.deploy_key]\nentry = \"Git/p\"\nattachment = \"id\"\n";
+
+    #[test]
+    fn a_vault_holding_only_the_key_stages_a_key_and_no_secrets() {
+        let source = source_with(KEY_ONLY_VAULT).expect("a key-only vault");
+        assert!(source.names_deploy_key());
+        assert!(!source.names_secrets(), "no entries, so no secrets file");
+    }
+
+    #[test]
+    fn the_key_is_named_in_one_place_only() {
+        let err = source_with(&format!(
+            "deploy_key = \"~/.ssh/k\"\n{KEY_ONLY_VAULT}"
+        ))
+        .expect_err("two keys")
+        .to_string();
+        assert!(err.contains("vault.deploy_key"), "{err}");
+        assert!(err.contains("`deploy_key`"), "{err}");
     }
 
     #[test]

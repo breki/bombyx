@@ -35,7 +35,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use super::{
-    EntryPath, SecretName, Values, VaultError, drive, finish, spawn_error,
+    Driven, EntryPath, SecretName, VaultError, VaultKey, drive, finish,
+    spawn_error,
 };
 
 /// The script that reads the master password from the terminal,
@@ -43,12 +44,14 @@ use super::{
 const PASSWORD: &str = include_str!("../../../templates/vault-password.sh");
 
 /// Opens `database`, reading its password from the terminal, and
-/// returns each entry's value in the order of `entries`.
+/// returns each entry's value in the order of `entries`, and the
+/// bytes of the attachment `key` names.
 pub(super) fn read<'a>(
     database: &Path,
     entries: &'a BTreeMap<SecretName, EntryPath>,
-) -> Result<Values<'a>, VaultError> {
-    read_with_tty(database, entries, Path::new("/dev/tty"))
+    key: Option<&VaultKey>,
+) -> Result<Driven<'a>, VaultError> {
+    read_with_tty(database, entries, key, Path::new("/dev/tty"))
 }
 
 /// [`read`], with the file the password is read from as a
@@ -56,8 +59,9 @@ pub(super) fn read<'a>(
 fn read_with_tty<'a>(
     database: &Path,
     entries: &'a BTreeMap<SecretName, EntryPath>,
+    key: Option<&VaultKey>,
     tty: &Path,
-) -> Result<Values<'a>, VaultError> {
+) -> Result<Driven<'a>, VaultError> {
     // Opened here, and closed at once, only to learn whether there
     // is a terminal. Without one the script would send an empty
     // password, and keepassxc-cli would report it as a wrong one.
@@ -107,7 +111,7 @@ fn read_with_tty<'a>(
     else {
         unreachable!("both pipes were asked for above");
     };
-    let driven = drive(out, &mut inp, database, entries);
+    let driven = drive(out, &mut inp, database, entries, key);
     if driven.is_err() {
         // keepassxc-cli may have stopped before reading the
         // password, leaving the script blocked on the terminal
@@ -163,6 +167,22 @@ mod tests {
         cli(&["mkdir", db_s, "Anthropic"], "pw\n");
         cli(&["add", "-p", db_s, "Anthropic/API key"], "pw\nsk-1\n");
         cli(&["add", "-p", db_s, "Bob's key"], "pw\nit's x\n");
+        // A key with no trailing newline, so the prompt follows its
+        // last byte directly, which is the case framing has to get
+        // right.
+        let key_file = dir.path().join("id key");
+        let key_bytes = b"-----BEGIN OPENSSH PRIVATE KEY-----\nabc";
+        std::fs::write(&key_file, key_bytes).expect("key");
+        let key_s = key_file.to_str().expect("utf8");
+        cli(
+            &["attachment-import", db_s, "Bob's key", "id key", key_s],
+            "pw\n",
+        );
+        let key = VaultKey {
+            entry: EntryPath::parse("Bob's key").expect("e"),
+            attachment: super::super::AttachmentName::parse("id key")
+                .expect("a"),
+        };
 
         let tty = dir.path().join("tty");
         std::fs::write(&tty, "pw\n").expect("tty");
@@ -176,15 +196,18 @@ mod tests {
                     )
                 })
                 .collect();
-        let values = read_with_tty(&db, &entries, &tty).expect("unlocks");
-        let read: Vec<_> = values
+        let driven =
+            read_with_tty(&db, &entries, Some(&key), &tty).expect("unlocks");
+        assert_eq!(driven.key.as_deref(), Some(&key_bytes[..]));
+        let read: Vec<_> = driven
+            .values
             .iter()
             .map(|(n, _, v)| (n.as_str(), v.as_slice()))
             .collect();
         assert_eq!(read, [("A", &b"sk-1"[..]), ("B", &b"it's x"[..])]);
 
         std::fs::write(&tty, "wrong\n").expect("tty");
-        let err = read_with_tty(&db, &entries, &tty).expect_err("wrong");
+        let err = read_with_tty(&db, &entries, None, &tty).expect_err("wrong");
         assert!(matches!(err, VaultError::Unlock { .. }), "{err:?}");
     }
 }

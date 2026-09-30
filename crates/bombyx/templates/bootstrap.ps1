@@ -149,16 +149,12 @@ try {
     $Secrets = @($DeployKey, $EnvFile, $GitCred)
     # A configured file must have arrived. One the config no longer
     # names is removed, so a credential nobody granted does not stay.
-    # vagrant uploads the deploy key on every provision, but only when
-    # it finds the file at the configured VM-host path, so a missing
-    # key means the file is no longer there. bombyx stages the other
-    # two for its own vagrant run alone.
+    # bombyx stages all three for its own vagrant run alone.
     $rerunAdvice = 'bombyx stages it only for the length of its own ' +
         'vagrant run, so a vagrant provision started by hand on the VM ' +
         'host does not find it. Re-run the bombyx command instead.'
     foreach ($item in @(
-            @('BOMBYX_DEPLOY_KEY', $DeployKey, 'deploy key',
-                'Check it is still on the VM host and re-run.'),
+            @('BOMBYX_DEPLOY_KEY', $DeployKey, 'deploy key', $rerunAdvice),
             @('BOMBYX_ENV_FILE_PRESENT', $EnvFile, 'env_file', $rerunAdvice),
             @('BOMBYX_GIT_CRED_PRESENT', $GitCred,
                 "git credential for repo_token", $rerunAdvice))) {

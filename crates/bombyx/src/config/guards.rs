@@ -195,8 +195,8 @@ pub(super) fn check_charset(
 ///
 /// bombyx generates a Vagrantfile, which is a Ruby file, and
 /// config values get written into it inside double quotes:
-/// `box`, `repo`, `ref`, `script`, `deploy_key`, and every
-/// value in the `[env]` table. Something like
+/// `box`, `repo`, `ref`, `script`, and every value in the
+/// `[env]` table. Something like
 /// `box = "generic/ubuntu2204"` in the config becomes
 /// `config.vm.box = "generic/ubuntu2204"` in the Ruby.
 ///
@@ -306,20 +306,13 @@ mod tests {
     /// rule set is one more row, wherever the type itself
     /// lives.
     ///
-    /// **Four other newtypes use rules from this module and
-    /// are deliberately not rows.** `RemoteRoot` and `HostName`
-    /// are built on `check_not_empty`, `check_not_an_option`
-    /// and `check_charset`, never on `check_renderable`, and
-    /// each carries anchoring or charset rules of its own that
-    /// no column here could express. `DeployKeyPath` does call
-    /// `check_renderable`, and is still not a row because
-    /// neither value of the last column fits it: `false` would
-    /// assert that a `-` prepended to `~/.secrets/k` is
-    /// *accepted*, and its anchoring rule refuses that, while
-    /// `true` would require the message to name `git`, which
-    /// this field never reaches. `super::root`, `super::host`
-    /// and `super::deploy_key` test all three, the dash rule
-    /// included.
+    /// **Other newtypes use rules from this module and are
+    /// deliberately not rows.** `RemoteRoot` and `HostName` are
+    /// built on `check_not_empty`, `check_not_an_option` and
+    /// `check_charset`, never on `check_renderable`, and each
+    /// carries anchoring or charset rules of its own that no
+    /// column here could express. `super::root` and
+    /// `super::host` test them, the dash rule included.
     ///
     /// So this table is not the answer to "which types use this
     /// module"; it is the answer to "which types share one rule

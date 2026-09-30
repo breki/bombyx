@@ -19,8 +19,23 @@ and this project adheres to
   names. `repo_token` may name a vault entry, and a `secrets_refreshed` hook may
   stand beside a vault. Linux and other `sh` workstations only for now; a
   Windows workstation refuses a `vault` (#149).
+- `[source.vault]` can hold the deploy key as an attachment on an entry, named
+  by `vault.deploy_key.entry` and `vault.deploy_key.attachment`, in place of a
+  `deploy_key` file. The same unlock reads it, and a vault may hold the key and
+  no `entries` (#157).
 
 ### Changed
+
+- **BREAKING:** `deploy_key` now names a private key file on the workstation,
+  not on the VM host. bombyx reads it, stages it in the project directory on the
+  VM host for the length of the `vagrant` run and removes it afterwards, as it
+  does the `env_file`, so the VM host stores no secret between runs. A missing
+  key stops the run before anything is created, with a message saying the key
+  belongs on the workstation; a file that is not a private key (such as the
+  `.pub` half) is refused. `up` and `shell` now also rewrite the key inside a
+  running guest, so a rotated key reaches it without a provision. Move an
+  existing key from the VM host to the workstation and point `deploy_key` at it
+  (#157).
 
 ### Fixed
 
