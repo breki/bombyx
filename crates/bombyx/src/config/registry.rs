@@ -471,14 +471,19 @@ fn refuse_windows_mismatch(
             script: script.as_str().to_owned(),
         });
     }
-    // The hook runs after the secrets refresh on a running guest,
-    // and a Windows guest gets no refresh yet (#137). `parse` checks
-    // this before the hook rule, whose advice -- add an `env_file` --
-    // would not make the hook run.
-    if project.hooks.secrets_refreshed.is_some() {
+    // The Windows hook runner starts the hook with `powershell
+    // -File` too, and the path has to fit both Windows' path limit and
+    // `MAX_WINDOWS_HOOK_LEN`, the cap the refresh call's command-line
+    // budget assumes.
+    if let Some(hook) = &project.hooks.secrets_refreshed
+        && let Some(reason) =
+            hook.windows_refusal(user.as_str().len(), key.as_str().len())
+    {
         return Err(ConfigError::WindowsGuestHook {
             path: path.to_path_buf(),
             project: key.as_str().to_owned(),
+            hook: hook.as_str().to_owned(),
+            reason,
         });
     }
     Ok(())

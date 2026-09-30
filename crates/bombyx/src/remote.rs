@@ -1389,19 +1389,32 @@ const REFRESH_SCRIPT: &str = r#"t="$HOME/$1.new"; umask 077; if cat > "$t" && ch
 /// hidden from a dry run ([`GuestHomeFile::hides_size`]), so no
 /// caller can send it with the count showing. Its path travels as
 /// `$1`, so the script is one text for both files.
+///
+/// **A Windows guest takes the file the same way**, on stdin with
+/// no terminal, but the command calls `refresh.ps1`, which
+/// `account.ps1` installs, because the script is too long to carry
+/// on that guest's command line; `remote::windows` builds the call.
+/// The login account writes the file there. That is safe although
+/// the agent writes its own files on Linux: the agent is an
+/// administrator on Windows too, so a link it leaves at the path
+/// leads the login account nowhere the agent could not write.
 #[must_use]
 pub fn refresh_in_guest(
     cfg: &Config,
     file: GuestHomeFile,
     contents: &[u8],
 ) -> RemoteCommand {
-    let guest = as_guest_user(
-        cfg,
-        REFRESH_SCRIPT,
-        &[file.path()],
-        "run bombyx provision.",
-        "exit 1",
-    );
+    let guest = if cfg.vm.guest == Guest::Windows {
+        windows::refresh_command(cfg, file.path(), None)
+    } else {
+        as_guest_user(
+            cfg,
+            REFRESH_SCRIPT,
+            &[file.path()],
+            "run bombyx provision.",
+            "exit 1",
+        )
+    };
     let cmd = vagrant_in(
         cfg,
         &cfg.remote_project_dir(),
@@ -1418,7 +1431,9 @@ pub fn refresh_in_guest(
 /// The exit status of a refresh whose write succeeded and whose
 /// `secrets_refreshed` hook the guest did not start, for any reason:
 /// no clone, a path that leads out of it, nothing there that is a
-/// regular file, or no temporary file for the hook's output.
+/// regular file, or no temporary file for the hook's output; and on a
+/// Windows guest, a link on the way, a runner that would not start,
+/// or a login to the agent that failed.
 ///
 /// The three hook statuses sit far from 1, which the write, `sudo`,
 /// `vagrant` and `ssh` all use for their own failures, so bombyx
@@ -1426,9 +1441,11 @@ pub fn refresh_in_guest(
 /// "the secrets may not be current".
 ///
 /// `REFRESH_THEN_HOOK_SCRIPT` spells the three as literals, because
-/// `concat!` takes literals only;
-/// `the_script_exits_with_the_hook_statuses` ties the two, on every
-/// platform.
+/// `concat!` takes literals only, and so do the Windows helpers
+/// `hook.ps1` and `refresh.ps1`, which are installed rather than
+/// rendered. `the_script_exits_with_the_hook_statuses` ties the Linux
+/// script to the constants and `the_windows_helpers_speak_refresh_outcome`
+/// the Windows helpers, on every platform.
 const HOOK_REFUSED: i32 = 90;
 
 /// The exit status of a refresh whose write succeeded and whose
@@ -1438,6 +1455,13 @@ const HOOK_FAILED: i32 = 91;
 /// The exit status of a refresh whose write succeeded and whose
 /// hook ran past [`HOOK_TIMEOUT_SECS`] and was stopped.
 const HOOK_TIMED_OUT: i32 = 92;
+
+/// How much of a `secrets_refreshed` hook's output the guest relays,
+/// in bytes. `REFRESH_THEN_HOOK_SCRIPT` and `hook.ps1` spell it as a
+/// literal, as they do the statuses above, so only the test that ties
+/// them, `the_windows_helpers_speak_refresh_outcome`, reads this.
+#[cfg(test)]
+const HOOK_OUTPUT_CAP: usize = 65536;
 
 /// How long a `secrets_refreshed` hook may run before the guest
 /// stops it.
@@ -1557,26 +1581,36 @@ const REFRESH_THEN_HOOK_SCRIPT: &str = concat!(
 ///
 /// The exit status says which part failed: 1 for the write, and
 /// `HOOK_REFUSED`, `HOOK_FAILED` or `HOOK_TIMED_OUT` for the
-/// hook. [`RefreshOutcome::from_code`] reads it.
+/// hook. [`RefreshOutcome::from_code`] reads it. A Windows guest
+/// returns the same statuses from `refresh.ps1`, which runs the hook
+/// as the agent through the `hook.ps1` it installs beside itself.
 #[must_use]
 pub fn refresh_secrets_then_hook(
     cfg: &Config,
     secrets: &Secrets,
     hook: &HookPath,
 ) -> RemoteCommand {
-    let timeout = HOOK_TIMEOUT_SECS.to_string();
-    let guest = as_guest_user(
-        cfg,
-        REFRESH_THEN_HOOK_SCRIPT,
-        &[
+    let guest = if cfg.vm.guest == Guest::Windows {
+        windows::refresh_command(
+            cfg,
             GuestHomeFile::Secrets.path(),
-            cfg.project.as_str(),
-            hook.as_str(),
-            &timeout,
-        ],
-        "run bombyx provision.",
-        "exit 1",
-    );
+            Some((hook, HOOK_TIMEOUT_SECS)),
+        )
+    } else {
+        let timeout = HOOK_TIMEOUT_SECS.to_string();
+        as_guest_user(
+            cfg,
+            REFRESH_THEN_HOOK_SCRIPT,
+            &[
+                GuestHomeFile::Secrets.path(),
+                cfg.project.as_str(),
+                hook.as_str(),
+                &timeout,
+            ],
+            "run bombyx provision.",
+            "exit 1",
+        )
+    };
     vagrant_in(
         cfg,
         &cfg.remote_project_dir(),
@@ -1921,12 +1955,13 @@ mod tests {
     fn a_windows_shell_logs_in_as_the_agent_through_the_hand_over_key() {
         // A Windows guest has no `sudo -u` for an interactive session,
         // so the login account reaches the agent's account by an SSH
-        // login to localhost, the route account.ps1 hands bootstrap.ps1
-        // over by. shell.ps1 holds the steps. The script travels base64-encoded, its comments
-        // dropped, because vagrant rewrites every `'` in a PowerShell
-        // command and Windows caps the command line's length; `-- -t`
-        // asks for the terminal vagrant does not request on a winssh
-        // guest.
+        // login to localhost, the one account.ps1 uses to hand
+        // bootstrap.ps1 to the agent. shell.ps1 holds the steps. The
+        // script travels
+        // base64-encoded, its comments dropped, because vagrant
+        // rewrites every `'` in a PowerShell command and Windows caps
+        // the command line's length; `-- -t` asks for the terminal
+        // vagrant does not request on a winssh guest.
         let mut cfg = cfg();
         cfg.vm.guest = crate::config::Guest::Windows;
         let c = shell_into_vm(&cfg);
@@ -1951,18 +1986,31 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_longest_windows_shell_command_fits_the_guest_command_line() {
-        // vagrant 2.4.9's `ssh_run.rb` prefixes the text and encodes it
-        // as UTF-16LE base64 for `powershell -encodedCommand`, and the
-        // guest's sshd runs that through `cmd.exe`, whose documented
-        // limit is 8191 characters. The budget leaves room for the
-        // `cmd.exe /c` around it. Built for the longest names the
-        // config accepts, so a template that grows fails here rather
-        // than on a guest.
-        const BUDGET: usize = 7800;
-        let longest_user = "a".repeat(20);
-        let user = crate::config::GuestUser::parse(&longest_user)
+    /// How long a Windows guest command may be once vagrant has
+    /// wrapped it. vagrant 2.4.9's `ssh_run.rb` prefixes the text and
+    /// encodes it as UTF-16LE base64 for `powershell -encodedCommand`,
+    /// and the guest's sshd runs that through `cmd.exe`, whose
+    /// documented limit is 8191 characters; this leaves room for the
+    /// `cmd.exe /c` around it.
+    const WINDOWS_COMMAND_BUDGET: usize = 7800;
+
+    /// The length of `text` as vagrant sends it to a Windows guest.
+    fn sent_by_vagrant(text: &str) -> usize {
+        let text =
+            format!("$ProgressPreference = \"SilentlyContinue\"; {text}");
+        let utf16: Vec<u8> =
+            text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        format!(
+            "powershell -encodedCommand {}",
+            crate::powershell::base64(&utf16)
+        )
+        .len()
+    }
+
+    /// A Windows config with the longest names the config accepts, so
+    /// a length test measures the worst case rather than the fixture.
+    fn longest_windows_cfg() -> Config {
+        let user = crate::config::GuestUser::parse(&"a".repeat(20))
             .expect("a plain name");
         assert!(user.windows_refusal().is_none());
         let longer = crate::config::GuestUser::parse(&"a".repeat(21))
@@ -1975,20 +2023,42 @@ mod tests {
             &"a".repeat(crate::name::MAX_NAME_LEN),
         )
         .expect("a name at the limit");
-        let text = format!(
-            "$ProgressPreference = \"SilentlyContinue\"; {}",
-            windows::shell_command(&cfg)
-        );
-        let utf16: Vec<u8> =
-            text.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        let sent = format!(
-            "powershell -encodedCommand {}",
-            crate::powershell::base64(&utf16)
-        );
+        cfg
+    }
+
+    #[test]
+    fn the_longest_windows_shell_command_fits_the_guest_command_line() {
+        // A template that grows fails here rather than on a guest.
+        let sent =
+            sent_by_vagrant(&windows::shell_command(&longest_windows_cfg()));
         assert!(
-            sent.len() <= BUDGET,
-            "{} characters, over the {BUDGET} budget",
-            sent.len()
+            sent <= WINDOWS_COMMAND_BUDGET,
+            "{sent} characters, over the {WINDOWS_COMMAND_BUDGET} budget"
+        );
+    }
+
+    #[test]
+    fn the_longest_windows_refresh_command_fits_the_guest_command_line() {
+        // The hook path is the one long value the call carries, so it
+        // is at `MAX_WINDOWS_HOOK_LEN`, the most any Windows project may
+        // name. The longest names here would leave a real hook less
+        // room, so this is an upper bound.
+        let cfg = longest_windows_cfg();
+        let limit = crate::config::MAX_WINDOWS_HOOK_LEN;
+        let hook = HookPath::parse(&format!(
+            "{}.ps1",
+            "a".repeat(limit - ".ps1".len())
+        ))
+        .expect("a hook path at the cap");
+        let text = windows::refresh_command(
+            &cfg,
+            GuestHomeFile::Credential.path(),
+            Some((&hook, HOOK_TIMEOUT_SECS)),
+        );
+        let sent = sent_by_vagrant(&text);
+        assert!(
+            sent <= WINDOWS_COMMAND_BUDGET,
+            "{sent} characters, over the {WINDOWS_COMMAND_BUDGET} budget"
         );
     }
 
@@ -2027,6 +2097,71 @@ mod tests {
                 shell_quote(&guest)
             )
         );
+    }
+
+    /// The text a Windows refresh sends: the prefix lines naming the
+    /// helper's arguments, then `refresh-call.ps1`'s code, encoded.
+    /// No hook goes with a timeout of 0, which nothing reads.
+    fn windows_refresh_text(file: &str, hook: &str, timeout: u32) -> String {
+        let script = format!(
+            "$Interface = {}\n$User = 'agent'\n$File = '{file}'\n\
+             $Project = 'myproject'\n$Hook = '{hook}'\n\
+             $Timeout = {timeout}\n{}",
+            windows::HELPER_CALL,
+            crate::powershell::code_lines(windows::REFRESH_CALL)
+        );
+        crate::powershell::run_encoded(&script)
+    }
+
+    #[test]
+    fn a_windows_refresh_calls_the_installed_helper_with_the_file_on_stdin() {
+        // The helper is too long to carry on the command line, so
+        // provisioning installs it and this names it. The file travels
+        // on stdin, with no terminal on either hop, as on Linux.
+        let mut cfg = cfg();
+        cfg.vm.guest = crate::config::Guest::Windows;
+        for (file, bytes) in [
+            (GuestHomeFile::Secrets, &b"K=v\r\n"[..]),
+            (GuestHomeFile::Credential, &b"https://x:t@h\n"[..]),
+        ] {
+            let c = refresh_in_guest(&cfg, file, bytes);
+            assert!(opts_before_host(&c).is_empty(), "no terminal");
+            assert_eq!(
+                remote_script(&c),
+                format!(
+                    "cd ~/'vms/myproject' && {} vagrant 'ssh' '--no-tty' \
+                     '-c' {}",
+                    vagrant_env(),
+                    shell_quote(&windows_refresh_text(file.path(), "", 0))
+                )
+            );
+            let stdin = c.stdin.as_ref().expect("the file is on stdin");
+            assert_eq!(stdin.bytes(), bytes);
+            assert_eq!(stdin.size_may_be_shown(), !file.hides_size());
+        }
+    }
+
+    #[test]
+    fn a_windows_refresh_with_a_hook_names_it_for_the_helper() {
+        let mut cfg = cfg();
+        cfg.vm.guest = crate::config::Guest::Windows;
+        let hook = HookPath::parse(".bombyx/refreshed.ps1").expect("a path");
+        let secrets = Secrets::for_tests(b"K=v\n");
+        let c = refresh_secrets_then_hook(&cfg, &secrets, &hook);
+        assert_eq!(
+            remote_script(&c),
+            format!(
+                "cd ~/'vms/myproject' && {} vagrant 'ssh' '--no-tty' '-c' {}",
+                vagrant_env(),
+                shell_quote(&windows_refresh_text(
+                    ".bombyx-env",
+                    ".bombyx/refreshed.ps1",
+                    60
+                ))
+            )
+        );
+        let stdin = c.stdin.as_ref().expect("the file is on stdin");
+        assert_eq!(stdin.bytes(), b"K=v\n");
     }
 
     /// Runs [`REFRESH_SCRIPT`] under `sh` with `HOME` at `home`,
@@ -2451,6 +2586,46 @@ mod tests {
             let known = [0, 1, HOOK_REFUSED, HOOK_FAILED, HOOK_TIMED_OUT];
             assert!(!used || known.contains(&code), "unexpected exit {code}");
         }
+    }
+
+    #[test]
+    fn the_windows_helpers_speak_refresh_outcome() {
+        // The helpers are installed, not rendered, so nothing puts
+        // these values into them; this keeps them in step with
+        // `RefreshOutcome::from_code` and with the Linux script.
+        let mut cfg = cfg();
+        cfg.vm.guest = crate::config::Guest::Windows;
+        let files = crate::vagrantfile::files(&cfg, &cfg.staged_for_tests());
+        let text = |name: &str| {
+            files
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, t)| t.clone())
+                .expect(name)
+        };
+        let hook = text("hook.ps1");
+        let has_line = crate::powershell::has_line;
+        for line in [
+            format!("$HookRefused = {HOOK_REFUSED}"),
+            format!("$HookFailed = {HOOK_FAILED}"),
+            format!("$HookTimedOut = {HOOK_TIMED_OUT}"),
+            format!("$OutputCap = {HOOK_OUTPUT_CAP}"),
+        ] {
+            assert!(has_line(&hook, &line), "hook.ps1: {line}");
+        }
+        let refresh = text("refresh.ps1");
+        for line in [
+            format!("$HookRefused = {HOOK_REFUSED}"),
+            format!("$HookFailed = {HOOK_FAILED}"),
+            format!("$HookTimedOut = {HOOK_TIMED_OUT}"),
+        ] {
+            assert!(has_line(&refresh, &line), "refresh.ps1: {line}");
+        }
+        assert!(
+            REFRESH_THEN_HOOK_SCRIPT
+                .contains(&format!("head -c {HOOK_OUTPUT_CAP} ")),
+            "the Linux script's cap"
+        );
     }
 
     #[test]

@@ -330,8 +330,9 @@ sequenceDiagram
 This is the sequence for a Linux guest. A Windows guest
 (`guest = "windows"`) follows it with `bootstrap.ps1` and
 `account.ps1` in place of the two shell scripts. It stages the
-same credentials, and gets no refresh while it runs (GitHub issue
-#137).
+same credentials, and `account.ps1` also installs `refresh.ps1` and
+`hook.ps1`, which `up` and `shell` call to refresh the running
+guest.
 
 The order matters in three places. bombyx creates the directory
 first, because the writes redirect into it. `vagrant up` runs

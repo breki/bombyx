@@ -95,10 +95,15 @@ differences:
   the administrators before it holds the secret: the counterpart of
   mode `0600`. `bootstrap.ps1` pins the git host's published keys as
   `bootstrap.sh` does.
-- **No refresh while the guest runs.** `up` and `shell` do not
-  rewrite a running Windows guest's secrets; they say so, and
-  `bombyx provision` rewrites them. GitHub issue #137 adds the
-  refresh, and the `secrets_refreshed` hook is refused until then.
+- **The refresh writes as the login account.** `up` and `shell` call
+  `refresh.ps1`, which `account.ps1` installs under Program Files. It
+  runs as vagrant's login account, writes the new file beside the old
+  one under a fresh ACL for the agent, SYSTEM and the administrators,
+  and renames it into place. Writing as another account is safe here,
+  unlike on Linux, because the agent is an administrator too: a link
+  it leaves at the path leads nowhere the agent could not write.
+  The `secrets_refreshed` hook then runs as the agent, over the same
+  loopback login as the hand-over, from a pruned environment.
 - **Every `env:` value travels base64-encoded**, because vagrant's
   Windows provisioner pastes it into the script unescaped. `[env]`
   names are compared without regard to case, as Windows compares

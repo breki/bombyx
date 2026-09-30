@@ -1161,18 +1161,20 @@ fn credential_block(staged: bool, dest: &str) -> String {
 ///
 /// Whenever [`render`] does, and for the same reason.
 #[must_use]
-pub fn files(cfg: &Config, staged: &Staged) -> [(&'static str, String); 3] {
+pub fn files(cfg: &Config, staged: &Staged) -> Vec<(&'static str, String)> {
     let vagrantfile = (VAGRANTFILE_NAME, render(cfg, staged));
     match cfg.vm.guest {
-        Guest::Linux => [
+        Guest::Linux => vec![
             vagrantfile,
             (BOOTSTRAP_NAME, BOOTSTRAP.to_owned()),
             (ACCOUNT_NAME, ACCOUNT.to_owned()),
         ],
-        Guest::Windows => [
+        Guest::Windows => vec![
             vagrantfile,
             (windows::BOOTSTRAP_NAME, windows::BOOTSTRAP.to_owned()),
             (windows::ACCOUNT_NAME, windows::ACCOUNT.to_owned()),
+            (windows::REFRESH_NAME, windows::REFRESH.to_owned()),
+            (windows::HOOK_NAME, windows::HOOK.to_owned()),
         ],
     }
 }
@@ -2251,7 +2253,8 @@ mod tests {
     #[test]
     fn a_windows_vagrantfile_stages_bootstrap_and_runs_account() {
         // The shell provisioner runs one script, account.ps1, so
-        // bootstrap.ps1 is uploaded ahead of it. The destination is
+        // bootstrap.ps1 and the two refresh helpers are uploaded
+        // ahead of it. The destination is
         // relative: vagrant expands no `~` on a Windows guest, and
         // SFTP resolves a relative path against the login home.
         let out = rendered_for(&cfg_windows_plain());
@@ -2262,11 +2265,14 @@ mod tests {
         let run = "  config.vm.provision \"shell\",\n    \
              path: \"account.ps1\",\n";
         assert!(out.contains(run), "{out}");
+        // Every upload lands before account.ps1 runs, which moves them.
+        let last_upload = out.rfind("config.vm.provision \"file\"");
         assert!(
-            out.find(upload) < out.find(run),
-            "the upload must come first: {out}"
+            out.find(upload) < out.find(run) && last_upload < out.find(run),
+            "the uploads must come first: {out}"
         );
-        assert_eq!(out.matches("config.vm.provision").count(), 2, "{out}");
+        // Three uploads, then the one shell provisioner.
+        assert_eq!(out.matches("config.vm.provision").count(), 4, "{out}");
         for absent in [ACCOUNT_NAME, BOOTSTRAP_NAME, "privileged"] {
             assert!(!out.contains(absent), "{absent} rendered: {out}");
         }
@@ -2351,11 +2357,37 @@ mod tests {
             [
                 VAGRANTFILE_NAME,
                 windows::BOOTSTRAP_NAME,
-                windows::ACCOUNT_NAME
+                windows::ACCOUNT_NAME,
+                windows::REFRESH_NAME,
+                windows::HOOK_NAME,
             ]
         );
         assert_eq!(files[1].1, windows::BOOTSTRAP);
         assert_eq!(files[2].1, windows::ACCOUNT);
+        assert_eq!(files[3].1, windows::REFRESH);
+        assert_eq!(files[4].1, windows::HOOK);
+    }
+
+    #[test]
+    fn a_windows_vagrantfile_uploads_each_script_account_ps1_installs() {
+        // account.ps1 runs from the shell provisioner's own upload; the
+        // other three travel as plain uploads into the login account's
+        // staging directory, where account.ps1 finds them.
+        let out = rendered_for(&cfg_windows_plain());
+        for (name, staged) in [
+            (windows::BOOTSTRAP_NAME, ".bombyx-staging/bootstrap.ps1"),
+            (windows::REFRESH_NAME, ".bombyx-staging/refresh.ps1"),
+            (windows::HOOK_NAME, ".bombyx-staging/hook.ps1"),
+        ] {
+            let upload = format!(
+                "  config.vm.provision \"file\",\n    \
+                 source: File.expand_path({}, __dir__),\n    \
+                 destination: {}\n",
+                ruby_string(name),
+                ruby_string(staged)
+            );
+            assert_eq!(out.matches(&upload).count(), 1, "{name}: {out}");
+        }
     }
 
     /// The base64 text `name` is handed over as in a Windows

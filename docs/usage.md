@@ -113,12 +113,12 @@ rewrite fails, `up` exits non-zero, and `shell` warns and opens
 the shell anyway. A `shell` that cannot read your `env_file` on
 the workstation also warns and opens.
 
-A Windows guest is the exception until the secrets refresh of
-GitHub issue #137 lands: `up` and `shell` do not rewrite its
-secrets, and print a note saying so. Run `bombyx provision myproject` instead, which places the new files
-and re-runs the project's script. Provisioning also checks the
-clone out afresh at the configured `ref`, which discards
-uncommitted work in it, so commit or push that work first.
+A Windows guest is refreshed the same way. There the refresh calls
+`refresh.ps1`, which provisioning installs, so a Windows VM
+provisioned by a bombyx without it says to run
+`bombyx provision myproject` first. Provisioning checks the clone
+out afresh at the configured `ref`, which discards uncommitted work
+in it, so commit or push that work first.
 
 bombyx sends each file down a pipe, through `ssh` and then
 `vagrant ssh`, so the refresh itself stores nothing on the VM host.
@@ -173,6 +173,14 @@ without one. The path:
 - names a file, so it has no final `.` and no trailing `/`;
 - and, checked in the guest, does not lead out of the clone
   through a symlink.
+
+On a Windows guest the hook is a `.ps1` file, which PowerShell runs
+with `-File`. It starts from the system's own variables (such as
+`SystemRoot`, `TEMP` and `USERPROFILE`), a fixed `PATH` and the two
+`BOMBYX_` names. bombyx refuses a link anywhere on its path, even one
+that stays inside the clone, and its whole path,
+`C:\Users\<guest_user>\<project>\<hook>`, must fit Windows' default
+259 characters, with the hook path itself 200 characters at most.
 
 When it runs: whenever bombyx has written `~/.bombyx-env`. That is
 after the provisioning run of the `up` that creates the VM (before

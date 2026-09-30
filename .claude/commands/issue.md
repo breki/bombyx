@@ -170,6 +170,12 @@ Open the PR as soon as the first commit is pushed, with
 push rather than at the end, and the work is visible while it
 is still moving.
 
+Watch that first run in the background at once, and read its
+result before `/review`'s stage 2. Pick the run by the pushed
+commit's hash, not by "latest": a run can take several seconds to
+appear, and `--limit 1` then returns the previous push's. A red
+run found during the review is one the review then has to carry.
+
 Then update the title and the body as the branch grows:
 whenever the scope changes, and after a round that a PR comment
 asked for. A title that still describes the first commit

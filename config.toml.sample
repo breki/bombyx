@@ -219,12 +219,15 @@ memory = "8GB"
 # the box's built-in accounts, and its `[env]` names are compared
 # without regard to case (see the `[env]` table below). A
 # `deploy_key`, an `env_file` and a `repo_token` are placed in a
-# Windows guest when it is provisioned, but not refreshed while it
-# runs: `bombyx provision` rewrites them, and GitHub issue #137 adds
-# the refresh. The `secrets_refreshed` hook is refused for a Windows
-# project until then. Use the box built from Microsoft's ISO by the
-# recipe in boxes/windows-server-2025/, added as
-# `bombyx/windows-server-2025`; docs/windows-guest-box.md says how.
+# Windows guest when it is provisioned, and `up` and `shell` refresh
+# a running one, as on Linux. A Windows project's `secrets_refreshed`
+# hook must be a `.ps1` file of at most 200 characters, and fewer
+# when `guest_user` and the project name are long: its whole path,
+# C:\Users\<guest_user>\<project>\<hook>, must fit the 259 characters
+# Windows allows by default. Use the box built from
+# Microsoft's ISO by the recipe in boxes/windows-server-2025/, added
+# as `bombyx/windows-server-2025`; docs/windows-guest-box.md says
+# how.
 # That box has no git: the `box` rule above that a box has git is
 # for a Linux guest, and a Windows guest's provisioning installs
 # git.
@@ -613,6 +616,15 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # opens anyway. docs/usage.md, under "Rotating a secret", has the
 # rest, and docs/trust-boundary.md says what the empty environment
 # does and does not protect.
+#
+# On a Windows guest the hook is a `.ps1` file, which PowerShell
+# runs with `-File`. It starts from the system's own variables (such
+# as SystemRoot, TEMP and USERPROFILE), a fixed PATH and the two
+# BOMBYX_ names, and bombyx refuses a link anywhere on its path, even
+# one that stays inside the clone. Its whole path,
+# C:\Users\<guest_user>\<project>\<hook>, must fit Windows' default
+# 259 characters, and the hook path itself holds 200 at most. The
+# time limit, the output cap and the statuses are the same.
 #
 # [projects.myproject.hooks]
 # secrets_refreshed = ".bombyx/refresh-env.sh"

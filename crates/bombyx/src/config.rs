@@ -250,7 +250,9 @@ pub use env_file::{EnvFileError, EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
 pub use guest_user::{GuestUser, WindowsUserRefusal};
-pub use hooks::{HookPath, Hooks};
+#[cfg(test)]
+pub(crate) use hooks::MAX_WINDOWS_HOOK_LEN;
+pub use hooks::{HookPath, Hooks, WindowsHookRefusal};
 pub use host::{
     CONFIG_DIR_ENV, HostName, HostOrigin, registry_file, user_config_dir,
 };
@@ -1886,28 +1888,50 @@ mod load_project_tests {
     }
 
     #[test]
-    fn a_windows_guest_refuses_the_secrets_refreshed_hook() {
-        // The hook runs after the secrets refresh on a running guest,
-        // and a Windows guest gets no refresh yet (GitHub issue
-        // #137), so the hook would never run. Refused whether or not
-        // an `env_file` is named: "add an env_file", the other hook
-        // error's advice, would not make it run.
-        for env_file in ["env_file = \"~/.secrets/x.env\"", ""] {
-            let src = format!(
+    fn a_windows_guest_takes_a_powershell_secrets_refreshed_hook() {
+        // The Windows hook runner starts the hook with `powershell
+        // -File`, which runs a `.ps1` file and nothing else, so a
+        // Windows project's hook is held to that rule, as `script` is.
+        let with_hook = |hook: &str| {
+            format!(
                 "{}\n[projects.myproject.hooks]\n\
-                 secrets_refreshed = \".bombyx/refresh-env.ps1\"\n",
-                windows_registry_with_source_key(env_file)
-            );
-            let err = load(&src, "myproject").expect_err(env_file);
-            assert!(
-                matches!(err, ConfigError::WindowsGuestHook { .. }),
-                "{env_file}: {err:?}"
-            );
-            let text = err.to_string();
-            for part in ["myproject", "secrets_refreshed", "#137"] {
-                assert!(text.contains(part), "{part}: {text}");
-            }
+                 secrets_refreshed = \"{hook}\"\n",
+                windows_registry_with_source_key(
+                    "env_file = \"~/.secrets/x.env\""
+                )
+            )
+        };
+        let (cfg, _) = load(&with_hook(".bombyx/refresh-env.ps1"), "myproject")
+            .expect("a .ps1 hook");
+        assert_eq!(
+            cfg.hooks.secrets_refreshed.as_ref().map(HookPath::as_str),
+            Some(".bombyx/refresh-env.ps1")
+        );
+        let err = load(&with_hook(".bombyx/refresh-env.sh"), "myproject")
+            .expect_err("a .sh hook on a Windows guest");
+        assert!(
+            matches!(err, ConfigError::WindowsGuestHook { .. }),
+            "{err:?}"
+        );
+        let text = err.to_string();
+        for part in ["myproject", "secrets_refreshed", "refresh-env.sh", ".ps1"]
+        {
+            assert!(text.contains(part), "{part}: {text}");
         }
+        // With short names, the refresh call's command-line cap of 200
+        // is the tighter rule; `hooks.rs` tests the path rule, which
+        // bites first when the names are long.
+        let at_limit = format!("{}.ps1", "a".repeat(196));
+        assert_eq!(at_limit.len(), 200);
+        load(&with_hook(&at_limit), "myproject").expect("200 characters");
+        let over = format!("{}.ps1", "a".repeat(197));
+        let err =
+            load(&with_hook(&over), "myproject").expect_err("201 characters");
+        assert!(
+            matches!(err, ConfigError::WindowsGuestHook { .. }),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("200"), "{err}");
     }
 
     #[test]

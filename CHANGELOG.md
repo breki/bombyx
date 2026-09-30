@@ -43,10 +43,13 @@ and this project adheres to
   `account.ps1` places each in the agent's profile, readable by the agent and
   the administrators alone, and `bootstrap.ps1` pins the git host's published
   ssh keys, as on Linux. Each provision rewrites the files afresh and removes
-  one the config no longer names. They are not refreshed in a running Windows
-  guest: `up` and `shell` say so, and `bombyx provision` rewrites them, which
-  also checks the clone out afresh. The `secrets_refreshed` hook is refused for
-  a Windows project, because it rides on that refresh.
+  one the config no longer names. `up` and `shell` refresh the secrets file and
+  the git credential in a running Windows guest, as on Linux, through
+  `refresh.ps1`, which provisioning installs under Program Files; a guest
+  provisioned without it says to run `bombyx provision`. A Windows project's
+  `secrets_refreshed` hook must be a `.ps1` file whose path fits Windows'
+  default 259-character limit inside the clone, 200 characters at most, and it
+  runs as the agent with the same exit statuses, time limit and output cap.
   `bombyx shell` opens PowerShell as the agent's account, in its clone, over
   an SSH login from the guest to itself with the key provisioning made for the
   hand-over; without the account or that key it says so and opens a shell as

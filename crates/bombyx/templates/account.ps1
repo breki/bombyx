@@ -245,6 +245,20 @@ try {
         Refuse ("bootstrap.ps1 did not arrive at $staged, so there " +
             "is nothing to hand to the agent's account.")
     }
+    # The secrets refresh a running guest's `up` and `shell` call, and
+    # the runner it starts for the project's hook, each with the path
+    # it is installed at. bombyx names them rather than sending them,
+    # because they are too long for the guest's command line.
+    $helpers = @(
+        @((Join-Path $Staging 'refresh.ps1'),
+            (Join-Path $InstallDir 'refresh.ps1')),
+        @((Join-Path $Staging 'hook.ps1'),
+            (Join-Path $InstallDir 'hook.ps1')))
+    foreach ($helper in $helpers) {
+        if (-not (Test-Path -LiteralPath $helper[0] -PathType Leaf)) {
+            Refuse "$($helper[0]) did not arrive. $VersionSkew"
+        }
+    }
     foreach ($tool in @($Ssh, $SshKeygen)) {
         if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
             Refuse ("$tool is not on this box, and bombyx needs it to " +
@@ -376,9 +390,16 @@ try {
     Place (Decode 'BOMBYX_GIT_CRED_PRESENT') 'git credential for repo_token' `
         'git-credentials' $gitCred $sid
 
-    # bootstrap.ps1, installed afresh on every provision so the
-    # agent's own edits to an earlier copy never run.
+    # bootstrap.ps1 and the helpers, installed afresh on every
+    # provision. bootstrap.ps1 runs only right after, so the agent's
+    # own edits to an earlier copy never run. The helpers run between
+    # provisions, when `up` and `shell` call them, so the agent, an
+    # administrator, can change them in that time, as it could change
+    # anything else on the guest.
     Copy-Item -LiteralPath $staged -Destination $Bootstrap -Force
+    foreach ($helper in $helpers) {
+        Copy-Item -LiteralPath $helper[0] -Destination $helper[1] -Force
+    }
     Remove-Item -LiteralPath $Staging -Recurse -Force
 
     # The hand-over key, made once and kept, so a later provision

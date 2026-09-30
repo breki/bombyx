@@ -6,33 +6,6 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-09-29-shell-help-promises-a-windows-refresh
-
-**Category:** Comprehension
-
-The clap help for `Shell` in `crates/bombyx/src/bin/bombyx/main.rs`
-says the command first rewrites the guest's copy of the `env_file`
-secrets and runs the `secrets_refreshed` hook. On a Windows guest it
-does neither yet; it prints a note instead. Part 2 of GitHub issue #137
-adds the refresh and the hook, which makes the help true, so the help
-waits for that change. Logged rather than fixed in the #151 review,
-because clap help is `bombyx --help` output and stage 3 changes only
-prose that a person alone reads.
-
-### fr-2026-09-29-unrefreshed-note-hides-the-clone-reset
-
-**Category:** Comprehension
-
-The note `plan::unrefreshed_secrets` returns for a Windows guest ends
-"`bombyx provision` rewrites them". It does not say that a provision
-also checks the clone out afresh at the configured `ref`, which
-discards uncommitted work there. `docs/usage.md` under "Rotating a
-secret" now says so; the note does not. Adding "and resets the clone,
-so commit or push first" would put the cost where the advice is.
-Logged rather than fixed in the #148 review, because the note is
-program output and stage 3 changes only prose that a person alone
-reads.
-
 ### fr-2026-09-29-windows-env-refusal-message-reads-twice
 
 **Category:** Comprehension
