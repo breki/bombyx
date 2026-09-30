@@ -19,13 +19,13 @@
 
 use std::fmt;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Deserialize;
 use thiserror::Error;
 
 use super::error::FieldError;
-use super::guards;
+use super::workstation_path;
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
 /// A secrets file on the workstation, as the operator wrote it.
@@ -227,10 +227,8 @@ impl EnvFilePath {
     /// state a home directory instead of depending on the one
     /// the test runner happens to have.
     ///
-    /// `HOME` is consulted before `USERPROFILE`. Git Bash on
-    /// Windows sets both, and its `HOME` is the POSIX form,
-    /// which is the one that joins onto the rest of a `~/`
-    /// value without a separator disagreement.
+    /// `super::workstation_path::resolve_home` does the
+    /// expanding, and says which variable it reads and why.
     ///
     /// # Errors
     ///
@@ -240,7 +238,12 @@ impl EnvFilePath {
     where
         F: Fn(&str) -> Option<String>,
     {
-        resolve_home(Self::FIELD, &self.0, getenv)
+        workstation_path::resolve_home(Self::FIELD, &self.0, getenv).map_err(
+            |e| EnvFileError::NoHome {
+                field: e.field,
+                value: e.value,
+            },
+        )
     }
 
     /// Reads the file this path names.
@@ -326,123 +329,16 @@ checked_str_try_from!(
 ///
 /// # Errors
 ///
-/// Returns what [`check_workstation_file`] returns, naming
-/// `env_file`.
+/// Returns what `super::workstation_path::check_file` returns,
+/// naming `env_file`.
 fn check(value: &str) -> Result<(), FieldError> {
-    check_workstation_file(EnvFilePath::FIELD, value)
-}
-
-/// Expands a leading `~/` in `value`, the path of a file on this
-/// machine that the config key `field` names.
-///
-/// [`EnvFilePath::resolve`] holds the rules. This is the body,
-/// shared with `super::vault`, whose database file sits on the
-/// same machine and is spelled the same way.
-///
-/// # Errors
-///
-/// Returns [`EnvFileError::NoHome`] naming `field` when the
-/// value needs a home directory and the environment names none.
-pub(super) fn resolve_home<F>(
-    field: &'static str,
-    value: &str,
-    getenv: F,
-) -> Result<PathBuf, EnvFileError>
-where
-    F: Fn(&str) -> Option<String>,
-{
-    let Some(rest) = value.strip_prefix("~/") else {
-        return Ok(PathBuf::from(value));
-    };
-    let home = getenv("HOME")
-        .or_else(|| getenv("USERPROFILE"))
-        .filter(|h| !h.is_empty())
-        .ok_or_else(|| EnvFileError::NoHome {
-            field,
-            value: value.to_owned(),
-        })?;
-    Ok(Path::new(&home).join(rest))
-}
-
-/// Checks the path of a file on this machine, which the config
-/// key `field` names.
-///
-/// Shared with `super::vault`: its database file sits on the
-/// same machine as the secrets file and is opened the same way,
-/// so the same spellings name a directory or depend on where
-/// bombyx was started.
-///
-/// # Errors
-///
-/// Returns [`FieldError::Empty`] when the value is blank, and
-/// [`FieldError::Invalid`] naming `field` when the value names a
-/// directory -- a bare `~`, a trailing separator, or a final `.`
-/// or `..` segment -- or is neither `~/`-anchored nor absolute
-/// on this machine.
-pub(super) fn check_workstation_file(
-    field: &'static str,
-    value: &str,
-) -> Result<(), FieldError> {
-    guards::check_not_empty(field, value)?;
-
-    // No charset rule, unlike `deploy_key`. That path is pasted
-    // into the generated Vagrantfile and quoted into a remote
-    // shell, so a `"` or a `$` in it changes what runs. This one
-    // reaches neither: bombyx hands it to `std::fs::read` on this
-    // machine, and the file's contents travel on a pipe. A file
-    // name holding a space or a quote is legal here.
-
-    // Every spelling that names a directory rather than a file,
-    // reported together and separately from the anchoring rule
-    // below. These values do name something real, so "must be
-    // absolute" would send the operator looking for the wrong
-    // mistake.
-    //
-    // The whole family, not only the case that prompted the
-    // rule: a bare `~`, a trailing separator, and a final `.` or
-    // `..` segment. `~/` is both the first and the second, and
-    // an absolute `/tmp/` is the second on its own.
-    //
-    // `std::path::is_separator` rather than `'/'`, because this
-    // value is resolved on the machine bombyx was compiled for
-    // and that machine may be Windows, where `\` separates too.
-    // The rule beneath this one asks `Path::is_absolute`, which
-    // already answers per platform; a `/`-only rule here would
-    // let `C:\secrets\` through on Windows and refuse it later
-    // with a message about a regular file.
-    let last = value.rsplit(std::path::is_separator).next();
-    let names_a_directory = value == "~"
-        || value.ends_with(std::path::is_separator)
-        || matches!(last, Some("." | ".."));
-    if names_a_directory {
-        return Err(FieldError::invalid(
-            field,
-            "names a directory rather than a file; it has to name \
-             the file itself",
-        ));
-    }
-
-    // `Path::is_absolute` answers for the machine bombyx was
-    // compiled for, and that is the machine that opens this file,
-    // so it is the right question here. On Windows it wants a
-    // drive, so `C:\secrets\x.env` passes and `\secrets\x.env`
-    // does not -- the second is relative to whichever drive the
-    // process is on.
-    if !value.starts_with("~/") && !Path::new(value).is_absolute() {
-        return Err(FieldError::invalid(
-            field,
-            "must start with `~/` or be an absolute path; a relative \
-             path resolves against whatever directory bombyx was \
-             started in",
-        ));
-    }
-
-    Ok(())
+    workstation_path::check_file(EnvFilePath::FIELD, value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     /// A home directory every test below expands against, so
     /// the expected paths and the environment agree.

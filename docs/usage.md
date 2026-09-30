@@ -166,9 +166,9 @@ clone:
 secrets_refreshed = ".bombyx/refresh-env.sh"
 ```
 
-It needs `env_file` in the project's `[source]` table, because the
-rewrite of that file is what it follows; bombyx refuses a hook
-without one. The path:
+It needs `env_file` or `vault` in the project's `[source]` table,
+because the rewrite of the secrets is what it follows; bombyx
+refuses a hook without one. The path:
 
 - is relative to the clone root and holds no `..` segment;
 - does not start with `-`;
@@ -372,6 +372,11 @@ bombyx --dry-run up myproject
 It is worth using whenever you are unsure what a command is about
 to do, `destroy` above all. The plan is for reading, and for
 pasting one line at a time.
+
+A dry run still reads the project's secrets, because the plan it
+prints includes the step that writes them. So with a `vault`, a
+dry run of `up`, `provision`, `shell` or `scratch` asks for the
+master password as a real run would.
 
 **Do not pipe the plan into a shell.**
 `bombyx --dry-run up myproject | sh` writes the generated files

@@ -27,9 +27,12 @@ body and `docs/trust-boundary.md` keep what lasts.
 
 ## Measured (keepassxc-cli 2.7.6, Linux)
 
-- Password prompt and errors go to stderr; the shell prompt
-  `<db file name>> `, an echo of each command, and each value go
-  to stdout.
+- Password prompt and errors go to stderr; the shell prompt, an
+  echo of each command, and each value go to stdout.
+- The shell prompt is the database's stored name followed by
+  `> ` (`My Vault> `), or its file name when the stored name is
+  empty, as `db-create` leaves it. So the driver learns the
+  prompt from the first one rather than predicting it.
 - Password read buffers stdin: commands written before the first
   prompt are swallowed. The driver waits for the prompt.
 - Wrong password: exit 1, no prompt on stdout.

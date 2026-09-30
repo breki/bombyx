@@ -636,9 +636,9 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
 /// # Panics
 ///
 /// Panics when `staged` did not come from `cfg`: when the
-/// config names an `env_file` or a `repo_token` and `staged` is
-/// missing the matching half, or when `staged` carries a half
-/// the config names nowhere.
+/// config names an `env_file`, a `vault` or a `repo_token` and
+/// `staged` is missing the matching half, or when `staged`
+/// carries a half the config names nowhere.
 /// [`Config::read_staged`](crate::config::Config::read_staged)
 /// builds a pair that cannot fail this.
 #[must_use]

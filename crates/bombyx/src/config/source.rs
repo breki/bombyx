@@ -78,20 +78,21 @@ pub struct Source {
     /// runs on, and `super::EnvFilePath` holds why that changes
     /// every rule.
     ///
-    /// `None` when the config names none: bombyx then writes no
-    /// secrets file and the guest gets an empty
+    /// `None` when the config names none. With no `vault` either,
+    /// bombyx writes no secrets file and the guest gets an empty
     /// `BOMBYX_ENV_FILE`.
     pub env_file: Option<EnvFilePath>,
     /// KeePassXC database on the **workstation** holding the
     /// project's secrets, one entry per variable.
     ///
     /// The other way to supply what `env_file` supplies, so a
-    /// config names one or the other. `super::Vault` says how
-    /// bombyx reads it without holding the master password.
+    /// config names one or the other. The `vault` module's own
+    /// documentation says how bombyx reads it without holding the
+    /// master password.
     pub vault: Option<Vault>,
     /// How the guest authenticates an https clone: the
-    /// variable inside `env_file` holding the token, and the
-    /// username it is sent under.
+    /// variable inside `env_file`, or among the `vault` entries,
+    /// holding the token, and the username it is sent under.
     ///
     /// A name, never the token. `None` for a repository that
     /// needs no credential to clone, and for one that clones
@@ -183,7 +184,7 @@ impl TryFrom<SourceFields> for Source {
     fn try_from(raw: SourceFields) -> Result<Self, Self::Error> {
         if raw.env_file.is_some() && raw.vault.is_some() {
             return Err(FieldError::invalid(
-                "vault",
+                Vault::FIELD,
                 "cannot stand beside `env_file`; both supply the \
                  project's secrets, so name one of them",
             ));

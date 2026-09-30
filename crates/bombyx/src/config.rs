@@ -92,6 +92,9 @@
 //!   the session that reads them without holding the master
 //!   password.
 //! - `vm` -- the `[vm]` table.
+//! - `workstation_path` -- the rules for a path to a file on the
+//!   workstation, which `env_file` and `vault.database` share,
+//!   and the `~` expansion they both use.
 //!
 //! A new field rule belongs in the module that owns the field.
 //! Put it in `guards` only once a second field needs it.
@@ -119,6 +122,7 @@ mod source;
 mod transport;
 mod vault;
 mod vm;
+mod workstation_path;
 
 pub use transport::Transport;
 
@@ -274,6 +278,7 @@ pub use vault::{EntryPath, SecretName, Vault, VaultDatabase, VaultError};
 pub use vm::{BoxName, CpuMode, Disk, Guest, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
+use repo_token::SecretsOrigin;
 pub(crate) use root::path_segments;
 
 /// Default root on the VM host under which project
@@ -400,7 +405,8 @@ pub struct Config {
 /// `crate::plan::Action::staged_read` says which those are.
 #[derive(Debug, Default)]
 pub struct Staged {
-    /// The project's secrets, as the file holds them.
+    /// The project's secrets, as the file holds them or as bombyx
+    /// assembled them from the vault's entries.
     secrets: Option<Secrets>,
     /// The credential `git` authenticates the clone with, built
     /// from one variable inside those secrets.
@@ -411,7 +417,8 @@ pub struct Staged {
 }
 
 impl Staged {
-    /// The project's secrets, when the config names a file.
+    /// The project's secrets, when the config names an `env_file`
+    /// or a `vault`.
     ///
     /// Both fields are private, and that is what holds the
     /// promise above up. Public ones would let a caller write a
@@ -443,8 +450,8 @@ pub enum StagedError {
     #[error(transparent)]
     File(#[from] EnvFileError),
 
-    /// The file was read and the token could not be taken out
-    /// of it.
+    /// The secrets were read, from the file or the vault, and the
+    /// token could not be taken out of them.
     #[error(transparent)]
     Token(#[from] RepoTokenError),
 
@@ -458,8 +465,9 @@ impl Config {
     /// from the vault `source.vault` names, whichever the config
     /// has, and builds whatever bombyx sends alongside them.
     ///
-    /// A vault asks for its master password on the terminal, and
-    /// `crate::config::Vault` says how that stays out of bombyx.
+    /// A vault asks for its master password on the terminal; the
+    /// `vault` module's own documentation says how the password
+    /// stays out of bombyx.
     ///
     /// The one supported way to build the [`Staged`] argument
     /// `crate::plan::plan` takes. Every part comes from here, so
@@ -490,8 +498,12 @@ impl Config {
         // the order here only matters to one built in code.
         let (secrets, origin) =
             match (self.source.env_file.as_ref(), self.source.vault.as_ref()) {
-                (Some(path), _) => (path.read(&getenv)?, path.as_str()),
-                (None, Some(vault)) => (vault.read(&getenv)?, "the vault"),
+                (Some(path), _) => {
+                    (path.read(&getenv)?, SecretsOrigin::File(path.as_str()))
+                }
+                (None, Some(vault)) => {
+                    (vault.read(&getenv)?, SecretsOrigin::Vault)
+                }
                 (None, None) => {
                     // A `repo_token` with nothing to read it out of
                     // is refused rather than ignored.
@@ -502,7 +514,7 @@ impl Config {
                     // claiming a credential that nothing stages, and
                     // the guest would refuse after booting.
                     if let Some(token) = self.source.repo_token.as_ref() {
-                        return Err(RepoTokenError::NoEnvFile {
+                        return Err(RepoTokenError::NoSecrets {
                             var: token.var.as_str().to_owned(),
                         }
                         .into());
@@ -523,13 +535,12 @@ impl Config {
     /// Split out of [`Config::read_staged`] so the file reading
     /// and the parsing of what was read stay separate, and
     /// private because the two belong together: a credential
-    /// built from contents that did not come from
-    /// `source.env_file` would name a file the error messages
-    /// then misdescribe.
+    /// built from contents that did not come from `origin` would
+    /// have the error messages name the wrong source.
     fn credential(
         &self,
         secrets: &Secrets,
-        path: &str,
+        origin: SecretsOrigin<'_>,
     ) -> Result<Option<GitCredential>, RepoTokenError> {
         let Some(token) = self.source.repo_token.as_ref() else {
             return Ok(None);
@@ -544,18 +555,20 @@ impl Config {
                 repo: self.source.repo.as_str().to_owned(),
             }
         })?;
-        repo_token::credential(host, token, secrets.as_bytes(), path).map(Some)
+        repo_token::credential(host, token, secrets.as_bytes(), origin)
+            .map(Some)
     }
 
     /// The [`Staged`] this config would produce, without going
     /// near a file.
     ///
     /// [`Config::read_staged`] is what a run uses, and it opens
-    /// the path `source.env_file` names. A test wanting the
-    /// pair asks for this instead: both halves are still
-    /// derived from one config, so a fixture cannot hand
-    /// `crate::plan::plan` a `Staged` belonging to a different
-    /// `Config`, and no test has to write a file to get one.
+    /// the file `source.env_file` names or unlocks the vault
+    /// `source.vault` names. A test wanting the pair asks for this
+    /// instead: both halves are still derived from one config, so
+    /// a fixture cannot hand `crate::plan::plan` a `Staged`
+    /// belonging to a different `Config`, and no test has to write
+    /// a file to get one.
     ///
     /// The secrets name the variable `repo_token` asks for, so
     /// the credential comes out of the real
@@ -565,15 +578,15 @@ impl Config {
     #[must_use]
     pub(crate) fn staged_for_tests(&self) -> Staged {
         let origin = match (&self.source.env_file, &self.source.vault) {
-            (Some(path), _) => path.as_str(),
-            (None, Some(_)) => "the vault",
+            (Some(path), _) => SecretsOrigin::File(path.as_str()),
+            (None, Some(_)) => SecretsOrigin::Vault,
             (None, None) => {
                 // The same refusal [`Config::read_staged`] makes, so
                 // a fixture cannot build a pair no run can produce.
                 assert!(
                     self.source.repo_token.is_none(),
-                    "a repo_token with no env_file is a config \
-                     read_staged refuses"
+                    "a repo_token with neither an env_file nor a \
+                     vault is a config read_staged refuses"
                 );
                 return Staged::default();
             }

@@ -311,12 +311,14 @@ for tools that are not present:
     reads.
 - **Give a command that reads `/dev/tty` a terminal with
   `script`.** The session has no terminal, so a password prompt
-  such as a `vault` unlock fails at once. `script -qec '<cmd>'
-  /dev/null` runs the command on a pty and passes its exit
-  status through; feed the input on stdin after a short delay,
-  `{ sleep 2; printf 'pw\n'; } | script ...`, so it arrives after
-  the prompt. Run that check before handing a terminal step to
-  the operator.
+  such as a `vault` unlock fails at once.
+  `script -qec '<cmd>' /dev/null` runs the command on a pty:
+  `-c` takes the command, `-e` passes its exit status through,
+  `-q` drops `script`'s banners, and `/dev/null` discards the
+  transcript `script` would otherwise save. Feed the input on
+  stdin after a short delay, `{ sleep 2; printf 'pw\n'; } |
+  script ...`, so it arrives after the prompt. Run that check
+  before handing a terminal step to the operator.
 - **A Windows command needing elevation blocks on a dialog
   you cannot see.** A UAC prompt waits off-screen while the
   command reads as a hang with an empty log. Run anything that

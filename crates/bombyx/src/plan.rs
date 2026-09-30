@@ -174,11 +174,11 @@ impl Action {
 /// **The file writes are the exception, and cannot be
 /// otherwise.** Each carries a whole file -- the generated
 /// Vagrantfile, the two guest scripts, the project's secrets
-/// when the config names an `env_file`, and the git credential
-/// when it names a `repo_token` -- and no file is in the
-/// command at all: it travels on the command's standard input,
-/// which is a pipe and not text a printed line can hold. The
-/// line says how many bytes bombyx will send; see
+/// when the config names an `env_file` or a `vault`, and the git
+/// credential when it names a `repo_token` -- and no file is in
+/// the command at all: it travels on the command's standard
+/// input, which is a pipe and not text a printed line can hold.
+/// The line says how many bytes bombyx will send; see
 /// [`RemoteCommand::with_stdin`]. That is also what keeps a
 /// secret out of a printed plan.
 ///

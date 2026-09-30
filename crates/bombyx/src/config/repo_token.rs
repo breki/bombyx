@@ -4,8 +4,9 @@
 //! Three things live here.
 //!
 //! [`RepoTokenVar`] is the *name* of a variable, not its value.
-//! The config states which variable inside `env_file` holds the
-//! token, so bombyx need not guess which of them is the git one.
+//! The config states which variable in the secrets holds the
+//! token, from `env_file` or from `vault`, so bombyx need not
+//! guess which of them is the git one.
 //!
 //! [`RepoUser`] is the username that goes with the token. The
 //! vendor fixes it and bombyx cannot work it out: a Bitbucket
@@ -29,8 +30,8 @@ use crate::newtype::{
     checked_str_newtype, checked_str_parse, checked_str_try_from,
 };
 
-/// The name of the variable inside `env_file` holding the git
-/// token.
+/// The name of the variable in the secrets, from `env_file` or
+/// `vault`, holding the git token.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct RepoTokenVar(String);
@@ -110,7 +111,7 @@ checked_str_try_from!(
 /// message for one without the other lives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoToken {
-    /// The variable inside `env_file` holding the token.
+    /// The variable in the secrets holding the token.
     pub var: RepoTokenVar,
     /// The username `git` sends the token under.
     pub user: RepoUser,
@@ -135,28 +136,52 @@ impl fmt::Debug for GitCredential {
     }
 }
 
-/// Why bombyx could not build a credential from the file.
+/// Where the secrets a credential is read out of came from, for
+/// the messages that name it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SecretsOrigin<'a> {
+    /// The file `env_file` names, as the operator wrote it.
+    File(&'a str),
+    /// The entries `vault` names.
+    Vault,
+}
+
+impl fmt::Display for SecretsOrigin<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::File(path) => f.write_str(path),
+            Self::Vault => f.write_str("the vault"),
+        }
+    }
+}
+
+/// Why bombyx could not build a credential from the secrets.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RepoTokenError {
-    /// The file holds no such variable.
+    /// The secrets hold no such variable.
+    ///
+    /// Named for the file, and raised for the vault too: `origin`
+    /// says which the secrets came from.
     #[error(
-        "`repo_token` names `{var}`, and {path} holds no such \
+        "`repo_token` names `{var}`, and {origin} holds no such \
          variable"
     )]
     NotInFile {
         /// The variable the config named.
         var: String,
-        /// The file, as the operator wrote it.
-        path: String,
+        /// Where the secrets came from: the file as the operator
+        /// wrote it, or `the vault`.
+        origin: String,
     },
 
     /// The variable is there and its value is empty.
-    #[error("`{var}` in {path} is empty, so there is no token")]
+    #[error("`{var}` in {origin} is empty, so there is no token")]
     EmptyValue {
         /// The variable the config named.
         var: String,
-        /// The file, as the operator wrote it.
-        path: String,
+        /// Where the secrets came from: the file as the operator
+        /// wrote it, or `the vault`.
+        origin: String,
     },
 
     /// The variable is there and a comment is all that follows
@@ -168,20 +193,26 @@ pub enum RepoTokenError {
     /// that is not there, when what they have is a value bombyx
     /// read as a comment -- and the cure, quoting, is not
     /// something that message would suggest.
+    ///
+    /// A vault cannot produce this: `super::vault` quotes every
+    /// value holding a `#`, so the hint about quoting is only ever
+    /// shown for a file.
     #[error(
-        "`{var}` in {path} is a comment: a `#` with nothing but \
+        "`{var}` in {origin} is a comment: a `#` with nothing but \
          whitespace in front of it ends a value, so bombyx found \
          no token there. Quote the value to keep a `#` inside it"
     )]
     CommentedOutValue {
         /// The variable the config named.
         var: String,
-        /// The file, as the operator wrote it.
-        path: String,
+        /// Where the secrets came from: the file as the operator
+        /// wrote it, or `the vault`.
+        origin: String,
     },
 
-    /// The config names a `repo_token` and no `env_file`, so
-    /// there is no file to read the variable out of.
+    /// The config names a `repo_token` and neither an `env_file`
+    /// nor a `vault`, so there is nothing to read the variable
+    /// out of.
     ///
     /// Unreachable from a config serde parsed, like
     /// [`RepoTokenError::NoHttpsHost`] below and for the same
@@ -192,7 +223,7 @@ pub enum RepoTokenError {
         "`repo_token` names `{var}` and neither `env_file` nor \
          `vault` is set, so there is nothing to read it out of"
     )]
-    NoEnvFile {
+    NoSecrets {
         /// The variable the config named.
         var: String,
     },
@@ -405,26 +436,26 @@ pub(crate) fn percent_encode(raw: &[u8]) -> String {
 /// when the repository names one, and it has to match what
 /// `git` asks the helper about or the helper answers nothing.
 /// `token` names the variable to read and the username to send.
-/// `path` is the `env_file` value as the operator wrote it, and
-/// it appears in both errors so a refusal names the file to go
-/// and edit.
+/// `origin` says where the secrets came from, the `env_file`
+/// value as the operator wrote it or the vault, and it appears in
+/// every error so a refusal names the place to go and edit.
 ///
 /// # Errors
 ///
-/// Returns [`RepoTokenError`] when the file holds no such
-/// variable, or holds it with an empty value.
+/// Returns [`RepoTokenError`] when the secrets hold no such
+/// variable, or hold it with an empty value.
 pub(crate) fn credential(
     host: &str,
     token: &RepoToken,
     secrets: &[u8],
-    path: &str,
+    origin: SecretsOrigin<'_>,
 ) -> Result<GitCredential, RepoTokenError> {
     let var = &token.var;
     let user = &token.user;
     let value = lookup(secrets, var.as_str()).ok_or_else(|| {
         RepoTokenError::NotInFile {
             var: var.as_str().to_owned(),
-            path: path.to_owned(),
+            origin: origin.to_string(),
         }
     })?;
     if value.is_empty() {
@@ -442,11 +473,11 @@ pub(crate) fn credential(
         let commented = lookup_raw(secrets, var.as_str()).is_some_and(|raw| {
             !raw.is_empty() && strip_inline_comment(&raw).is_empty()
         });
-        let (v, p) = (var.as_str().to_owned(), path.to_owned());
+        let (var, origin) = (var.as_str().to_owned(), origin.to_string());
         return Err(if commented {
-            RepoTokenError::CommentedOutValue { var: v, path: p }
+            RepoTokenError::CommentedOutValue { var, origin }
         } else {
-            RepoTokenError::EmptyValue { var: v, path: p }
+            RepoTokenError::EmptyValue { var, origin }
         });
     }
     // The trailing newline is part of the format: `git`'s
@@ -665,7 +696,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN=#s3cret\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect_err("the comment rule consumed the value");
         assert!(
@@ -683,7 +714,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN=\"\"\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect_err("an empty quoted value is no token");
         assert!(
@@ -697,7 +728,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN=\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect_err("an empty token is no token");
         assert!(
@@ -715,7 +746,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN= # paste yours here\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect_err("a comment is not a token");
         assert!(
@@ -816,7 +847,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN=abc\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect("the variable is in the file");
         assert_eq!(line(&cred), "https://x-token-auth:abc@bitbucket.org\n");
@@ -828,7 +859,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN=a/b@c\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect("the variable is in the file");
         assert_eq!(
@@ -843,7 +874,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("OTHER=abc\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect_err("the variable is not in the file");
         let msg = err.to_string();
@@ -857,7 +888,7 @@ mod tests {
             "bitbucket.org",
             &token(),
             secrets("BITBUCKET_TOKEN=\n"),
-            "~/secrets/x.env",
+            SecretsOrigin::File("~/secrets/x.env"),
         )
         .expect_err("an empty token is no token");
         assert!(matches!(err, RepoTokenError::EmptyValue { .. }));

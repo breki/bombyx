@@ -111,9 +111,9 @@ enum VmCmd {
     /// A VM that already exists is not provisioned again, so its
     /// copy of the secrets from `env_file` or `vault`, and the git
     /// credential when `repo_token` is set, are rewritten in the
-    /// guest once it is up. On a running VM, that is all `up` does. Nothing is
-    /// fetched or checked out, so work in the guest's clone is
-    /// untouched.
+    /// guest once it is up. On a running VM, that is all `up`
+    /// does. Nothing is fetched or checked out, so work in the
+    /// guest's clone is untouched.
     ///
     /// The project's `secrets_refreshed` hook, when its `[hooks]`
     /// table names one, runs from the clone after the rewrite, and
@@ -158,9 +158,9 @@ enum VmCmd {
     ///
     /// First rewrites the guest's copy of the secrets from
     /// `env_file` or `vault`, and the git credential when
-    /// `repo_token` is set, and runs
-    /// the `secrets_refreshed` hook, as `up` does. If any of that
-    /// fails, bombyx warns and opens the shell anyway.
+    /// `repo_token` is set, and runs the `secrets_refreshed` hook,
+    /// as `up` does. If any of that fails, bombyx warns and opens
+    /// the shell anyway.
     Shell(ProjectArg),
     /// Show VM status on the host
     Status(ProjectArg),

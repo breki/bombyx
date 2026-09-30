@@ -378,17 +378,20 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # `keepassxc-cli`, which has to be installed and on PATH. The
 # password goes from your terminal to `keepassxc-cli` without
 # passing through bombyx, and bombyx reads only the entries listed
-# here. A `--dry-run` asks too, for the reason it reads `env_file`.
+# here. A `--dry-run` of `up`, `provision`, `shell` or `scratch`
+# asks too: the plan it prints includes the step that writes the
+# secrets, and that step exists only once they have been read.
 #
 # Not yet on a Windows workstation: bombyx refuses a `vault` there.
 # An entry path may not hold `"`, `\` or a control character, which
 # `keepassxc-cli` would read as part of its command.
 #
-# [source.vault]
-# database = "~/.secrets/bombyx.kdbx"
-# [source.vault.entries]
-# ANTHROPIC_API_KEY = "Anthropic/API key"
-# BITBUCKET_TOKEN = "Bitbucket/myproject token"
+# Dotted keys rather than a `[...vault]` table header, so the keys
+# after these lines stay in this `[source]` table.
+#
+# vault.database = "~/.secrets/bombyx.kdbx"
+# vault.entries.ANTHROPIC_API_KEY = "Anthropic/API key"
+# vault.entries.BITBUCKET_TOKEN = "Bitbucket/myproject token"
 
 # Optional, and a pair: write both or neither. They are how the
 # guest clones a private repository over `https` instead of over
