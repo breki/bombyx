@@ -362,15 +362,47 @@ script = ".bombyx/provision.sh"   # path inside the clone
 #
 # env_file = "~/.secrets/myproject.env"
 
+# Optional, and the other way to supply what `env_file` supplies:
+# keep each secret as an entry in a KeePassXC database on this
+# machine, rather than as a line in a plain-text file. Name one of
+# the two, not both.
+#
+# `database` follows the rules of `env_file` above. Each line under
+# `entries` maps a variable to the path of an entry, and bombyx
+# reads that entry's password. It then sends the guest the same
+# `NAME=value` file an `env_file` would, so nothing inside the VM
+# can tell the difference. `repo_token` below names one of these
+# variables.
+#
+# bombyx asks for the master password once per run, through
+# `keepassxc-cli`, which has to be installed and on PATH. The
+# password goes from your terminal to `keepassxc-cli` without
+# passing through bombyx, and bombyx reads only the entries listed
+# here. A `--dry-run` of `up`, `provision`, `shell` or `scratch`
+# asks too: the plan it prints includes the step that writes the
+# secrets, and that step exists only once they have been read.
+#
+# Not yet on a Windows workstation: bombyx refuses a `vault` there.
+# An entry path may not hold `"`, `\` or a control character, which
+# `keepassxc-cli` would read as part of its command.
+#
+# Dotted keys rather than a `[...vault]` table header, so the keys
+# after these lines stay in this `[source]` table.
+#
+# vault.database = "~/.secrets/bombyx.kdbx"
+# vault.entries.ANTHROPIC_API_KEY = "Anthropic/API key"
+# vault.entries.BITBUCKET_TOKEN = "Bitbucket/myproject token"
+
 # Optional, and a pair: write both or neither. They are how the
 # guest clones a private repository over `https` instead of over
 # ssh with `deploy_key` above.
 #
 # `repo_token` names a variable INSIDE the file `env_file`
-# points at. Not the token itself -- this file stays free of
-# secrets, so it can still be pasted into a bug report. There is
-# one copy of the token, in one file, and rotating it means
-# editing that file and nothing else.
+# points at, or one of the `vault` entries. Not the token itself
+# -- this file stays free of secrets, so it can still be pasted
+# into a bug report. There is one copy of the token, in one
+# place, and rotating it means editing that place and nothing
+# else.
 #
 # bombyx reads that one variable, builds a credential from it,
 # and sends the credential to the guest before the clone runs.
@@ -416,8 +448,9 @@ script = ".bombyx/provision.sh"   # path inside the clone
 #   - Both keys or neither. A variable name with no username
 #     leaves bombyx guessing; a username with no variable name
 #     has no token to go with.
-#   - `env_file` has to be set, since that is the file the
-#     variable is read out of.
+#   - `env_file` or `vault` has to be set, since that is where
+#     the variable is read out of. With a `vault`, the variable
+#     has to be one of its entries.
 #   - `repo` has to be an `https` URL. `git` sends the token on
 #     every request, so `http` would put it on the wire in plain
 #     text, and an ssh URL never asks for one.
@@ -596,8 +629,8 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # them calls the hook script from its provisioning script too. The
 # hook runs after that script, so a script that needs a secret
 # during its run reads `$BOMBYX_ENV_FILE` instead of `.env`. The
-# hook needs `env_file` above: without one there is nothing for it
-# to copy, so bombyx refuses the pair.
+# hook needs `env_file` or `vault` above: without one there is
+# nothing for it to copy, so bombyx refuses the pair.
 #
 # The path is relative to the clone root, like `script`, and holds
 # no `..` segment. It does not start with `-`, holds only letters,

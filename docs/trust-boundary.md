@@ -176,27 +176,27 @@ Three secrets can reach the guest:
 | Secret | What it is | Named on |
 |---|---|---|
 | `deploy_key` | A private key | The VM host |
-| `env_file` | A file of secrets | The workstation |
-| `repo_token` | A git token built from a variable inside `env_file` | (derived) |
+| `env_file` or `vault` | A file of secrets, or entries in a KeePassXC database | The workstation |
+| `repo_token` | A git token built from one of those variables | (derived) |
 
 Each takes a route that keeps it off both machines' command lines
 and out of every generated file, and the VM host holds its copy
 only for the length of the `vagrant` run.
 
-`up` and `shell` also rewrite the `env_file` copy and the
-`repo_token` credential inside a guest that already exists, so a
-rotated token reaches it without a provision. That route stores
-nothing on the VM host at all; an `up` that has to boot the VM
-still stages the files for its `vagrant` run, as above, before it
-refreshes. Each file travels on a pipe: from bombyx to `ssh`,
-through `vagrant ssh --no-tty` on the VM host, and into a `cat`
-that the agent's account runs in the guest. On the VM host the
-file exists only in the memory of the processes passing it along.
-Nothing in the path asks for a terminal, because a terminal's line
-discipline can echo input back into the output. We have not
-checked whether Vagrant's own debug log (`VAGRANT_LOG=debug`, set
-on the VM host) records what passes through; the staging route has
-the same unknown for its upload.
+`up` and `shell` also rewrite the copy of the secrets, from
+`env_file` or `vault`, and the `repo_token` credential inside a
+guest that already exists, so a rotated token reaches it without
+a provision. That route stores nothing on the VM host at all; an
+`up` that has to boot the VM still stages the files for its
+`vagrant` run, as above, before it refreshes. Each file travels on
+a pipe: from bombyx to `ssh`, through `vagrant ssh --no-tty` on
+the VM host, and into a `cat` that the agent's account runs in the
+guest. On the VM host the file exists only in the memory of the
+processes passing it along. Nothing in the path asks for a
+terminal, because a terminal's line discipline can echo input back
+into the output. We have not checked whether Vagrant's own debug
+log (`VAGRANT_LOG=debug`, set on the VM host) records what passes
+through; the staging route has the same unknown for its upload.
 
 Whichever route a secret takes, the outcome is the same for all
 three, and it is the cost: **the agent needs the value to work, so
@@ -217,6 +217,29 @@ Vagrantfile: `vagrant destroy` loads the Vagrantfile too, so a
 Vagrantfile that tested the key and raised would leave a directory
 no bombyx command could tear down. bombyx knows which verb it is
 running; the Vagrantfile does not.
+
+### The vault's master password stays out of bombyx
+
+A `vault` keeps the workstation's copy of the secrets encrypted
+at rest, rather than guarded by file permissions alone. bombyx
+opens it once per run through `keepassxc-cli open`, and never
+holds the master password:
+
+```text
+bombyx --stdin--> sh (password, then cat) --pipe--> keepassxc-cli
+bombyx <---------------------stdout---------------- keepassxc-cli
+```
+
+The `sh` script reads the password from the terminal, with echo
+off, and writes it into a pipe that bombyx creates and never
+reads. It then forwards bombyx's `show` commands, one per entry
+the config names. So the decrypted values bombyx sees are those
+entries and nothing else in the database. From there the
+secrets take the `env_file` route above.
+
+This protects the copy at rest. It does not protect a run in
+progress: a process running as the operator can still read
+bombyx's memory, or the terminal, while the vault is open.
 
 ### The agent can read the credential
 

@@ -12,6 +12,14 @@ and this project adheres to
 
 ### Added
 
+- A `[source.vault]` table reads the project secrets from a KeePassXC database
+  on the workstation instead of a plain-text `env_file`: one entry per variable,
+  unlocked once per run. bombyx asks for the master password through
+  `keepassxc-cli` and never holds it, and it reads only the entries the config
+  names. `repo_token` may name a vault entry, and a `secrets_refreshed` hook may
+  stand beside a vault. Linux and other `sh` workstations only for now; a
+  Windows workstation refuses a `vault` (#149).
+
 ### Changed
 
 ### Fixed

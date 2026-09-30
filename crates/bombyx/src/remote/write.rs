@@ -3,12 +3,13 @@
 //! Every file bombyx stages on the VM host goes through here.
 //! `crate::plan::plan` decides which ones: the Vagrantfile, the
 //! bootstrap script and the account script on every run, the
-//! project's secrets when the config names an `env_file`, and a
-//! git credential when it names a `repo_token`. Those are the
-//! only project files any machine outside the guest holds. Not
-//! one of them comes from the project's repository -- bombyx
-//! generates the first three and the last, and the secrets are a
-//! file on the operator's own workstation that the config names.
+//! project's secrets when the config names an `env_file` or a
+//! `vault`, and a git credential when it names a `repo_token`.
+//! Those are the only project files any machine outside the guest
+//! holds. Not one of them comes from the project's repository --
+//! bombyx generates the first three and the last, and the secrets
+//! come from the operator's own workstation: the file the config
+//! names, or the entries of the vault it names.
 //! So a project cannot supply any of them however it arranges its
 //! own directory. See `docs/trust-boundary.md`.
 //!

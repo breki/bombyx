@@ -587,10 +587,10 @@ fn preserve_list(env: &BTreeMap<EnvName, EnvValue>) -> String {
 /// checks the pairing here instead. See [`render`]'s `# Panics`.
 fn assert_staged_matches(cfg: &Config, staged: &Staged) {
     assert_eq!(
-        cfg.source.env_file.is_some(),
+        cfg.source.names_secrets(),
         staged.secrets().is_some(),
-        "a config naming an env_file must be rendered against \
-         the secrets read from it"
+        "a config naming an env_file or a vault must be rendered \
+         against the secrets read from it"
     );
     assert_eq!(
         cfg.source.repo_token.is_some(),
@@ -636,9 +636,9 @@ fn assert_staged_matches(cfg: &Config, staged: &Staged) {
 /// # Panics
 ///
 /// Panics when `staged` did not come from `cfg`: when the
-/// config names an `env_file` or a `repo_token` and `staged` is
-/// missing the matching half, or when `staged` carries a half
-/// the config names nowhere.
+/// config names an `env_file`, a `vault` or a `repo_token` and
+/// `staged` is missing the matching half, or when `staged`
+/// carries a half the config names nowhere.
 /// [`Config::read_staged`](crate::config::Config::read_staged)
 /// builds a pair that cannot fail this.
 #[must_use]
@@ -1237,6 +1237,7 @@ mod tests {
                 .expect("a valid fixture path"),
             deploy_key: None,
             env_file: None,
+            vault: None,
             repo_token: None,
         };
         cfg
@@ -1283,6 +1284,21 @@ mod tests {
         cfg.source.env_file =
             Some(EnvFilePath::parse(ENV_FILE).expect("a valid fixture path"));
         cfg
+    }
+
+    #[test]
+    fn a_vault_config_renders_against_the_secrets_read_from_it() {
+        // A vault supplies what an `env_file` supplies, so the
+        // Vagrantfile announces a staged secrets file for it too.
+        let mut cfg = cfg_with(Provider::Libvirt);
+        cfg.source.vault = Some(
+            toml::from_str("database = \"~/s.kdbx\"\n[entries]\nA = \"a\"\n")
+                .expect("a vault table"),
+        );
+        let out = rendered_for(&cfg);
+        let bare = rendered_for(&cfg_with(Provider::Libvirt));
+        assert_ne!(out, bare, "a vault must stage a secrets file");
+        assert_eq!(out, rendered_for(&cfg_with_env_file()));
     }
 
     /// [`render`] against the [`Staged`] this config implies.
@@ -2151,7 +2167,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "a config naming an env_file")]
+    #[should_panic(expected = "a config naming an env_file or a vault")]
     fn a_config_naming_a_file_cannot_be_rendered_against_nothing() {
         // Announcing `0` for a config that names an `env_file`
         // is the quiet half of a mismatch. `bootstrap.sh`

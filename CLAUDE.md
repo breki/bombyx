@@ -309,6 +309,16 @@ for tools that are not present:
     `ssh win "wsl -d D -- sh -c 'echo <b64> | base64 -d | sh'"`
     -- because base64 holds no character any of the three shells
     reads.
+- **Give a command that reads `/dev/tty` a terminal with
+  `script`.** The session has no terminal, so a password prompt
+  such as a `vault` unlock fails at once.
+  `script -qec '<cmd>' /dev/null` runs the command on a pty:
+  `-c` takes the command, `-e` passes its exit status through,
+  `-q` drops `script`'s banners, and `/dev/null` discards the
+  transcript `script` would otherwise save. Feed the input on
+  stdin after a short delay, `{ sleep 2; printf 'pw\n'; } |
+  script ...`, so it arrives after the prompt. Run that check
+  before handing a terminal step to the operator.
 - **A Windows command needing elevation blocks on a dialog
   you cannot see.** A UAC prompt waits off-screen while the
   command reads as a hang with an empty log. Run anything that
@@ -847,6 +857,10 @@ For any script that runs more than ~30 seconds
   notification and no output. The generated Vagrantfile's
   `boot_timeout` comment records a Windows first boot of up to
   385 s.
+
+  **A test that spawns an interactive program gets a `timeout`
+  too.** A child waiting on input that never comes hangs the
+  call until the tool's own timeout, with no output to show why.
 
   **Leave buffering filters out of a Monitor pipeline.** `tr`,
   `sed` without `-u` and `cut` hold their output until a buffer

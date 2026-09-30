@@ -145,8 +145,9 @@ pub struct Project {
     /// A table of its own rather than keys in `[source]`, because a
     /// hook is about the guest's lifecycle, not about where the
     /// clone comes from. The one rule tying it to another table --
-    /// `secrets_refreshed` needs `source.env_file` -- runs in this
-    /// module's `parse`, once both tables exist.
+    /// `secrets_refreshed` needs `source.env_file` or
+    /// `source.vault` -- runs in this module's `parse`, once both
+    /// tables exist.
     #[serde(default)]
     pub hooks: super::Hooks,
 }
@@ -526,13 +527,14 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
             refuse_windows_mismatch(key, project, path)?;
         }
         // The hook runs after the secrets refresh and at no other
-        // time, and a project with no `env_file` has no refresh.
+        // time, and a project with neither `env_file` nor `vault`
+        // has no refresh.
         // Accepting the pairing would leave a hook that never runs
         // and nothing saying why.
         if project.hooks.secrets_refreshed.is_some()
-            && project.source.env_file.is_none()
+            && !project.source.names_secrets()
         {
-            return Err(ConfigError::HookWithoutEnvFile {
+            return Err(ConfigError::HookWithoutSecrets {
                 path: path.to_path_buf(),
                 project: key.as_str().to_owned(),
             });

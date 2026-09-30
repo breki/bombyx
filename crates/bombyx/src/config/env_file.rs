@@ -19,13 +19,13 @@
 
 use std::fmt;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Deserialize;
 use thiserror::Error;
 
 use super::error::FieldError;
-use super::guards;
+use super::workstation_path;
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
 /// A secrets file on the workstation, as the operator wrote it.
@@ -81,6 +81,13 @@ impl Secrets {
     #[must_use]
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+
+    /// Secrets assembled from the entries of a KeePassXC
+    /// database, which `super::vault` builds in the same
+    /// `NAME=value` shape the file holds.
+    pub(super) fn from_vault(bytes: Vec<u8>) -> Self {
+        Self(bytes)
     }
 
     /// Secrets holding `bytes`, for a test.
@@ -220,10 +227,8 @@ impl EnvFilePath {
     /// state a home directory instead of depending on the one
     /// the test runner happens to have.
     ///
-    /// `HOME` is consulted before `USERPROFILE`. Git Bash on
-    /// Windows sets both, and its `HOME` is the POSIX form,
-    /// which is the one that joins onto the rest of a `~/`
-    /// value without a separator disagreement.
+    /// `super::workstation_path::resolve_home` does the
+    /// expanding, and says which variable it reads and why.
     ///
     /// # Errors
     ///
@@ -233,17 +238,12 @@ impl EnvFilePath {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let Some(rest) = self.0.strip_prefix("~/") else {
-            return Ok(PathBuf::from(&self.0));
-        };
-        let home = getenv("HOME")
-            .or_else(|| getenv("USERPROFILE"))
-            .filter(|h| !h.is_empty())
-            .ok_or_else(|| EnvFileError::NoHome {
-                field: Self::FIELD,
-                value: self.0.clone(),
-            })?;
-        Ok(Path::new(&home).join(rest))
+        workstation_path::resolve_home(Self::FIELD, &self.0, getenv).map_err(
+            |e| EnvFileError::NoHome {
+                field: e.field,
+                value: e.value,
+            },
+        )
     }
 
     /// Reads the file this path names.
@@ -329,78 +329,16 @@ checked_str_try_from!(
 ///
 /// # Errors
 ///
-/// Returns [`FieldError::Empty`] when the value is blank, and
-/// [`FieldError::Invalid`] naming `env_file` when the value
-/// names a directory -- a bare `~`, a trailing separator, or a
-/// final `.` or `..` segment -- or is neither `~/`-anchored nor
-/// absolute on this machine.
+/// Returns what `super::workstation_path::check_file` returns,
+/// naming `env_file`.
 fn check(value: &str) -> Result<(), FieldError> {
-    guards::check_not_empty(EnvFilePath::FIELD, value)?;
-
-    // No charset rule, unlike `deploy_key`. That path is pasted
-    // into the generated Vagrantfile and quoted into a remote
-    // shell, so a `"` or a `$` in it changes what runs. This one
-    // reaches neither: bombyx hands it to `std::fs::read` on this
-    // machine, and the file's contents travel on a pipe. A file
-    // name holding a space or a quote is legal here.
-
-    // Every spelling that names a directory rather than a file,
-    // reported together and separately from the anchoring rule
-    // below. These values do name something real, so "must be
-    // absolute" would send the operator looking for the wrong
-    // mistake.
-    //
-    // The whole family, not only the case that prompted the
-    // rule: a bare `~`, a trailing separator, and a final `.` or
-    // `..` segment. `~/` is both the first and the second, and
-    // an absolute `/tmp/` is the second on its own.
-    //
-    // `std::path::is_separator` rather than `'/'`, because this
-    // value is resolved on the machine bombyx was compiled for
-    // and that machine may be Windows, where `\` separates too.
-    // The rule beneath this one asks `Path::is_absolute`, which
-    // already answers per platform; a `/`-only rule here would
-    // let `C:\secrets\` through on Windows and refuse it later
-    // with a message about a regular file.
-    let last = value.rsplit(std::path::is_separator).next();
-    let names_a_directory = value == "~"
-        || value.ends_with(std::path::is_separator)
-        || matches!(last, Some("." | ".."));
-    if names_a_directory {
-        return Err(invalid(
-            "names a directory rather than a file; `env_file` has \
-             to name the secrets file itself",
-        ));
-    }
-
-    // `Path::is_absolute` answers for the machine bombyx was
-    // compiled for, and that is the machine that opens this file,
-    // so it is the right question here. On Windows it wants a
-    // drive, so `C:\secrets\x.env` passes and `\secrets\x.env`
-    // does not -- the second is relative to whichever drive the
-    // process is on.
-    if !value.starts_with("~/") && !Path::new(value).is_absolute() {
-        return Err(invalid(
-            "must start with `~/` or be an absolute path; a relative \
-             path resolves against whatever directory bombyx was \
-             started in",
-        ));
-    }
-
-    Ok(())
-}
-
-/// Builds a [`FieldError::Invalid`] naming `env_file`.
-fn invalid(reason: impl Into<String>) -> FieldError {
-    FieldError::Invalid {
-        field: EnvFilePath::FIELD,
-        reason: reason.into(),
-    }
+    workstation_path::check_file(EnvFilePath::FIELD, value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     /// A home directory every test below expands against, so
     /// the expected paths and the environment agree.

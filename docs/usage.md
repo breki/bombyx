@@ -97,7 +97,10 @@ it targets the project VM only; for a scratch VM the answer is
 ## Rotating a secret
 
 To change a value in your `env_file`, such as an expired token,
-edit the file on your workstation and run `up` or `shell`:
+edit the file on your workstation and run `up` or `shell`. With a
+`vault`, edit the entry in KeePassXC instead; `up` and `shell`
+then ask for the master password once and read every entry
+again:
 
 ```bash
 bombyx up myproject   # or: bombyx shell myproject
@@ -111,7 +114,7 @@ Nothing is fetched or checked out, so the work in the guest's
 clone is not touched. `up` on a running VM does only this. When a
 rewrite fails, `up` exits non-zero, and `shell` warns and opens
 the shell anyway. A `shell` that cannot read your `env_file` on
-the workstation also warns and opens.
+the workstation, or unlock your `vault`, also warns and opens.
 
 A Windows guest is refreshed the same way. There the refresh calls
 `refresh.ps1`, which provisioning installs, so a Windows VM
@@ -163,9 +166,9 @@ clone:
 secrets_refreshed = ".bombyx/refresh-env.sh"
 ```
 
-It needs `env_file` in the project's `[source]` table, because the
-rewrite of that file is what it follows; bombyx refuses a hook
-without one. The path:
+It needs `env_file` or `vault` in the project's `[source]` table,
+because the rewrite of the secrets is what it follows; bombyx
+refuses a hook without one. The path:
 
 - is relative to the clone root and holds no `..` segment;
 - does not start with `-`;
@@ -369,6 +372,11 @@ bombyx --dry-run up myproject
 It is worth using whenever you are unsure what a command is about
 to do, `destroy` above all. The plan is for reading, and for
 pasting one line at a time.
+
+A dry run still reads the project's secrets, because the plan it
+prints includes the step that writes them. So with a `vault`, a
+dry run of `up`, `provision`, `shell` or `scratch` asks for the
+master password as a real run would.
 
 **Do not pipe the plan into a shell.**
 `bombyx --dry-run up myproject | sh` writes the generated files

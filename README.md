@@ -105,9 +105,10 @@ script = ".bombyx/provision.sh"
 `[vm]` describes the machine to boot; `[source]` is the repository the
 guest clones and the script it runs. Both are required. Optional keys
 handle private repositories and secrets --
-`config.toml.sample` documents `deploy_key`, `env_file` and
-`repo_token`, and [docs/trust-boundary.md](docs/trust-boundary.md)
-explains what putting a credential in the VM costs.
+`config.toml.sample` documents `deploy_key`, `env_file`, `vault`
+(secrets kept in a KeePassXC database) and `repo_token`, and
+[docs/trust-boundary.md](docs/trust-boundary.md) explains what
+putting a credential in the VM costs.
 
 Every command but `list` and `self-update` takes the project as its
 first argument: `bombyx up myproject`.

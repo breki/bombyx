@@ -54,4 +54,6 @@ doc-valid-idents = [
     "qemu",
     "virsh",
     "VirtualBox",
+    # The workstation vault.
+    "KeePassXC",
 ]
