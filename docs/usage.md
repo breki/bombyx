@@ -97,9 +97,12 @@ bombyx provision myproject --discard
 `--discard` is a flag of `provision`, and has nothing to do with
 the `discard` subcommand, which destroys a scratch VM.
 
-A commit made inside the guest does not survive a provision, with
-or without `--discard`, because the checkout detaches HEAD and
-leaves that commit on no branch. Push it.
+The guest's clone sits on a detached HEAD, meaning no branch is
+checked out: the first `up` leaves it that way, and so does every
+provision. A commit made there lands on no branch, so the next
+provision leaves it behind, with or without `--discard`. Push it.
+A branch the agent makes before committing is kept, but the
+provision checks out the fetched commit in its place.
 
 Files your `.gitignore` matches are not protected. Git treats them
 as build output, so the checkout overwrites one the fetched commit

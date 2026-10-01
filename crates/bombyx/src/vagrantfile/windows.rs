@@ -341,6 +341,27 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_ps1_detaches_a_fresh_clone_like_an_updated_one() {
+        // The Windows half of `bootstrap_tests`' branch-state test:
+        // after the clone, HEAD detaches and the branch the clone
+        // made is deleted, in that order.
+        let script = BOOTSTRAP.replace("\r\n", "\n");
+        let at = |text: &str| {
+            script
+                .find(text)
+                .unwrap_or_else(|| panic!("bootstrap.ps1: {text}"))
+        };
+        let clone = at("clone @depth --branch $Ref '--' $Repo");
+        let detach = at("Invoke-Native $Git -C $CloneDir checkout --quiet \
+             --detach");
+        let found = at("Invoke-Native $Git -C $CloneDir show-ref --verify \
+             --quiet `\n            '--' \"refs/heads/$Ref\"");
+        let delete = at("Invoke-Native $Git -C $CloneDir branch --quiet -D \
+             '--' $Ref");
+        assert!(clone < detach && detach < found && found < delete);
+    }
+
+    #[test]
     fn account_ps1_installs_the_helpers_where_the_refresh_calls_them() {
         // account.ps1 moves each helper from the staging directory into
         // the bombyx folder under Program Files; refresh-call.ps1 names
