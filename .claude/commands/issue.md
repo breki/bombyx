@@ -70,6 +70,11 @@ decision that lives only in this chat is lost.
 `git checkout -b <type>/<short-name>` from an up-to-date
 `main`. Never work an issue directly on `main`.
 
+When another worktree has `main` checked out, `git checkout main`
+fails. Run `git fetch`, then branch from `origin/main` and run
+`git branch --unset-upstream`, so the first push does not track
+`main`.
+
 ### 4. Implement, test first
 
 Red then green, per `CLAUDE.md` under **Test-Driven
