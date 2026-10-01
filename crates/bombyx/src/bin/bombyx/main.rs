@@ -136,6 +136,12 @@ enum VmCmd {
     /// carries over. Push or stash the work in `bombyx shell`, or
     /// run again with `--discard`.
     ///
+    /// Files your `.gitignore` matches are not protected. Git
+    /// treats them as build output, so the checkout overwrites one
+    /// the fetched commit adds, and a change of `source.repo`
+    /// deletes them with the clone. Keep nothing there you cannot
+    /// make again.
+    ///
     /// The checkout detaches HEAD, so committing in the guest
     /// does not protect work: the next provision moves HEAD away
     /// and leaves that commit on no branch, findable only through
@@ -143,9 +149,10 @@ enum VmCmd {
     ///
     /// Pointing `source.repo` at a different repository removes
     /// the clone and starts over. The guest refuses that too
-    /// while the clone holds uncommitted edits or untracked
-    /// files, unless `--discard` is given. Rewriting the same URL
-    /// with or without a trailing `/` or `.git` keeps the clone.
+    /// while the clone holds uncommitted edits or untracked files
+    /// git does not ignore, unless `--discard` is given. Rewriting
+    /// the same URL with or without a trailing `/` or `.git` keeps
+    /// the clone.
     ///
     /// The project's `secrets_refreshed` hook, when its `[hooks]`
     /// table names one, runs after a successful provision, and a

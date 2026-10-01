@@ -41,9 +41,10 @@ pub enum Action {
     ///
     /// The default mode fetches `source.ref` and checks it out,
     /// and the guest refuses when that would overwrite the
-    /// agent's uncommitted edits or untracked files. It refuses
-    /// in the same way to delete a clone of another repository
-    /// -- left by a change to `source.repo` -- that holds any.
+    /// agent's uncommitted edits or untracked files git does not
+    /// ignore. It refuses in the same way to delete a clone of
+    /// another repository -- left by a change to `source.repo` --
+    /// that holds any. Ignored files are not protected.
     /// The checkout detaches HEAD, so a commit made in the guest
     /// ends up on no branch after the next provision.
     /// `crates/bombyx/templates/bootstrap.sh` decides all of
@@ -852,11 +853,7 @@ mod tests {
                 .map(|s| s.contains(remote::CLONE_UPDATE_ENV))
                 .unwrap()
         };
-        for mode in [
-            CloneUpdate::Checkout,
-            CloneUpdate::Discard,
-            CloneUpdate::Keep,
-        ] {
+        for mode in CloneUpdate::ALL {
             let boot = scripts(&Action::Provision(mode))
                 .into_iter()
                 .find(|s| s.contains("vagrant 'provision'"))

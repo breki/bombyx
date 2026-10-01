@@ -796,7 +796,9 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
       # How a provision may update the clone the guest already
       # holds. Set on the vagrant process for one run, so a bare
       # `vagrant provision` gets the fallback, which refuses to
-      # overwrite the agent's work.
+      # overwrite the agent's work. `ENV.fetch(name, default)`
+      # reads the variable from vagrant's own environment, or
+      # `default` when it is unset.
       \"{clone_update_env}\" => ENV.fetch(\"{clone_update_env}\", \"{clone_update}\"),
       # Read from the vagrant process on the VM host, which
       # bombyx sets. Vagrant does not export its own

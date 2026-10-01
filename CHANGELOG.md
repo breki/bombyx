@@ -23,9 +23,10 @@ and this project adheres to
   guest's clone. The checkout refuses, listing the files, when it would
   overwrite an edited tracked file or an untracked file the fetched commit adds,
   and a change of `source.repo` no longer deletes a clone that holds uncommitted
-  edits or untracked files. bombyx's own `chmod +x` on the provisioning script
-  does not count as an edit. Linux and Windows guests both; verified on a Linux
-  guest only.
+  edits or untracked files. Files `.gitignore` matches are not protected: the
+  checkout overwrites them and a change of `source.repo` deletes them. bombyx's
+  own `chmod +x` on the provisioning script does not count as an edit. Linux
+  and Windows guests both; verified on a Linux guest only.
 
 ### Fixed
 

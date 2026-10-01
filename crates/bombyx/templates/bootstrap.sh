@@ -986,20 +986,28 @@ git_net() {
 }
 
 # How this provision may update the clone it finds, as
-# `bombyx provision` chose it: `checkout` by default, `discard`
-# for `--discard`, `keep` for `--no-fetch`. The value rides on
-# the `vagrant` process for one run, so a Vagrantfile from an
-# older bombyx, or a bare `vagrant provision` on the VM host,
-# sets none -- and the fallback is the mode that loses nothing.
-# A word this script does not know means the two halves of
-# bombyx disagree, and guessing what it meant could destroy the
-# agent's work.
+# `bombyx provision` chose it: `checkout` by default, which
+# refuses to overwrite the agent's work; `discard` for
+# `--discard`, which overwrites it; `keep` for `--no-fetch`,
+# which keeps the checkout as it is, with no fetch and no
+# checkout at all.
+#
+# The Vagrantfile bombyx writes always passes a word, falling
+# back to `checkout` when the `vagrant` process has none. The
+# fallback here covers only a Vagrantfile that does not pass the
+# variable at all -- one edited by hand -- and names the same
+# mode. bombyx writes the Vagrantfile and this script in the same
+# run, so an unknown word did not come from bombyx: it was
+# exported in the shell that ran `vagrant` on the VM host.
+# Guessing what it meant could destroy the agent's work, so it
+# is refused.
 CLONE_UPDATE=${BOMBYX_CLONE_UPDATE:-checkout}
 case "$CLONE_UPDATE" in
     checkout|discard|keep) ;;
     *) refuse "BOMBYX_CLONE_UPDATE is \"$CLONE_UPDATE\", which" \
-        "this script does not know. Run the bombyx that wrote" \
-        "the Vagrantfile, or provision again." ;;
+        "this script does not know. The shell that ran vagrant on" \
+        "the VM host set it; unset it there, or run bombyx" \
+        "provision." ;;
 esac
 readonly CLONE_UPDATE
 
@@ -1015,12 +1023,13 @@ readonly CLONE_UPDATE
 # after every provision, and the agent would seem to hold work
 # it never made.
 #
-# A status git cannot give counts as work. "Cannot tell" is not
-# "clean", by the same rule the URL comparison below follows. The
-# shape carries that without a `return`, which this script
-# keeps for `refuse` alone: an `if` whose condition fails and
-# that has no `else` ends with status 0, so a failed `git status`
-# answers "may hold work".
+# A status git cannot give counts as work. Both guards here take
+# the answer that deletes nothing when they cannot tell: for the
+# URL comparison below that is "same repository", and for this
+# one it is "may hold work". The shape carries that without a
+# `return`, which this script keeps for `refuse` alone: an `if`
+# whose condition fails and that has no `else` ends with status
+# 0, so a failed `git status` answers "may hold work".
 clone_may_hold_work() {
     if porcelain=$(git -C "$CLONE_DIR" -c core.fileMode=false \
         status --porcelain)
@@ -1157,26 +1166,30 @@ if [ -d "$CLONE_DIR/.git" ]; then
         # edits included. Saying which commit that is, and
         # whether the tree differs from it, is all the operator
         # has to tell this run apart from an updated one.
+        # A failed substitution inside `echo`'s arguments would not
+        # stop `set -e`; it would print an empty commit, so the
+        # answer is read first and a failure is named.
+        if ! head=$(git -C "$CLONE_DIR" rev-parse --short HEAD); then
+            head="an unreadable HEAD"
+        fi
         echo "bombyx: not updating the clone (--no-fetch);" \
-            "running from commit" \
-            "$(git -C "$CLONE_DIR" rev-parse --short HEAD)." >&2
+            "running from commit $head." >&2
         if clone_may_hold_work; then
             echo "bombyx: the clone holds uncommitted work," \
                 "which the script sees as it is." >&2
         fi
     else
-        # The fetch and both checkouts fail on a tracked file
-        # inside a directory the agent cannot write -- which the
-        # project's own script can leave behind, because it has
-        # `sudo` and runs with this tree as its working
-        # directory. `git checkout --force` is the nastier one:
-        # it exits 1 after printing "Switched to branch", so the
-        # worktree is half-changed, and without this check
-        # `set -e` would abort with nothing naming bombyx.
-        # Named on the command rather than exported, and it wins
-        # over any `core.sshCommand` an earlier provision left in
-        # this clone: `git` prefers GIT_SSH_COMMAND to that
-        # setting.
+        # The fetch, like both checkouts below, fails on a tracked
+        # file inside a directory the agent cannot write -- which
+        # the project's own script can leave behind, because it
+        # has `sudo` and runs with this tree as its working
+        # directory. Each is checked, so the failure names bombyx
+        # rather than ending in a bare `set -e` abort.
+        #
+        # `git_net` sets GIT_SSH_COMMAND on this one command
+        # rather than exporting it, and GIT_SSH_COMMAND wins over
+        # any `core.sshCommand` an earlier provision left in this
+        # clone.
         if ! git_net -C "$CLONE_DIR" \
             fetch --depth 1 origin -- "$BOMBYX_REF"
         then
@@ -1189,10 +1202,16 @@ if [ -d "$CLONE_DIR/.git" ]; then
         # git refuses before it changes anything when the checkout
         # would overwrite an edited tracked file, or an untracked
         # file at a path the fetched commit adds, and it lists
-        # those files. An edit the fetched commit does not touch
-        # carries over. `core.fileMode=false` keeps this script's
+        # those files. A file `.gitignore` matches is the
+        # exception: git overwrites it silently. An edit the
+        # fetched commit does not touch carries over.
+        # `core.fileMode=false` keeps this script's
         # own `chmod +x` from reading as such an edit;
         # `clone_may_hold_work` says why that matters.
+        #
+        # `git checkout --force` is the nastier failure: it exits
+        # 1 after printing "Switched to branch", so the worktree is
+        # half-changed, which its refusal says.
         if [ "$CLONE_UPDATE" = discard ]; then
             if ! git -C "$CLONE_DIR" checkout --force FETCH_HEAD
             then

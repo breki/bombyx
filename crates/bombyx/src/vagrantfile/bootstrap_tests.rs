@@ -740,17 +740,26 @@ fn code_at(code: &str, needle: &str) -> usize {
 
 #[test]
 fn the_clone_mode_is_checked_before_the_clone_is_touched() {
-    // A Vagrantfile from an older bombyx sets no mode, so the
-    // fallback is the one that loses nothing. An unknown word is
-    // refused through `refuse`, which clears the uploaded
-    // credentials, and before anything fetches or deletes.
+    // A Vagrantfile edited by hand may pass no mode, so the
+    // fallback is the one that refuses to overwrite the agent's
+    // work. An unknown word is refused through `refuse`, which
+    // clears the uploaded credentials, and before anything fetches
+    // or deletes.
+    use crate::remote::CloneUpdate;
     let code = bootstrap_code();
-    let read = code_at(&code, "CLONE_UPDATE=${BOMBYX_CLONE_UPDATE:-checkout}");
+    let read = code_at(
+        &code,
+        &format!(
+            "CLONE_UPDATE=${{BOMBYX_CLONE_UPDATE:-{}}}",
+            CloneUpdate::default().as_str()
+        ),
+    );
+    let words = CloneUpdate::ALL.map(CloneUpdate::as_str).join("|");
     let check = code_at(
         &code,
-        "case \"$CLONE_UPDATE\" in checkout|discard|keep) ;; *) refuse",
+        &format!("case \"$CLONE_UPDATE\" in {words}) ;; *) refuse"),
     );
-    assert!(read < check, "the mode is checked before it is read");
+    assert!(read < check, "the mode must be read before it is checked");
     for touch in ["git_net -C \"$CLONE_DIR\" fetch", "rm -rf \"$CLONE_DIR\""] {
         assert!(check < code_at(&code, touch), "checked after {touch}");
     }
@@ -783,8 +792,8 @@ fn a_clone_holding_work_is_not_deleted_without_discard() {
     // A change of `source.repo` deletes the clone. That loses
     // everything the agent has not pushed, so it waits for
     // `--discard` unless git says the tree is clean. A status
-    // that cannot be read counts as work, the same "cannot tell
-    // is not different" rule the URL comparison follows.
+    // that cannot be read counts as work: when unsure, take the
+    // answer that deletes nothing.
     let code = bootstrap_code();
     code_at(
         &code,
@@ -808,9 +817,13 @@ fn keep_leaves_the_clone_alone_and_needs_one() {
     let code = bootstrap_code();
     let keep = code_at(
         &code,
-        "if [ \"$CLONE_UPDATE\" = keep ]; then echo \"bombyx: not updating",
+        "if [ \"$CLONE_UPDATE\" = keep ]; then if ! head=$(git -C",
     );
     assert!(keep < code_at(&code, "git_net -C \"$CLONE_DIR\" fetch"));
+    // The commit is the one thing the operator gets to tell this
+    // run apart from an updated one, so an unreadable HEAD is
+    // named rather than printed as an empty string.
+    code_at(&code, "head=\"an unreadable HEAD\"");
     code_at(
         &code,
         "if [ \"$CLONE_UPDATE\" = keep ]; then refuse \"this VM holds \

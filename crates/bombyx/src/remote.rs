@@ -96,9 +96,14 @@ pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 /// [`VM_HOST_ENV`] does, rather than in the generated
 /// `Vagrantfile`. The choice belongs to one run: written into the
 /// file, a `--discard` would stay in force for the next bare
-/// `vagrant provision` on the VM host. The `Vagrantfile` reads it
-/// with [`CloneUpdate::Checkout`] as the fallback, so a run that
-/// does not set it gets the mode that loses nothing.
+/// `vagrant provision` on the VM host.
+///
+/// Two fallbacks name [`CloneUpdate::Checkout`], the mode that
+/// refuses to overwrite the agent's work. The `Vagrantfile`'s
+/// covers a `vagrant` run that does not set the variable, which is
+/// every run but `provision`'s. `bootstrap.sh`'s covers a
+/// Vagrantfile that does not pass it, edited by hand or not
+/// written by bombyx; a Vagrantfile bombyx wrote always passes it.
 pub const CLONE_UPDATE_ENV: &str = "BOMBYX_CLONE_UPDATE";
 
 /// How a provision updates the clone the guest already holds.
@@ -108,25 +113,39 @@ pub const CLONE_UPDATE_ENV: &str = "BOMBYX_CLONE_UPDATE";
 /// `provision` names a mode. `up` and `scratch` name none, and the
 /// guest falls back to [`CloneUpdate::Checkout`]: they provision a
 /// machine they create, which has no clone yet, or one whose first
-/// provision never finished, where the fallback is the mode that
-/// loses nothing.
+/// provision never finished, where that mode refuses to overwrite
+/// the agent's work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CloneUpdate {
     /// Fetch `ref` and check it out, refusing when that would
-    /// overwrite the agent's uncommitted edits or untracked
-    /// files, or delete a clone of another repository that holds
-    /// any.
+    /// overwrite the agent's uncommitted edits or untracked files
+    /// git does not ignore, or delete a clone of another
+    /// repository that holds any. Ignored files are not protected.
     #[default]
     Checkout,
-    /// Fetch `ref` and check it out, overwriting whatever the
-    /// agent has not committed. `provision --discard`.
+    /// Fetch `ref` and check it out by force, overwriting edited
+    /// tracked files and untracked files the fetched commit adds,
+    /// and delete a clone of another repository whatever it holds.
+    /// An untracked file the fetched commit has no path for is
+    /// left alone. `provision --discard`.
     Discard,
-    /// Leave the clone as it is and run the project's script from
-    /// the current checkout. `provision --no-fetch`.
+    /// Keep the checkout as it is: no fetch and no checkout, so
+    /// the project's script runs from whatever the guest holds.
+    /// `provision --no-fetch`. Not to be read as "keep the agent's
+    /// changes", which is what `Checkout` does.
     Keep,
 }
 
 impl CloneUpdate {
+    /// Every mode, in declaration order.
+    ///
+    /// The tests build the words the guest scripts must accept
+    /// from it, so a mode the scripts do not know fails a test
+    /// rather than a guest. A new variant stops
+    /// `every_clone_mode_is_listed` compiling, which is the
+    /// reminder to list it here.
+    pub const ALL: [Self; 3] = [Self::Checkout, Self::Discard, Self::Keep];
+
     /// The word the guest reads from [`CLONE_UPDATE_ENV`].
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -198,21 +217,25 @@ fn vm_host_env(cfg: &Config) -> String {
 }
 
 /// Builds the `vagrant` command itself: the identity and
-/// provider prefix, the program, and its quoted arguments.
+/// provider prefix, the clone mode when there is one, the
+/// program, and its quoted arguments.
 ///
-/// Split out from [`vagrant_script`] so every shape bombyx emits
-/// carries the same prefix. [`vagrant_script`] puts the command
-/// after a bare `cd`, so a builder needing it somewhere else
-/// builds it directly. Two do: `save_snapshot_if_absent` calls
-/// this function to put `snapshot list` and `snapshot save`
-/// inside one `if`, and `destroy_vm_if_present` calls
-/// [`vagrant_command_as`] inside its guards, because it names the
+/// This is the one place the configured provider is chosen.
+/// [`vagrant_script`] builds through it and puts the command after
+/// a bare `cd`; a builder needing it somewhere else calls it
+/// directly. `save_snapshot_if_absent` does, to put `snapshot
+/// list` and `snapshot save` inside one `if`. `destroy_vm_if_present`
+/// calls [`vagrant_command_as`] instead, because it names the
 /// recorded provider rather than the configured one. A builder
-/// assembling its own string would run `vagrant` with none of
-/// the three variables set: `VM_HOST_ENV`, `VM_HOSTNAME_ENV` and
-/// `PROVIDER_ENV`.
-fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
-    vagrant_command_as(cfg, Some(cfg.vm.provider), args)
+/// assembling its own string would run `vagrant` with none of the
+/// variables set: `VM_HOST_ENV`, `VM_HOSTNAME_ENV`, `PROVIDER_ENV`,
+/// and `CLONE_UPDATE_ENV` when a mode is given.
+fn vagrant_command(
+    cfg: &Config,
+    args: &[&str],
+    clone_update: Option<CloneUpdate>,
+) -> String {
+    vagrant_command_as(cfg, Some(cfg.vm.provider), args, clone_update)
 }
 
 /// [`vagrant_command`] naming `provider` rather than the
@@ -221,25 +244,16 @@ fn vagrant_command(cfg: &Config, args: &[&str]) -> String {
 /// `destroy_vm_if_present` is the only caller that needs this: it
 /// names the provider vagrant recorded the machine under, and
 /// none for a machine it cannot place.
+///
+/// `clone_update` is named in [`CLONE_UPDATE_ENV`] when it is
+/// `Some`. Only a provision passes one; every other call leaves
+/// the variable unset, so the Vagrantfile's fallback decides;
+/// `CLONE_UPDATE_ENV` says which mode that is.
 fn vagrant_command_as(
     cfg: &Config,
     provider: Option<Provider>,
     args: &[&str],
-) -> String {
-    vagrant_command_with(cfg, provider, None, args)
-}
-
-/// [`vagrant_command_as`] that also names `clone_update` in
-/// [`CLONE_UPDATE_ENV`], or names no mode when it is `None`.
-///
-/// Only a provision passes a mode. Every other call leaves the
-/// variable unset, so the guest's fallback decides, and that
-/// fallback is the mode that loses nothing.
-fn vagrant_command_with(
-    cfg: &Config,
-    provider: Option<Provider>,
     clone_update: Option<CloneUpdate>,
-    args: &[&str],
 ) -> String {
     use std::fmt::Write as _;
     let mut cmd = vm_host_env(cfg);
@@ -265,7 +279,8 @@ fn vagrant_command_with(
 }
 
 /// Builds the remote script that enters `dir` and runs
-/// `vagrant` with `args`.
+/// `vagrant` with `args`, naming `clone_update` as
+/// [`vagrant_command_as`] does.
 ///
 /// Every vagrant invocation that runs **inside a project
 /// directory** carries [`vm_host_env`], not just the ones that
@@ -279,27 +294,16 @@ fn vagrant_command_with(
 /// reads no `Vagrantfile` -- checked by running it in a
 /// directory holding one that raises -- so there is nothing
 /// there to read the variables.
-fn vagrant_script(cfg: &Config, dir: &str, args: &[&str]) -> String {
-    vagrant_script_with(cfg, dir, None, args)
-}
-
-/// [`vagrant_script`] naming `clone_update` for the guest; see
-/// [`vagrant_command_with`].
-fn vagrant_script_with(
+fn vagrant_script(
     cfg: &Config,
     dir: &str,
-    clone_update: Option<CloneUpdate>,
     args: &[&str],
+    clone_update: Option<CloneUpdate>,
 ) -> String {
     format!(
         "cd {dir} && {cmd}",
         dir = quote_remote_path(dir),
-        cmd = vagrant_command_with(
-            cfg,
-            Some(cfg.vm.provider),
-            clone_update,
-            args
-        ),
+        cmd = vagrant_command(cfg, args, clone_update),
     )
 }
 
@@ -587,7 +591,7 @@ pub fn vagrant_in(
     args: &[&str],
     tty: Tty,
 ) -> RemoteCommand {
-    let script = vagrant_script(cfg, dir, args);
+    let script = vagrant_script(cfg, dir, args, None);
     transport(cfg, &script, tty)
 }
 
@@ -653,6 +657,12 @@ pub fn vagrant_in(
 /// not depend on where the shell is standing. A `cd` that failed
 /// leaves the shell in the login directory, where a bare
 /// `rm -f bombyx.env` would name a different file.
+///
+/// `clone_update` names the guest's clone mode on the `vagrant`
+/// call. `None` names none, so the Vagrantfile's fallback,
+/// [`CloneUpdate::Checkout`], applies; `Some(Checkout)` names it
+/// outright. Only `provision` passes `Some`, so that a dry run
+/// shows the mode it asked for.
 #[must_use]
 pub fn vagrant_in_then_remove(
     cfg: &Config,
@@ -679,7 +689,7 @@ pub fn vagrant_in_then_remove(
         .join("; ");
     let script = format!(
         "{run}; rc=$?; {removes}; exit $rc",
-        run = vagrant_script_with(cfg, dir, clone_update, args),
+        run = vagrant_script(cfg, dir, args, clone_update),
     );
     transport(cfg, &script, tty)
 }
@@ -903,7 +913,8 @@ fn status_fragment(cfg: &Config) -> String {
          else printf '{NEVER_BUILT}\\n'; fi",
         name = shell_quote(cfg.project.as_str()),
         vagrantfile = quote_remote_path(&format!("{dir}/Vagrantfile")),
-        run = vagrant_script(cfg, &dir, &["status", "--machine-readable"]),
+        run =
+            vagrant_script(cfg, &dir, &["status", "--machine-readable"], None),
     )
 }
 
@@ -945,7 +956,7 @@ pub fn status_or_never_built(cfg: &Config, tty: Tty) -> RemoteCommand {
          else printf 'bombyx: %s has no VM yet; run `up` to create \
          it\\n' {name}; fi",
         vagrantfile = quote_remote_path(&format!("{dir}/Vagrantfile")),
-        run = vagrant_script(cfg, &dir, &["status"]),
+        run = vagrant_script(cfg, &dir, &["status"], None),
         name = shell_quote(cfg.project.as_str()),
     );
     transport(cfg, &script, tty)
@@ -1050,13 +1061,13 @@ pub fn destroy_vm_if_present(
             format!(
                 "[ -f {id} ]; then {cmd}; ",
                 id = shell_quote(&recorded_machine_id(p)),
-                cmd = vagrant_command_as(cfg, Some(p), &destroy),
+                cmd = vagrant_command_as(cfg, Some(p), &destroy, None),
             )
         })
         .collect();
     branches.push(format!(
         "{ANY_RECORDED_MACHINE}; then {cmd}; ",
-        cmd = vagrant_command_as(cfg, None, &destroy),
+        cmd = vagrant_command_as(cfg, None, &destroy, None),
     ));
     let script = format!(
         "cd {dir} && if [ -f Vagrantfile ]; then if {chain}fi; \
@@ -1181,9 +1192,10 @@ pub fn save_snapshot_if_absent(
          for %s; re-run this command with snapshot in place of \
          up\\n' {project} >&2; }}",
         dir = quote_remote_path(dir),
-        list = vagrant_command(cfg, &["snapshot", "list"]),
+        list = vagrant_command(cfg, &["snapshot", "list"], None),
         name = shell_quote(FRESH_SNAPSHOT),
-        save = vagrant_command(cfg, &["snapshot", "save", FRESH_SNAPSHOT]),
+        save =
+            vagrant_command(cfg, &["snapshot", "save", FRESH_SNAPSHOT], None),
         name_bare = FRESH_SNAPSHOT,
         project = shell_quote(cfg.project.as_str()),
     );
@@ -3355,6 +3367,24 @@ fi
     }
 
     #[test]
+    fn every_clone_mode_is_listed() {
+        // The `match` has no wildcard arm, so a new variant stops
+        // this test compiling until it gets an arm, and `ARMS` is
+        // raised by hand beside it; `config::vm`'s
+        // `every_provider_is_listed` is the same shape.
+        const ARMS: usize = 3;
+        let slot = |m: CloneUpdate| match m {
+            CloneUpdate::Checkout => 0,
+            CloneUpdate::Discard => 1,
+            CloneUpdate::Keep => 2,
+        };
+        assert_eq!(CloneUpdate::ALL.len(), ARMS, "a mode is unlisted");
+        for (i, m) in CloneUpdate::ALL.into_iter().enumerate() {
+            assert_eq!(slot(m), i, "{m:?} is listed out of place");
+        }
+    }
+
+    #[test]
     fn a_clone_mode_is_named_on_the_vagrant_call_and_only_when_given() {
         // The mode belongs to one run, so it rides on the vagrant
         // invocation; `CLONE_UPDATE_ENV` holds why. A call given no
@@ -3371,11 +3401,7 @@ fi
             ))
         };
         let env = vagrant_env();
-        for mode in [
-            CloneUpdate::Checkout,
-            CloneUpdate::Discard,
-            CloneUpdate::Keep,
-        ] {
+        for mode in CloneUpdate::ALL {
             let s = script(Some(mode));
             let want = format!(
                 "cd '/srv/x' && {env} {CLONE_UPDATE_ENV}='{}' vagrant \

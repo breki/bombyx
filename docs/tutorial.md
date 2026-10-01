@@ -754,7 +754,8 @@ so you can push them from the guest or pass `--discard` to let
 them go. It also detaches HEAD, so a commit made in the guest
 does not survive it; [usage.md](usage.md) under **up and
 provision** sets out what is kept and what is lost, and how
-`--no-fetch` re-runs the script without touching the clone.
+`--no-fetch` re-runs the script without fetching or checking
+anything out.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM rather than your project one:

@@ -307,16 +307,18 @@ try {
             "credential.helper=$credHelper")
     }
 
-    # How this provision may update the clone, with the fallback that
-    # loses nothing. Checked once the credentials are known, so a
-    # refusal removes them; bootstrap.sh says why each part is there.
+    # How this provision may update the clone, falling back to the
+    # mode that refuses to overwrite the agent's work. Checked once
+    # the credentials are known, so a refusal removes them;
+    # bootstrap.sh says why each part is there.
     $CloneUpdate = $env:BOMBYX_CLONE_UPDATE
     if ([string]::IsNullOrEmpty($CloneUpdate)) {
         $CloneUpdate = 'checkout'
     }
     if ($CloneUpdate -cnotin @('checkout', 'discard', 'keep')) {
         Refuse ("BOMBYX_CLONE_UPDATE is `"$CloneUpdate`", which this " +
-            "script does not know. $VersionSkew")
+            'script does not know. The shell that ran vagrant on the VM ' +
+            'host set it; unset it there, or run bombyx provision.')
     }
 
     if (Test-Path -LiteralPath (Join-Path $CloneDir '.git') -PathType Container) {
@@ -358,6 +360,9 @@ try {
                 $ErrorActionPreference = 'Continue'
                 & $Git -C $CloneDir rev-parse --short HEAD 2>$null
             }
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty("$head")) {
+                $head = 'an unreadable HEAD'
+            }
             [Console]::Error.WriteLine(
                 'bombyx: not updating the clone (--no-fetch); running ' +
                 "from commit $head.")
@@ -375,7 +380,10 @@ try {
                     "clear it in the guest: $CloneDir")
             }
             # Only --discard forces the checkout; bootstrap.sh says what
-            # a plain one refuses and why it ignores the executable bit.
+            # a plain one refuses. core.fileMode=false matters there
+            # because that script runs chmod +x on the project's script;
+            # nothing here sets the bit, so on Windows it only keeps the
+            # two scripts' git calls the same.
             if ($CloneUpdate -eq 'discard') {
                 Invoke-Native $Git -C $CloneDir checkout --force FETCH_HEAD
                 if ($LASTEXITCODE -ne 0) {
