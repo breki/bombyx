@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.11.0] - 2026-10-01
+
+### Added
+
 - A `[source.vault]` table reads the project secrets from a KeePassXC database
   on the workstation instead of a plain-text `env_file`: one entry per variable,
   unlocked once per run. bombyx asks for the master password through
