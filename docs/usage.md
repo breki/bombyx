@@ -370,6 +370,13 @@ built the machine with. Run `bombyx destroy myproject`, then
 On a machine that is its own VM host, `doctor` checks `sh` rather
 than `ssh`; [local-host.md](local-host.md) covers that route.
 
+A project with a `vault` adds a `local keepassxc-cli` row, which
+fails when `keepassxc-cli` is not on your `PATH`. On a Windows
+workstation that row fails with the refusal `up` would give,
+because bombyx cannot open a vault there yet. `doctor` never asks
+for the master password: it checks that the program is there, not
+that the database opens.
+
 ## --dry-run
 
 Every command takes `--dry-run`, which prints the exact shell it

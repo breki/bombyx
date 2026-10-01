@@ -23,6 +23,8 @@ and this project adheres to
   by `vault.deploy_key.entry` and `vault.deploy_key.attachment`, in place of a
   `deploy_key` file. The same unlock reads it, and a vault may hold the key and
   no `entries`, alone or beside an `env_file` that holds the secrets (#157).
+- `bombyx doctor` checks for `keepassxc-cli` when the project names a `vault`,
+  and reports on a Windows workstation that a vault is not supported there yet.
 
 ### Changed
 

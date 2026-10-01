@@ -1194,17 +1194,15 @@ fn run_refresh(commands: &[RemoteCommand]) -> bool {
 /// programs for their versions.
 fn doctor_run(cfg: &Config) -> Ran {
     let mut report = Report::default();
-    // One local program per route, and only the one this run
-    // will actually spawn: checking `ssh` where bombyx starts
-    // `sh` reports on a program no VM command reaches, and a
-    // report that turns red over it says nothing about whether
-    // `up` works.
-    //
-    // `bombyx self-update` also needs `git`, `curl` and `tar`.
-    // Those are its problem, for the same reason.
-    match cfg.transport() {
-        Transport::Ssh => report.add(local_tool("ssh", Some("-V"))),
-        Transport::Local => report.add(local_tool("sh", None)),
+    // Only the programs a run of this config starts;
+    // `doctor::local_tools` says which and why. `bombyx
+    // self-update` also needs `git`, `curl` and `tar`. Those are
+    // its problem, for the same reason.
+    for tool in doctor::local_tools(cfg, cfg!(windows)) {
+        report.add(local_tool(tool.name, tool.version_arg));
+    }
+    if let Some(finding) = doctor::vault_platform_finding(cfg, cfg!(windows)) {
+        report.add(finding);
     }
     report.add_all(doctor::host_findings(cfg, spawn_probe));
 
