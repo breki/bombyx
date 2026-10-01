@@ -795,12 +795,13 @@ fn the_history_is_checked_before_the_clone_is_touched() {
 
 #[test]
 fn a_full_history_clone_fetches_every_branch() {
-    // `--depth` turns on `--single-branch`, so a shallow clone's
-    // refspec names `ref` alone. Full history widens it to every
-    // branch and unshallows a clone an earlier provision left
-    // shallow. A fetch that names `ref` ignores the refspec, so
-    // the other branches need a fetch of their own, and the
-    // second fetch then sets `FETCH_HEAD` for the checkout.
+    // The refspec is the clone's `remote.origin.fetch` setting,
+    // the branches a plain `git fetch origin` brings down, and a
+    // `--depth` clone sets it to `ref` alone. Under `full`,
+    // `set-branches '*'` widens it, one fetch brings every branch
+    // down (unshallowing a shallow clone), and a separate fetch
+    // of `ref` writes `FETCH_HEAD` for the checkout, because a
+    // fetch that names `ref` ignores the refspec.
     let code = bootstrap_code();
     let widen = code_at(
         &code,
@@ -829,9 +830,9 @@ fn a_full_history_clone_fetches_every_branch() {
 #[test]
 fn shallow_never_cuts_the_history_of_a_full_clone() {
     // A `--depth 1` fetch into a full clone makes it shallow and
-    // drops every older commit -- measured. So the depth applies
-    // only when the clone is shallow already, and only twice in
-    // the script: that fetch, and a shallow first clone.
+    // drops every older commit. So the depth applies only when the
+    // clone is shallow already, and only twice in the script: that
+    // fetch, and a shallow first clone.
     let code = bootstrap_code();
     code_at(
         &code,

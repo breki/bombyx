@@ -4,6 +4,19 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-10-01-first-clone-aborts-without-refuse
+
+**Category:** Correctness
+
+The first `git_net clone` in `bootstrap.sh` runs bare under
+`set -e`, so a failed clone aborts the script without `refuse`, and
+the uploaded deploy key, secrets file and git credential stay in the
+guest. `bootstrap.ps1` refuses with "could not clone" there. True on
+`main` before the history change; raised by the fresh-reader stage of
+the #160 review and logged rather than fixed, because it is outside
+that change. The fix is an `if ! git_net clone ...; then refuse ...;
+fi` around both clone lines.
+
 ### rt-2026-09-30-windows-refresh-mixed-advice
 
 **Category:** Correctness

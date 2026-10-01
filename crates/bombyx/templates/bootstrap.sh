@@ -891,8 +891,8 @@ fi
 # for gets; docs/trust-boundary.md says what it costs.
 #
 # IT IS NEVER EXPORTED. `git_ssh` is built here and named on
-# each of the two `git` commands below that talk to the network,
-# one command at a time.
+# every `git` command below that talks to the network, one
+# command at a time.
 #
 # The reason is `exec` at the end of this script, which hands
 # the environment to the project's own script. An exported
@@ -968,9 +968,9 @@ else
     git_cred_helper=""
 fi
 
-# The two `git` commands below that talk to the network go
+# Every `git` command below that talks to the network goes
 # through here, so the credential and the ssh command are added
-# in one place rather than twice.
+# in one place rather than at each call.
 #
 # Two branches rather than one command with a variable in it.
 # The helper string carries a space, so an unquoted expansion
@@ -1013,23 +1013,27 @@ readonly CLONE_UPDATE
 
 # How much of the repository the clone holds, from
 # `[source].history`: `full`, every branch with its whole
-# history, or `shallow`, one commit of `ref`. A config value, so
-# the Vagrantfile always passes it; the fallback covers one
-# edited by hand, and an unknown word is refused for the reason
-# the clone mode's is.
+# history, or `shallow`, one commit of `ref`. bombyx writes the
+# value into the Vagrantfile from the config, which refuses any
+# other word, so the fallback covers only a Vagrantfile edited by
+# hand. An unknown word means the same, and guessing `shallow`
+# from it could cut the clone's history, so it is refused.
 HISTORY=${BOMBYX_HISTORY:-full}
 case "$HISTORY" in
     full|shallow) ;;
     *) refuse "BOMBYX_HISTORY is \"$HISTORY\", which this" \
-        "script does not know. Set source.history to full or" \
-        "shallow, then provision again." ;;
+        "script does not know. bombyx refuses such a value in the" \
+        "config, so the Vagrantfile on the VM host was edited by" \
+        "hand; run bombyx provision to rewrite it." ;;
 esac
 readonly HISTORY
 
-# Whether the clone holds only part of its history, as a
-# `--depth` clone or fetch leaves it. A clone git cannot answer
-# for counts as full, which is the answer that keeps a later
-# fetch from cutting it.
+# Whether the clone holds only part of its history, as git calls
+# a clone that a `--depth` clone or fetch left with older commits
+# missing. A `--depth 1` fetch into a full clone drops every older
+# commit, so the safe answer when git cannot tell is "full". A
+# failed `rev-parse` prints nothing, so the test is false, and
+# `set -e` does not fire inside an `if`.
 clone_is_shallow() {
     [ "$(git -C "$CLONE_DIR" rev-parse --is-shallow-repository)" \
         = true ]
@@ -1062,8 +1066,8 @@ clone_may_hold_work() {
     fi
 }
 
-# The refusal for a fetch or a `set-branches` that failed, shared
-# by every step of the update below.
+# Refuses because the update failed. Called by `set-branches`
+# and every fetch below; the checkouts give their own messages.
 update_failed() {
     refuse "could not update the clone. The message above" \
         "says why. If something in it belongs to another" \
@@ -1188,9 +1192,10 @@ fi
 # `FETCH_HEAD` is a file git writes during a fetch, naming the
 # commit that fetch just brought down. Checking it out is how
 # you land on exactly what was fetched. Using `$BOMBYX_REF` in
-# the checkout instead would resolve the name a second time,
-# and a `--depth 1` fetch does not create a local branch for it
-# to resolve to.
+# the checkout instead would resolve the name a second time, and
+# `git fetch origin -- <ref>` updates `origin/<ref>` and
+# `FETCH_HEAD`, never a local branch named `<ref>`, so the name
+# would find a stale local branch or nothing.
 if [ -d "$CLONE_DIR/.git" ]; then
     if [ "$CLONE_UPDATE" = keep ]; then
         # `--no-fetch`: no fetch and no checkout, so the script
@@ -1211,23 +1216,26 @@ if [ -d "$CLONE_DIR/.git" ]; then
                 "which the script sees as it is." >&2
         fi
     else
-        # The fetch, like both checkouts below, fails on a tracked
-        # file inside a directory the agent cannot write -- which
-        # the project's own script can leave behind, because it
-        # has `sudo` and runs with this tree as its working
-        # directory. Each is checked, so the failure names bombyx
-        # rather than ending in a bare `set -e` abort.
+        # Every fetch here, like both checkouts below, fails on a
+        # tracked file inside a directory the agent cannot write
+        # -- which the project's own script can leave behind,
+        # because it has `sudo` and runs with this tree as its
+        # working directory. Each is checked, so the failure names
+        # bombyx rather than ending in a bare `set -e` abort.
         #
-        # `git_net` sets GIT_SSH_COMMAND on this one command
-        # rather than exporting it, and GIT_SSH_COMMAND wins over
-        # any `core.sshCommand` an earlier provision left in this
+        # `git_net` sets GIT_SSH_COMMAND on each command rather
+        # than exporting it, and GIT_SSH_COMMAND wins over any
+        # `core.sshCommand` an earlier provision left in this
         # clone.
         #
-        # Full history widens the refspec to every branch, since
-        # `--depth` turned on `--single-branch` for a clone an
-        # earlier provision left shallow, and unshallows that
-        # clone. Every branch then needs a fetch of its own,
-        # because a fetch that names `ref` ignores the refspec.
+        # The refspec is the clone's `remote.origin.fetch`
+        # setting, which lists the branches a plain `git fetch
+        # origin` brings down. A `--depth` clone sets it to `ref`
+        # alone. Under `history = full`, `set-branches '*'` makes
+        # it every branch, and does no harm on a clone that has
+        # that already. One `git fetch origin` then brings every
+        # branch down, with `--unshallow` when the clone is
+        # shallow so the missing history comes too.
         if [ "$HISTORY" = full ]; then
             if ! git -C "$CLONE_DIR" remote set-branches origin '*'
             then
@@ -1242,11 +1250,13 @@ if [ -d "$CLONE_DIR/.git" ]; then
             fi
         fi
 
-        # The fetch of `ref` sets `FETCH_HEAD` for the checkout.
-        # Its depth applies only to a shallow clone: a `--depth 1`
-        # fetch into a full clone makes it shallow and drops every
+        # The fetch of `ref` follows separately, because it alone
+        # writes `FETCH_HEAD` for the checkout; a fetch that names
+        # `ref` ignores the refspec. It gets `--depth 1` only under
+        # `history = shallow` and only when the clone is shallow
+        # already: in a full clone that fetch would drop every
         # older commit, so a project that switched to `shallow`
-        # keeps the history it already has.
+        # keeps the history it has.
         if [ "$HISTORY" = shallow ] && clone_is_shallow; then
             if ! git_net -C "$CLONE_DIR" \
                 fetch --depth 1 origin -- "$BOMBYX_REF"
@@ -1330,8 +1340,8 @@ else
             "guest, then provision again."
     fi
 
-    # A clone without `--depth` writes git's default refspec,
-    # which fetches every branch.
+    # A clone without `--depth` writes git's default refspec (see
+    # the fetch above), which names every branch.
     if [ "$HISTORY" = full ]; then
         git_net clone --branch "$BOMBYX_REF" \
             -- "$BOMBYX_REPO" "$CLONE_DIR"

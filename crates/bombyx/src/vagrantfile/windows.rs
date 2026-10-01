@@ -304,9 +304,12 @@ mod tests {
     #[test]
     fn bootstrap_ps1_clones_the_configured_history() {
         // The Windows half of `bootstrap_tests`' history tests: the
-        // same fallback and words, every branch under `full`, and a
-        // depth only for a shallow fetch into a shallow clone or a
-        // shallow first clone.
+        // same fallback and words, every branch under `full`, and
+        // `--depth 1` only when the setting is `shallow` and the
+        // clone is shallow already, or on a first clone under
+        // `shallow`. The first clone passes its depth as the array
+        // `@('--depth', '1')`, so the literal `--depth 1` appears
+        // once, in the fetch, where the shell script has it twice.
         use crate::config::History;
         let script = BOOTSTRAP.replace("\r\n", "\n");
         let fallback = format!("$History = '{}'", History::default().as_str());
@@ -327,7 +330,14 @@ mod tests {
         ] {
             assert!(script.contains(text), "bootstrap.ps1: {text}");
         }
-        assert_eq!(script.matches("--depth 1").count(), 1);
+        // Counted over code lines, so a comment naming the flag
+        // does not count.
+        let depths = script
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .filter(|l| l.contains("--depth 1"))
+            .count();
+        assert_eq!(depths, 1, "{script}");
     }
 
     #[test]

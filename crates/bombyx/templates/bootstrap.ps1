@@ -91,8 +91,9 @@ function Test-SameRepo([string] $A, [string] $B) {
 }
 
 # Whether the clone at `dir` holds only part of its history, as
-# bootstrap.sh's clone_is_shallow decides: a clone git cannot answer
-# for counts as full, so a later fetch does not cut it.
+# bootstrap.sh's clone_is_shallow decides. A clone git cannot answer
+# for counts as full, because a --depth 1 fetch into a full clone
+# would drop every older commit.
 function Test-CloneIsShallow([string] $Git, [string] $Dir) {
     $answer = & {
         $ErrorActionPreference = 'Continue'
@@ -339,8 +340,9 @@ try {
     }
     if ($History -cnotin @('full', 'shallow')) {
         Refuse ("BOMBYX_HISTORY is `"$History`", which this script does " +
-            'not know. Set source.history to full or shallow, then ' +
-            'provision again.')
+            'not know. bombyx refuses such a value in the config, so the ' +
+            'Vagrantfile on the VM host was edited by hand; run bombyx ' +
+            'provision to rewrite it.')
     }
 
     if (Test-Path -LiteralPath (Join-Path $CloneDir '.git') -PathType Container) {
@@ -415,8 +417,9 @@ try {
                     Refuse $updateFailed
                 }
             }
-            # A depth only for a clone that is shallow already, so a
-            # full clone keeps its history under shallow.
+            # --depth 1 only under history = shallow and only when the
+            # clone is shallow already, so a full clone keeps its
+            # history when the setting changes to shallow.
             if ($History -eq 'shallow' -and
                 (Test-CloneIsShallow $Git $CloneDir)) {
                 Invoke-Native $Git @gitNet -C $CloneDir fetch --depth 1 origin `
