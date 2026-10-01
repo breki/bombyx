@@ -357,25 +357,6 @@ behavioural question. Seven comment findings on PR #66 turn on
 this decision and are left unfixed until it is made: FR-1, FR-2,
 FR-5, FR-7, FR-12, FR-13, FR-15 (FR-12 is the argument itself).
 
-### guest-branch-state-differs
-
-**Summary:** first up leaves a branch, later ones detach
-
-The first `up` clones with `git clone --depth 1 --branch <ref>` and leaves the
-guest on a real branch. Every provision after that runs `git checkout --force
-FETCH_HEAD`, which detaches HEAD. So a guest that has never been
-re-provisioned is on a branch and an identical one that has is not, and an
-operator cannot say which state to expect. The detaching itself is deliberate
-and `bootstrap.sh` says so where it happens: a commit made in the guest sits
-on no branch, the next provision moves HEAD away from it, and pushing rather
-than committing is how work survives. That reasoning stands. It is the
-inconsistency between the two paths that is not covered. Found by running
-`bombyx --project jutro-rebuild provision` a second time on 2026-09-07 and
-then looking at the guest's checkout. Still true as of 2026-09-08: the
-`git clone --depth 1 --branch` in bootstrap.sh and the
-`git checkout --force FETCH_HEAD` above it. Cited by command rather than by
-line, because the host-key work moved both.
-
 ### chmod-dirties-the-checkout
 
 **Summary:** bombyx modifies a tracked file every run
