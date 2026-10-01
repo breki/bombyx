@@ -35,7 +35,9 @@ use super::{
 use crate::config::{Config, EnvName, EnvValue, Staged};
 use crate::hostkeys;
 use crate::powershell::base64;
-use crate::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
+use crate::remote::{
+    CLONE_UPDATE_ENV, CloneUpdate, VM_HOST_ENV, VM_HOSTNAME_ENV,
+};
 
 /// The script that clones the project and runs its script, as the
 /// agent, shipped to the host unchanged.
@@ -149,11 +151,18 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     for (name, value) in &cfg.env {
         entry(name.as_str(), value.as_str());
     }
-    for name in [VM_HOST_ENV, VM_HOSTNAME_ENV] {
+    // Read from the vagrant process, as bootstrap.sh's are; the
+    // clone mode falls back to the one that loses nothing.
+    for (name, fallback) in [
+        (VM_HOST_ENV, "unknown"),
+        (VM_HOSTNAME_ENV, "unknown"),
+        (CLONE_UPDATE_ENV, CloneUpdate::default().as_str()),
+    ] {
         let _ = writeln!(
             env,
-            "      {name} => [ENV.fetch({name}, \"unknown\")].pack(\"m0\"),",
+            "      {name} => [ENV.fetch({name}, {fallback})].pack(\"m0\"),",
             name = ruby_string(name),
+            fallback = ruby_string(fallback),
         );
     }
     let mut uploads = String::new();
@@ -255,6 +264,31 @@ mod tests {
         ] {
             assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
         }
+    }
+
+    #[test]
+    fn bootstrap_ps1_updates_the_clone_as_the_mode_says() {
+        // The Windows half of `bootstrap_tests`' clone-mode tests:
+        // the same fallback, the same three words, a forced checkout
+        // only under `discard`, and no deletion of a clone holding
+        // work without it. Two needles span a line break, and the
+        // file checks out with CRLF endings, so they are matched
+        // against LF text.
+        let script = BOOTSTRAP.replace("\r\n", "\n");
+        for text in [
+            "$CloneUpdate = $env:BOMBYX_CLONE_UPDATE",
+            "$CloneUpdate = 'checkout'",
+            "if ($CloneUpdate -cnotin @('checkout', 'discard', 'keep')) {",
+            "if ($CloneUpdate -ne 'discard' -and\n                \
+             (Test-CloneHoldsWork $Git $CloneDir)) {",
+            "if ($CloneUpdate -eq 'keep') {",
+            "if ($CloneUpdate -eq 'discard') {",
+            "Invoke-Native $Git -C $CloneDir -c core.fileMode=false `\n                    \
+             checkout FETCH_HEAD",
+        ] {
+            assert!(script.contains(text), "bootstrap.ps1: {text}");
+        }
+        assert_eq!(script.matches("checkout --force").count(), 1);
     }
 
     #[test]

@@ -30,7 +30,7 @@ use bombyx::doctor::{
 use bombyx::listing;
 use bombyx::name::{ProjectName, ScratchName};
 use bombyx::plan::{self, Action, StagedRead, plan};
-use bombyx::remote::{self, RemoteCommand, Tty};
+use bombyx::remote::{self, CloneUpdate, RemoteCommand, Tty};
 use bombyx::term;
 use bombyx::update::{self, asset};
 use clap::{Args, Parser, Subcommand};
@@ -129,29 +129,48 @@ enum VmCmd {
     /// fetches your repository and checks out `ref` again in
     /// the clone the guest already has.
     ///
-    /// `bootstrap.sh` forces that checkout, so it overwrites
-    /// your edits to tracked files. It also overwrites an
-    /// untracked file when the fetched commit adds one at the
-    /// same path. An untracked file survives only where the
-    /// commit has nothing at that path.
+    /// The checkout keeps the agent's work. When it would
+    /// overwrite an edit to a tracked file, or an untracked file
+    /// at a path the fetched commit adds, the guest refuses and
+    /// lists the files. An edit the fetched commit does not touch
+    /// carries over. Push or stash the work in `bombyx shell`, or
+    /// run again with `--discard`.
     ///
-    /// A forced checkout of `FETCH_HEAD` detaches HEAD, so
-    /// committing in the guest does not protect work either: the
-    /// next provision moves HEAD away and leaves that commit on
-    /// no branch, findable only through `git reflog`. Push it to
-    /// survive a provision.
+    /// The checkout detaches HEAD, so committing in the guest
+    /// does not protect work: the next provision moves HEAD away
+    /// and leaves that commit on no branch, findable only through
+    /// `git reflog`. Push it to survive a provision.
     ///
     /// Pointing `source.repo` at a different repository removes
-    /// the clone and starts over, which loses everything.
-    /// Rewriting the same URL with or without a trailing `/` or
-    /// `.git` keeps the clone.
+    /// the clone and starts over. The guest refuses that too
+    /// while the clone holds uncommitted edits or untracked
+    /// files, unless `--discard` is given. Rewriting the same URL
+    /// with or without a trailing `/` or `.git` keeps the clone.
     ///
     /// The project's `secrets_refreshed` hook, when its `[hooks]`
     /// table names one, runs after a successful provision, and a
     /// failed hook makes `provision` exit non-zero.
     ///
     /// The VM must already exist: run `up` first.
-    Provision(ProjectArg),
+    Provision {
+        #[command(flatten)]
+        project: ProjectArg,
+        /// Overwrite the agent's uncommitted work in the clone
+        ///
+        /// Checks out `ref` even where that overwrites edits to
+        /// tracked files or untracked files, and removes a clone
+        /// of a previous `source.repo` however much it holds.
+        #[arg(long, conflicts_with = "no_fetch")]
+        discard: bool,
+        /// Run the provisioning script without updating the clone
+        ///
+        /// Skips the fetch and the checkout, and runs the script
+        /// as it stands in the guest's current checkout, the
+        /// agent's edits included. The guest prints the commit it
+        /// ran from. Refused on a VM that has no clone yet.
+        #[arg(long)]
+        no_fetch: bool,
+    },
     /// Halt the project VM
     Down(ProjectArg),
     /// Open a shell inside the project VM, in the project clone
@@ -240,7 +259,7 @@ impl VmCmd {
     fn project(&self) -> &ProjectName {
         match self {
             Self::Up(p)
-            | Self::Provision(p)
+            | Self::Provision { project: p, .. }
             | Self::Down(p)
             | Self::Shell(p)
             | Self::Status(p)
@@ -527,8 +546,8 @@ fn run() -> Result<Ran> {
     if matches!(action, Action::Shell) {
         return shell_run(&cfg, tty, &staged, cli.dry_run);
     }
-    if matches!(action, Action::Provision) {
-        return provision_run(&cfg, tty, &staged, cli.dry_run);
+    if let Action::Provision(clone_update) = action {
+        return provision_run(&cfg, clone_update, tty, &staged, cli.dry_run);
     }
 
     // Every other action renders its dry run the same way, through
@@ -797,7 +816,13 @@ fn run_id() -> String {
 fn action_of(cmd: &VmCmd) -> Result<Action> {
     Ok(match cmd {
         VmCmd::Up(_) => Action::Up,
-        VmCmd::Provision(_) => Action::Provision,
+        VmCmd::Provision {
+            discard, no_fetch, ..
+        } => Action::Provision(match (discard, no_fetch) {
+            (true, _) => CloneUpdate::Discard,
+            (_, true) => CloneUpdate::Keep,
+            _ => CloneUpdate::Checkout,
+        }),
         VmCmd::Down(_) => Action::Down,
         VmCmd::Shell(_) => Action::Shell,
         VmCmd::Status(_) => Action::Status,
@@ -1023,11 +1048,12 @@ fn up_run(
 /// do.
 fn provision_run(
     cfg: &Config,
+    clone_update: CloneUpdate,
     tty: Tty,
     staged: &Staged,
     dry_run: bool,
 ) -> Result<Ran> {
-    let mut cmds = plan(&Action::Provision, cfg, tty, staged);
+    let mut cmds = plan(&Action::Provision(clone_update), cfg, tty, staged);
     let after = plan::refresh_after_provisioning(cfg, staged);
     if dry_run {
         cmds.extend(after);

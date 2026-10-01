@@ -89,6 +89,55 @@ pub const VM_HOST_ENV: &str = "BOMBYX_VM_HOST";
 /// pointing at a private item.
 pub const VM_HOSTNAME_ENV: &str = "BOMBYX_VM_HOSTNAME";
 
+/// Environment variable telling the guest how a provision may
+/// update the clone it already holds.
+///
+/// It travels on the `vagrant provision` invocation, as
+/// [`VM_HOST_ENV`] does, rather than in the generated
+/// `Vagrantfile`. The choice belongs to one run: written into the
+/// file, a `--discard` would stay in force for the next bare
+/// `vagrant provision` on the VM host. The `Vagrantfile` reads it
+/// with [`CloneUpdate::Checkout`] as the fallback, so a run that
+/// does not set it gets the mode that loses nothing.
+pub const CLONE_UPDATE_ENV: &str = "BOMBYX_CLONE_UPDATE";
+
+/// How a provision updates the clone the guest already holds.
+///
+/// The guest's bootstrap script reads the word
+/// [`CloneUpdate::as_str`] gives and refuses any other. Only
+/// `provision` names a mode. `up` and `scratch` name none, and the
+/// guest falls back to [`CloneUpdate::Checkout`]: they provision a
+/// machine they create, which has no clone yet, or one whose first
+/// provision never finished, where the fallback is the mode that
+/// loses nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CloneUpdate {
+    /// Fetch `ref` and check it out, refusing when that would
+    /// overwrite the agent's uncommitted edits or untracked
+    /// files, or delete a clone of another repository that holds
+    /// any.
+    #[default]
+    Checkout,
+    /// Fetch `ref` and check it out, overwriting whatever the
+    /// agent has not committed. `provision --discard`.
+    Discard,
+    /// Leave the clone as it is and run the project's script from
+    /// the current checkout. `provision --no-fetch`.
+    Keep,
+}
+
+impl CloneUpdate {
+    /// The word the guest reads from [`CLONE_UPDATE_ENV`].
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Checkout => "checkout",
+            Self::Discard => "discard",
+            Self::Keep => "keep",
+        }
+    }
+}
+
 /// Vagrant's own variable naming the provider it must use.
 ///
 /// Rendering `config.vm.provider :libvirt` in the generated
@@ -177,6 +226,21 @@ fn vagrant_command_as(
     provider: Option<Provider>,
     args: &[&str],
 ) -> String {
+    vagrant_command_with(cfg, provider, None, args)
+}
+
+/// [`vagrant_command_as`] that also names `clone_update` in
+/// [`CLONE_UPDATE_ENV`], or names no mode when it is `None`.
+///
+/// Only a provision passes a mode. Every other call leaves the
+/// variable unset, so the guest's fallback decides, and that
+/// fallback is the mode that loses nothing.
+fn vagrant_command_with(
+    cfg: &Config,
+    provider: Option<Provider>,
+    clone_update: Option<CloneUpdate>,
+    args: &[&str],
+) -> String {
     use std::fmt::Write as _;
     let mut cmd = vm_host_env(cfg);
     if let Some(provider) = provider {
@@ -186,6 +250,11 @@ fn vagrant_command_as(
         // matches every other one in the script.
         let _ =
             write!(cmd, " {PROVIDER_ENV}={}", shell_quote(provider.as_str()));
+    }
+    if let Some(mode) = clone_update {
+        // A fixed word too, quoted for the same reason.
+        let _ =
+            write!(cmd, " {CLONE_UPDATE_ENV}={}", shell_quote(mode.as_str()));
     }
     cmd.push_str(" vagrant");
     for arg in args {
@@ -211,10 +280,26 @@ fn vagrant_command_as(
 /// directory holding one that raises -- so there is nothing
 /// there to read the variables.
 fn vagrant_script(cfg: &Config, dir: &str, args: &[&str]) -> String {
+    vagrant_script_with(cfg, dir, None, args)
+}
+
+/// [`vagrant_script`] naming `clone_update` for the guest; see
+/// [`vagrant_command_with`].
+fn vagrant_script_with(
+    cfg: &Config,
+    dir: &str,
+    clone_update: Option<CloneUpdate>,
+    args: &[&str],
+) -> String {
     format!(
         "cd {dir} && {cmd}",
         dir = quote_remote_path(dir),
-        cmd = vagrant_command(cfg, args),
+        cmd = vagrant_command_with(
+            cfg,
+            Some(cfg.vm.provider),
+            clone_update,
+            args
+        ),
     )
 }
 
@@ -573,6 +658,7 @@ pub fn vagrant_in_then_remove(
     cfg: &Config,
     dir: &str,
     args: &[&str],
+    clone_update: Option<CloneUpdate>,
     tty: Tty,
     names: &[&str],
 ) -> RemoteCommand {
@@ -593,7 +679,7 @@ pub fn vagrant_in_then_remove(
         .join("; ");
     let script = format!(
         "{run}; rc=$?; {removes}; exit $rc",
-        run = vagrant_script(cfg, dir, args),
+        run = vagrant_script_with(cfg, dir, clone_update, args),
     );
     transport(cfg, &script, tty)
 }
@@ -3250,6 +3336,7 @@ fi
             &cfg(),
             "/srv/x",
             &["up"],
+            None,
             Tty::NoPty,
             &["bombyx.env"],
         );
@@ -3268,6 +3355,39 @@ fi
     }
 
     #[test]
+    fn a_clone_mode_is_named_on_the_vagrant_call_and_only_when_given() {
+        // The mode belongs to one run, so it rides on the vagrant
+        // invocation; `CLONE_UPDATE_ENV` holds why. A call given no
+        // mode must not name one, or it would override the guest's
+        // fallback with a value nobody chose.
+        let script = |mode| {
+            remote_script(&vagrant_in_then_remove(
+                &cfg(),
+                "/srv/x",
+                &["provision"],
+                mode,
+                Tty::NoPty,
+                &["bombyx.env"],
+            ))
+        };
+        let env = vagrant_env();
+        for mode in [
+            CloneUpdate::Checkout,
+            CloneUpdate::Discard,
+            CloneUpdate::Keep,
+        ] {
+            let s = script(Some(mode));
+            let want = format!(
+                "cd '/srv/x' && {env} {CLONE_UPDATE_ENV}='{}' vagrant \
+                 'provision';",
+                mode.as_str()
+            );
+            assert!(s.contains(&want), "{mode:?}: {s}");
+        }
+        assert!(!script(None).contains(CLONE_UPDATE_ENV));
+    }
+
+    #[test]
     fn a_removal_that_failed_is_reported_and_fails_the_run() {
         // bombyx tells the operator the VM host keeps no copy.
         // An `rm` that quietly gave up -- a full disk, a
@@ -3278,6 +3398,7 @@ fi
             &cfg(),
             "/srv/x",
             &["up"],
+            None,
             Tty::NoPty,
             &["bombyx.env"],
         );
@@ -3313,6 +3434,7 @@ fi
             &cfg(),
             "/srv/x",
             &["up"],
+            None,
             Tty::NoPty,
             &["bombyx.env"],
         );

@@ -384,6 +384,7 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
         super::HOST_KEYS_URL_ENV,
         super::HOST_KEYS_FORMAT_ENV,
         super::PROJECT_ENV,
+        crate::remote::CLONE_UPDATE_ENV,
     ]);
     for name in names {
         // The legal spelling is `${NAME:-<default>}` for any
@@ -728,6 +729,96 @@ fn a_fetch_or_checkout_that_cannot_finish_says_so() {
     assert!(
         flat.contains("could not update the clone"),
         "a failure must name the path and say what to do"
+    );
+}
+
+// Byte offset of `needle` in `bootstrap_code`, which must hold it.
+fn code_at(code: &str, needle: &str) -> usize {
+    code.find(needle)
+        .unwrap_or_else(|| panic!("bootstrap.sh lacks: {needle}"))
+}
+
+#[test]
+fn the_clone_mode_is_checked_before_the_clone_is_touched() {
+    // A Vagrantfile from an older bombyx sets no mode, so the
+    // fallback is the one that loses nothing. An unknown word is
+    // refused through `refuse`, which clears the uploaded
+    // credentials, and before anything fetches or deletes.
+    let code = bootstrap_code();
+    let read = code_at(&code, "CLONE_UPDATE=${BOMBYX_CLONE_UPDATE:-checkout}");
+    let check = code_at(
+        &code,
+        "case \"$CLONE_UPDATE\" in checkout|discard|keep) ;; *) refuse",
+    );
+    assert!(read < check, "the mode is checked before it is read");
+    for touch in ["git_net -C \"$CLONE_DIR\" fetch", "rm -rf \"$CLONE_DIR\""] {
+        assert!(check < code_at(&code, touch), "checked after {touch}");
+    }
+}
+
+#[test]
+fn only_discard_forces_the_checkout() {
+    // A plain checkout refuses before it changes anything when it
+    // would overwrite an edited tracked file or an untracked one,
+    // and names the files; `--force` overwrites both. The plain
+    // one ignores the exec bit, because this script's own
+    // `chmod +x` on the project's script would otherwise read as
+    // the agent's edit and block every update that touches it.
+    let code = bootstrap_code();
+    assert_eq!(code.matches("checkout --force").count(), 1, "{code}");
+    code_at(
+        &code,
+        "if [ \"$CLONE_UPDATE\" = discard ]; then \
+         if ! git -C \"$CLONE_DIR\" checkout --force FETCH_HEAD",
+    );
+    code_at(
+        &code,
+        "elif ! git -C \"$CLONE_DIR\" -c core.fileMode=false \
+         checkout FETCH_HEAD",
+    );
+}
+
+#[test]
+fn a_clone_holding_work_is_not_deleted_without_discard() {
+    // A change of `source.repo` deletes the clone. That loses
+    // everything the agent has not pushed, so it waits for
+    // `--discard` unless git says the tree is clean. A status
+    // that cannot be read counts as work, the same "cannot tell
+    // is not different" rule the URL comparison follows.
+    let code = bootstrap_code();
+    code_at(
+        &code,
+        "if porcelain=$(git -C \"$CLONE_DIR\" -c core.fileMode=false \
+         status --porcelain) then [ -n \"$porcelain\" ] fi",
+    );
+    let guard = code_at(
+        &code,
+        "if [ \"$CLONE_UPDATE\" != discard ] && clone_may_hold_work; \
+         then refuse",
+    );
+    assert!(guard < code_at(&code, "rm -rf \"$CLONE_DIR\""));
+}
+
+#[test]
+fn keep_leaves_the_clone_alone_and_needs_one() {
+    // `--no-fetch` runs the script from the checkout as it is, so
+    // it must reach neither the fetch nor the checkout, nor run
+    // a clone of a repository the config no longer names. With
+    // no clone there is no script to run.
+    let code = bootstrap_code();
+    let keep = code_at(
+        &code,
+        "if [ \"$CLONE_UPDATE\" = keep ]; then echo \"bombyx: not updating",
+    );
+    assert!(keep < code_at(&code, "git_net -C \"$CLONE_DIR\" fetch"));
+    code_at(
+        &code,
+        "if [ \"$CLONE_UPDATE\" = keep ]; then refuse \"this VM holds \
+         a clone of",
+    );
+    code_at(
+        &code,
+        "if [ \"$CLONE_UPDATE\" = keep ]; then refuse \"--no-fetch",
     );
 }
 

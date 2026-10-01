@@ -83,12 +83,34 @@ bombyx provision myproject
 ```
 
 `provision` re-runs the bootstrap in the guest, fetching
-`[source]` again at your configured ref. The checkout is forced,
-so **push your work first**: it overwrites edits to tracked files,
-and a commit made inside the guest does not survive it. Untracked
-files -- the agent's work -- are kept, except where the fetched
-commit adds a file at the same path. Changing `source.repo` to a
-different repository discards the clone and starts over.
+`[source]` again at your configured ref and checking it out. The
+checkout keeps the agent's work. When it would overwrite an edit
+to a tracked file, or an untracked file at a path the fetched
+commit adds, the guest refuses and lists the files; an edit the
+fetched commit does not touch carries over. Push or stash the work
+from `bombyx shell`, or overwrite it on purpose:
+
+```bash
+bombyx provision myproject --discard
+```
+
+A commit made inside the guest does not survive a provision
+either way, because the checkout detaches HEAD and leaves that
+commit on no branch. Push it.
+
+Changing `source.repo` to a different repository discards the
+clone and starts over. The guest refuses that while the clone
+holds uncommitted edits or untracked files, unless you pass
+`--discard`.
+
+To re-run the provisioning script without touching the clone,
+pass `--no-fetch`. The script then runs from the guest's current
+checkout, the agent's edits included, and the guest prints the
+commit it ran from:
+
+```bash
+bombyx provision myproject --no-fetch
+```
 
 `provision` needs a VM that already exists, so run `up` first, and
 it targets the project VM only; for a scratch VM the answer is
@@ -128,8 +150,9 @@ A Windows guest is refreshed the same way. There the refresh calls
 `refresh.ps1`, which provisioning installs, so a Windows VM that
 has no `refresh.ps1` says to run `bombyx provision myproject`
 first. Provisioning checks the clone out afresh at the configured
-`ref`, which discards uncommitted work in it, so commit or push
-that work first.
+`ref` and refuses when that would overwrite uncommitted work, so
+`bombyx provision myproject --no-fetch` is the way to install the
+helpers without touching the clone.
 
 bombyx sends each file down a pipe, through `ssh` and then
 `vagrant ssh`, so the refresh itself stores nothing on the VM host.

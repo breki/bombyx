@@ -985,6 +985,50 @@ git_net() {
     fi
 }
 
+# How this provision may update the clone it finds, as
+# `bombyx provision` chose it: `checkout` by default, `discard`
+# for `--discard`, `keep` for `--no-fetch`. The value rides on
+# the `vagrant` process for one run, so a Vagrantfile from an
+# older bombyx, or a bare `vagrant provision` on the VM host,
+# sets none -- and the fallback is the mode that loses nothing.
+# A word this script does not know means the two halves of
+# bombyx disagree, and guessing what it meant could destroy the
+# agent's work.
+CLONE_UPDATE=${BOMBYX_CLONE_UPDATE:-checkout}
+case "$CLONE_UPDATE" in
+    checkout|discard|keep) ;;
+    *) refuse "BOMBYX_CLONE_UPDATE is \"$CLONE_UPDATE\", which" \
+        "this script does not know. Run the bombyx that wrote" \
+        "the Vagrantfile, or provision again." ;;
+esac
+readonly CLONE_UPDATE
+
+# Whether the clone may hold work the agent has not committed:
+# an edit to a tracked file, or an untracked file. Ignored files
+# do not count; they are build output, which a rebuild makes
+# again.
+#
+# `core.fileMode=false` makes git ignore the executable bit,
+# for this one command. The `chmod +x` at the end of this
+# script sets it on the project's script, so a repository that
+# tracks that file at mode 100644 would otherwise show a change
+# after every provision, and the agent would seem to hold work
+# it never made.
+#
+# A status git cannot give counts as work. "Cannot tell" is not
+# "clean", by the same rule the URL comparison below follows. The
+# shape carries that without a `return`, which this script
+# keeps for `refuse` alone: an `if` whose condition fails and
+# that has no `else` ends with status 0, so a failed `git status`
+# answers "may hold work".
+clone_may_hold_work() {
+    if porcelain=$(git -C "$CLONE_DIR" -c core.fileMode=false \
+        status --porcelain)
+    then
+        [ -n "$porcelain" ]
+    fi
+}
+
 # If the clone came from a different repository than the one
 # bombyx was asked for, throw it away rather than fetching over
 # it.
@@ -997,17 +1041,22 @@ git_net() {
 # new one does not, the guest runs the OLD repo's script and
 # reports success. A wrong answer that looks right.
 #
-# Two things this is careful about, because discarding the clone
-# also discards whatever the agent has not committed.
+# Three things this is careful about, because discarding the
+# clone also discards whatever the agent has not committed.
 #
 # It compares loosely. The same repository can be written more
 # than one way -- with or without a trailing `.git`, with or
 # without a trailing slash -- and deleting somebody's work over
 # a cosmetic edit to the config would be indefensible.
 #
-# And it only acts on a definite mismatch. If `git remote
-# get-url` fails for any reason, that is "cannot tell", not
-# "different", so the clone stays.
+# It only acts on a definite mismatch. If `git remote get-url`
+# fails for any reason, that is "cannot tell", not "different",
+# so the clone stays.
+#
+# And it deletes a clone holding work only under `discard`.
+# Without it, the operator is told to push first; `keep` refuses
+# a mismatch outright, since running the old repository's script
+# is the wrong answer described above.
 #
 # `${VAR%text}` expands VAR with `text` removed from the END, if
 # it is there, and leaves it alone if it is not. So `${1%/}`
@@ -1028,6 +1077,20 @@ if [ -d "$CLONE_DIR/.git" ]; then
         remote get-url origin 2>/dev/null)
     then
         if ! same_repo "$current_url" "$BOMBYX_REPO"; then
+            if [ "$CLONE_UPDATE" = keep ]; then
+                refuse "this VM holds a clone of $current_url" \
+                    "but the config asks for $BOMBYX_REPO, so" \
+                    "--no-fetch has no script of that repository" \
+                    "to run. Provision without it."
+            fi
+            if [ "$CLONE_UPDATE" != discard ] && clone_may_hold_work; then
+                refuse "this VM holds a clone of $current_url" \
+                    "with uncommitted work in it, and the config" \
+                    "now asks for $BOMBYX_REPO, so the clone would" \
+                    "be deleted. Push the work from the guest, or" \
+                    "run bombyx provision --discard to delete it:" \
+                    "$CLONE_DIR"
+            fi
             # Announced, never silent. This throws away
             # uncommitted work, and an operator who sees a fresh
             # clone with no explanation has no way to know why.
@@ -1063,7 +1126,8 @@ fi
 # what `bombyx provision` triggers.
 #
 # So it has two jobs: clone the project the first time, and
-# fetch the latest changes every time after that. If it only
+# fetch the latest changes every time after that, unless
+# `--no-fetch` asked it to leave the clone alone. If it only
 # handled the first case, `bombyx provision` would do nothing.
 #
 # The directory is tested again rather than reusing the answer
@@ -1087,30 +1151,67 @@ fi
 # and a `--depth 1` fetch does not create a local branch for it
 # to resolve to.
 if [ -d "$CLONE_DIR/.git" ]; then
-    # Both of these fail on a tracked file inside a directory
-    # the agent cannot write -- which the project's own script
-    # can leave behind, because it has `sudo` and runs with this
-    # tree as its working directory. `git checkout --force` is
-    # the nastier one: it exits 1 after printing "Switched to
-    # branch", so the worktree is half-changed, and without this
-    # check `set -e` would abort with nothing naming bombyx.
-    # Named on the command rather than exported, and it wins
-    # over any `core.sshCommand` an earlier provision left in
-    # this clone: `git` prefers GIT_SSH_COMMAND to that setting.
-    if ! git_net -C "$CLONE_DIR" \
-        fetch --depth 1 origin -- "$BOMBYX_REF"
-    then
-        refuse "could not update the clone. The message above" \
-            "says why. If something in it belongs to another" \
-            "user, clear it in the guest: $CLONE_DIR"
-    fi
+    if [ "$CLONE_UPDATE" = keep ]; then
+        # `--no-fetch`: no fetch and no checkout, so the script
+        # below runs from the tree as it stands, the agent's
+        # edits included. Saying which commit that is, and
+        # whether the tree differs from it, is all the operator
+        # has to tell this run apart from an updated one.
+        echo "bombyx: not updating the clone (--no-fetch);" \
+            "running from commit" \
+            "$(git -C "$CLONE_DIR" rev-parse --short HEAD)." >&2
+        if clone_may_hold_work; then
+            echo "bombyx: the clone holds uncommitted work," \
+                "which the script sees as it is." >&2
+        fi
+    else
+        # The fetch and both checkouts fail on a tracked file
+        # inside a directory the agent cannot write -- which the
+        # project's own script can leave behind, because it has
+        # `sudo` and runs with this tree as its working
+        # directory. `git checkout --force` is the nastier one:
+        # it exits 1 after printing "Switched to branch", so the
+        # worktree is half-changed, and without this check
+        # `set -e` would abort with nothing naming bombyx.
+        # Named on the command rather than exported, and it wins
+        # over any `core.sshCommand` an earlier provision left in
+        # this clone: `git` prefers GIT_SSH_COMMAND to that
+        # setting.
+        if ! git_net -C "$CLONE_DIR" \
+            fetch --depth 1 origin -- "$BOMBYX_REF"
+        then
+            refuse "could not update the clone. The message above" \
+                "says why. If something in it belongs to another" \
+                "user, clear it in the guest: $CLONE_DIR"
+        fi
 
-    if ! git -C "$CLONE_DIR" checkout --force FETCH_HEAD
-    then
-        refuse "could not update the clone. The message above" \
-            "says why, and the checkout may be half-changed." \
-            "If something in it belongs to another user, clear" \
-            "it in the guest: $CLONE_DIR"
+        # Only `--discard` forces the checkout. Without `--force`,
+        # git refuses before it changes anything when the checkout
+        # would overwrite an edited tracked file, or an untracked
+        # file at a path the fetched commit adds, and it lists
+        # those files. An edit the fetched commit does not touch
+        # carries over. `core.fileMode=false` keeps this script's
+        # own `chmod +x` from reading as such an edit;
+        # `clone_may_hold_work` says why that matters.
+        if [ "$CLONE_UPDATE" = discard ]; then
+            if ! git -C "$CLONE_DIR" checkout --force FETCH_HEAD
+            then
+                refuse "could not update the clone. The message" \
+                    "above says why, and the checkout may be" \
+                    "half-changed. If something in it belongs to" \
+                    "another user, clear it in the guest:" \
+                    "$CLONE_DIR"
+            fi
+        elif ! git -C "$CLONE_DIR" -c core.fileMode=false \
+            checkout FETCH_HEAD
+        then
+            refuse "did not update the clone. The message above" \
+                "says why. When it lists files, they hold the" \
+                "agent's work: push or stash it in the guest, or" \
+                "run bombyx provision --discard to overwrite it." \
+                "When something belongs to another user, clear" \
+                "it in the guest: $CLONE_DIR"
+        fi
     fi
     # Deliberately no `git clean` here. It would make the tree
     # match the commit exactly, but it deletes untracked files
@@ -1120,25 +1221,23 @@ if [ -d "$CLONE_DIR/.git" ]; then
     # What that costs is a tree that is a superset of the
     # commit: build output and generated files stay behind. It
     # is not a tree that disagrees about tracked files, because
-    # `--force` above already deletes a tracked file the new
-    # commit does not have. Stale leftovers are a fair price for
-    # not deleting the agent's work.
+    # the checkout already deletes a tracked file the new commit
+    # does not have. Stale leftovers are a fair price for not
+    # deleting the agent's work.
     #
-    # It narrows the loss rather than removing it, in two ways
-    # worth knowing.
-    #
-    # `--force` overwrites an untracked file when the fetched
-    # commit carries one at the same path; git refuses that only
-    # without `--force`. So an agent's `notes.md` survives until
-    # upstream adds a `notes.md`, and then it goes silently.
-    #
-    # And checking out `FETCH_HEAD` detaches HEAD. A commit the
-    # agent makes after that sits on no branch, and the next
-    # provision moves HEAD away from it: `git log` stops showing
-    # it and only the reflog can find it. Committing inside the
-    # guest is therefore not a way to survive a provision --
-    # pushing is.
+    # One loss remains. Checking out `FETCH_HEAD` detaches HEAD.
+    # A commit the agent makes after that sits on no branch, and
+    # the next provision moves HEAD away from it: `git log`
+    # stops showing it and only the reflog can find it.
+    # Committing inside the guest is therefore not a way to
+    # survive a provision -- pushing is.
 else
+    if [ "$CLONE_UPDATE" = keep ]; then
+        refuse "--no-fetch runs the script from the clone, and" \
+            "this VM has none at $CLONE_DIR. Provision without" \
+            "it to make one."
+    fi
+
     # A directory here with no `.git` in it is a leftover --
     # from a discard that failed part-way, or from anything
     # else. `git clone` into it dies with "destination path
