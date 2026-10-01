@@ -16,6 +16,10 @@ and this project adheres to
   `provision` did before, and `bombyx provision --no-fetch` re-runs the
   provisioning script from the guest's current checkout without fetching or
   checking anything out. The two are refused together.
+- `[source].history` sets how much of the repository the guest's clone holds:
+  `full` (the default) is every branch with its whole history, and `shallow` is
+  one commit of `ref`, as before. Switching to `shallow` keeps the history a
+  clone already has.
 
 ### Changed
 
@@ -27,6 +31,12 @@ and this project adheres to
   checkout overwrites them and a change of `source.repo` deletes them. bombyx's
   own `chmod +x` on the provisioning script does not count as an edit. Linux
   and Windows guests both; verified on a Linux guest only.
+- The guest clones the project with its full history and every branch, and each
+  `bombyx provision` fetches every branch as well as `ref`, so `git log`, `git
+  blame` and diffs against other branches work in the guest. An existing VM's
+  shallow clone gets the rest of its history on its next provision. Set `history
+  = "shallow"` to keep the one-commit clone. Linux and Windows guests both;
+  verified on a Linux guest only.
 
 ### Fixed
 

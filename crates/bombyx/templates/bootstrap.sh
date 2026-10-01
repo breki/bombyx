@@ -1011,6 +1011,30 @@ case "$CLONE_UPDATE" in
 esac
 readonly CLONE_UPDATE
 
+# How much of the repository the clone holds, from
+# `[source].history`: `full`, every branch with its whole
+# history, or `shallow`, one commit of `ref`. A config value, so
+# the Vagrantfile always passes it; the fallback covers one
+# edited by hand, and an unknown word is refused for the reason
+# the clone mode's is.
+HISTORY=${BOMBYX_HISTORY:-full}
+case "$HISTORY" in
+    full|shallow) ;;
+    *) refuse "BOMBYX_HISTORY is \"$HISTORY\", which this" \
+        "script does not know. Set source.history to full or" \
+        "shallow, then provision again." ;;
+esac
+readonly HISTORY
+
+# Whether the clone holds only part of its history, as a
+# `--depth` clone or fetch leaves it. A clone git cannot answer
+# for counts as full, which is the answer that keeps a later
+# fetch from cutting it.
+clone_is_shallow() {
+    [ "$(git -C "$CLONE_DIR" rev-parse --is-shallow-repository)" \
+        = true ]
+}
+
 # Whether the clone may hold work the agent has not committed:
 # an edit to a tracked file, or an untracked file. Ignored files
 # do not count; they are build output, which a rebuild makes
@@ -1036,6 +1060,14 @@ clone_may_hold_work() {
     then
         [ -n "$porcelain" ]
     fi
+}
+
+# The refusal for a fetch or a `set-branches` that failed, shared
+# by every step of the update below.
+update_failed() {
+    refuse "could not update the clone. The message above" \
+        "says why. If something in it belongs to another" \
+        "user, clear it in the guest: $CLONE_DIR"
 }
 
 # If the clone came from a different repository than the one
@@ -1190,12 +1222,40 @@ if [ -d "$CLONE_DIR/.git" ]; then
         # rather than exporting it, and GIT_SSH_COMMAND wins over
         # any `core.sshCommand` an earlier provision left in this
         # clone.
-        if ! git_net -C "$CLONE_DIR" \
-            fetch --depth 1 origin -- "$BOMBYX_REF"
+        #
+        # Full history widens the refspec to every branch, since
+        # `--depth` turned on `--single-branch` for a clone an
+        # earlier provision left shallow, and unshallows that
+        # clone. Every branch then needs a fetch of its own,
+        # because a fetch that names `ref` ignores the refspec.
+        if [ "$HISTORY" = full ]; then
+            if ! git -C "$CLONE_DIR" remote set-branches origin '*'
+            then
+                update_failed
+            fi
+            if clone_is_shallow; then
+                if ! git_net -C "$CLONE_DIR" fetch --unshallow origin; then
+                    update_failed
+                fi
+            elif ! git_net -C "$CLONE_DIR" fetch origin; then
+                update_failed
+            fi
+        fi
+
+        # The fetch of `ref` sets `FETCH_HEAD` for the checkout.
+        # Its depth applies only to a shallow clone: a `--depth 1`
+        # fetch into a full clone makes it shallow and drops every
+        # older commit, so a project that switched to `shallow`
+        # keeps the history it already has.
+        if [ "$HISTORY" = shallow ] && clone_is_shallow; then
+            if ! git_net -C "$CLONE_DIR" \
+                fetch --depth 1 origin -- "$BOMBYX_REF"
+            then
+                update_failed
+            fi
+        elif ! git_net -C "$CLONE_DIR" fetch origin -- "$BOMBYX_REF"
         then
-            refuse "could not update the clone. The message above" \
-                "says why. If something in it belongs to another" \
-                "user, clear it in the guest: $CLONE_DIR"
+            update_failed
         fi
 
         # Only `--discard` forces the checkout. Without `--force`,
@@ -1270,9 +1330,15 @@ else
             "guest, then provision again."
     fi
 
-    git_net clone \
-        --depth 1 --branch "$BOMBYX_REF" \
-        -- "$BOMBYX_REPO" "$CLONE_DIR"
+    # A clone without `--depth` writes git's default refspec,
+    # which fetches every branch.
+    if [ "$HISTORY" = full ]; then
+        git_net clone --branch "$BOMBYX_REF" \
+            -- "$BOMBYX_REPO" "$CLONE_DIR"
+    else
+        git_net clone --depth 1 --branch "$BOMBYX_REF" \
+            -- "$BOMBYX_REPO" "$CLONE_DIR"
+    fi
 fi
 
 # The clone records the command this script cloned with, so

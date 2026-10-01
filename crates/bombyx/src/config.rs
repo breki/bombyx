@@ -275,7 +275,7 @@ pub use repo_token::{
     GitCredential, RepoToken, RepoTokenError, RepoTokenVar, RepoUser,
 };
 pub use root::RemoteRoot;
-pub use source::{GitRef, RepoUrl, ScriptPath, Source};
+pub use source::{GitRef, History, RepoUrl, ScriptPath, Source};
 pub use vault::{
     AttachmentName, EntryPath, SecretName, Vault, VaultDatabase, VaultError,
     VaultKey, VaultRead,

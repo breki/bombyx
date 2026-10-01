@@ -84,10 +84,10 @@ pub(super) fn check_not_empty(
 /// `repo` and `script` reach `git`.
 ///
 /// **For `ref` this is the second of two guards, not the only
-/// one.** The guest runs
-/// `git fetch --depth 1 origin -- "$BOMBYX_REF"`, and that `--`
-/// already tells `git` that whatever follows it is a value
-/// rather than an option.
+/// one.** The guest runs `git fetch origin -- "$BOMBYX_REF"`,
+/// with `--depth 1` for a shallow clone, and that `--` already
+/// tells `git` that whatever follows it is a value rather than
+/// an option.
 ///
 /// The check is kept anyway, because `git` accepts options
 /// *after* positional arguments. That is easy to miss, since

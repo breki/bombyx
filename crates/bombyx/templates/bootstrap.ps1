@@ -90,6 +90,17 @@ function Test-SameRepo([string] $A, [string] $B) {
     return $trimmed[0] -ceq $trimmed[1]
 }
 
+# Whether the clone at `dir` holds only part of its history, as
+# bootstrap.sh's clone_is_shallow decides: a clone git cannot answer
+# for counts as full, so a later fetch does not cut it.
+function Test-CloneIsShallow([string] $Git, [string] $Dir) {
+    $answer = & {
+        $ErrorActionPreference = 'Continue'
+        & $Git -C $Dir rev-parse --is-shallow-repository 2>$null
+    }
+    return "$answer" -eq 'true'
+}
+
 # Whether the clone at `dir` may hold work the agent has not
 # committed, as bootstrap.sh's clone_may_hold_work decides: an edited
 # tracked file or an untracked one, with the executable bit ignored,
@@ -320,6 +331,17 @@ try {
             'script does not know. The shell that ran vagrant on the VM ' +
             'host set it; unset it there, or run bombyx provision.')
     }
+    # How much of the repository the clone holds, from
+    # [source].history; bootstrap.sh says why each part is there.
+    $History = $env:BOMBYX_HISTORY
+    if ([string]::IsNullOrEmpty($History)) {
+        $History = 'full'
+    }
+    if ($History -cnotin @('full', 'shallow')) {
+        Refuse ("BOMBYX_HISTORY is `"$History`", which this script does " +
+            'not know. Set source.history to full or shallow, then ' +
+            'provision again.')
+    }
 
     if (Test-Path -LiteralPath (Join-Path $CloneDir '.git') -PathType Container) {
         $origin = & {
@@ -372,12 +394,38 @@ try {
                     'script sees as it is.')
             }
         } else {
-            Invoke-Native $Git @gitNet -C $CloneDir fetch --depth 1 origin `
-                '--' $Ref
+            $updateFailed = 'could not update the clone. The message ' +
+                'above says why. If something in it belongs to another ' +
+                "user, clear it in the guest: $CloneDir"
+            # Every branch under full history, unshallowing a clone an
+            # earlier provision left shallow; bootstrap.sh says why
+            # each fetch is needed.
+            if ($History -eq 'full') {
+                Invoke-Native $Git -C $CloneDir remote set-branches origin '*'
+                if ($LASTEXITCODE -ne 0) {
+                    Refuse $updateFailed
+                }
+                if (Test-CloneIsShallow $Git $CloneDir) {
+                    Invoke-Native $Git @gitNet -C $CloneDir fetch `
+                        --unshallow origin
+                } else {
+                    Invoke-Native $Git @gitNet -C $CloneDir fetch origin
+                }
+                if ($LASTEXITCODE -ne 0) {
+                    Refuse $updateFailed
+                }
+            }
+            # A depth only for a clone that is shallow already, so a
+            # full clone keeps its history under shallow.
+            if ($History -eq 'shallow' -and
+                (Test-CloneIsShallow $Git $CloneDir)) {
+                Invoke-Native $Git @gitNet -C $CloneDir fetch --depth 1 origin `
+                    '--' $Ref
+            } else {
+                Invoke-Native $Git @gitNet -C $CloneDir fetch origin '--' $Ref
+            }
             if ($LASTEXITCODE -ne 0) {
-                Refuse ('could not update the clone. The message above ' +
-                    'says why. If something in it belongs to another user, ' +
-                    "clear it in the guest: $CloneDir")
+                Refuse $updateFailed
             }
             # Only --discard forces the checkout; bootstrap.sh says what
             # a plain one refuses. core.fileMode=false matters there
@@ -416,7 +464,14 @@ try {
                 'is a leftover. Remove it in the guest, then provision ' +
                 'again.')
         }
-        Invoke-Native $Git @gitNet clone --depth 1 --branch $Ref '--' $Repo `
+        # Without --depth, git writes its default refspec, which
+        # fetches every branch.
+        if ($History -eq 'full') {
+            $depth = @()
+        } else {
+            $depth = @('--depth', '1')
+        }
+        Invoke-Native $Git @gitNet clone @depth --branch $Ref '--' $Repo `
             $CloneDir
         if ($LASTEXITCODE -ne 0) {
             Refuse ("could not clone $Repo. The message above says why.")

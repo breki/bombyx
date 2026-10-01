@@ -385,6 +385,7 @@ fn no_variable_the_vagrantfile_may_omit_is_expanded_bare() {
         super::HOST_KEYS_FORMAT_ENV,
         super::PROJECT_ENV,
         crate::remote::CLONE_UPDATE_ENV,
+        super::HISTORY_ENV,
     ]);
     for name in names {
         // The legal spelling is `${NAME:-<default>}` for any
@@ -766,6 +767,87 @@ fn the_clone_mode_is_checked_before_the_clone_is_touched() {
 }
 
 #[test]
+fn the_history_is_checked_before_the_clone_is_touched() {
+    // An unknown word is refused through `refuse`, as the clone
+    // mode is, before anything clones or fetches.
+    use crate::config::History;
+    let code = bootstrap_code();
+    let read = code_at(
+        &code,
+        &format!(
+            "HISTORY=${{BOMBYX_HISTORY:-{}}}",
+            History::default().as_str()
+        ),
+    );
+    let words = History::ALL.map(History::as_str).join("|");
+    let check = code_at(
+        &code,
+        &format!("case \"$HISTORY\" in {words}) ;; *) refuse"),
+    );
+    assert!(
+        read < check,
+        "the history must be read before it is checked"
+    );
+    for touch in ["git_net -C \"$CLONE_DIR\" fetch", "git_net clone"] {
+        assert!(check < code_at(&code, touch), "checked after {touch}");
+    }
+}
+
+#[test]
+fn a_full_history_clone_fetches_every_branch() {
+    // `--depth` turns on `--single-branch`, so a shallow clone's
+    // refspec names `ref` alone. Full history widens it to every
+    // branch and unshallows a clone an earlier provision left
+    // shallow. A fetch that names `ref` ignores the refspec, so
+    // the other branches need a fetch of their own, and the
+    // second fetch then sets `FETCH_HEAD` for the checkout.
+    let code = bootstrap_code();
+    let widen = code_at(
+        &code,
+        "if [ \"$HISTORY\" = full ]; then if ! git -C \"$CLONE_DIR\" \
+         remote set-branches origin '*'",
+    );
+    let unshallow = code_at(
+        &code,
+        "if clone_is_shallow; then if ! git_net -C \"$CLONE_DIR\" fetch \
+         --unshallow origin; then",
+    );
+    let every =
+        code_at(&code, "elif ! git_net -C \"$CLONE_DIR\" fetch origin; then");
+    let the_ref = code_at(
+        &code,
+        "elif ! git_net -C \"$CLONE_DIR\" fetch origin -- \"$BOMBYX_REF\"",
+    );
+    assert!(widen < unshallow && unshallow < every && every < the_ref);
+    code_at(
+        &code,
+        "if [ \"$HISTORY\" = full ]; then git_net clone --branch \
+         \"$BOMBYX_REF\" -- \"$BOMBYX_REPO\" \"$CLONE_DIR\"",
+    );
+}
+
+#[test]
+fn shallow_never_cuts_the_history_of_a_full_clone() {
+    // A `--depth 1` fetch into a full clone makes it shallow and
+    // drops every older commit -- measured. So the depth applies
+    // only when the clone is shallow already, and only twice in
+    // the script: that fetch, and a shallow first clone.
+    let code = bootstrap_code();
+    code_at(
+        &code,
+        "if [ \"$HISTORY\" = shallow ] && clone_is_shallow; then if ! \
+         git_net -C \"$CLONE_DIR\" fetch --depth 1 origin -- \
+         \"$BOMBYX_REF\"",
+    );
+    code_at(
+        &code,
+        "else git_net clone --depth 1 --branch \"$BOMBYX_REF\" -- \
+         \"$BOMBYX_REPO\" \"$CLONE_DIR\"",
+    );
+    assert_eq!(code.matches("--depth 1").count(), 2, "{code}");
+}
+
+#[test]
 fn only_discard_forces_the_checkout() {
     // A plain checkout refuses before it changes anything when it
     // would overwrite an edited tracked file or an untracked one,
@@ -933,8 +1015,9 @@ fn removing_the_key_unpins_the_clone_from_it() {
     // And it has to run after the clone exists, since
     // there is no config file to unset anything from
     // before that.
+    // The last clone line, whichever history it clones.
     let clone = flat
-        .find("git_net clone --depth 1")
+        .rfind("git_net clone")
         .expect("the clone must be there");
     let unset = flat
         .find("config --unset-all core.sshCommand")
@@ -1314,8 +1397,9 @@ fn removing_the_token_unpins_the_clone_from_the_credential() {
     ] {
         assert!(flat.contains(clause), "not in the script: {clause}");
     }
+    // The last clone line, whichever history it clones.
     let clone = flat
-        .find("git_net clone --depth 1")
+        .rfind("git_net clone")
         .expect("the clone must be there");
     let unset = flat
         .find("config --unset-all credential.helper")

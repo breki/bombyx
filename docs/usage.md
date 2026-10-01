@@ -123,6 +123,15 @@ whose clone belongs to a repository other than `source.repo`:
 bombyx provision myproject --no-fetch
 ```
 
+The guest's clone holds every branch with its whole history, so
+`git log`, `git blame` and a diff against another branch work
+there. Each provision fetches every branch as well as `ref`. For a
+repository too large for that, set `history = "shallow"` under
+`[source]`: the clone then holds one commit of `ref` and no other
+branch. A VM whose clone is shallow gets the rest of its history
+on the first provision after you switch to `full`. Switching to
+`shallow` keeps the history the clone already has.
+
 `provision` needs a VM that already exists, so run `up` first, and
 it targets the project VM only; for a scratch VM the answer is
 `discard` then `scratch`.

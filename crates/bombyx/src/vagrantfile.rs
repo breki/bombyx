@@ -166,6 +166,10 @@ const REPO_ENV: &str = "BOMBYX_REPO";
 /// Branch or tag the guest checks out.
 const REF_ENV: &str = "BOMBYX_REF";
 
+/// How much of the repository the guest clones: the word
+/// `config::History::as_str` gives.
+const HISTORY_ENV: &str = "BOMBYX_HISTORY";
+
 /// The project's own script, which [`BOOTSTRAP`] runs out of the
 /// clone.
 const SCRIPT_ENV: &str = "BOMBYX_SCRIPT";
@@ -412,10 +416,11 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// to start with the prefix, and a bombyx variable added
 /// without it would fall outside the reservation with every
 /// test still green.
-const BOMBYX_ENV_NAMES: [&str; 14] = [
+const BOMBYX_ENV_NAMES: [&str; 15] = [
     GUEST_USER_ENV,
     REPO_ENV,
     REF_ENV,
+    HISTORY_ENV,
     SCRIPT_ENV,
     PROJECT_ENV,
     DEPLOY_KEY_ENV,
@@ -781,6 +786,7 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
       \"{preserve_env_name}\" => {preserve_env},
       \"{repo_env}\" => {repo},
       \"{ref_env}\" => {git_ref},
+      \"{history_env}\" => {history},
       \"{script_env}\" => {script},
       \"{clone_project_env}\" => {clone_project},
       \"{deploy_key_env_name}\" => \"{deploy_key_env}\",
@@ -820,6 +826,8 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
         ),
         repo_env = REPO_ENV,
         ref_env = REF_ENV,
+        history_env = HISTORY_ENV,
+        history = ruby_string(source.history.as_str()),
         script_env = SCRIPT_ENV,
         clone_project_env = PROJECT_ENV,
         deploy_key_env_name = DEPLOY_KEY_ENV,
@@ -1229,6 +1237,7 @@ mod tests {
             env_file: None,
             vault: None,
             repo_token: None,
+            history: crate::config::History::default(),
         };
         cfg
     }
@@ -1680,6 +1689,28 @@ mod tests {
                 )),
                 "{var} not forwarded:\n{out}"
             );
+        }
+    }
+
+    #[test]
+    fn hands_the_guest_the_configured_history() {
+        // A config value, so it is written into the file like
+        // `BOMBYX_REF`, not read from the vagrant process.
+        use crate::config::History;
+        for h in History::ALL {
+            let mut linux = cfg_with(Provider::Libvirt);
+            linux.source.history = h;
+            let out = rendered_for(&linux);
+            let line = format!("\"{HISTORY_ENV}\" => \"{}\",", h.as_str());
+            assert_eq!(out.matches(&line).count(), 1, "{line}:\n{out}");
+            let mut windows = cfg_windows_plain();
+            windows.source.history = h;
+            let out = rendered_for(&windows);
+            let line = format!(
+                "\"{HISTORY_ENV}\" => \"{}\",",
+                crate::powershell::base64(h.as_str().as_bytes())
+            );
+            assert_eq!(out.matches(&line).count(), 1, "{line}:\n{out}");
         }
     }
 
