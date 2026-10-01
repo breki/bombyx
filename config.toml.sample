@@ -255,19 +255,22 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # out here because a leading-dot directory is easy to miss. Part 3
 # of bombyx's docs/tutorial.md writes a re-runnable one.
 
-# Optional, and the only key in this table that is a path on
-# the VM HOST rather than something the guest hands to git.
+# Optional, and like `env_file` below, a path on YOUR OWN
+# MACHINE rather than something the guest hands to git.
 #
 # Leave it out for a public repository. `git clone` then needs
 # no credential, and the generated Vagrantfile carries no
 # upload at all.
 #
-# For a private one, name a private key file on the VM host.
-# vagrant reads it there and uploads it into the guest before
-# provisioning, so the key never touches your workstation and
-# never sits in any repository. Scope it to this one repository:
-# code inside the VM can read it, and scoping keeps a stolen
-# copy from reaching your other repositories.
+# For a private one, name the private key file here. bombyx reads
+# it, sends it to the VM host down the connection it already has,
+# and has vagrant upload it into the guest before provisioning.
+# The VM host holds it for the length of the vagrant run and no
+# longer, as it holds the `env_file`, so no copy stays in the VM
+# host's own files between runs; the guest's disk image, which is
+# a file there, keeps the guest's copy. Scope the key to this one
+# repository: code inside the VM can read it, and scoping keeps a
+# stolen copy from reaching your other repositories.
 #
 # Whether it may push is a decision rather than a default. A
 # commit made in the guest sits on no branch after the next
@@ -275,25 +278,27 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # this key. Read-only is tighter and means the agent cannot push
 # at all. See docs/trust-boundary.md.
 #
-# vagrant runs on the VM host, so `~` is that machine's home
-# directory and not yours. bombyx checks the file is there
-# before `up`, `provision` or `scratch` creates anything, so a
-# path the VM host does not have stops the run with a message
-# naming it rather than booting a VM whose clone then fails. A
-# key that is there but that the VM host's login user cannot
-# read is refused the same way.
+# Inside the guest it lands at `~/.ssh/bombyx-deploy-key`, mode
+# 0600. `bombyx up` and `bombyx shell` rewrite it whenever the VM
+# already exists, so a key you rotate here reaches the guest
+# without a provision.
 #
-# The value must be anchored -- it starts with `/` or `~/` --
-# and name a file below that anchor. No `.` or `..` segment, no
-# `//`, no trailing slash, and `~` only as the first character.
-# Every character has to be a letter, a digit, `.`, `_`, `-`,
-# `/` or `~`, so a key path with a space in it is refused.
+# The value follows the rules of `env_file` below: it starts with
+# `~/` or is an absolute path on this machine, and it names a
+# file. That file has to be the private half of the key pair.
+# bombyx refuses one whose first line is not a
+# `-----BEGIN ... PRIVATE KEY-----` line, which catches the `.pub`
+# file. It reads the key before it creates anything, so a path
+# this machine does not have stops the run with a message naming
+# it.
 #
-# deploy_key = "~/.secrets/myproject-deploy-key"
+# The key can come from the `vault` below instead. Name it in one
+# place, not both.
+#
+# deploy_key = "~/.ssh/myproject-deploy-key"
 
-# Optional, and the only key in this table that is a path on
-# YOUR OWN MACHINE. `deploy_key` above names one on the VM host;
-# this one names one here.
+# Optional, and like `deploy_key` above, a path on YOUR OWN
+# MACHINE.
 #
 # It is for the project's `.env` -- the API keys and passwords
 # the project's own provisioning script needs. That file is
@@ -365,7 +370,7 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # Optional, and the other way to supply what `env_file` supplies:
 # keep each secret as an entry in a KeePassXC database on this
 # machine, rather than as a line in a plain-text file. Name one of
-# the two, not both.
+# the two for the secrets, not both.
 #
 # `database` follows the rules of `env_file` above. Each line under
 # `entries` maps a variable to the path of an entry, and bombyx
@@ -392,6 +397,20 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # vault.database = "~/.secrets/bombyx.kdbx"
 # vault.entries.ANTHROPIC_API_KEY = "Anthropic/API key"
 # vault.entries.BITBUCKET_TOKEN = "Bitbucket/myproject token"
+#
+# The deploy key can live here too, as an attachment on an entry:
+# a key spans lines, so it cannot be an entry's password. Attach
+# the key file to an entry with
+#
+#   keepassxc-cli attachment-import DATABASE "ENTRY" id_ed25519 KEYFILE
+#
+# and name the entry and the attachment with the two keys below,
+# in place of `deploy_key` above. The same master password unlocks
+# both. A vault may hold the key alone, with no `entries`, and
+# then stand alone or beside an `env_file` that holds the secrets.
+#
+# vault.deploy_key.entry = "Bitbucket/myproject deploy key"
+# vault.deploy_key.attachment = "id_ed25519"
 
 # Optional, and a pair: write both or neither. They are how the
 # guest clones a private repository over `https` instead of over
@@ -432,15 +451,11 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # there is read-only and always has been, so a key can clone and
 # can never push. An agent that opens pull requests needs to
 # push, so it needs the token -- and once it has one, the key
-# has nothing left to do. On a host whose keys can push,
-# `deploy_key` reaches fewer machines. Neither secret passes
-# through a command line -- the token travels on standard input
-# the same way this file's contents do. The difference is how
-# many machines hold a copy: bombyx never opens the deploy key,
-# so it exists on the VM host and in the guest and nowhere else,
-# while the token is read here and then exists on your own
-# machine, on the VM host for the length of the vagrant run, and
-# in the guest.
+# has nothing left to do. On a host whose keys can push, either
+# one works. Both take the same route: neither passes through a
+# command line, and each is read on your own machine, held on the
+# VM host for the length of the vagrant run, and kept in the
+# guest.
 #
 # Four rules bombyx checks while it reads this file, each of
 # which stops the run with a message naming the key:
@@ -449,8 +464,8 @@ script = ".bombyx/provision.sh"   # path inside the clone
 #     leaves bombyx guessing; a username with no variable name
 #     has no token to go with.
 #   - `env_file` or `vault` has to be set, since that is where
-#     the variable is read out of. With a `vault`, the variable
-#     has to be one of its entries.
+#     the variable is read out of. With a `vault` and no
+#     `env_file`, the variable has to be one of its entries.
 #   - `repo` has to be an `https` URL. `git` sends the token on
 #     every request, so `http` would put it on the wire in plain
 #     text, and an ssh URL never asks for one.
@@ -591,9 +606,9 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # and be owned by the guest's own account, or bombyx refuses the
 # provision and says which of those failed.
 #
-# Values carry the same rule as `box`, `repo`, `ref`, `script`
-# and `deploy_key`: no quote, no backslash, no control
-# character, no `#{`, and no leading or trailing space. An
+# Values carry the same rule as `box`, `repo`, `ref` and
+# `script`: no quote, no backslash, no control character, no
+# `#{`, and no leading or trailing space. An
 # empty value is refused too. Leave the key out to make a
 # variable absent; there is no way to set one to the empty
 # string.
@@ -629,8 +644,9 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # them calls the hook script from its provisioning script too. The
 # hook runs after that script, so a script that needs a secret
 # during its run reads `$BOMBYX_ENV_FILE` instead of `.env`. The
-# hook needs `env_file` or `vault` above: without one there is
-# nothing for it to copy, so bombyx refuses the pair.
+# hook needs `env_file`, or a `vault` with `entries`, above:
+# without one there is nothing for it to copy, so bombyx refuses
+# the pair.
 #
 # The path is relative to the clone root, like `script`, and holds
 # no `..` segment. It does not start with `-`, holds only letters,

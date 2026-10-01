@@ -210,9 +210,9 @@ pub enum RepoTokenError {
         origin: String,
     },
 
-    /// The config names a `repo_token` and neither an `env_file`
-    /// nor a `vault`, so there is nothing to read the variable
-    /// out of.
+    /// The config names a `repo_token` and no secrets -- no
+    /// `env_file`, and no `vault` with `entries` -- so there is
+    /// nothing to read the variable out of.
     ///
     /// Unreachable from a config serde parsed, like
     /// [`RepoTokenError::NoHttpsHost`] below and for the same
@@ -220,8 +220,9 @@ pub enum RepoTokenError {
     /// while the file is read, and `super::Config`'s fields are
     /// public.
     #[error(
-        "`repo_token` names `{var}` and neither `env_file` nor \
-         `vault` is set, so there is nothing to read it out of"
+        "`repo_token` names `{var}` and the config names no secrets \
+         -- no `env_file`, and no `vault.entries` -- so there is \
+         nothing to read it out of"
     )]
     NoSecrets {
         /// The variable the config named.

@@ -1,48 +1,46 @@
-//! What `deploy_key` may be: the path, on the VM host, of the
+//! What `deploy_key` may be: the path, on the workstation, of the
 //! private key the guest clones a private repository with.
 //!
 //! The field is optional. A public repository needs no
-//! credential, so most `[source]` tables leave it out.
+//! credential, so most `[source]` tables leave it out. The key can
+//! come from the vault instead, as an attachment; `super::vault`
+//! holds that form.
 //!
-//! bombyx never opens the file. The path is written into the
-//! generated Vagrantfile, and `vagrant` -- running on the VM
-//! host -- expands it and uploads the file into the guest. So
-//! the key stays on the VM host until the guest exists, and the
-//! workstation never holds it.
+//! **The path names a file on the machine bombyx runs on**, as
+//! `env_file`'s does, and follows the same rules: bombyx opens the
+//! file itself, reads it, and carries its bytes to the VM host,
+//! which stages them only for the `vagrant` run. So the VM host
+//! stores no key between runs. `docs/trust-boundary.md` holds the
+//! rule and what it costs.
 //!
-//! What refuses a path the VM host does not have is
-//! `crate::remote::require_file`, before bombyx writes the
-//! Vagrantfile at all. The upload in the Vagrantfile is
-//! conditional and carries no `raise` of its own;
-//! `crate::vagrantfile` records why.
-//!
-//! Every rule is enforced in one function, the private `check`
-//! below, and [`DeployKeyPath`] is the only thing that calls
-//! it.
+//! Two things live here, as in `super::env_file`. [`DeployKeyPath`]
+//! is the value the config states, checked while the config is
+//! read. [`DeployKey`] is the key itself, which bombyx reads later
+//! and hands to a pipe.
+
+use std::fmt;
+use std::path::PathBuf;
 
 use serde::Deserialize;
+use thiserror::Error;
 
+use super::env_file::{EnvFileError, read_capped, resolve_file};
 use super::error::FieldError;
-use super::guards;
-use super::path_segments;
+use super::workstation_path;
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
-/// A private key file on the VM host, ready to be written into
-/// the generated Vagrantfile.
+/// A private key file on the workstation, as the operator wrote it.
 ///
 /// This is a *newtype*: a struct wrapping one `String`, where
 /// the `String` inside is private. You cannot build one
 /// directly. You have to call [`DeployKeyPath::parse`], which
 /// runs the private `check` first. So holding one is the proof
-/// that every rule in this module ran, and the compiler is what
-/// promises that.
+/// that every rule in this module ran.
 ///
-/// A `PathBuf` would be the wrong representation, for the same
-/// reason `super::ScriptPath` is not one: this path is resolved
-/// on the VM host, and `PathBuf` answers for the machine bombyx
-/// was compiled for. A Windows workstation driving a Linux VM
-/// host would have `PathBuf` reading `~/.secrets/k` with
-/// Windows' separator rules.
+/// A `String` rather than a `PathBuf` for the reason
+/// `super::EnvFilePath` gives: the value is stored as the operator
+/// typed it, and its leading `~/` is expanded when the file is
+/// opened.
 ///
 /// `#[serde(try_from = "String")]` is what connects the type to
 /// the config file. Without it serde would assign the private
@@ -51,39 +49,169 @@ use crate::newtype::{checked_str_newtype, checked_str_try_from};
 #[serde(try_from = "String")]
 pub struct DeployKeyPath(String);
 
+/// A private key, read from the workstation or from the vault.
+///
+/// Holding one is the proof the bytes look like a private key:
+/// `DeployKey::from_bytes` is the only way in. The check is
+/// about shape, not validity. It refuses the two mistakes an
+/// operator makes, naming the `.pub` half and naming a file that
+/// is not a key at all, and it does not parse the key.
+///
+/// **Nothing renders the bytes.** There is no `Display`, and
+/// `Debug` reports a length, for the reason `super::Secrets`
+/// gives.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DeployKey(Vec<u8>);
+
+/// The bytes did not start the way a private key file does.
+///
+/// A unit error, because each caller names its own source: the
+/// file `deploy_key` names, or the vault attachment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct NotAKey;
+
+/// What every refusal of a [`NotAKey`] tells the operator, so the
+/// file's message and the vault's give the one reason
+/// `DeployKey::from_bytes` checks.
+pub(super) const NOT_A_KEY: &str = "does not start with a \
+    `-----BEGIN ... PRIVATE KEY-----` line; it has to be the private \
+    half of the key pair, not the `.pub` file";
+
+/// Why bombyx could not read the key `deploy_key` names.
+#[derive(Debug, Error)]
+pub enum DeployKeyError {
+    /// The file could not be read, for any reason but a missing
+    /// file, including a `~` with no home directory to expand it
+    /// against.
+    #[error(transparent)]
+    File(#[from] EnvFileError),
+
+    /// This machine has no file at the path.
+    ///
+    /// The message says where bombyx looked, because a key kept on
+    /// the VM host is the likely reason: bombyx reads it here and
+    /// carries it there for the run.
+    #[error(
+        "`deploy_key` names {path}, which this machine does not have; \
+         bombyx reads the key on the workstation and carries it to \
+         the VM host for the run, so the key belongs here"
+    )]
+    Missing {
+        /// The path bombyx tried, after expanding `~`.
+        path: PathBuf,
+    },
+
+    /// The file does not hold a private key.
+    #[error("`deploy_key` names {path}, which {reason}", reason = NOT_A_KEY)]
+    NotAKey {
+        /// The path bombyx tried, after expanding `~`.
+        path: PathBuf,
+    },
+}
+
 impl DeployKeyPath {
     /// The config key this type reads, and the name every one
     /// of its errors reports against.
-    ///
-    /// Public because it is also what tells an operator which
-    /// line to edit, and `crate::plan` needs it for the
-    /// message `crate::remote::require_file` prints. Written
-    /// on the type rather than as a bare literal in each
-    /// place, so renaming the TOML key cannot leave one caller
-    /// naming a key the config no longer has.
     pub const FIELD: &'static str = "deploy_key";
 
     /// Checks `raw` against every rule here and wraps it.
     ///
-    /// Takes `&str` so a caller holding a borrowed value need
-    /// not copy it. Serde arrives owning a `String` and hands
-    /// that to [`DeployKeyPath::try_from`] instead, which runs
-    /// the same private `check`.
-    ///
     /// # Errors
     ///
     /// Returns [`FieldError::Empty`] when `raw` is blank, and
-    /// [`FieldError::Invalid`] naming `deploy_key` when it
-    /// breaks any other rule `check` holds.
+    /// [`FieldError::Invalid`] naming `deploy_key` when it breaks
+    /// any other rule `check` holds.
     pub fn parse(raw: &str) -> Result<Self, FieldError> {
         check(raw)?;
         Ok(Self(raw.to_owned()))
+    }
+
+    /// Reads the key this path names.
+    ///
+    /// `getenv` reads this machine's environment, for the `~` in
+    /// the path, as [`super::EnvFilePath::read`]'s does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeployKeyError::Missing`] when the file is not
+    /// there, [`DeployKeyError::NotAKey`] when it does not hold a
+    /// private key, and [`DeployKeyError::File`] for every other
+    /// reason the read failed, which
+    /// [`super::EnvFilePath::read`] lists.
+    pub fn read<F>(&self, getenv: F) -> Result<DeployKey, DeployKeyError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        let path = resolve_file(Self::FIELD, &self.0, getenv)?;
+        let bytes = match read_capped(Self::FIELD, path.clone()) {
+            Ok(bytes) => bytes,
+            Err(EnvFileError::Read { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Err(DeployKeyError::Missing { path });
+            }
+            Err(e) => return Err(e.into()),
+        };
+        DeployKey::from_bytes(bytes)
+            .map_err(|NotAKey| DeployKeyError::NotAKey { path })
+    }
+}
+
+impl DeployKey {
+    /// Wraps `bytes` once they look like a private key file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NotAKey`] unless the first line is a PEM or
+    /// OpenSSH armour line for a private key.
+    pub(super) fn from_bytes(bytes: Vec<u8>) -> Result<Self, NotAKey> {
+        // Both armours OpenSSH reads put the type on the first
+        // line: `-----BEGIN OPENSSH PRIVATE KEY-----` for its own
+        // format, and `-----BEGIN RSA PRIVATE KEY-----` and the
+        // like for PEM. A `.pub` file starts with the algorithm
+        // name instead, so it fails here rather than as an
+        // authentication failure inside the guest.
+        let first = bytes.split(|&b| b == b'\n').next().unwrap_or_default();
+        let first = first.strip_suffix(b"\r").unwrap_or(first);
+        if first.starts_with(b"-----BEGIN ")
+            && first.ends_with(b"PRIVATE KEY-----")
+        {
+            Ok(Self(bytes))
+        } else {
+            Err(NotAKey)
+        }
+    }
+
+    /// The key itself, for whoever writes it into a pipe.
+    ///
+    /// Crate-private, so the "nothing renders it" rule above is
+    /// something the compiler holds outside this crate.
+    #[must_use]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// A key holding a fixed, fake body, for a test.
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        Self(TEST_KEY.to_vec())
+    }
+}
+
+/// A key-shaped body that is no real key.
+#[cfg(test)]
+const TEST_KEY: &[u8] = b"-----BEGIN OPENSSH PRIVATE KEY-----\n\
+    b3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n";
+
+impl fmt::Debug for DeployKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DeployKey({} bytes)", self.0.len())
     }
 }
 
 checked_str_newtype!(
     DeployKeyPath,
-    "The value, as the generated Vagrantfile and the VM host see it."
+    "The value, as the operator wrote it in the config file."
 );
 
 checked_str_try_from!(
@@ -98,299 +226,102 @@ checked_str_try_from!(
 ///
 /// # Errors
 ///
-/// Returns [`FieldError::Empty`] when the value is blank, and
-/// [`FieldError::Invalid`] naming `deploy_key` when the value
-/// would break the generated Vagrantfile, holds a character
-/// outside the allowed set, does not start with `/` or `~/`,
-/// names no file below that anchor, contains `//` or a `.` or
-/// `..` segment, ends in `/`, or spells `~` anywhere but
-/// first.
+/// Returns what `super::workstation_path::check_file` returns,
+/// naming `deploy_key`.
 fn check(value: &str) -> Result<(), FieldError> {
-    // The path is written into the generated Vagrantfile
-    // inside a double-quoted Ruby string, so it carries the
-    // same rule the four other rendered fields do.
-    //
-    // Both calls are needed because the charset rule says
-    // nothing about a blank value: `check_charset` looks for a
-    // character it disallows, and an empty string has none to
-    // find. `check_renderable` is what refuses one.
-    guards::check_renderable(DeployKeyPath::FIELD, value)?;
-    guards::check_charset(
-        DeployKeyPath::FIELD,
-        value,
-        guards::is_remote_path_char,
-        "letters, digits, `.`, `_`, `-`, `/` or `~`",
-    )?;
-
-    // The path must be anchored. `vagrant` runs in the
-    // project's directory on the VM host, so a relative value
-    // would send `File.expand_path` looking under
-    // `<remote_root>/<project>` -- a directory bombyx creates,
-    // writes and deletes, and no place to keep a key.
-    //
-    // A bare `~` is let through here and refused by the rule
-    // below, which names the real problem: it is a directory,
-    // not a key file.
-    let anchored =
-        value.starts_with('/') || value == "~" || value.starts_with("~/");
-    if !anchored {
-        return Err(invalid(
-            "must start with `/` or `~/`; a relative path resolves \
-             against the directory vagrant runs in on the VM host",
-        ));
-    }
-
-    let segments = path_segments(value);
-    if segments.is_empty() {
-        return Err(invalid(
-            "must name a file below `/` or `~`; the value as written \
-             is a directory",
-        ));
-    }
-
-    // `path_segments` filters empty segments away, so without
-    // this rule `~//k` counts as depth one and reaches the VM
-    // host as `~/'/keys/k'` -- `quote_remote_path` keeps the
-    // `~/` outside the quotes. A path starting with exactly two
-    // slashes is implementation-defined in POSIX and need not
-    // name the same file as one slash, which is why this is a
-    // refusal rather than something to tidy up.
-    if value.contains("//") {
-        return Err(invalid(
-            "must not contain `//`; the path is expanded on the VM \
-             host, where you cannot see what it resolved to",
-        ));
-    }
-
-    // Reported separately from the rule above, because the
-    // value does name a file and only its spelling says
-    // otherwise.
-    if value.ends_with('/') {
-        return Err(invalid(
-            "must not end with `/`; a private key is a file, not a \
-             directory",
-        ));
-    }
-
-    // This rule is not a containment guarantee, and it does
-    // not need to be. `vagrant` copies this file's contents
-    // into the guest rather than deleting anything, so a
-    // config naming the wrong path leaks a file instead of
-    // destroying one -- and no rule here restricts which file
-    // it names, so a `--config` inside a repository you did not
-    // write is what carries this case.
-    //
-    // What the rule buys is that the path says plainly which
-    // directory it reads, because the VM host expands it and
-    // the operator never sees the result.
-    if let Some(bad) = segments.iter().find(|s| **s == "." || **s == "..") {
-        return Err(invalid(format!(
-            "must not contain a `{bad}` segment; the path is expanded \
-             on the VM host, where you cannot see what it resolved to"
-        )));
-    }
-
-    // Both a remote shell and Ruby's `File.expand_path` expand
-    // `~` only in leading position. Anywhere else it is a
-    // literal character in a file name.
-    if value.char_indices().any(|(i, c)| c == '~' && i > 0) {
-        return Err(invalid("`~` is only allowed as the first character"));
-    }
-
-    Ok(())
-}
-
-/// Builds this module's one error shape, which always names the
-/// same field.
-fn invalid(reason: impl Into<String>) -> FieldError {
-    FieldError::Invalid {
-        field: DeployKeyPath::FIELD,
-        reason: reason.into(),
-    }
+    workstation_path::check_file(DeployKeyPath::FIELD, value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A value every rule here accepts, so a test needing a
-    /// good path does not invent its own.
-    const GOOD: &str = "~/.secrets/myproject-deploy-key";
+    /// A directory holding one file per test, removed when the
+    /// guard drops.
+    fn scratch(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(name);
+        (dir, path)
+    }
 
-    /// Asserts `bad` is refused, with a message mentioning
-    /// `reason`.
-    ///
-    /// Pinning the reason rather than only the failure is what
-    /// makes these notice a deleted rule: a value refused by
-    /// some other check would still fail `is_err()`.
-    fn refused(bad: &str, reason: &str) {
-        let err = check(bad).expect_err("must be refused").to_string();
-        assert!(err.contains(reason), "{bad:?}: want {reason:?}, got {err}");
+    /// The path of `path`, as a config value.
+    fn parsed(path: &std::path::Path) -> DeployKeyPath {
+        DeployKeyPath::parse(&path.display().to_string())
+            .expect("an absolute path")
+    }
+
+    fn nothing(_: &str) -> Option<String> {
+        None
     }
 
     #[test]
-    fn a_key_path_under_either_anchor_is_accepted() {
-        for good in [
-            GOOD,
-            "/etc/bombyx/deploy-key",
-            "~/deploy-key",
-            "/srv/keys/a_b-c.pem",
-        ] {
-            assert!(check(good).is_ok(), "{good:?} must be accepted");
+    fn a_workstation_path_is_accepted_and_a_relative_one_is_not() {
+        assert!(DeployKeyPath::parse("~/.ssh/p-deploy-key").is_ok());
+        let err = DeployKeyPath::parse("keys/k").expect_err("relative");
+        assert!(err.to_string().contains("deploy_key"), "{err}");
+        assert!(err.to_string().contains("must start with `~/`"), "{err}");
+    }
+
+    #[test]
+    fn a_path_naming_a_directory_is_refused() {
+        for bad in ["~", "~/", "~/.ssh/.."] {
+            let err = DeployKeyPath::parse(bad).expect_err("a directory");
+            assert!(err.to_string().contains("names a directory"), "{err}");
         }
     }
 
     #[test]
-    fn the_stored_value_is_the_value_given() {
-        // No normalizing here, unlike `super::root::RemoteRoot`,
-        // which drops a trailing slash. Nothing joins anything
-        // onto this path, so there is no second spelling to
-        // reconcile -- and a trailing slash is refused outright
-        // rather than repaired.
-        let key = DeployKeyPath::parse(GOOD).expect("a valid fixture path");
-        assert_eq!(key.as_str(), GOOD);
+    fn a_key_file_is_read_whole() {
+        let (_dir, path) = scratch("k");
+        std::fs::write(&path, TEST_KEY).expect("write");
+        let key = parsed(&path).read(nothing).expect("a key");
+        assert_eq!(key.as_bytes(), TEST_KEY);
     }
 
     #[test]
-    fn a_blank_value_is_refused() {
-        for bad in ["", "   "] {
-            refused(bad, "must not be empty");
-            // The field name is the only part of the message
-            // telling an operator which key to edit, and it
-            // travels through a guard and two error types
-            // before it is printed.
-            refused(bad, DeployKeyPath::FIELD);
+    fn a_missing_file_says_the_key_belongs_on_the_workstation() {
+        let (_dir, path) = scratch("absent");
+        let err = parsed(&path).read(nothing).expect_err("missing");
+        assert!(matches!(err, DeployKeyError::Missing { .. }), "{err:?}");
+        assert!(err.to_string().contains("belongs here"), "{err}");
+    }
+
+    #[test]
+    fn a_public_key_or_an_empty_file_is_not_a_key() {
+        let (_dir, path) = scratch("k.pub");
+        for body in [&b"ssh-ed25519 AAAAC3Nz op@ws\n"[..], b""] {
+            std::fs::write(&path, body).expect("write");
+            let err = parsed(&path).read(nothing).expect_err("not a key");
+            assert!(matches!(err, DeployKeyError::NotAKey { .. }), "{err:?}");
         }
     }
 
     #[test]
-    fn surrounding_whitespace_is_refused_as_whitespace() {
-        // A copy-paste artifact. Reported as whitespace rather
-        // than as a disallowed character, because "character
-        // ' ' is not allowed" sends an operator looking for a
-        // space in the middle of the path.
-        for bad in [format!(" {GOOD}"), format!("{GOOD} ")] {
-            refused(&bad, "whitespace");
+    fn the_armour_line_must_name_a_private_key() {
+        let good: [&[u8]; 4] = [
+            TEST_KEY,
+            b"-----BEGIN RSA PRIVATE KEY-----\nx\n",
+            b"-----BEGIN PRIVATE KEY-----\nx\n",
+            b"-----BEGIN EC PRIVATE KEY-----\r\nx\r\n",
+        ];
+        for body in good {
+            assert!(DeployKey::from_bytes(body.to_vec()).is_ok(), "{body:?}");
+        }
+        let bad: [&[u8]; 5] = [
+            b"",
+            b"-----BEGIN PUBLIC KEY-----\nx\n",
+            b"-----BEGIN CERTIFICATE-----\nx\n",
+            b"PuTTY-User-Key-File-3: ssh-ed25519\n",
+            b"x-----BEGIN OPENSSH PRIVATE KEY-----\n",
+        ];
+        for body in bad {
+            assert_eq!(DeployKey::from_bytes(body.to_vec()), Err(NotAKey));
         }
     }
 
     #[test]
-    fn characters_that_would_break_the_generated_ruby_are_refused() {
-        // The path is written into the Vagrantfile inside a
-        // double-quoted Ruby string. A quote ends it early and
-        // a backslash escapes what follows.
-        for bad in [format!("{GOOD}a\"b"), format!("{GOOD}a\\b")] {
-            refused(&bad, "would end or escape");
-        }
-        refused(&format!("{GOOD}#{{x}}"), "Ruby interpolation");
-    }
-
-    #[test]
-    fn a_control_character_is_reported_as_one() {
-        refused(&format!("{GOOD}a\u{7}b"), "control character");
-    }
-
-    #[test]
-    fn a_character_outside_the_path_set_is_refused() {
-        // Narrower than the Ruby rule above: a space or a `$`
-        // breaks no Ruby string, and neither belongs in a key
-        // path the operator wrote.
-        for bad in ["~/my keys/k", "~/keys/$k", "~/keys/k;rm"] {
-            refused(bad, "is not allowed");
-        }
-    }
-
-    #[test]
-    fn an_unanchored_path_is_refused() {
-        // Relative to what? `vagrant` runs in the project's
-        // directory on the VM host, so a relative path would
-        // look for the key under `~/vms/<project>` -- which is
-        // a directory bombyx creates, writes and deletes.
-        for bad in ["deploy-key", ".secrets/k", "keys/k"] {
-            refused(bad, "must start with `/` or `~/`");
-        }
-    }
-
-    #[test]
-    fn an_anchor_with_no_file_below_it_is_refused() {
-        // `~` and `/` are directories. Naming one as the key
-        // file would reach the VM host as a path `File.exist?`
-        // answers yes for, and `ssh` would then refuse a
-        // directory as an identity file inside the guest,
-        // which is a long way from the config line at fault.
-        for bad in ["/", "~", "~/"] {
-            refused(bad, "must name a file below");
-        }
-    }
-
-    #[test]
-    fn a_trailing_slash_is_refused() {
-        // It says the value is a directory, and a private key
-        // is a file.
-        refused(&format!("{GOOD}/"), "must not end with `/`");
-    }
-
-    #[test]
-    fn a_doubled_slash_is_refused() {
-        // `path_segments` filters empty segments away, so
-        // without this rule `~//k` counts as depth one and
-        // passes every other check. It also survives into the
-        // script bombyx sends: `quote_remote_path` keeps the
-        // `~/` outside the quotes, so `~//keys/k` is emitted
-        // as `~/'/keys/k'`.
-        //
-        // A leading `//` is the case worth refusing rather than
-        // tidying: POSIX leaves a path beginning with exactly
-        // two slashes implementation-defined, so it need not
-        // resolve to the same file as one slash.
-        for bad in ["~//k", "/srv//keys/k", "//etc/keys/k"] {
-            refused(bad, "must not contain `//`");
-        }
-    }
-
-    #[test]
-    fn a_dot_or_dot_dot_segment_is_refused() {
-        // The rule is that the path says plainly which
-        // directory it reads, because it is expanded on
-        // another machine and the operator never sees the
-        // result. `check` says what the field really does with
-        // the file, which is not read it.
-        for bad in ["~/./k", "~/.secrets/../k", "/srv/keys/.."] {
-            refused(bad, "segment");
-        }
-    }
-
-    #[test]
-    fn a_tilde_past_the_first_character_is_refused() {
-        // A remote shell and Ruby's `File.expand_path` both
-        // expand `~` only in leading position. Anywhere else
-        // it is a literal character in a name, and almost
-        // certainly a mistake.
-        refused("~/keys/~k", "`~` is only allowed as the first");
-    }
-
-    #[test]
-    fn a_leading_dash_cannot_arise() {
-        // `super::guards::check_not_an_option` is deliberately
-        // not called here. The value reaches a Ruby literal
-        // and, through `crate::remote::require_file`, a shell
-        // assignment that `quote_remote_path` quotes. Neither
-        // is an argv position, and the anchoring rule already
-        // refuses every value that could read as an option.
-        refused("-x", "must start with `/` or `~/`");
-    }
-
-    #[test]
-    fn serde_runs_the_same_rules() {
-        // The `try_from` attribute is what makes "holding one
-        // means it passed" true for a value out of TOML.
-        // Without it serde assigns the private field directly.
-        let ok: Result<DeployKeyPath, _> =
-            DeployKeyPath::try_from(GOOD.to_owned());
-        assert_eq!(ok.expect("a valid fixture path").as_str(), GOOD);
-
-        let err = DeployKeyPath::try_from("keys/k".to_owned())
-            .expect_err("must be refused");
-        assert!(err.to_string().contains("must start with"), "{err}");
+    fn debug_reports_a_length_and_no_bytes() {
+        let shown = format!("{:?}", DeployKey::for_tests());
+        assert_eq!(shown, format!("DeployKey({} bytes)", TEST_KEY.len()));
     }
 }

@@ -91,11 +91,9 @@ readonly ACCOUNT_HOME="/home/${BOMBYX_GUEST_USER:-}"
 #
 # WHETHER a key was configured arrives as BOMBYX_DEPLOY_KEY,
 # which the Vagrantfile sets to `1` or `0` on every render, and
-# is never read off this filesystem. This flag reports the
-# config, where the two further down report what bombyx staged
-# for the run. The key is the reason: it already sits on the VM
-# host, bombyx only checks it is there, and vagrant uploads it
-# -- so there is nothing for bombyx to stage. The key lands in
+# is never read off this filesystem. Like the two further down,
+# it reports what bombyx staged for this run, and bombyx stages
+# the key only when the config names one. The key lands in
 # this account's own .ssh directory, and this is the account the
 # agent works as -- so testing for the file would let the guest
 # answer a question about the operator's config. A
@@ -568,15 +566,17 @@ fi
 
 if [ "${BOMBYX_DEPLOY_KEY:-}" = 1 ]; then
     # The config named a key, so the upload must have happened.
-    # Failing here rather than carrying on: a missing file
-    # means the key went away on the VM host after bombyx
-    # checked for it, and the alternative is a clone that
-    # authenticates with nothing and a guest that reports
-    # success.
+    # Failing here rather than carrying on: bombyx stages the key
+    # only for its own vagrant run, so a missing file means a
+    # provisioner nobody started through bombyx, and the
+    # alternative is a clone that authenticates with nothing and
+    # a guest that reports success.
     if [ ! -f "$DEPLOY_KEY" ]; then
         refuse "the configured deploy key did not arrive at" \
-            "$DEPLOY_KEY. Check it is still on the VM host" \
-            "and re-run."
+            "$DEPLOY_KEY. bombyx stages that file only for the" \
+            "length of its own vagrant run, so a vagrant" \
+            "provision started by hand on the VM host does not" \
+            "find it. Re-run the bombyx command instead."
     fi
 
     # The key is tightened where it landed, not moved out of

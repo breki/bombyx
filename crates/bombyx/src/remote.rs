@@ -510,11 +510,12 @@ pub fn vagrant_in(
 /// `name` from `dir` whether `vagrant` succeeded or not.
 ///
 /// Used for the files the VM host holds only while `vagrant` is
-/// uploading them into the guest: the project's secrets, and
-/// the git credential built from one variable inside them.
+/// uploading them into the guest: the project's secrets, the git
+/// credential built from one variable inside them, and the deploy
+/// key.
 ///
 /// Every verb that writes the generated files runs this, not
-/// only the ones that staged either. See below.
+/// only the ones that staged any of them. See below.
 ///
 /// **The removal is inside this one command rather than a step
 /// after it**, and that is the whole reason the function exists.
@@ -539,30 +540,27 @@ pub fn vagrant_in(
 /// either way.
 ///
 /// **Every name is removed whether it was staged or not.** The
-/// caller writes the secrets file and the git credential only
-/// when the config names them, and a run interrupted after this
-/// step began leaves a file the next run's config may no longer
-/// mention. So the removals are unconditional and the message
-/// says the file *may* hold secrets rather than that it does.
+/// caller writes the secrets file, the git credential and the
+/// deploy key only when the config names them, and a run
+/// interrupted after this step began leaves a file the next run's
+/// config may no longer mention. So the removals are unconditional
+/// and the message says the file *may* hold secrets rather than
+/// that it does.
 ///
-/// The names arrive as a slice because two files travel this
-/// way. Both are removed even when the boot failed, and each
+/// The names arrive as a slice because three files travel this
+/// way. Each is removed even when the boot failed, and each
 /// reports its own failure, so one file that cannot be removed
-/// does not hide the other.
+/// does not hide another.
 ///
 /// The path reaches `printf` as an argument rather than inside
 /// the format string. A `%` in there is read as a conversion
 /// specifier and eats the argument after it, and a `'` ends the
-/// format string early. `require_file` does the same, for the
-/// same reason.
+/// format string early.
 ///
 /// **The message names the VM host on both routes**, and on the
 /// local route that host is the machine the operator is sitting
 /// at. The path it prints is the VM host's, so naming any other
 /// machine would describe a path that does not exist there.
-/// [`require_file`] makes the same choice for the opposite
-/// reason -- its text arrives in a terminal on the workstation
-/// after running on the far side of `ssh`.
 ///
 /// The path is anchored rather than relative to the `cd`. With
 /// the default `remote_root` it renders as `~/'vms/…'`, which
@@ -872,67 +870,6 @@ pub fn status_or_never_built(cfg: &Config, tty: Tty) -> RemoteCommand {
 #[must_use]
 pub fn ensure_dir(cfg: &Config, dir: &str) -> RemoteCommand {
     let script = format!("mkdir -p {}", quote_remote_path(dir));
-    transport(cfg, &script, Tty::NoPty)
-}
-
-/// Builds the command that fails when `path` is not a file on
-/// the VM host.
-///
-/// `field` is the config key the path came from, and it is in
-/// the message because the answer to "which line do I edit?" is
-/// what the operator needs. A bare `test -f` would exit 1 and
-/// say nothing.
-///
-/// It is `&'static str` so no value read at run time can reach
-/// it, and it is passed to `printf` as an argument rather than
-/// written into the format string: a `%` in there is read as a
-/// conversion specifier and consumes the path argument, and a
-/// `'` ends the format string early.
-///
-/// Unreadable counts as missing. The check runs as the VM
-/// host's login user -- the same one that will run `vagrant`
-/// there -- so a key that user cannot open is a mistake worth
-/// catching here, where the message still names the config
-/// key. Left to Vagrant's `file` provisioner it fails a long
-/// way from the line at fault.
-///
-/// The message names the VM host rather than saying "this
-/// machine". The `printf` runs on the far side of `ssh` while
-/// the text arrives in a terminal on the workstation, so "this
-/// machine" would name a machine the reader is not sitting at.
-/// The host is an argument too, for the same reason `field` is:
-/// `HostName`'s charset happens to exclude `%` and `'`, and a
-/// rule kept in another file is the one somebody widens.
-///
-/// **This is a check on the VM host, run by bombyx, and that is
-/// the point.** The generated Vagrantfile could test the file
-/// itself and `raise`, which is fewer moving parts and one
-/// fewer round trip. It cannot be done there: `vagrant destroy`
-/// loads that file too, so the `raise` would leave a directory
-/// no bombyx command could tear down --
-/// [`destroy_vm_if_present`] holds why. bombyx knows which verb
-/// it is running and the Vagrantfile does not.
-///
-/// The path is assigned to a shell variable first so that a
-/// leading `~` is expanded once, and the message then quotes
-/// the directory the far side really looked in rather than the
-/// `~` the operator wrote. POSIX expands a tilde at the start
-/// of an assignment's value, which `sh` and `dash` were both
-/// checked for.
-#[must_use]
-pub fn require_file(
-    cfg: &Config,
-    path: &str,
-    field: &'static str,
-) -> RemoteCommand {
-    let script = format!(
-        "p={quoted}; if [ ! -f \"$p\" ] || [ ! -r \"$p\" ]; then \
-         printf 'bombyx: %s names %s, which %s does not have or \
-         cannot read\\n' {field} \"$p\" {host} >&2; exit 1; fi",
-        quoted = quote_remote_path(path),
-        field = shell_quote(field),
-        host = shell_quote(cfg.host.as_str()),
-    );
     transport(cfg, &script, Tty::NoPty)
 }
 
@@ -1352,7 +1289,12 @@ fn as_guest_user(
 /// `chmod` fixes a stale `.new` the agent loosened. On any failure
 /// the temporary goes, so a half-written copy does not sit in the
 /// home.
-const REFRESH_SCRIPT: &str = r#"t="$HOME/$1.new"; umask 077; if cat > "$t" && chmod 600 "$t" && mv -f -- "$t" "$HOME/$1"; then exit 0; fi; rm -f -- "$t"; exit 1"#;
+///
+/// The deploy key lives in `~/.ssh`, which a guest provisioned
+/// before its config named a key does not have. So the script
+/// creates the file's directory first, and the `umask` gives it
+/// mode 0700, which `ssh` requires of that directory.
+const REFRESH_SCRIPT: &str = r#"t="$HOME/$1.new"; umask 077; if mkdir -p -- "${t%/*}" && cat > "$t" && chmod 600 "$t" && mv -f -- "$t" "$HOME/$1"; then exit 0; fi; rm -f -- "$t"; exit 1"#;
 
 /// Builds the command that writes `contents` over `file` in the
 /// agent's home, inside the running project VM.
@@ -1388,7 +1330,7 @@ const REFRESH_SCRIPT: &str = r#"t="$HOME/$1.new"; umask 077; if cat > "$t" && ch
 /// `file` decides the payload's form too: the credential's size is
 /// hidden from a dry run ([`GuestHomeFile::hides_size`]), so no
 /// caller can send it with the count showing. Its path travels as
-/// `$1`, so the script is one text for both files.
+/// `$1`, so the script is one text for every file.
 ///
 /// **A Windows guest takes the file the same way**, on stdin with
 /// no terminal, but the command calls `refresh.ps1`, which
@@ -1738,7 +1680,7 @@ mod tests {
         /// One builder, named for the error message.
         type Builder = (&'static str, fn(&Config) -> RemoteCommand);
 
-        let builders: [Builder; 10] = [
+        let builders: [Builder; 9] = [
             ("vagrant", |c| vagrant(c, &["status"], Tty::NoPty)),
             ("status_or_never_built", |c| {
                 status_or_never_built(c, Tty::NoPty)
@@ -1760,15 +1702,6 @@ mod tests {
                 save_snapshot_if_absent(c, &c.remote_project_dir(), Tty::NoPty)
             }),
             ("write", |c| write_file(c, "~/vms", "Vagrantfile", b"x\n")),
-            // A row because this builder reads `cfg.host`
-            // outside `vagrant_command`, so a script made
-            // conditional on the route here would go unnoticed.
-            // Note what it cannot catch: both fixtures carry
-            // the same `host`, so a host that *varied* by route
-            // would still compare equal.
-            ("require_file", |c| {
-                require_file(c, "~/.secrets/k", "deploy_key")
-            }),
         ];
         for (name, build) in builders {
             let over_ssh = build(&cfg());
@@ -2165,15 +2098,20 @@ mod tests {
     }
 
     /// Runs [`REFRESH_SCRIPT`] under `sh` with `HOME` at `home`,
-    /// feeding it `input`, and returns whether it succeeded.
+    /// feeding it `input` for `file`, and returns whether it
+    /// succeeded.
     ///
-    /// Unix only, like both of its callers: the script needs a
-    /// POSIX `sh`, and a helper nothing calls is a dead-code error.
+    /// Unix only, like its callers: the script needs a POSIX `sh`,
+    /// and a helper nothing calls is a dead-code error.
     #[cfg(unix)]
-    fn run_refresh_script(home: &std::path::Path, input: &[u8]) -> bool {
+    fn run_refresh_script_for(
+        home: &std::path::Path,
+        file: GuestHomeFile,
+        input: &[u8],
+    ) -> bool {
         use std::io::Write as _;
         let mut child = std::process::Command::new("sh")
-            .args(["-c", REFRESH_SCRIPT, "sh", ".bombyx-env"])
+            .args(["-c", REFRESH_SCRIPT, "sh", file.path()])
             .env("HOME", home)
             .stdin(std::process::Stdio::piped())
             .spawn()
@@ -2185,6 +2123,35 @@ mod tests {
             .write_all(input)
             .expect("the script reads its input");
         child.wait().expect("sh finishes").success()
+    }
+
+    /// [`run_refresh_script_for`] the secrets file.
+    #[cfg(unix)]
+    fn run_refresh_script(home: &std::path::Path, input: &[u8]) -> bool {
+        run_refresh_script_for(home, GuestHomeFile::Secrets, input)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refresh_creates_the_ssh_directory_a_key_needs_at_mode_700() {
+        // A guest provisioned before its config named a key has no
+        // `~/.ssh` for the agent, and `ssh` refuses a directory other
+        // accounts can write.
+        use std::os::unix::fs::PermissionsExt as _;
+        let home = tempfile::tempdir().expect("a temp dir");
+        let key = b"-----BEGIN OPENSSH PRIVATE KEY-----\n";
+        assert!(run_refresh_script_for(
+            home.path(),
+            GuestHomeFile::DeployKey,
+            key
+        ));
+        let target = home.path().join(GuestHomeFile::DeployKey.path());
+        assert_eq!(std::fs::read(&target).expect("the key"), key);
+        let mode = |p: &std::path::Path| {
+            std::fs::metadata(p).expect("meta").permissions().mode() & 0o777
+        };
+        assert_eq!(mode(&home.path().join(".ssh")), 0o700);
+        assert_eq!(mode(&target), 0o600);
     }
 
     #[cfg(unix)]
@@ -2898,76 +2865,6 @@ mod tests {
     fn ensure_dir_quotes_an_absolute_dir() {
         let c = ensure_dir(&cfg(), "/srv/vms/p");
         assert_eq!(remote_script(&c), "mkdir -p '/srv/vms/p'");
-    }
-
-    #[test]
-    fn require_file_names_the_path_in_its_own_message() {
-        // The whole script, because the message is the point:
-        // an operator who sees only "exit status 1" has to go
-        // and read the generated Vagrantfile to find out which
-        // file was missing.
-        let c = require_file(&cfg(), "~/.secrets/k", "deploy_key");
-        assert_eq!(
-            remote_script(&c),
-            "p=~/'.secrets/k'; if [ ! -f \"$p\" ] || \
-             [ ! -r \"$p\" ]; then printf 'bombyx: %s names %s, \
-             which %s does not have or cannot read\\n' \
-             'deploy_key' \"$p\" 'vmhost' >&2; exit 1; fi"
-        );
-    }
-
-    #[test]
-    fn require_file_quotes_an_absolute_path() {
-        let c = require_file(&cfg(), "/etc/keys/k", "deploy_key");
-        assert!(
-            remote_script(&c).starts_with("p='/etc/keys/k';"),
-            "{}",
-            remote_script(&c)
-        );
-    }
-
-    #[test]
-    fn require_file_names_the_vm_host_rather_than_this_machine() {
-        // The `printf` runs on the far side of `ssh` and the
-        // text arrives in a terminal on the workstation, so
-        // "this machine" would name a machine the reader is not
-        // sitting at. On the local route the two coincide and
-        // the same wording still reads correctly.
-        for cfg in [cfg(), local_cfg()] {
-            let c = require_file(&cfg, "~/.secrets/k", "deploy_key");
-            assert!(
-                remote_script(&c).contains("'vmhost' >&2"),
-                "{}",
-                remote_script(&c)
-            );
-        }
-    }
-
-    #[test]
-    fn require_file_refuses_a_file_it_cannot_read() {
-        // The check runs as the user `vagrant` will run as, so
-        // an unreadable key is a mistake this step can catch at
-        // the one point where the message names the config key.
-        // Left to Vagrant's `file` provisioner it fails a long
-        // way from the config line at fault.
-        let script =
-            remote_script(&require_file(&cfg(), "~/.secrets/k", "deploy_key"));
-        assert!(script.contains("! -f"), "{script}");
-        assert!(script.contains("! -r"), "{script}");
-    }
-
-    #[test]
-    fn require_file_passes_the_field_name_as_an_argument() {
-        // Not interpolated into the `printf` format string. A
-        // field containing `%` would otherwise be read as a
-        // conversion specifier and eat the path argument, and
-        // one containing `'` would end the format string early.
-        let script = remote_script(&require_file(&cfg(), "/k", "de%s'ploy"));
-        assert!(script.contains(r"'de%s'\''ploy'"), "{script}");
-        assert!(
-            script.contains("'bombyx: %s names %s,"),
-            "the field name must not be in the format string: {script}"
-        );
     }
 
     #[test]

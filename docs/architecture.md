@@ -179,6 +179,11 @@ classDiagram
   class Vault {
     +VaultDatabase database
     +BTreeMap~SecretName, EntryPath~ entries
+    +Option~VaultKey~ deploy_key
+  }
+  class VaultKey {
+    +EntryPath entry
+    +AttachmentName attachment
   }
   class RepoToken {
     +RepoTokenVar var
@@ -228,6 +233,7 @@ classDiagram
   Vm --> Guest
   Source *-- RepoToken : repo_token
   Source *-- Vault : vault
+  Vault *-- VaultKey : deploy_key
   Registry ..> HostOrigin : ranked to produce one
 ```
 

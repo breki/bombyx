@@ -4,7 +4,7 @@
 //! order -- so it lives in the library where it is covered by
 //! tests, not in `src/bin/`.
 
-use crate::config::{Config, DeployKeyPath, Staged};
+use crate::config::{Config, Staged};
 use crate::doctor;
 use crate::name::ScratchName;
 use crate::remote::{self, RemoteCommand, Tty};
@@ -125,9 +125,8 @@ impl Action {
     /// **The teardown verbs are why `Skip` exists.** A
     /// `destroy` refused because the secrets file has gone would
     /// leave the VM and the directory it was asked to remove,
-    /// with no bombyx command able to clear either. `write_then`
-    /// states the same rule for the deploy key, aimed at the VM
-    /// host instead of the workstation.
+    /// with no bombyx command able to clear either. The deploy
+    /// key is read the same way, so the same rule covers it.
     ///
     /// `doctor` is on the same side of the line, and for a
     /// sharper reason: its job is to report what is wrong with a
@@ -254,22 +253,23 @@ pub fn plan(
 /// Provisioning is the only other thing that writes them, and it
 /// also re-runs `bootstrap.sh`, whose forced checkout overwrites
 /// work in the guest's clone. So `up` and `shell` send the files
-/// this way instead: nothing but the two files changes, and a
-/// token rotated on the workstation reaches the guest without the
+/// this way instead: nothing but those files changes, and a token
+/// or key rotated on the workstation reaches the guest without the
 /// operator committing anything first.
 ///
 /// One command per file, and none for a file `staged` lacks, so a
 /// project with no `env_file` pays no round trip. The credential
 /// is refreshed alongside the secrets because it is built from
 /// one variable inside them, and a rotated repo token would leave
-/// `git` pushing with the old one otherwise.
+/// `git` pushing with the old one otherwise. The deploy key is
+/// refreshed on its own, since an ssh clone may stage no secrets.
 ///
 /// **The commands are independent**, so a caller runs every one
 /// and reports each failure, rather than stopping at the first:
 /// a secrets file the guest would not take is no reason to leave
 /// the credential stale.
 ///
-/// Only the two copies are rewritten. A project script that
+/// Only those copies are rewritten. A project script that
 /// copied the secrets somewhere else during provisioning keeps
 /// that copy, unless the project names a `secrets_refreshed` hook
 /// to make it again, and a process that read them keeps its
@@ -280,8 +280,8 @@ pub fn plan(
 /// command as the write, so it costs no round trip of its own and
 /// runs only once the write has succeeded;
 /// [`remote::refresh_secrets_then_hook`] holds how. The credential
-/// goes first for the hook's sake: a hook that runs `git` then
-/// finds the token the operator just rotated.
+/// and the key go first for the hook's sake: a hook that runs
+/// `git` then finds the token or key the operator just rotated.
 #[must_use]
 pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
     let mut cmds = Vec::new();
@@ -290,6 +290,13 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
             cfg,
             GuestHomeFile::Credential,
             credential.as_bytes(),
+        ));
+    }
+    if let Some(key) = staged.deploy_key() {
+        cmds.push(remote::refresh_in_guest(
+            cfg,
+            GuestHomeFile::DeployKey,
+            key.as_bytes(),
         ));
     }
     cmds.extend(secrets_command(cfg, staged));
@@ -301,7 +308,7 @@ pub fn refresh_secrets(cfg: &Config, staged: &Staged) -> Vec<RemoteCommand> {
 /// nothing was staged.
 ///
 /// Shared by [`refresh_secrets`] and [`refresh_after_provisioning`],
-/// which differ only in whether the credential goes too.
+/// which differ only in whether the credential and the key go too.
 fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
     let secrets = staged.secrets()?;
     Some(match &cfg.hooks.secrets_refreshed {
@@ -323,10 +330,10 @@ fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
 /// command, so this is that one command when a hook is configured,
 /// and nothing otherwise.
 ///
-/// Provisioning has just written both files, so rewriting the
-/// secrets here serves only to carry the hook. The credential has
-/// no hook, so rewriting it would cost a `vagrant ssh` and change
-/// nothing; it is left out.
+/// Provisioning has just written every file, so rewriting the
+/// secrets here serves only to carry the hook. The credential and
+/// the key have no hook, so rewriting them would cost a `vagrant
+/// ssh` each and change nothing; they are left out.
 ///
 /// The hook runs *after* the project's own provisioning script, so
 /// that script cannot rely on the copy the hook makes; one that
@@ -389,10 +396,8 @@ fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
 /// the host after the directory has already been created.
 ///
 /// The three verbs sharing this helper are the three that boot
-/// or provision, and so the three that need the deploy key. The
-/// teardown verbs go through [`tear_down`] and check nothing,
-/// which is deliberate: a `destroy` refused because the key has
-/// gone would leave the directory it was asked to remove.
+/// or provision, and so the three that stage the deploy key. The
+/// teardown verbs go through [`tear_down`] and stage nothing.
 fn write_then(
     cfg: &Config,
     dir: &str,
@@ -400,24 +405,12 @@ fn write_then(
     tty: Tty,
     staged: &Staged,
 ) -> Vec<RemoteCommand> {
-    // Before the `mkdir`, so a config naming a key the VM host
-    // does not have leaves no directory and no Vagrantfile
-    // behind. The generated Vagrantfile cannot hold this check
-    // itself -- `remote::require_file` says why.
-    let mut cmds = Vec::new();
-    if let Some(key) = &cfg.source.deploy_key {
-        cmds.push(remote::require_file(
-            cfg,
-            key.as_str(),
-            DeployKeyPath::FIELD,
-        ));
-    }
-    cmds.push(remote::ensure_dir(cfg, dir));
+    let mut cmds = vec![remote::ensure_dir(cfg, dir)];
     for (name, contents) in vagrantfile::files(cfg, staged) {
         cmds.push(remote::write_file(cfg, dir, name, contents.as_bytes()));
     }
 
-    // The two secret-carrying files are written after the
+    // The three secret-carrying files are written after the
     // generated ones, so the window in which the VM host holds
     // them is the `vagrant` run and nothing more.
     if let Some(secrets) = staged.secrets() {
@@ -442,6 +435,14 @@ fn write_then(
             credential.as_bytes(),
         ));
     }
+    if let Some(key) = staged.deploy_key() {
+        cmds.push(remote::write_file(
+            cfg,
+            dir,
+            vagrantfile::DEPLOY_KEY_FILE_NAME,
+            key.as_bytes(),
+        ));
+    }
 
     // The removal runs whether one was staged or not, and that
     // is not tidiness. A run interrupted after the vagrant step
@@ -463,6 +464,7 @@ fn write_then(
         &[
             vagrantfile::ENV_FILE_NAME,
             vagrantfile::CREDENTIAL_FILE_NAME,
+            vagrantfile::DEPLOY_KEY_FILE_NAME,
         ],
     ));
     cmds
@@ -471,7 +473,7 @@ fn write_then(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Provider;
+    use crate::config::{DeployKey, DeployKeyPath, Provider};
 
     fn cfg() -> Config {
         Config::for_tests()
@@ -753,6 +755,11 @@ mod tests {
                  { printf 'bombyx: could not remove %s from the VM \
                  host; it may hold secrets for this project\\\\n' \
                  ~/'vms/myproject/bombyx.git-credentials' >&2; \
+                 [ \\\"\\$rc\\\" = 0 ] && rc=1; }; \
+                 rm -f ~/'vms/myproject/bombyx.deploy-key' || \
+                 { printf 'bombyx: could not remove %s from the VM \
+                 host; it may hold secrets for this project\\\\n' \
+                 ~/'vms/myproject/bombyx.deploy-key' >&2; \
                  [ \\\"\\$rc\\\" = 0 ] && rc=1; }; exit \\$rc\"",
             ]
         );
@@ -808,80 +815,76 @@ mod tests {
         }
     }
 
-    /// [`cfg`] carrying a `deploy_key`.
-    fn cfg_with_key() -> Config {
+    /// The staged key's name in the project directory.
+    const KEY_FILE: &str = vagrantfile::DEPLOY_KEY_FILE_NAME;
+
+    /// [`cfg`] carrying a `deploy_key`, and what it stages.
+    fn cfg_with_key() -> (Config, Staged) {
         let mut cfg = cfg();
         cfg.source.deploy_key = Some(
             DeployKeyPath::parse("~/.secrets/k").expect("a valid fixture path"),
         );
-        cfg
+        let staged = cfg.staged_for_tests();
+        (cfg, staged)
     }
 
     #[test]
-    fn a_deploy_key_is_checked_before_anything_is_created() {
-        // First step or nothing. Checking after the `mkdir`
-        // would leave a directory behind on a config naming a
-        // key the VM host does not have, and checking after the
-        // writes would leave a Vagrantfile too.
+    fn a_deploy_key_is_staged_owner_only_before_the_vagrant_run() {
+        // The key reaches the VM host the way the secrets do: a
+        // write into the project directory, at 0600, ahead of the
+        // `vagrant` step that uploads it.
+        let (cfg, staged) = cfg_with_key();
         for action in [
             Action::Up,
             Action::Provision,
             Action::Scratch(scratch("pr-1234")),
         ] {
-            let cmds =
-                plan(&action, &cfg_with_key(), Tty::NoPty, &Staged::default());
-            assert!(
-                script(&cmds[0]).contains("'deploy_key'"),
-                "{action:?}: the key check is not the first step"
+            let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
+            let scripts: Vec<String> = cmds.iter().map(script).collect();
+            let write = scripts
+                .iter()
+                .position(|s| s.contains("cat > ") && s.contains(KEY_FILE))
+                .unwrap_or_else(|| panic!("{action:?}: the key is not staged"));
+            assert!(scripts[write].contains("umask 077"), "{action:?}");
+            assert_eq!(write, scripts.len() - 2, "{action:?}: not last write");
+            assert_eq!(
+                cmds[write].stdin.as_ref().map(remote::Stdin::bytes),
+                staged.deploy_key().map(DeployKey::as_bytes),
+                "{action:?}: the write does not carry the key"
             );
         }
     }
 
     #[test]
-    fn no_deploy_key_adds_no_check_step() {
-        // The check names a path, so a plan with no key has no
-        // path to name and the step would test the empty
-        // string.
-        //
-        // The needle is the shell-quoted field name the check
-        // passes to `printf`. `bootstrap.sh` mentions
-        // `deploy_key` in a comment and one of these commands
-        // writes that file, so the bare name would match the
-        // write step.
+    fn the_staged_key_is_removed_whether_or_not_one_was_staged() {
+        // The same rule as the secrets file: a run interrupted
+        // after the write leaves the key on the VM host, and a
+        // config that dropped `deploy_key` since would otherwise
+        // never collect it.
+        let (with_key, staged) = cfg_with_key();
+        for (cfg, staged) in
+            [(&with_key, &staged), (&cfg(), &Staged::default())]
+        {
+            let cmds = plan(&Action::Up, cfg, Tty::NoPty, staged);
+            let last = script(cmds.last().expect("a vagrant step"));
+            assert!(
+                last.contains(&format!("rm -f ~/'vms/myproject/{KEY_FILE}'")),
+                "{last}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_verb_checks_the_vm_host_for_a_key() {
+        // The key lives on the workstation, so there is nothing on
+        // the VM host to look for. The needle is the shell-quoted
+        // field name a host-side check would pass to `printf`.
+        let (cfg, staged) = cfg_with_key();
         for action in all_actions() {
-            let cmds = plan(&action, &cfg(), Tty::NoPty, &Staged::default());
+            let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
             assert!(
                 !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
-                "{action:?}: a check was built with no key configured"
-            );
-        }
-    }
-
-    #[test]
-    fn only_the_verbs_that_boot_check_the_deploy_key() {
-        // Two groups, for two reasons.
-        //
-        // `destroy` and `discard` have to work on a directory
-        // whose key has gone: a check would stop the teardown
-        // at its first step and leave the directory behind,
-        // which is the whole reason the Vagrantfile does not
-        // raise either.
-        //
-        // `down` and `status` need no key because they touch a
-        // machine that already exists. A check there would
-        // refuse a `status` for a reason having nothing to do
-        // with answering it.
-        for action in [
-            Action::Destroy,
-            Action::Discard(scratch("pr-1234")),
-            Action::Down,
-            Action::Status,
-        ] {
-            let cmds =
-                plan(&action, &cfg_with_key(), Tty::NoPty, &Staged::default());
-            assert!(
-                !cmds.iter().any(|c| script(c).contains("'deploy_key'")),
-                "{action:?}: teardown must not check the key"
+                "{action:?}: a host-side key check was built"
             );
         }
     }
@@ -951,6 +954,11 @@ mod tests {
                  { printf 'bombyx: could not remove %s from the VM \
                  host; it may hold secrets for this project\\\\n' \
                  ~/'vms/myproject/bombyx.git-credentials' >&2; \
+                 [ \\\"\\$rc\\\" = 0 ] && rc=1; }; \
+                 rm -f ~/'vms/myproject/bombyx.deploy-key' || \
+                 { printf 'bombyx: could not remove %s from the VM \
+                 host; it may hold secrets for this project\\\\n' \
+                 ~/'vms/myproject/bombyx.deploy-key' >&2; \
                  [ \\\"\\$rc\\\" = 0 ] && rc=1; }; exit \\$rc\"",
             ]
         );
@@ -1563,6 +1571,37 @@ mod tests {
                 "the token reached an argument: {c}"
             );
         }
+    }
+
+    #[test]
+    fn a_refresh_rewrites_the_deploy_key_on_its_own() {
+        // An ssh clone needs the key and may need no secrets, so
+        // the key is refreshed whether or not secrets were staged.
+        let (cfg, staged) = cfg_with_key();
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        let script = script(&cmds[0]);
+        assert!(script.contains(GuestHomeFile::DeployKey.path()), "{script}");
+        let stdin = cmds[0].stdin.as_ref().expect("the key is on stdin");
+        assert_eq!(
+            Some(stdin.bytes()),
+            staged.deploy_key().map(DeployKey::as_bytes)
+        );
+    }
+
+    #[test]
+    fn the_deploy_key_is_refreshed_before_the_secrets_and_their_hook() {
+        // The hook may run `git`, so it has to find the key the
+        // operator just rotated, as it finds the credential.
+        let (mut cfg, _) = staged_project_with_hook(false);
+        cfg.source.deploy_key = Some(
+            DeployKeyPath::parse("~/.secrets/k").expect("a valid fixture path"),
+        );
+        let staged = cfg.staged_for_tests();
+        let cmds = refresh_secrets(&cfg, &staged);
+        assert_eq!(cmds.len(), 2, "{cmds:?}");
+        assert!(script(&cmds[0]).contains(GuestHomeFile::DeployKey.path()));
+        assert!(script(&cmds[1]).contains(GuestHomeFile::Secrets.path()));
     }
 
     /// [`staged_project`] with a `secrets_refreshed` hook as well.

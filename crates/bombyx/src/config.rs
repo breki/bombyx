@@ -26,9 +26,10 @@
 //! `box`, `ref`, `deploy_key`, `env_file`, `repo_token`,
 //! `repo_user`, `secrets_refreshed` and `project` -- an `[env]`
 //! entry is two more, an [`EnvName`] keying an [`EnvValue`], and
-//! a `vault` is three: a [`VaultDatabase`], and a [`SecretName`]
-//! keying an [`EntryPath`] per entry. No count here: the list
-//! grows, and a figure in prose costs the next reader a recount.
+//! a `vault` is a [`VaultDatabase`], a [`SecretName`] keying an
+//! [`EntryPath`] per entry, and a [`VaultKey`] when it holds the
+//! deploy key. No count here: the list grows, and a figure in
+//! prose costs the next reader a recount.
 //! See [`RepoUrl`] for how the pattern works.
 //!
 //! `cpus` is a `std::num::NonZeroU32`, which is the whole rule it
@@ -67,7 +68,8 @@
 //! - `registry` -- the operator's own `config.toml`: the VM
 //!   host, and a table per project.
 //! - `deploy_key` -- every rule the path to a private key on
-//!   the VM host must pass.
+//!   the workstation must pass, and the type holding the key
+//!   bombyx reads from it.
 //! - `env` -- the `[env]` table: a project's own variables, and
 //!   the two types holding a name and a value.
 //! - `env_file` -- every rule the path to a secrets file on the
@@ -93,8 +95,8 @@
 //!   password.
 //! - `vm` -- the `[vm]` table.
 //! - `workstation_path` -- the rules for a path to a file on the
-//!   workstation, which `env_file` and `vault.database` share,
-//!   and the `~` expansion they both use.
+//!   workstation, which `env_file`, `deploy_key` and
+//!   `vault.database` share, and the `~` expansion they all use.
 //!
 //! A new field rule belongs in the module that owns the field.
 //! Put it in `guards` only once a second field needs it.
@@ -252,7 +254,7 @@ fn test_registry_with(name: &str, host: &str, keys: &str) -> String {
 }
 
 pub use crate::name::ProjectName;
-pub use deploy_key::DeployKeyPath;
+pub use deploy_key::{DeployKey, DeployKeyError, DeployKeyPath};
 #[cfg(test)]
 pub(crate) use env::RESERVED_PREFIX;
 pub use env::{EnvName, EnvValue};
@@ -274,7 +276,10 @@ pub use repo_token::{
 };
 pub use root::RemoteRoot;
 pub use source::{GitRef, RepoUrl, ScriptPath, Source};
-pub use vault::{EntryPath, SecretName, Vault, VaultDatabase, VaultError};
+pub use vault::{
+    AttachmentName, EntryPath, SecretName, Vault, VaultDatabase, VaultError,
+    VaultKey, VaultRead,
+};
 pub use vm::{BoxName, CpuMode, Disk, Guest, Hostname, Memory, Provider, Vm};
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
@@ -392,12 +397,14 @@ pub struct Config {
 /// run on a VM that already exists, which pipes them into the
 /// guest without staging them anywhere.
 ///
-/// Both parts come out of one source, the file `source.env_file`
-/// names or the vault `source.vault` names, and the invariant is
-/// that either both came from one [`Config::read_staged`] call
-/// or there is nothing here at all. The fields are private so
-/// those are the only two states a caller can produce, which
-/// matters because `crate::plan::plan` takes one on trust.
+/// The secrets and the credential come out of one source, the
+/// file `source.env_file` names or the vault `source.vault` names;
+/// the deploy key comes from its own file or the vault's
+/// attachment. The invariant is that every part came from one
+/// [`Config::read_staged`] call or there is nothing here at all.
+/// The fields are private so those are the only two states a
+/// caller can produce, which matters because `crate::plan::plan`
+/// takes one on trust.
 ///
 /// `Default` is the second state rather than a hole in the
 /// first. It is what an action that must keep working after the
@@ -414,15 +421,22 @@ pub struct Staged {
     /// `None` when the config names no `repo_token`, which is
     /// what a public repository and an ssh clone both want.
     credential: Option<GitCredential>,
+    /// The private key the guest clones with, from the file
+    /// `source.deploy_key` names or the vault attachment
+    /// `source.vault.deploy_key` names.
+    ///
+    /// Independent of the other two: an ssh clone of a private
+    /// repository needs the key and may need no secrets at all.
+    deploy_key: Option<DeployKey>,
 }
 
 impl Staged {
     /// The project's secrets, when the config names an `env_file`
-    /// or a `vault`.
+    /// or a `vault` with `entries`.
     ///
-    /// Both fields are private, and that is what holds the
+    /// Every field is private, and that is what holds the
     /// promise above up. Public ones would let a caller write a
-    /// `Staged` whose halves came from two different configs,
+    /// `Staged` whose parts came from two different configs,
     /// and `crate::plan::plan` takes one on trust.
     #[must_use]
     pub fn secrets(&self) -> Option<&Secrets> {
@@ -435,15 +449,22 @@ impl Staged {
     pub fn credential(&self) -> Option<&GitCredential> {
         self.credential.as_ref()
     }
+
+    /// The deploy key, when the config names one.
+    #[must_use]
+    pub fn deploy_key(&self) -> Option<&DeployKey> {
+        self.deploy_key.as_ref()
+    }
 }
 
 /// Why bombyx could not assemble what it stages for a run.
 ///
-/// Three causes, kept apart because they send the operator to
+/// Four causes, kept apart because they send the operator to
 /// different places. [`StagedError::File`] and
 /// [`StagedError::Vault`] are about reaching the secrets at all,
-/// from the file or the vault, and [`StagedError::Token`] is
-/// about what was inside them once bombyx had.
+/// from the file or the vault, [`StagedError::Token`] is about
+/// what was inside them once bombyx had, and
+/// [`StagedError::DeployKey`] is about the key file.
 #[derive(Debug, Error)]
 pub enum StagedError {
     /// The file `env_file` names could not be read.
@@ -458,12 +479,18 @@ pub enum StagedError {
     /// The vault `source.vault` names could not be read.
     #[error(transparent)]
     Vault(#[from] VaultError),
+
+    /// The key file `source.deploy_key` names could not be read.
+    #[error(transparent)]
+    DeployKey(#[from] DeployKeyError),
 }
 
 impl Config {
     /// Reads the secrets from the file `source.env_file` names or
     /// from the vault `source.vault` names, whichever the config
-    /// has, and builds whatever bombyx sends alongside them.
+    /// has, and builds whatever bombyx sends alongside them. The
+    /// deploy key comes from the file `source.deploy_key` names or
+    /// from the vault's attachment.
     ///
     /// A vault asks for its master password on the terminal; the
     /// `vault` module's own documentation says how the password
@@ -488,44 +515,74 @@ impl Config {
     /// no home directory, the path is not a regular file, or the
     /// file could not be opened; and [`StagedError::Token`] when
     /// the file holds no variable of the name `repo_token`
-    /// states, or holds it empty; and [`StagedError::Vault`]
-    /// when the vault could not be unlocked or lacks an entry.
+    /// states, or holds it empty; [`StagedError::Vault`] when the
+    /// vault could not be unlocked or lacks an entry or the key's
+    /// attachment; and [`StagedError::DeployKey`] when the key file
+    /// is missing, unreadable or holds no private key.
     pub fn read_staged<F>(&self, getenv: F) -> Result<Staged, StagedError>
     where
         F: Fn(&str) -> Option<String>,
     {
-        // `Source::try_from` refuses a config naming both, so
-        // the order here only matters to one built in code.
-        let (secrets, origin) =
-            match (self.source.env_file.as_ref(), self.source.vault.as_ref()) {
-                (Some(path), _) => {
-                    (path.read(&getenv)?, SecretsOrigin::File(path.as_str()))
-                }
-                (None, Some(vault)) => {
-                    (vault.read(&getenv)?, SecretsOrigin::Vault)
-                }
-                (None, None) => {
-                    // A `repo_token` with nothing to read it out of
-                    // is refused rather than ignored.
-                    // `Source::try_from` catches it while a config
-                    // file parses; this is the same pairing in a
-                    // config built in code, where the fields are
-                    // public. Ignoring it would render a Vagrantfile
-                    // claiming a credential that nothing stages, and
-                    // the guest would refuse after booting.
-                    if let Some(token) = self.source.repo_token.as_ref() {
-                        return Err(RepoTokenError::NoSecrets {
-                            var: token.var.as_str().to_owned(),
-                        }
-                        .into());
+        // Everything the workstation's files decide runs first, so a
+        // missing key or a token absent from the `env_file` stops the
+        // run before a vault asks for its password.
+        let file_key = self
+            .source
+            .deploy_key
+            .as_ref()
+            .map(|path| path.read(&getenv))
+            .transpose()?;
+        let from_file = match self.source.env_file.as_ref() {
+            Some(path) => {
+                let secrets = path.read(&getenv)?;
+                let origin = SecretsOrigin::File(path.as_str());
+                let credential = self.credential(&secrets, origin)?;
+                Some((secrets, credential))
+            }
+            None => None,
+        };
+        // `Source::try_from` lets a vault stand beside an `env_file`
+        // only when it holds the key alone, so the file is the one
+        // source of secrets whenever it is named.
+        let (vault_secrets, vault_key) = match self.source.vault.as_ref() {
+            Some(vault) => {
+                let read = vault.read(&getenv)?;
+                (read.secrets, read.deploy_key)
+            }
+            None => (None, None),
+        };
+        let deploy_key = file_key.or(vault_key);
+        let (secrets, credential) = match (from_file, vault_secrets) {
+            (Some(pair), _) => pair,
+            (None, Some(secrets)) => {
+                let credential =
+                    self.credential(&secrets, SecretsOrigin::Vault)?;
+                (secrets, credential)
+            }
+            (None, None) => {
+                // A `repo_token` with nothing to read it out of is
+                // refused rather than ignored. `Source::try_from`
+                // catches it while a config file parses; this is the
+                // same pairing in a config built in code, where the
+                // fields are public. Ignoring it would render a
+                // Vagrantfile claiming a credential that nothing
+                // stages, and the guest would refuse after booting.
+                if let Some(token) = self.source.repo_token.as_ref() {
+                    return Err(RepoTokenError::NoSecrets {
+                        var: token.var.as_str().to_owned(),
                     }
-                    return Ok(Staged::default());
+                    .into());
                 }
-            };
-        let credential = self.credential(&secrets, origin)?;
+                return Ok(Staged {
+                    deploy_key,
+                    ..Staged::default()
+                });
+            }
+        };
         Ok(Staged {
             secrets: Some(secrets),
             credential,
+            deploy_key,
         })
     }
 
@@ -577,18 +634,25 @@ impl Config {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn staged_for_tests(&self) -> Staged {
+        let deploy_key =
+            self.source.names_deploy_key().then(DeployKey::for_tests);
         let origin = match (&self.source.env_file, &self.source.vault) {
             (Some(path), _) => SecretsOrigin::File(path.as_str()),
-            (None, Some(_)) => SecretsOrigin::Vault,
-            (None, None) => {
+            (None, Some(vault)) if !vault.entries.is_empty() => {
+                SecretsOrigin::Vault
+            }
+            _ => {
                 // The same refusal [`Config::read_staged`] makes, so
                 // a fixture cannot build a pair no run can produce.
                 assert!(
                     self.source.repo_token.is_none(),
-                    "a repo_token with neither an env_file nor a \
-                     vault is a config read_staged refuses"
+                    "a repo_token with no secrets -- no env_file, and \
+                     no vault entries -- is a config read_staged refuses"
                 );
-                return Staged::default();
+                return Staged {
+                    deploy_key,
+                    ..Staged::default()
+                };
             }
         };
         let body = self.source.repo_token.as_ref().map_or_else(
@@ -606,6 +670,7 @@ impl Config {
         Staged {
             secrets: Some(secrets),
             credential,
+            deploy_key,
         }
     }
 
@@ -1989,6 +2054,24 @@ mod load_project_tests {
     }
 
     #[test]
+    fn a_hook_beside_a_vault_holding_only_the_key_names_the_real_gap() {
+        // Such a vault stages no secrets, so the hook is refused, but
+        // the operator has a vault: telling them to add one sends
+        // them to the wrong line.
+        let err = load(
+            &registry_with_hook(
+                "vault = { database = \"~/s.kdbx\", deploy_key = \
+                 { entry = \"Git/p\", attachment = \"id\" } }",
+            ),
+            "myproject",
+        )
+        .expect_err("a key-only vault has no secrets to refresh");
+        let text = err.to_string();
+        assert!(text.contains("vault.entries"), "{text}");
+        assert!(!text.contains("neither `env_file` nor `vault`"), "{text}");
+    }
+
+    #[test]
     fn a_hook_without_an_env_file_is_refused_while_the_file_is_read() {
         // The hook follows the secrets refresh and nothing else, so
         // with no `env_file` it could never run. The refusal names
@@ -2004,6 +2087,61 @@ mod load_project_tests {
         for part in ["myproject", "secrets_refreshed", "env_file"] {
             assert!(text.contains(part), "{part}: {text}");
         }
+    }
+
+    #[test]
+    fn a_deploy_key_is_staged_with_no_secrets_beside_it() {
+        // An ssh clone of a private repository needs the key and
+        // nothing else, so the key must not wait on a secrets
+        // source.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let file = dir.path().join("k");
+        let key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nx\n";
+        std::fs::write(&file, key).expect("write");
+        let (mut cfg, _) =
+            load(&test_registry("myproject", "vmhost", None), "myproject")
+                .expect("a registry with no key must load");
+        cfg.source.deploy_key = Some(
+            DeployKeyPath::parse(&file.display().to_string())
+                .expect("an absolute path"),
+        );
+        let staged = cfg.read_staged(|_| None).expect("the key is there");
+        assert!(staged.secrets.is_none());
+        assert_eq!(
+            staged.deploy_key.as_ref().map(DeployKey::as_bytes),
+            Some(&key[..])
+        );
+
+        std::fs::remove_file(&file).expect("remove");
+        let err = cfg.read_staged(|_| None).expect_err("the key is gone");
+        assert!(matches!(err, StagedError::DeployKey(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_token_missing_from_the_env_file_is_refused_before_the_vault_opens() {
+        // The token check needs only the file, so an operator must not
+        // type the master password to be told the file lacks it. The
+        // vault's database does not exist here, so reaching the vault
+        // at all would report that instead of the token.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let env = dir.path().join("s.env");
+        std::fs::write(&env, b"OTHER=1\n").expect("write");
+        let db = dir.path().join("absent.kdbx");
+        let registry = format!(
+            "host = \"vmhost\"\n[projects.p.vm]\nprovider = \"libvirt\"\n\
+             box = \"b\"\ncpus = 1\nmemory = 512\n[projects.p.source]\n\
+             repo = \"https://bitbucket.org/w/r.git\"\nref = \"main\"\n\
+             script = \"s.sh\"\nenv_file = {env:?}\nrepo_token = \"GH\"\n\
+             repo_user = \"x-token-auth\"\n[projects.p.source.vault]\n\
+             database = {db:?}\n\
+             deploy_key = {{ entry = \"Git/p\", attachment = \"id\" }}\n",
+            env = env.display().to_string(),
+            db = db.display().to_string(),
+        );
+        let (cfg, _) =
+            load(&registry, "p").expect("a key-only vault beside a file");
+        let err = cfg.read_staged(|_| None).expect_err("the file lacks GH");
+        assert!(matches!(err, StagedError::Token(_)), "{err:?}");
     }
 
     #[test]

@@ -331,11 +331,12 @@ and ends with the step that pushes it.
 
 This tutorial uses a public repository, so that the guest clones
 with no credential of its own. A private repository needs a
-credential inside the VM: name a deploy key on the VM host with
-`deploy_key` in `[source]`, and `vagrant` uploads it into the
-guest before provisioning. Bear in mind that code in the VM can
-read that key -- see [trust-boundary.md](trust-boundary.md) for
-what that costs.
+credential inside the VM: name a private key file on the machine
+you are typing on with `deploy_key` in `[source]`, and bombyx
+carries it into the guest before provisioning, the way it carries
+your secrets. The VM host holds it only while `vagrant` runs. Bear
+in mind that code in the VM can read that key -- see
+[trust-boundary.md](trust-boundary.md) for what that costs.
 
 A project's own secrets travel in the other direction. `env_file`
 in `[source]` names a file on the machine you are typing on,
@@ -440,8 +441,8 @@ above it, so written below that header this one would parse as
 refused.
 
 `[vm]` and `[source]` are required, and every key within them --
-except `provider`, `deploy_key`, `env_file`, `repo_token` and
-`repo_user` -- is required too. bombyx builds the VM from `[vm]`
+except `provider`, `deploy_key`, `env_file`, `vault`, `repo_token`
+and `repo_user` -- is required too. bombyx builds the VM from `[vm]`
 and the guest clones the repository named in `[source]`, so there
 is nothing sensible for bombyx to invent on your behalf: a base
 image is a choice, and a repository bombyx made up would be cloned

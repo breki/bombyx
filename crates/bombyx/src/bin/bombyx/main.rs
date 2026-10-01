@@ -480,10 +480,8 @@ fn run() -> Result<Ran> {
     //
     // Before the plan is built, so a config naming a file this
     // machine does not have stops the run with the path in the
-    // message. That mirrors what `remote::require_file` does for
-    // `deploy_key` on the VM host, and it is the same promise:
-    // nothing is created anywhere before the credential is known
-    // to be there.
+    // message: nothing is created anywhere before the secrets and
+    // the deploy key are known to be here.
     //
     // A dry run reads it too, and that is deliberate rather than
     // an oversight in the sentence above. `plan` renders the

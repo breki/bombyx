@@ -6,6 +6,23 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-09-30-deploy-key-messages-name-the-wrong-thing
+
+**Category:** Comprehension
+
+Printed text about the deploy key that stage 3 may not edit, because
+the program emits it. `vault.rs`'s refusal of an empty vault ends
+"or name a `deploy_key`", and only `vault.deploy_key` satisfies it,
+not the top-level key. `main.rs`'s best-effort `shell` warning says
+"not refreshing the secrets" when a missing `deploy_key` file is the
+cause, and it skips every refresh. `vagrantfile::assert_staged_matches`
+says "an env_file or a vault" where the check is `names_secrets`,
+false for a key-only vault. The generated Vagrantfile calls the key
+"The credential the guest clones a private repository with", while
+"credential" names the git credential file everywhere else. The
+renames `EnvFileError` and `MAX_ENV_FILE_BYTES` for the shared read
+are `aq-2026-09-30-workstation-file-error`.
+
 ### fr-2026-09-29-windows-env-refusal-message-reads-twice
 
 **Category:** Comprehension

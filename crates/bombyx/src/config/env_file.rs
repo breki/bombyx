@@ -10,12 +10,11 @@
 //! file's contents, which bombyx reads later and hands to a
 //! pipe.
 //!
-//! **The path names a file on the machine bombyx runs on**,
-//! unlike `super::DeployKeyPath`, whose path names one on the VM
-//! host. That difference decides every rule below. bombyx opens
-//! this file itself, so it can say what a value resolved to; it
-//! never gives the path to a shell, so nothing here is about
-//! quoting.
+//! **The path names a file on the machine bombyx runs on**, as
+//! `super::DeployKeyPath`'s does. That decides every rule below.
+//! bombyx opens this file itself, so it can say what a value
+//! resolved to; it never gives the path to a shell, so nothing
+//! here is about quoting.
 
 use std::fmt;
 use std::io::Read;
@@ -36,14 +35,12 @@ use crate::newtype::{checked_str_newtype, checked_str_try_from};
 /// runs the private `check` first. So holding one is the proof
 /// that every rule in this module ran.
 ///
-/// A `PathBuf` would be the wrong representation, for a reason
-/// the opposite of `super::DeployKeyPath`'s. That path is
-/// expanded on the VM host, so `PathBuf` would answer for the
-/// wrong machine. This one is expanded here, and `PathBuf`
-/// would answer correctly -- but it has no idea what a leading
-/// `~/` means, and expanding that is [`EnvFilePath::read`]'s
-/// job. The value is stored as the operator typed it and turns
-/// into a `PathBuf` at the moment it is opened.
+/// A `String` rather than a `PathBuf`. The path is expanded on
+/// this machine, so `PathBuf` would answer for the right one --
+/// but it has no idea what a leading `~/` means, and expanding
+/// that is [`EnvFilePath::read`]'s job. So the value is stored as
+/// the operator typed it and turns into a `PathBuf` at the moment
+/// it is opened.
 ///
 /// `#[serde(try_from = "String")]` is what connects the type to
 /// the config file. Without it serde would assign the private
@@ -108,19 +105,24 @@ impl fmt::Debug for Secrets {
     }
 }
 
-/// Largest secrets file that will be read.
+/// Largest file [`read_capped`] will read: a secrets file or a
+/// deploy key.
 ///
-/// A secrets file holds a handful of `NAME=value` lines, so
-/// the limit costs a real one nothing. What it buys: the path
-/// is checked with `metadata` and opened afterwards, and
-/// whoever can write the containing directory can swap a
-/// regular file for something that never ends between those
-/// two calls. The cap bounds what bombyx holds in memory
-/// either way. `super::read::MAX_CONFIG_BYTES` is the same
+/// A secrets file holds a handful of `NAME=value` lines and a
+/// private key a few kilobytes, so the limit costs a real one
+/// nothing. What it buys: the path is checked with `metadata` and
+/// opened afterwards, and whoever can write the containing
+/// directory can swap a regular file for something that never ends
+/// between those two calls. The cap bounds what bombyx holds in
+/// memory either way. `super::read::MAX_CONFIG_BYTES` is the same
 /// number for the same reason.
 const MAX_ENV_FILE_BYTES: u64 = 64 * 1024;
 
-/// Why bombyx could not read the file `env_file` names.
+/// Why bombyx could not read a file on the workstation that
+/// `env_file` or `deploy_key` names.
+///
+/// Every variant carries the field it was read for, so the one
+/// type serves both.
 ///
 /// Separate from [`FieldError`], which belongs to a value's
 /// shape and is raised while the config is being parsed. These
@@ -173,7 +175,7 @@ pub enum EnvFileError {
     /// is the one thing they can act on.
     #[error(
         "`{field}` names {path}, which is larger than the \
-         {limit} byte limit on a secrets file"
+         {limit} byte limit on a file bombyx reads"
     )]
     TooLarge {
         /// Name of the offending field.
@@ -238,12 +240,7 @@ impl EnvFilePath {
     where
         F: Fn(&str) -> Option<String>,
     {
-        workstation_path::resolve_home(Self::FIELD, &self.0, getenv).map_err(
-            |e| EnvFileError::NoHome {
-                field: e.field,
-                value: e.value,
-            },
-        )
+        resolve_file(Self::FIELD, &self.0, getenv)
     }
 
     /// Reads the file this path names.
@@ -266,50 +263,93 @@ impl EnvFilePath {
         F: Fn(&str) -> Option<String>,
     {
         let path = self.resolve(getenv)?;
-        let read_error = |source| EnvFileError::Read {
-            field: Self::FIELD,
-            path: path.clone(),
-            source,
-        };
-
-        // Asked before the read rather than after it. A read of
-        // a fifo or a character device does not return, so a
-        // check made afterwards is one that never runs.
-        //
-        // `metadata` follows a symlink, which is the right
-        // question here: what matters is what bombyx will end
-        // up reading, not how it was named.
-        let meta = std::fs::metadata(&path).map_err(read_error)?;
-        if !meta.is_file() {
-            return Err(EnvFileError::NotAFile {
-                field: Self::FIELD,
-                path,
-            });
-        }
-
-        // One byte past the cap, so a file *at* the limit is
-        // read whole and anything beyond it is detectable
-        // rather than silently truncated into a secrets file
-        // the guest would accept and half-understand.
-        //
-        // `take` rather than a length taken from `meta`: the
-        // path is re-opened here, so the file the read gets is
-        // not provably the file `metadata` answered about.
-        let mut bytes = Vec::new();
-        std::fs::File::open(&path)
-            .map_err(read_error)?
-            .take(MAX_ENV_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(read_error)?;
-        if bytes.len() as u64 > MAX_ENV_FILE_BYTES {
-            return Err(EnvFileError::TooLarge {
-                field: Self::FIELD,
-                path,
-                limit: MAX_ENV_FILE_BYTES,
-            });
-        }
-        Ok(Secrets(bytes))
+        read_capped(Self::FIELD, path).map(Secrets)
     }
+}
+
+/// Expands a leading `~/` in `value`, the file the config key
+/// `field` names, reporting a missing home as [`EnvFileError`].
+///
+/// Shared with `super::deploy_key`, so the two fields report it
+/// the same way.
+///
+/// # Errors
+///
+/// Returns [`EnvFileError::NoHome`] when the value needs a home
+/// directory and the environment names none.
+pub(super) fn resolve_file<F>(
+    field: &'static str,
+    value: &str,
+    getenv: F,
+) -> Result<PathBuf, EnvFileError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    workstation_path::resolve_home(field, value, getenv).map_err(|e| {
+        EnvFileError::NoHome {
+            field: e.field,
+            value: e.value,
+        }
+    })
+}
+
+/// Reads the regular file at `path`, which the config key `field`
+/// names, refusing anything larger than `MAX_ENV_FILE_BYTES`.
+///
+/// Shared with `super::deploy_key`, whose file is opened the same
+/// way on the same machine. Every error names `field`, so each
+/// caller's refusal points at its own config line.
+///
+/// # Errors
+///
+/// Returns [`EnvFileError::NotAFile`] when the path names something
+/// other than a regular file, [`EnvFileError::Read`] when the file
+/// is missing or cannot be opened, and [`EnvFileError::TooLarge`]
+/// when it is bigger than the cap.
+pub(super) fn read_capped(
+    field: &'static str,
+    path: PathBuf,
+) -> Result<Vec<u8>, EnvFileError> {
+    let read_error = |source| EnvFileError::Read {
+        field,
+        path: path.clone(),
+        source,
+    };
+
+    // Asked before the read rather than after it. A read of
+    // a fifo or a character device does not return, so a
+    // check made afterwards is one that never runs.
+    //
+    // `metadata` follows a symlink, which is the right
+    // question here: what matters is what bombyx will end
+    // up reading, not how it was named.
+    let meta = std::fs::metadata(&path).map_err(read_error)?;
+    if !meta.is_file() {
+        return Err(EnvFileError::NotAFile { field, path });
+    }
+
+    // One byte past the cap, so a file *at* the limit is
+    // read whole and anything beyond it is detectable
+    // rather than silently truncated into a secrets file
+    // the guest would accept and half-understand.
+    //
+    // `take` rather than a length taken from `meta`: the
+    // path is re-opened here, so the file the read gets is
+    // not provably the file `metadata` answered about.
+    let mut bytes = Vec::new();
+    std::fs::File::open(&path)
+        .map_err(read_error)?
+        .take(MAX_ENV_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(read_error)?;
+    if bytes.len() as u64 > MAX_ENV_FILE_BYTES {
+        return Err(EnvFileError::TooLarge {
+            field,
+            path,
+            limit: MAX_ENV_FILE_BYTES,
+        });
+    }
+    Ok(bytes)
 }
 
 checked_str_newtype!(

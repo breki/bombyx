@@ -3,15 +3,15 @@
 //! Every file bombyx stages on the VM host goes through here.
 //! `crate::plan::plan` decides which ones: the Vagrantfile, the
 //! bootstrap script and the account script on every run, the
-//! project's secrets when the config names an `env_file` or a
-//! `vault`, and a git credential when it names a `repo_token`.
-//! Those are the only project files any machine outside the guest
-//! holds. Not one of them comes from the project's repository --
-//! bombyx generates the first three and the last, and the secrets
-//! come from the operator's own workstation: the file the config
-//! names, or the entries of the vault it names.
-//! So a project cannot supply any of them however it arranges its
-//! own directory. See `docs/trust-boundary.md`.
+//! project's secrets when the config names an `env_file` or
+//! `vault.entries`, a git credential when it names a `repo_token`,
+//! and the deploy key when it names one. Those are the only project
+//! files any machine outside the guest holds. Not one of them comes
+//! from the project's repository -- bombyx generates the three
+//! scripts and the credential, and the secrets and the key come
+//! from the operator's own workstation: the files the config
+//! names, or the vault it names. So a project cannot supply any of
+//! them however it arranges its own directory. See `docs/trust-boundary.md`.
 //!
 //! The command that carries a file is as short as it looks:
 //!
@@ -151,7 +151,7 @@ mod tests {
         // an instant. It does nothing to a file that is already
         // there, and a re-provision writes over one -- `cat >`
         // truncates without touching the mode -- so the `chmod`
-        // is what corrects a file an older bombyx left at 0664.
+        // is what corrects a file an earlier run left at 0664.
         let c = write_file(&cfg(), "/srv/x", "Vagrantfile", b"x\n");
         let script = c.args.last().expect("a script argument");
         assert!(script.contains("umask 077"), "{script}");

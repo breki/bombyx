@@ -93,9 +93,23 @@ try {
     $stdin = [Console]::OpenStandardInput()
     $buffer = New-Object IO.MemoryStream
     $stdin.CopyTo($buffer)
+    # The key lives in .ssh, which a guest provisioned before its
+    # config named a key does not have.
+    $dir = Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
     Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
     [IO.File]::WriteAllBytes($new, [byte[]]@())
     Protect $new $sid
+    # The agent owns the file, as account.ps1's Protect makes it at
+    # provisioning: the login account writes it, and Windows' ssh
+    # refuses a private key another account owns. Done before the
+    # rename, so a failure leaves the agent's old copy in place, and
+    # the target is the agent's afterwards whichever owner Replace
+    # keeps.
+    $out = & icacls.exe $new /setowner "*$sid" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "could not make $new the agent's: $out"
+    }
     [IO.File]::WriteAllBytes($new, $buffer.ToArray())
     if (Test-Path -LiteralPath $target) {
         # Replace carries the old file's permissions over, so the

@@ -99,8 +99,11 @@ it targets the project VM only; for a scratch VM the answer is
 To change a value in your `env_file`, such as an expired token,
 edit the file on your workstation and run `up` or `shell`. With a
 `vault`, edit the entry in KeePassXC instead; `up` and `shell`
-then ask for the master password once and read every entry
-again:
+then ask for the master password once and read every entry again.
+To rotate a deploy key, replace its file, or with a vault import
+the new key over the attachment with `keepassxc-cli
+attachment-import -f DATABASE "ENTRY" id_ed25519 KEYFILE` (without
+`-f` the import refuses an attachment that exists):
 
 ```bash
 bombyx up myproject   # or: bombyx shell myproject
@@ -109,19 +112,24 @@ bombyx up myproject   # or: bombyx shell myproject
 Both commands write the file over its copy in the guest,
 `~/.bombyx-env` in the agent's home: `shell` before the shell
 opens, and `up` once the VM is up. When the config names a
-`repo_token`, they rewrite the git credential built from it too.
-Nothing is fetched or checked out, so the work in the guest's
-clone is not touched. `up` on a running VM does only this. When a
-rewrite fails, `up` exits non-zero, and `shell` warns and opens
-the shell anyway. A `shell` that cannot read your `env_file` on
-the workstation, or unlock your `vault`, also warns and opens.
+`repo_token`, they rewrite the git credential built from it too,
+and when it names a deploy key, the key at
+`~/.ssh/bombyx-deploy-key`. So a key you rotate reaches the guest
+the same way, without a provision. Nothing is fetched or checked
+out, so the work in the guest's clone is not touched. `up` on a
+running VM does only this. When a rewrite fails, `up` exits
+non-zero, and `shell` warns and opens the shell anyway. A `shell`
+that cannot read your `env_file` or `deploy_key` on the
+workstation, or unlock your `vault`, also warns and opens, and
+then refreshes nothing: one failed read skips every file, not only
+the one that failed.
 
 A Windows guest is refreshed the same way. There the refresh calls
-`refresh.ps1`, which provisioning installs, so a Windows VM
-provisioned by a bombyx without it says to run
-`bombyx provision myproject` first. Provisioning checks the clone
-out afresh at the configured `ref`, which discards uncommitted work
-in it, so commit or push that work first.
+`refresh.ps1`, which provisioning installs, so a Windows VM that
+has no `refresh.ps1` says to run `bombyx provision myproject`
+first. Provisioning checks the clone out afresh at the configured
+`ref`, which discards uncommitted work in it, so commit or push
+that work first.
 
 bombyx sends each file down a pipe, through `ssh` and then
 `vagrant ssh`, so the refresh itself stores nothing on the VM host.
@@ -130,7 +138,7 @@ host for the length of the boot, as every boot does, and refreshes
 afterwards. [trust-boundary.md](trust-boundary.md) describes both
 routes.
 
-Only those two copies change:
+Only those copies change:
 
 - **A copy your provisioning script made keeps the old values**,
   until the step that made it runs again. Put the copy in a script
@@ -146,15 +154,17 @@ Only those two copies change:
   removes it. A project that checks `.env` is a plain file will
   refuse the link as well.
 - **A running process keeps the values it read.** Restart it.
-- **Adding `env_file` or `repo_token` to a project still needs
-  `provision`**, because the provisioning script is what uses the
-  file, and `bootstrap.sh` is what tells `git` about the
-  credential.
+- **Adding `env_file`, `repo_token` or a deploy key to a project
+  still needs `provision`**, because the provisioning script is
+  what uses the file, and `bootstrap.sh` is what tells `git` about
+  the credential and the key. `up` and `shell` do write a new key
+  into the guest, but `git` uses it only once `provision` has
+  pointed it there.
 - **So does removing one.** `up` and `shell` send only the files
-  the config names, so taking `env_file` or `repo_token` out
-  leaves the guest's copy in place, and `git` keeps sending a
-  token you meant to withdraw. `provision` deletes the copies the
-  config no longer names.
+  the config names, so taking `env_file`, `repo_token` or the key
+  out leaves the guest's copy in place, and `git` keeps sending a
+  token or a key you meant to withdraw. `provision` deletes the
+  copies the config no longer names.
 
 ### The `secrets_refreshed` hook
 
@@ -166,9 +176,9 @@ clone:
 secrets_refreshed = ".bombyx/refresh-env.sh"
 ```
 
-It needs `env_file` or `vault` in the project's `[source]` table,
-because the rewrite of the secrets is what it follows; bombyx
-refuses a hook without one. The path:
+It needs `env_file`, or a `vault` with `entries`, in the project's
+`[source]` table, because the rewrite of the secrets is what it
+follows; bombyx refuses a hook without one. The path:
 
 - is relative to the clone root and holds no `..` segment;
 - does not start with `-`;
