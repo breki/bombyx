@@ -70,10 +70,20 @@ decision that lives only in this chat is lost.
 `git checkout -b <type>/<short-name>` from an up-to-date
 `main`. Never work an issue directly on `main`.
 
-When another worktree has `main` checked out, `git checkout main`
-fails. Run `git fetch`, then branch from `origin/main` and run
-`git branch --unset-upstream`, so the first push does not track
-`main`.
+A worktree is a second checkout of the same repository, and git
+refuses to check out one branch in two of them. So when another
+worktree has `main`, `git checkout main` fails. Branch from the
+remote copy instead:
+
+```bash
+git fetch
+git checkout -b <type>/<short-name> origin/main
+git branch --unset-upstream
+```
+
+A branch made from `origin/main` takes it as its upstream, so a
+plain `git push` would target `main`. Unsetting it means the first
+push names the branch: `git push -u origin <type>/<short-name>`.
 
 ### 4. Implement, test first
 

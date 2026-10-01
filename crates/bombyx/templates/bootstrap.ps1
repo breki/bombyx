@@ -480,11 +480,15 @@ try {
             Refuse ("could not clone $Repo. The message above says why.")
         }
         # Detached, and without the branch the clone made, so a fresh
-        # clone agrees with an updated one; bootstrap.sh says why.
+        # clone agrees with an updated one. bootstrap.sh says why, in
+        # its "One loss remains" paragraph and the comment after its
+        # clone.
         Invoke-Native $Git -C $CloneDir checkout --quiet --detach
         if ($LASTEXITCODE -ne 0) {
             Refuse ('could not detach HEAD in the new clone at ' +
-                "$CloneDir. The message above says why.")
+                "$CloneDir. The message above says why. " +
+                'Later provisions skip this step, so remove the ' +
+                'clone in the guest, then provision again.')
         }
         Invoke-Native $Git -C $CloneDir show-ref --verify --quiet `
             '--' "refs/heads/$Ref"
@@ -492,7 +496,9 @@ try {
             Invoke-Native $Git -C $CloneDir branch --quiet -D '--' $Ref
             if ($LASTEXITCODE -ne 0) {
                 Refuse ("could not delete the branch $Ref in the new " +
-                    "clone at $CloneDir. The message above says why.")
+                    "clone at $CloneDir. The message above says why. " +
+                    'Later provisions skip this step, so remove the ' +
+                    'clone in the guest, then provision again.')
             }
         }
     }

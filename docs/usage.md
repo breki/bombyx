@@ -98,11 +98,17 @@ bombyx provision myproject --discard
 the `discard` subcommand, which destroys a scratch VM.
 
 The guest's clone sits on a detached HEAD, meaning no branch is
-checked out: the first `up` leaves it that way, and so does every
-provision. A commit made there lands on no branch, so the next
-provision leaves it behind, with or without `--discard`. Push it.
-A branch the agent makes before committing is kept, but the
-provision checks out the fetched commit in its place.
+checked out. Every fresh clone leaves it that way -- the first
+`up`, and a provision that starts over after a change of
+`source.repo` -- and so does every provision that fetches. A
+commit made on that detached HEAD lands on no branch, so the next
+such provision leaves it behind, with or without `--discard`. Push
+it.
+
+A branch the agent makes before committing still points at the
+agent's commit after a provision. The provision moves HEAD off that
+branch to the fetched commit, and `git switch <branch>` in the
+guest brings the work back.
 
 Files your `.gitignore` matches are not protected. Git treats them
 as build output, so the checkout overwrites one the fetched commit

@@ -40,10 +40,12 @@ and this project adheres to
 
 ### Fixed
 
-- The guest's clone is now on a detached HEAD after the first `up`, as it
-  already was after every later provision, and the first clone no longer leaves
-  a local branch for `ref` behind that no provision moves. A guest that has been
-  re-provisioned and one that has not now look the same in `git status` (#163).
+- The guest's clone is now on a detached HEAD after a fresh clone -- the first
+  `up`, or a provision that starts over after a change of `source.repo` -- as it
+  already was after every later provision. A fresh clone also no longer leaves
+  behind a local branch named after `ref` that no provision moves. A guest that
+  has been re-provisioned and one that has not now look the same in
+  `git status` (#163).
 
 ### Removed
 
