@@ -28,8 +28,8 @@ use std::collections::BTreeMap;
 
 use super::{
     CREDENTIAL_PRESENT_ENV, DEPLOY_KEY_ENV, ENV_FILE_PRESENT_ENV, GIT_HOST_ENV,
-    GUEST_USER_ENV, HOST_KEYS_FORMAT_ENV, HOST_KEYS_URL_ENV, PRESERVE_ENV,
-    PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV, credential_block,
+    GUEST_USER_ENV, HISTORY_ENV, HOST_KEYS_FORMAT_ENV, HOST_KEYS_URL_ENV,
+    PRESERVE_ENV, PROJECT_ENV, REF_ENV, REPO_ENV, SCRIPT_ENV, credential_block,
     deploy_key_block, env_file_block, ruby_string,
 };
 use crate::config::{Config, EnvName, EnvValue, Staged};
@@ -129,6 +129,7 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     entry(PRESERVE_ENV, &preserve_list(&cfg.env));
     entry(REPO_ENV, source.repo.as_str());
     entry(REF_ENV, source.git_ref.as_str());
+    entry(HISTORY_ENV, source.history.as_str());
     entry(SCRIPT_ENV, source.script.as_str());
     entry(PROJECT_ENV, cfg.project.as_str());
     // Each "0" too, so the guest removes a copy an earlier provision
@@ -298,6 +299,45 @@ mod tests {
             assert!(script.contains(text), "bootstrap.ps1: {text}");
         }
         assert_eq!(script.matches("checkout --force").count(), 1);
+    }
+
+    #[test]
+    fn bootstrap_ps1_clones_the_configured_history() {
+        // The Windows half of `bootstrap_tests`' history tests: the
+        // same fallback and words, every branch under `full`, and
+        // `--depth 1` only when the setting is `shallow` and the
+        // clone is shallow already, or on a first clone under
+        // `shallow`. The first clone passes its depth as the array
+        // `@('--depth', '1')`, so the literal `--depth 1` appears
+        // once, in the fetch, where the shell script has it twice.
+        use crate::config::History;
+        let script = BOOTSTRAP.replace("\r\n", "\n");
+        let fallback = format!("$History = '{}'", History::default().as_str());
+        let words =
+            History::ALL.map(|h| format!("'{}'", h.as_str())).join(", ");
+        let check = format!("if ($History -cnotin @({words})) {{");
+        for text in [
+            "$History = $env:BOMBYX_HISTORY",
+            fallback.as_str(),
+            check.as_str(),
+            "Invoke-Native $Git -C $CloneDir remote set-branches origin '*'",
+            "Invoke-Native $Git @gitNet -C $CloneDir fetch `\n                        \
+             --unshallow origin",
+            "if ($History -eq 'shallow' -and\n                \
+             (Test-CloneIsShallow $Git $CloneDir)) {",
+            "$depth = @('--depth', '1')",
+            "clone @depth --branch $Ref '--' $Repo",
+        ] {
+            assert!(script.contains(text), "bootstrap.ps1: {text}");
+        }
+        // Counted over code lines, so a comment naming the flag
+        // does not count.
+        let depths = script
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .filter(|l| l.contains("--depth 1"))
+            .count();
+        assert_eq!(depths, 1, "{script}");
     }
 
     #[test]

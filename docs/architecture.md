@@ -175,6 +175,7 @@ classDiagram
     +Option~EnvFilePath~ env_file
     +Option~Vault~ vault
     +Option~RepoToken~ repo_token
+    +History history
   }
   class Vault {
     +VaultDatabase database

@@ -107,6 +107,8 @@ pub struct Source {
     /// says why the split state is not worth being able to
     /// write down.
     pub repo_token: Option<RepoToken>,
+    /// How much of the repository the guest clones.
+    pub history: History,
 }
 
 /// The `[source]` table as TOML spells it, before the rules
@@ -137,6 +139,8 @@ struct SourceFields {
     repo_token: Option<RepoTokenVar>,
     #[serde(default)]
     repo_user: Option<RepoUser>,
+    #[serde(default)]
+    history: History,
 }
 
 impl Source {
@@ -299,6 +303,7 @@ impl TryFrom<SourceFields> for Source {
                 .repo_token
                 .zip(raw.repo_user)
                 .map(|(var, user)| RepoToken { var, user }),
+            history: raw.history,
         })
     }
 }
@@ -564,9 +569,9 @@ impl ScriptPath {
 /// Ruby-literal rules and the leading-dash rule.
 ///
 /// **The dash rule here is the second of two guards.** The
-/// guest runs `git fetch --depth 1 origin -- "$BOMBYX_REF"`,
-/// and that `--` already tells `git` that whatever follows is a
-/// value rather than an option. `super::guards::check_not_an_option`
+/// guest runs `git fetch origin -- "$BOMBYX_REF"`, and that `--`
+/// already tells `git` that whatever follows is a value rather
+/// than an option. `super::guards::check_not_an_option`
 /// says why the rule is kept anyway.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
@@ -594,6 +599,44 @@ checked_str_try_from!(
     FieldError,
     check_git_ref
 );
+
+/// How much of the repository the guest's clone holds, as
+/// `[source].history`.
+///
+/// `full`, the default, is every branch with its whole history,
+/// which is what `git log`, `git blame` and a diff against
+/// another branch need. `shallow` is one commit of `ref` alone,
+/// for a repository too large to clone in full.
+///
+/// A plain enum rather than a checked string: serde reads only
+/// the two words, so a misspelt value is refused while the
+/// config loads. The guest's bootstrap script reads the word
+/// [`History::as_str`] gives and refuses any other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum History {
+    /// Every branch, with its whole history.
+    #[default]
+    Full,
+    /// One commit of `ref`, and no other branch.
+    Shallow,
+}
+
+impl History {
+    /// Every value, in declaration order. A new variant stops
+    /// `every_history_is_listed` compiling, which is the reminder
+    /// to list it here.
+    pub const ALL: [Self; 2] = [Self::Full, Self::Shallow];
+
+    /// The word the config spells and the guest reads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Shallow => "shallow",
+        }
+    }
+}
 
 /// Every rule a `ref` value must pass, in one place.
 ///
@@ -731,6 +774,32 @@ mod tests {
             writeln!(t, "{n} = \"e/{n}\"").expect("a String takes any write");
         }
         t
+    }
+
+    #[test]
+    fn history_is_full_unless_the_config_asks_for_shallow() {
+        assert_eq!(source_with("").unwrap().history, History::Full);
+        for h in History::ALL {
+            let got = source_with(&format!("history = \"{}\"", h.as_str()));
+            assert_eq!(got.unwrap().history, h);
+        }
+        let err = source_with("history = \"deep\"").unwrap_err().to_string();
+        assert!(err.contains("history"), "{err}");
+    }
+
+    #[test]
+    fn every_history_is_listed() {
+        // No wildcard arm, so a new variant stops this compiling;
+        // `ARMS` is raised by hand beside it.
+        const ARMS: usize = 2;
+        let slot = |h: History| match h {
+            History::Full => 0,
+            History::Shallow => 1,
+        };
+        assert_eq!(History::ALL.len(), ARMS, "a value is unlisted");
+        for (i, h) in History::ALL.into_iter().enumerate() {
+            assert_eq!(slot(h), i, "{h:?} is listed out of place");
+        }
     }
 
     #[test]

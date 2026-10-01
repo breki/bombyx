@@ -255,6 +255,18 @@ script = ".bombyx/provision.sh"   # path inside the clone
 # out here because a leading-dot directory is easy to miss. Part 3
 # of bombyx's docs/tutorial.md writes a re-runnable one.
 
+# Optional; `full` if you leave it out.
+#
+# How much of the repository the guest's clone holds. `full` is
+# every branch with its whole history, which `git log`, `git
+# blame` and a diff against another branch need. `shallow` is one
+# commit of `ref` and no other branch, for a repository too large
+# to clone in full. An existing VM with a shallow clone fetches
+# the rest of its history on its next provision unless this says
+# `shallow`, since `full` is the default; switching to `shallow`
+# keeps the history the clone already has.
+history = "full"             # full or shallow
+
 # Optional, and like `env_file` below, a path on YOUR OWN
 # MACHINE rather than something the guest hands to git.
 #
