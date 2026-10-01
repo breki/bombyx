@@ -90,6 +90,21 @@ function Test-SameRepo([string] $A, [string] $B) {
     return $trimmed[0] -ceq $trimmed[1]
 }
 
+# Whether the clone at `dir` may hold work the agent has not
+# committed, as bootstrap.sh's clone_may_hold_work decides: an edited
+# tracked file or an untracked one, with the executable bit ignored,
+# and a status git cannot give counted as work.
+function Test-CloneHoldsWork([string] $Git, [string] $Dir) {
+    $status = & {
+        $ErrorActionPreference = 'Continue'
+        & $Git -C $Dir -c core.fileMode=false status --porcelain 2>$null
+    }
+    if ($LASTEXITCODE -ne 0) {
+        return $true
+    }
+    return (@($status) -join '') -ne ''
+}
+
 # Changes `key` in the git config of the clone at `dir`: 'replace'
 # makes `value` its only value, 'add' appends `value`, and 'unset'
 # removes every value, succeeding when there was none, which git
@@ -292,12 +307,38 @@ try {
             "credential.helper=$credHelper")
     }
 
+    # How this provision may update the clone, falling back to the
+    # mode that refuses to overwrite the agent's work. Checked once
+    # the credentials are known, so a refusal removes them;
+    # bootstrap.sh says why each part is there.
+    $CloneUpdate = $env:BOMBYX_CLONE_UPDATE
+    if ([string]::IsNullOrEmpty($CloneUpdate)) {
+        $CloneUpdate = 'checkout'
+    }
+    if ($CloneUpdate -cnotin @('checkout', 'discard', 'keep')) {
+        Refuse ("BOMBYX_CLONE_UPDATE is `"$CloneUpdate`", which this " +
+            'script does not know. The shell that ran vagrant on the VM ' +
+            'host set it; unset it there, or run bombyx provision.')
+    }
+
     if (Test-Path -LiteralPath (Join-Path $CloneDir '.git') -PathType Container) {
         $origin = & {
             $ErrorActionPreference = 'Continue'
             & $Git -C $CloneDir remote get-url origin 2>$null
         }
         if ($LASTEXITCODE -eq 0 -and -not (Test-SameRepo "$origin" $Repo)) {
+            if ($CloneUpdate -eq 'keep') {
+                Refuse ("this VM holds a clone of $origin but the config " +
+                    "asks for $Repo, so --no-fetch has no script of that " +
+                    'repository to run. Provision without it.')
+            }
+            if ($CloneUpdate -ne 'discard' -and
+                (Test-CloneHoldsWork $Git $CloneDir)) {
+                Refuse ("this VM holds a clone of $origin with uncommitted " +
+                    "work in it, and the config now asks for $Repo, so the " +
+                    'clone would be deleted. Push the work from the guest, ' +
+                    "or run bombyx provision --discard to delete it: $CloneDir")
+            }
             [Console]::Error.WriteLine(
                 "bombyx: this VM holds a clone of $origin but " +
                 "the config asks for $Repo.")
@@ -314,19 +355,60 @@ try {
     }
 
     if (Test-Path -LiteralPath (Join-Path $CloneDir '.git') -PathType Container) {
-        Invoke-Native $Git @gitNet -C $CloneDir fetch --depth 1 origin '--' $Ref
-        if ($LASTEXITCODE -ne 0) {
-            Refuse ('could not update the clone. The message above says ' +
-                "why. If something in it belongs to another user, clear " +
-                "it in the guest: $CloneDir")
-        }
-        Invoke-Native $Git -C $CloneDir checkout --force FETCH_HEAD
-        if ($LASTEXITCODE -ne 0) {
-            Refuse ('could not update the clone. The message above says ' +
-                'why, and the checkout may be half-changed. Clear it in ' +
-                "the guest: $CloneDir")
+        if ($CloneUpdate -eq 'keep') {
+            $head = & {
+                $ErrorActionPreference = 'Continue'
+                & $Git -C $CloneDir rev-parse --short HEAD 2>$null
+            }
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty("$head")) {
+                $head = 'an unreadable HEAD'
+            }
+            [Console]::Error.WriteLine(
+                'bombyx: not updating the clone (--no-fetch); running ' +
+                "from commit $head.")
+            if (Test-CloneHoldsWork $Git $CloneDir) {
+                [Console]::Error.WriteLine(
+                    'bombyx: the clone holds uncommitted work, which the ' +
+                    'script sees as it is.')
+            }
+        } else {
+            Invoke-Native $Git @gitNet -C $CloneDir fetch --depth 1 origin `
+                '--' $Ref
+            if ($LASTEXITCODE -ne 0) {
+                Refuse ('could not update the clone. The message above ' +
+                    'says why. If something in it belongs to another user, ' +
+                    "clear it in the guest: $CloneDir")
+            }
+            # Only --discard forces the checkout; bootstrap.sh says what
+            # a plain one refuses. core.fileMode=false matters there
+            # because that script runs chmod +x on the project's script;
+            # nothing here sets the bit, so on Windows it only keeps the
+            # two scripts' git calls the same.
+            if ($CloneUpdate -eq 'discard') {
+                Invoke-Native $Git -C $CloneDir checkout --force FETCH_HEAD
+                if ($LASTEXITCODE -ne 0) {
+                    Refuse ('could not update the clone. The message above ' +
+                        'says why, and the checkout may be half-changed. ' +
+                        "Clear it in the guest: $CloneDir")
+                }
+            } else {
+                Invoke-Native $Git -C $CloneDir -c core.fileMode=false `
+                    checkout FETCH_HEAD
+                if ($LASTEXITCODE -ne 0) {
+                    Refuse ('did not update the clone. The message ' +
+                        'above says why. When it lists files, they hold ' +
+                        "the agent's work: push or stash it in the guest, " +
+                        'or run bombyx provision --discard to overwrite ' +
+                        'it. When something belongs to another user, ' +
+                        "clear it in the guest: $CloneDir")
+                }
+            }
         }
     } else {
+        if ($CloneUpdate -eq 'keep') {
+            Refuse ('--no-fetch runs the script from the clone, and this ' +
+                "VM has none at $CloneDir. Provision without it to make one.")
+        }
         if ((Test-Path -LiteralPath $CloneDir) -and
             $null -ne (Get-ChildItem -LiteralPath $CloneDir -Force |
                 Select-Object -First 1)) {

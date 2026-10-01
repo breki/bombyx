@@ -12,7 +12,21 @@ and this project adheres to
 
 ### Added
 
+- `bombyx provision --discard` overwrites the agent's uncommitted work, as
+  `provision` did before, and `bombyx provision --no-fetch` re-runs the
+  provisioning script from the guest's current checkout without fetching or
+  checking anything out. The two are refused together.
+
 ### Changed
+
+- `bombyx provision` no longer overwrites the agent's uncommitted work in the
+  guest's clone. The checkout refuses, listing the files, when it would
+  overwrite an edited tracked file or an untracked file the fetched commit adds,
+  and a change of `source.repo` no longer deletes a clone that holds uncommitted
+  edits or untracked files. Files `.gitignore` matches are not protected: the
+  checkout overwrites them and a change of `source.repo` deletes them. bombyx's
+  own `chmod +x` on the provisioning script does not count as an edit. Linux
+  and Windows guests both; verified on a Linux guest only.
 
 ### Fixed
 

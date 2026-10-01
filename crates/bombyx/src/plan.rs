@@ -7,7 +7,7 @@
 use crate::config::{Config, Staged};
 use crate::doctor;
 use crate::name::ScratchName;
-use crate::remote::{self, RemoteCommand, Tty};
+use crate::remote::{self, CloneUpdate, RemoteCommand, Tty};
 use crate::vagrantfile::{self, GuestHomeFile};
 
 /// What the user asked bombyx to do.
@@ -35,16 +35,20 @@ pub enum Action {
     /// was halted or running -- so the guest stays on the
     /// commit it checked out when it was created, while `up`
     /// reports success. This re-runs `bootstrap.sh`, which
-    /// fetches and checks out `source.ref` again in the clone
-    /// the guest already has. The checkout is forced, so it
-    /// overwrites edits to tracked files and any untracked file
-    /// the fetched commit adds at the same path. It also
-    /// detaches HEAD, so a commit made in the guest ends up on
-    /// no branch after the next provision. Changing
-    /// `source.repo` to a different repository removes the
-    /// clone outright, which loses everything -- see
-    /// `crates/bombyx/templates/bootstrap.sh`, which decides
-    /// that and explains how loosely it compares the URLs.
+    /// updates the clone the guest already has as the
+    /// [`remote::CloneUpdate`] says, then runs the project's
+    /// script from it.
+    ///
+    /// The default mode fetches `source.ref` and checks it out,
+    /// and the guest refuses when that would overwrite the
+    /// agent's uncommitted edits or untracked files git does not
+    /// ignore. It refuses in the same way to delete a clone of
+    /// another repository -- left by a change to `source.repo` --
+    /// that holds any. Ignored files are not protected.
+    /// The checkout detaches HEAD, so a commit made in the guest
+    /// ends up on no branch after the next provision.
+    /// `crates/bombyx/templates/bootstrap.sh` decides all of
+    /// this and explains how loosely it compares the URLs.
     ///
     /// Requires a machine that already exists: `vagrant
     /// provision` has nothing to provision on a VM that was
@@ -53,7 +57,7 @@ pub enum Action {
     /// The binary follows a successful run with
     /// [`refresh_after_provisioning`], which runs the project's
     /// `secrets_refreshed` hook when one is configured.
-    Provision,
+    Provision(CloneUpdate),
     /// Halt the project VM.
     Down,
     /// Open a shell inside the project VM, in the project clone.
@@ -138,7 +142,7 @@ impl Action {
     #[must_use]
     pub fn staged_read(&self) -> StagedRead {
         match self {
-            Self::Up | Self::Provision | Self::Scratch(_) => {
+            Self::Up | Self::Provision(_) | Self::Scratch(_) => {
                 StagedRead::Required
             }
             Self::Shell => StagedRead::BestEffort,
@@ -211,13 +215,19 @@ pub fn plan(
         // is absent. `provision` and `scratch` share `write_then` and
         // want no snapshot at all, the other reason it is not in the
         // helper.
-        Action::Up => {
-            write_then(cfg, &cfg.remote_project_dir(), &["up"], tty, staged)
-        }
-        Action::Provision => write_then(
+        Action::Up => write_then(
+            cfg,
+            &cfg.remote_project_dir(),
+            &["up"],
+            None,
+            tty,
+            staged,
+        ),
+        Action::Provision(clone_update) => write_then(
             cfg,
             &cfg.remote_project_dir(),
             &["provision"],
+            Some(*clone_update),
             tty,
             staged,
         ),
@@ -238,9 +248,14 @@ pub fn plan(
         // them honestly.
         Action::Doctor => doctor::probe_commands(&doctor::host_probes(cfg)),
         Action::Destroy => tear_down(cfg, &cfg.remote_project_dir(), tty),
-        Action::Scratch(name) => {
-            write_then(cfg, &cfg.remote_scratch_dir(name), &["up"], tty, staged)
-        }
+        Action::Scratch(name) => write_then(
+            cfg,
+            &cfg.remote_scratch_dir(name),
+            &["up"],
+            None,
+            tty,
+            staged,
+        ),
         Action::Discard(name) => {
             tear_down(cfg, &cfg.remote_scratch_dir(name), tty)
         }
@@ -251,11 +266,12 @@ pub fn plan(
 /// copies inside the running project VM.
 ///
 /// Provisioning is the only other thing that writes them, and it
-/// also re-runs `bootstrap.sh`, whose forced checkout overwrites
-/// work in the guest's clone. So `up` and `shell` send the files
-/// this way instead: nothing but those files changes, and a token
-/// or key rotated on the workstation reaches the guest without the
-/// operator committing anything first.
+/// also re-runs `bootstrap.sh`, which checks `ref` out in the
+/// guest's clone and refuses when that would overwrite the agent's
+/// work. So `up` and `shell` send the files this way instead:
+/// nothing but those files changes, and a token or key rotated on
+/// the workstation reaches the guest without the operator
+/// committing or pushing anything first.
 ///
 /// One command per file, and none for a file `staged` lacks, so a
 /// project with no `env_file` pays no round trip. The credential
@@ -390,6 +406,10 @@ fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
 /// them drifting: `vagrant` needs the Vagrantfile bombyx
 /// generates, so every caller has to write it before booting.
 ///
+/// `clone_update` is `Some` for `provision` alone. `up` and
+/// `scratch` leave the mode to the guest's fallback;
+/// [`remote::CloneUpdate`] says why that is safe for them.
+///
 /// `args` is a slice rather than one string, matching
 /// [`remote::vagrant_in`]. A single string would turn a
 /// two-word invocation into one quoted argument, which fails on
@@ -402,6 +422,7 @@ fn write_then(
     cfg: &Config,
     dir: &str,
     args: &[&str],
+    clone_update: Option<CloneUpdate>,
     tty: Tty,
     staged: &Staged,
 ) -> Vec<RemoteCommand> {
@@ -460,6 +481,7 @@ fn write_then(
         cfg,
         dir,
         args,
+        clone_update,
         tty,
         &[
             vagrantfile::ENV_FILE_NAME,
@@ -606,7 +628,7 @@ mod tests {
     /// non-writing set unnoticed.
     fn writes_files(action: &Action) -> bool {
         match action {
-            Action::Up | Action::Provision | Action::Scratch(_) => true,
+            Action::Up | Action::Provision(_) | Action::Scratch(_) => true,
             Action::Down
             | Action::Shell
             | Action::Status
@@ -627,7 +649,7 @@ mod tests {
     fn all_actions() -> Vec<Action> {
         let variants = [
             Action::Up,
-            Action::Provision,
+            Action::Provision(CloneUpdate::Checkout),
             Action::Down,
             Action::Shell,
             Action::Status,
@@ -643,7 +665,7 @@ mod tests {
         for action in &variants {
             match action {
                 Action::Up
-                | Action::Provision
+                | Action::Provision(_)
                 | Action::Down
                 | Action::Shell
                 | Action::Status
@@ -796,7 +818,10 @@ mod tests {
         // whatever else their plans carry.
         for (action, verb) in [
             (Action::Up, "vagrant 'up'"),
-            (Action::Provision, "vagrant 'provision'"),
+            (
+                Action::Provision(CloneUpdate::Checkout),
+                "vagrant 'provision'",
+            ),
             (Action::Scratch(scratch("pr-1234")), "vagrant 'up'"),
         ] {
             let s = scripts(&action);
@@ -813,6 +838,35 @@ mod tests {
                 "{action:?}: bootstrap written out of order"
             );
         }
+    }
+
+    #[test]
+    fn only_provision_tells_the_guest_how_to_update_the_clone() {
+        // `provision` names its mode, the default included, so a
+        // dry run shows which one the guest will act on. `up` and
+        // `scratch` provision only a machine they create, which
+        // has no clone, so naming a mode there would be noise.
+        let named = |action: &Action| {
+            scripts(action)
+                .iter()
+                .find(|s| s.contains(" vagrant '"))
+                .map(|s| s.contains(remote::CLONE_UPDATE_ENV))
+                .unwrap()
+        };
+        for mode in CloneUpdate::ALL {
+            let boot = scripts(&Action::Provision(mode))
+                .into_iter()
+                .find(|s| s.contains("vagrant 'provision'"))
+                .unwrap();
+            let want = format!(
+                "{}='{}' vagrant 'provision'",
+                remote::CLONE_UPDATE_ENV,
+                mode.as_str()
+            );
+            assert!(boot.contains(&want), "{mode:?}: {boot}");
+        }
+        assert!(!named(&Action::Up));
+        assert!(!named(&Action::Scratch(scratch("pr-1234"))));
     }
 
     /// The staged key's name in the project directory.
@@ -836,7 +890,7 @@ mod tests {
         let (cfg, staged) = cfg_with_key();
         for action in [
             Action::Up,
-            Action::Provision,
+            Action::Provision(CloneUpdate::Checkout),
             Action::Scratch(scratch("pr-1234")),
         ] {
             let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
@@ -928,7 +982,7 @@ mod tests {
         // Pins the literal shell, so the command's whole effect
         // on the host is readable in one place.
         assert_eq!(
-            scripts_without_payloads(&Action::Provision),
+            scripts_without_payloads(&Action::Provision(CloneUpdate::Checkout)),
             vec![
                 "ssh vmhost \"mkdir -p ~/'vms/myproject'\"",
                 "ssh vmhost \"umask 077; \
@@ -944,6 +998,7 @@ mod tests {
                  BOMBYX_VM_HOST='vmhost' \
                  BOMBYX_VM_HOSTNAME=\\$(hostname -s) \
                  VAGRANT_DEFAULT_PROVIDER='libvirt' \
+                 BOMBYX_CLONE_UPDATE='checkout' \
                  vagrant 'provision'; rc=\\$?; \
                  rm -f ~/'vms/myproject/bombyx.env' || \
                  { printf 'bombyx: could not remove %s from the VM \
@@ -976,7 +1031,7 @@ mod tests {
         // appends it -- so the two plans are the same length and the
         // comparison runs to the last step.
         let up = run(&Action::Up);
-        let pr = run(&Action::Provision);
+        let pr = run(&Action::Provision(CloneUpdate::Checkout));
         assert_eq!(up.len(), pr.len());
         let writes = up.len() - 1;
         assert_eq!(up[..writes], pr[..writes]);
@@ -988,13 +1043,19 @@ mod tests {
         // The removal of the staged secrets file rides on the
         // same step, so the two scripts do not end at the verb.
         // What this test owns is that the two verbs differ and
-        // nothing else does; `remote`'s own tests pin the
-        // removal's spelling, and
+        // nothing else does, but for the clone mode `provision`
+        // names, which
+        // `only_provision_tells_the_guest_how_to_update_the_clone`
+        // owns. `remote`'s own tests pin the removal's spelling,
+        // and
         // `provision_writes_the_files_then_reprovisions` above
         // pins the whole line.
         for (script, verb) in [
             (script(up.last().unwrap()), "vagrant 'up'"),
-            (script(pr.last().unwrap()), "vagrant 'provision'"),
+            (
+                script(pr.last().unwrap()),
+                "BOMBYX_CLONE_UPDATE='checkout' vagrant 'provision'",
+            ),
         ] {
             assert_eq!(
                 script.split_once("; rc=$?; ").map(|(head, _)| head),
@@ -1462,7 +1523,7 @@ mod tests {
         // to refresh the guest's copy, and must open all the same.
         for action in all_actions() {
             let want = match action {
-                Action::Up | Action::Provision | Action::Scratch(_) => {
+                Action::Up | Action::Provision(_) | Action::Scratch(_) => {
                     StagedRead::Required
                 }
                 Action::Shell => StagedRead::BestEffort,
@@ -1480,7 +1541,7 @@ mod tests {
         // that same step rather than after it.
         for action in [
             Action::Up,
-            Action::Provision,
+            Action::Provision(CloneUpdate::Checkout),
             Action::Scratch(scratch("pr-1234")),
         ] {
             let (cfg, staged) = staged_project(true);
@@ -1704,7 +1765,7 @@ mod tests {
         // guest side. This is its sibling.
         for action in [
             Action::Up,
-            Action::Provision,
+            Action::Provision(CloneUpdate::Checkout),
             Action::Scratch(scratch("pr-1234")),
         ] {
             let cmds = plan(&action, &cfg(), Tty::NoPty, &Staged::default());
@@ -1740,7 +1801,7 @@ mod tests {
         // with the network.
         for action in [
             Action::Up,
-            Action::Provision,
+            Action::Provision(CloneUpdate::Checkout),
             Action::Scratch(scratch("pr-1234")),
         ] {
             let (cfg, staged) = staged_project(true);
@@ -1820,7 +1881,7 @@ mod tests {
         // and a dry run prints the plan to a terminal.
         for action in [
             Action::Up,
-            Action::Provision,
+            Action::Provision(CloneUpdate::Checkout),
             Action::Scratch(scratch("pr-1234")),
         ] {
             let (cfg, staged) = staged_project(true);

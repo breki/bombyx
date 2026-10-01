@@ -749,9 +749,13 @@ The reason is that `up` provisions a VM only when it first creates
 one; every later `up` leaves the old script in place and still
 reports success, which makes the gap easy to miss. `provision`
 re-runs the bootstrap, so push your change first. The re-checkout
-is forced and detaches HEAD, so that an agent's uncommitted edits
-and in-guest commits do not survive it; [usage.md](usage.md) under
-**up and provision** sets out what is kept and what is lost.
+refuses to overwrite an agent's uncommitted edits and lists them,
+so you can push them from the guest or pass `--discard` to let
+them go. It also detaches HEAD, so a commit made in the guest
+does not survive it; [usage.md](usage.md) under **up and
+provision** sets out what is kept and what is lost, and how
+`--no-fetch` re-runs the script without fetching or checking
+anything out.
 
 For untrusted code -- an external PR, an unfamiliar dependency
 tree -- use a throwaway VM rather than your project one:

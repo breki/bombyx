@@ -6,6 +6,40 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-01-provision-clone-mode-help-and-messages
+
+**Category:** Comprehension
+
+Printed text about the clone mode (#161, #162) that stage 3 may not
+edit, because the program emits it. The `provision --no-fetch` help
+says it is refused on a VM with no clone, and not that it is also
+refused when the clone belongs to a repository other than
+`source.repo`. The `provision` help says the next provision moves
+HEAD away, which `--no-fetch` does not do. The `--discard` help says
+it overwrites the agent's uncommitted work, but `checkout --force`
+leaves an untracked file the fetched commit has no path for. And the
+repo-change announcement in `bootstrap.sh` and `bootstrap.ps1` prints
+"Uncommitted work in <dir> is lost" even under the default mode, where
+the guard has just found none; it should say what that mode loses,
+which is ignored files, and keep the full warning for `--discard`.
+`docs/usage.md` already carries the corrected wording for the first
+two.
+
+### fr-2026-10-01-discard-names-three-things
+
+**Category:** Comprehension
+
+"discard" means three things: the `bombyx discard` subcommand, which
+destroys a scratch VM; the new `provision --discard` and
+`CloneUpdate::Discard`; and, in older comments and test names in
+`bootstrap.sh` and `bootstrap_tests.rs` ("a discard that failed
+part-way", `a_discard_that_cannot_finish_says_so`), the `rm -rf` of a
+clone whose `source.repo` changed, which also runs under the default
+mode. Calling that last step "removing the clone" would leave
+"discard" to the subcommand and the flag. Deferred from the #161
+review: renaming the older names is churn outside the change, and
+`docs/usage.md` now says the flag is not the subcommand.
+
 ### fr-2026-09-30-deploy-key-messages-name-the-wrong-thing
 
 **Category:** Comprehension

@@ -35,7 +35,9 @@ use super::{
 use crate::config::{Config, EnvName, EnvValue, Staged};
 use crate::hostkeys;
 use crate::powershell::base64;
-use crate::remote::{VM_HOST_ENV, VM_HOSTNAME_ENV};
+use crate::remote::{
+    CLONE_UPDATE_ENV, CloneUpdate, VM_HOST_ENV, VM_HOSTNAME_ENV,
+};
 
 /// The script that clones the project and runs its script, as the
 /// agent, shipped to the host unchanged.
@@ -149,11 +151,19 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     for (name, value) in &cfg.env {
         entry(name.as_str(), value.as_str());
     }
-    for name in [VM_HOST_ENV, VM_HOSTNAME_ENV] {
+    // Read from the vagrant process, as the Linux Vagrantfile's are;
+    // the clone mode falls back to the one that refuses to overwrite
+    // the agent's work.
+    for (name, fallback) in [
+        (VM_HOST_ENV, "unknown"),
+        (VM_HOSTNAME_ENV, "unknown"),
+        (CLONE_UPDATE_ENV, CloneUpdate::default().as_str()),
+    ] {
         let _ = writeln!(
             env,
-            "      {name} => [ENV.fetch({name}, \"unknown\")].pack(\"m0\"),",
+            "      {name} => [ENV.fetch({name}, {fallback})].pack(\"m0\"),",
             name = ruby_string(name),
+            fallback = ruby_string(fallback),
         );
     }
     let mut uploads = String::new();
@@ -185,10 +195,11 @@ pub(super) fn provisioning(cfg: &Config, staged: &Staged) -> String {
     # vagrant writes each value below into the script as
     # $env:NAME=\"value\" and escapes nothing, so every value is
     # base64, which holds no character PowerShell reads inside
-    # double quotes. account.ps1 decodes them. The last two are
-    # read from the vagrant process on the VM host, which bombyx
-    # sets, and encoded here as vagrant reads this file:
-    # `pack(\"m0\")` is Ruby's base64 with no newline.
+    # double quotes. account.ps1 decodes them. BOMBYX_VM_HOST,
+    # BOMBYX_VM_HOSTNAME and BOMBYX_CLONE_UPDATE are read from the
+    # vagrant process on the VM host, which bombyx sets, and
+    # encoded here as vagrant reads this file: `pack(\"m0\")` is
+    # Ruby's base64 with no newline.
     env: {{
 {env}    }}
 ",
@@ -255,6 +266,38 @@ mod tests {
         ] {
             assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
         }
+    }
+
+    #[test]
+    fn bootstrap_ps1_updates_the_clone_as_the_mode_says() {
+        // The Windows half of `bootstrap_tests`' clone-mode tests:
+        // the same fallback, the same three words, a forced checkout
+        // only under `discard`, and no deletion of a clone holding
+        // work without it. Two needles span a line break, and the
+        // file checks out with CRLF endings, so they are matched
+        // against LF text.
+        let script = BOOTSTRAP.replace("\r\n", "\n");
+        let fallback =
+            format!("$CloneUpdate = '{}'", CloneUpdate::default().as_str());
+        let words = CloneUpdate::ALL
+            .map(|m| format!("'{}'", m.as_str()))
+            .join(", ");
+        let check = format!("if ($CloneUpdate -cnotin @({words})) {{");
+        for text in [
+            "$CloneUpdate = $env:BOMBYX_CLONE_UPDATE",
+            fallback.as_str(),
+            check.as_str(),
+            "if ($CloneUpdate -ne 'discard' -and\n                \
+             (Test-CloneHoldsWork $Git $CloneDir)) {",
+            "if ($CloneUpdate -eq 'keep') {",
+            "$head = 'an unreadable HEAD'",
+            "if ($CloneUpdate -eq 'discard') {",
+            "Invoke-Native $Git -C $CloneDir -c core.fileMode=false `\n                    \
+             checkout FETCH_HEAD",
+        ] {
+            assert!(script.contains(text), "bootstrap.ps1: {text}");
+        }
+        assert_eq!(script.matches("checkout --force").count(), 1);
     }
 
     #[test]

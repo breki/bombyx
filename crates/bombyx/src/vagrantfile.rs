@@ -412,7 +412,7 @@ const HOST_KEYS_FORMAT_ENV: &str = "BOMBYX_HOST_KEYS_FORMAT";
 /// to start with the prefix, and a bombyx variable added
 /// without it would fall outside the reservation with every
 /// test still green.
-const BOMBYX_ENV_NAMES: [&str; 13] = [
+const BOMBYX_ENV_NAMES: [&str; 14] = [
     GUEST_USER_ENV,
     REPO_ENV,
     REF_ENV,
@@ -426,6 +426,7 @@ const BOMBYX_ENV_NAMES: [&str; 13] = [
     HOST_KEYS_FORMAT_ENV,
     crate::remote::VM_HOST_ENV,
     crate::remote::VM_HOSTNAME_ENV,
+    crate::remote::CLONE_UPDATE_ENV,
 ];
 
 /// [`BOOTSTRAP`] as code, with every comment line dropped and
@@ -792,6 +793,13 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
       \"{git_host_env}\" => {git_host},
       \"{host_keys_url_env}\" => {host_keys_url},
       \"{host_keys_format_env}\" => {host_keys_format},
+      # How a provision may update the clone the guest already
+      # holds. Set on the vagrant process for one run, so a bare
+      # `vagrant provision` gets the fallback, which refuses to
+      # overwrite the agent's work. `ENV.fetch(name, default)`
+      # reads the variable from vagrant's own environment, or
+      # `default` when it is unset.
+      \"{clone_update_env}\" => ENV.fetch(\"{clone_update_env}\", \"{clone_update}\"),
       # Read from the vagrant process on the VM host, which
       # bombyx sets. Vagrant does not export its own
       # environment into a guest, so this hand-over is what
@@ -841,6 +849,8 @@ fn linux_provisioning(cfg: &Config, staged: &Staged) -> String {
         clone_project = ruby_string(cfg.project.as_str()),
         host_env = crate::remote::VM_HOST_ENV,
         hostname_env = crate::remote::VM_HOSTNAME_ENV,
+        clone_update_env = crate::remote::CLONE_UPDATE_ENV,
+        clone_update = crate::remote::CloneUpdate::default().as_str(),
     )
 }
 
@@ -1671,6 +1681,24 @@ mod tests {
                 "{var} not forwarded:\n{out}"
             );
         }
+    }
+
+    #[test]
+    fn forwards_the_clone_mode_with_the_safe_fallback() {
+        // The mode rides on the vagrant process, so a bare
+        // `vagrant provision` on the VM host sets none. The
+        // fallback is the mode that refuses to overwrite the
+        // agent's work, and both guests read it.
+        let var = crate::remote::CLONE_UPDATE_ENV;
+        let fallback = crate::remote::CloneUpdate::default().as_str();
+        assert_eq!(fallback, "checkout");
+        let fetch = format!("ENV.fetch(\"{var}\", \"{fallback}\")");
+        let linux = rendered_for(&cfg_with(Provider::Libvirt));
+        let line = format!("\"{var}\" => {fetch},");
+        assert!(linux.contains(&line), "{line}:\n{linux}");
+        let windows = rendered_for(&cfg_windows_plain());
+        let line = format!("\"{var}\" => [{fetch}].pack(\"m0\"),");
+        assert!(windows.contains(&line), "{line}:\n{windows}");
     }
 
     #[test]

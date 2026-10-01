@@ -445,12 +445,42 @@ fn provision_writes_the_files_then_runs_vagrant_provision() {
     assert!(lines[0].contains("mkdir -p ~/'vms/myproject'"));
     assert!(
         lines[4].contains(&format!(
-            "cd ~/'vms/myproject' && {} vagrant 'provision';",
+            "cd ~/'vms/myproject' && {} BOMBYX_CLONE_UPDATE='checkout' \
+             vagrant 'provision';",
             vagrant_env()
         )),
         "{}",
         lines[4]
     );
+}
+
+#[test]
+fn each_provision_flag_reaches_the_guest_as_its_mode() {
+    let dir = project_dir();
+    for (flag, mode) in [("--discard", "discard"), ("--no-fetch", "keep")] {
+        let lines =
+            dry_run(&dir, &["--dry-run", "provision", "myproject", flag]);
+        let want = format!("BOMBYX_CLONE_UPDATE='{mode}' vagrant 'provision'");
+        assert!(lines[4].contains(&want), "{flag}: {}", lines[4]);
+    }
+}
+
+#[test]
+fn discard_and_no_fetch_are_refused_together() {
+    // One asks the guest to overwrite the clone and the other to
+    // leave it alone, so no run can honour both.
+    let dir = project_dir();
+    bombyx_in(&dir)
+        .args([
+            "--dry-run",
+            "provision",
+            "myproject",
+            "--discard",
+            "--no-fetch",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--no-fetch"));
 }
 
 #[test]
