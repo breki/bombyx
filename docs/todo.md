@@ -463,3 +463,17 @@ On success the runner prints only Test OK, so a filter that matches no test
 reads the same as one that ran thirty. A failing run already prints libtest's
 count line; printing that same line on success would show what ran.
 
+### host-reads-guest-paths
+
+**Summary:** check whether the VM host reads any path or file the guest controls
+
+docs/incidents.md records the Docker Sandboxes escapes: a planted symlink in a
+host-guest share gave code in the guest read and write on host files. bombyx
+disables Vagrant's default shared folder (vagrantfile.rs, the synced_folder
+line), and #80 tracks the provisioning output that does cross from the guest.
+Nobody has checked the rest: whether vagrant, libvirt or a bombyx command on the
+VM host opens a path, follows a link or parses a file whose content the guest
+can influence. List each read the VM host makes during up, provision, shell,
+reset and destroy, and say for each one whether the guest can change what it
+reads.
+
