@@ -381,6 +381,36 @@ alone. `bootstrap.sh` and `hostkeys.rs` hold the mechanism.
 `docs/developer/redteam-log.md` records why this is open, and
 GitHub issue #57 carries the decision it waits on.
 
+### The guest's egress rule is a backstop
+
+The VM host's firewall, `scripts/agent-vm-firewall.sh`, is what
+keeps a guest off the home network. `account.sh` also loads an
+egress rule inside each Linux guest. The rule refuses the guest's
+new connections to the same private ranges the host refuses, and
+all IPv6. A systemd unit loads it again at every boot.
+
+The rule is not containment. The agent has passwordless `sudo`,
+so it can delete the rule with one command, and the guest is the
+party the VM exists to contain. What the rule catches is a mistake
+on the VM host: rules never applied, flushed at boot by another
+firewall service, or naming a bridge libvirt has since moved.
+
+- **What passes.** Replies to connections made from outside, DHCP,
+  and DNS to each default gateway. sshd's replies pass by port as
+  well as by connection state, because a provision loads the rule
+  inside Vagrant's own SSH session.
+- **What it covers.** Only the interfaces that carry a default
+  route, so a container bridge inside the guest keeps working.
+- **Where it is missing.** A box without `nft` or `systemctl` gets
+  a warning in the provisioning output and no rule. A Windows
+  guest gets no rule; `guest-egress-windows` in `docs/todo.md`
+  tracks that.
+- **The host side.** The `host firewall` row of `bombyx doctor`
+  fails unless the firewall's unit is active and its rules name
+  the bridge the guests use. `doctor` runs without root, so it
+  cannot read the loaded table; `sudo agent-vm-firewall status`
+  does.
+
 ### Open problems
 
 | Problem | Why it is open | Tracked by |

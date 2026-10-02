@@ -288,6 +288,7 @@ $ bombyx doctor <name>
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/you (will create /home/you/vms/...
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
+  vmhost  host firewall     ok    active, bridge virbr1; table not read
 all checks passed
 ```
 

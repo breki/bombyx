@@ -328,7 +328,7 @@ sequenceDiagram
   vg->>guest: create from box
   vg->>guest: stage bootstrap.sh and the credentials
   vg->>guest: run account.sh as root
-  guest->>guest: create the agent's account, hand over
+  guest->>guest: create the agent's account, load the egress rule, hand over
   guest->>git: git clone repo at ref, as the agent
   guest->>guest: run the script from the clone
   cli->>host: one script: list, test, save if absent
@@ -366,8 +366,11 @@ Two scripts run in the guest. `account.sh` runs first, as root,
 because the Vagrantfile marks its one shell provisioner
 `privileged: true`. It creates the account `guest_user` names --
 `agent` by default -- gives it passwordless `sudo`, moves the
-staged credentials into its home, and hands `bootstrap.sh` to it
-through `sudo -u`. It reads nothing from the repository.
+staged credentials into its home, loads the guest's egress rule,
+and hands `bootstrap.sh` to it through `sudo -u`. It reads nothing
+from the repository. The egress rule is a backstop to the VM
+host's firewall, not containment; `docs/trust-boundary.md` under
+**The guest's egress rule is a backstop** says why.
 `bootstrap.sh` then runs as that account, so the clone and
 anything the project installs land in its home, where the agent
 looks, rather than in `/root` or in the home of `vagrant`, the

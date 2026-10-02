@@ -116,11 +116,19 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
     //
     // A non-libvirt project gets `provider_finding` instead,
     // which is a skip row rather than an absent one.
+    //
+    // The firewall probe follows the same split, for its own
+    // reason: scripts/agent-vm-firewall.sh filters a libvirt
+    // bridge, so there is nothing of it to find on a Hyper-V
+    // host. `firewall_finding` gives that project its skip row.
     match cfg.vm.provider {
-        Provider::Libvirt => probes.push(HostProbe::plain(
-            "libvirt provider",
-            remote::probe::provider(cfg),
-        )),
+        Provider::Libvirt => probes.extend([
+            HostProbe::plain("libvirt provider", remote::probe::provider(cfg)),
+            HostProbe::plain(
+                "host firewall",
+                remote::probe::host_firewall(cfg),
+            ),
+        ]),
         Provider::Hyperv => {}
     }
     probes
@@ -210,7 +218,26 @@ where
     let mut findings = settled_findings(cfg);
     findings.extend(run_probes(&host_probes(cfg), run));
     findings.extend(provider_finding(cfg));
+    findings.extend(firewall_finding(cfg));
     findings
+}
+
+/// The firewall row for a project `host_probes` cannot check.
+///
+/// This returns `None` for libvirt, whose probe is in the list.
+/// For Hyper-V it returns a skip: bombyx has no host firewall for
+/// that provider, and the report must say the guests are
+/// unchecked rather than drop the row, for the reason
+/// `provider_finding` gives.
+pub(crate) fn firewall_finding(cfg: &Config) -> Option<Finding> {
+    match cfg.vm.provider {
+        Provider::Libvirt => None,
+        p @ Provider::Hyperv => Some(Finding::new(
+            Scope::Host,
+            "host firewall",
+            Outcome::Skip(format!("no host firewall exists for {p}")),
+        )),
+    }
 }
 
 /// Confirms the host shell ran a POSIX construct correctly.
@@ -388,6 +415,41 @@ mod tests {
         let row = "libvirt provider";
         assert!(names(&cfg_with(Provider::Libvirt)).contains(&row));
         assert!(!names(&cfg_with(Provider::Hyperv)).contains(&row));
+    }
+
+    #[test]
+    fn the_firewall_probe_is_only_sent_for_a_libvirt_project() {
+        // The probe reads scripts/agent-vm-firewall.sh's unit and
+        // rules file and the libvirt network's bridge. None of
+        // those exist for Hyper-V.
+        let names = |c: &Config| {
+            host_probes(c).iter().map(|p| p.name).collect::<Vec<_>>()
+        };
+        for route in [cfg(), local_cfg()] {
+            let mut libvirt = route.clone();
+            libvirt.vm.provider = Provider::Libvirt;
+            assert!(names(&libvirt).contains(&"host firewall"));
+        }
+        assert!(!names(&cfg_with(Provider::Hyperv)).contains(&"host firewall"));
+    }
+
+    #[test]
+    fn a_hyperv_project_gets_a_firewall_skip_row_not_silence() {
+        // An absent row reads as a check that passed, and the
+        // firewall is the row an operator most needs not to
+        // misread.
+        let findings = host_findings(&cfg_with(Provider::Hyperv), |_| {
+            Outcome::Pass(String::new())
+        });
+        let row = findings
+            .iter()
+            .find(|f| f.name == "host firewall")
+            .expect("a host firewall row for hyperv");
+        match &row.outcome {
+            Outcome::Skip(why) => assert!(why.contains("hyperv"), "{why}"),
+            other => panic!("must not pass or fail: {other:?}"),
+        }
+        assert_eq!(firewall_finding(&cfg_with(Provider::Libvirt)), None);
     }
 
     fn ran(success: bool, stdout: &str, stderr: &str) -> ProbeResult {

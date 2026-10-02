@@ -491,3 +491,15 @@ WSL2 host runs Microsoft's kernel, which Windows updates; decide what the row
 says on each host kind before writing it. The row cannot say whether a kernel is
 vulnerable, only whether it is the newest one installed.
 
+### guest-egress-windows
+
+**Summary:** Windows guests get no egress rule of their own
+
+account.sh loads a backstop egress rule in every Linux guest (#93); account.ps1
+loads none, so a Windows guest relies on the VM host's firewall alone. Windows
+Firewall lets a block rule beat every allow rule, so the DNS exception for the
+default gateway cannot be an allow rule beside the block: the gateway has to be
+cut out of the blocked ranges, for example as address ranges either side of it.
+The rule must also let the session that loads it live, as the Linux rule does
+for sshd's replies. Verifying it needs a Windows guest booted on a VM host.
+

@@ -207,7 +207,8 @@ enum VmCmd {
     /// discards the state `reset` would have returned to. The VM
     /// and its caches are untouched.
     Snapshot(ProjectArg),
-    /// Check bombyx's preconditions, changing nothing
+    /// Check bombyx's preconditions and the host firewall, changing
+    /// nothing
     Doctor(ProjectArg),
     /// Destroy the project VM and remove its directory
     ///

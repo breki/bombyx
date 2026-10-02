@@ -186,6 +186,24 @@ To undo everything: `sudo agent-vm-firewall revert`.
 
 ## Checking that it worked
 
+`bombyx doctor` checks the host side without entering a guest.
+Its `host firewall` row fails unless the unit `persist` installs
+is active and the rules name the bridge `vagrant-libvirt` uses
+now. It cannot read the loaded table, because that needs root, so
+the checks below still matter.
+
+Every Linux guest bombyx builds also loads an egress rule of its
+own, which `docs/trust-boundary.md` describes under **The guest's
+egress rule is a backstop**. That rule refuses the same
+addresses, so a probe from the guest reports "blocked" whether or
+not the host rules are loaded. Stop it before you probe, and
+start it again afterwards:
+
+```bash
+sudo systemctl stop bombyx-guest-egress.service    # before
+sudo systemctl start bombyx-guest-egress.service   # after
+```
+
 These run inside the VM, with `bombyx shell`. Read the next two
 paragraphs first; the block itself comes after them.
 
@@ -424,11 +442,13 @@ without.
 
 **Only the one libvirt network is protected.** The rules name a
 single bridge. A guest booted onto a different libvirt network
-is not restricted at all, and `bombyx` does not stop a project
-from defining one. `status` re-checks that the named bridge
-still exists and still belongs to the network, because nftables
-happily accepts a rule naming an interface that is gone -- which
-would list perfectly while matching nothing.
+is not restricted at all. The Vagrantfile bombyx generates names
+no network, so every guest bombyx builds joins `vagrant-libvirt`,
+and a guest elsewhere is one bombyx did not build. `status`
+re-checks that the named bridge still exists and still belongs to
+the network, because nftables happily accepts a rule naming an
+interface that is gone -- which would list perfectly while
+matching nothing.
 
 **A guest cannot reach services on the host, including ones it
 may want.** The input chain drops everything the guest starts.
@@ -445,7 +465,10 @@ guest that escalates to root on the VM host can remove these
 rules. Enforcing the same policy at the router -- a separate
 VLAN for agent VMs with an allowlist for outbound traffic --
 does not have that weakness, because the device applying the
-rules is not the device under attack.
+rules is not the device under attack. The egress rule bombyx loads
+inside each Linux guest does not change this either: the agent can
+remove it, so it catches mistakes on the host and contains
+nothing.
 
 Treat this as the version you can have today. It closes the
 guest-to-LAN and guest-to-host paths, which is most of the

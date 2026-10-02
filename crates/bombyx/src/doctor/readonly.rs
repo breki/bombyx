@@ -48,29 +48,26 @@
 /// that is subtly wrong inspires more confidence than this list
 /// while catching less.
 const MUTATING_COMMANDS: &[&str] = &[
-    "mkdir",
-    "rmdir",
-    "rm",
-    "touch",
-    "unzip",
-    "scp",
-    "cp",
-    "mv",
-    "dd",
-    "ln",
-    "chmod",
-    "chown",
-    "truncate",
-    "tee",
-    "install",
-    "mkfifo",
-    "mknod",
-    "sed",
-    "git",
-    "apt",
-    "apt-get",
-    "systemctl",
-    "tar",
+    "mkdir", "rmdir", "rm", "touch", "unzip", "scp", "cp", "mv", "dd", "ln",
+    "chmod", "chown", "truncate", "tee", "install", "mkfifo", "mknod", "sed",
+    "git", "apt", "apt-get", "tar",
+];
+
+/// `systemctl` subcommands that only read state.
+///
+/// An allowlist, unlike the `vagrant` lists below: most of
+/// `systemctl`'s verbs start, stop, enable or reload something,
+/// so a verb missing from this list is refused. `systemctl` is
+/// judged here and not in [`MUTATING_COMMANDS`] because the
+/// firewall probe asks whether a unit is active, and naming the
+/// whole command would refuse that question with the writes.
+const READ_ONLY_SYSTEMCTL: &[&str] = &[
+    "is-active",
+    "is-enabled",
+    "is-failed",
+    "status",
+    "show",
+    "cat",
 ];
 
 /// `vagrant` subcommands that change something.
@@ -329,6 +326,16 @@ fn mutating_vagrant_use(args: &[&str]) -> Option<String> {
     MUTATING_VAGRANT.contains(sub).then(|| (*sub).to_owned())
 }
 
+/// The `systemctl` subcommand in `args` that is not known to
+/// only read, if any.
+///
+/// The subcommand is the first non-flag word. A bare
+/// `systemctl` lists units and changes nothing.
+fn mutating_systemctl_use(args: &[&str]) -> Option<String> {
+    let sub = args.iter().find(|w| !w.starts_with('-'))?;
+    (!READ_ONLY_SYSTEMCTL.contains(sub)).then(|| (*sub).to_owned())
+}
+
 /// The first sign in `script` that it would change the host.
 ///
 /// Returns the offending word so a failure names what it objected
@@ -353,6 +360,11 @@ pub fn mutating_token(script: &str) -> Option<String> {
             && let Some(found) = mutating_vagrant_use(args)
         {
             return Some(format!("vagrant {found}"));
+        }
+        if bare == "systemctl"
+            && let Some(found) = mutating_systemctl_use(args)
+        {
+            return Some(format!("systemctl {found}"));
         }
     }
     None
@@ -396,7 +408,12 @@ mod tests {
             // and `sudo` in front of `mkdir`, `apt` or `systemctl`
             // is exactly what a probe author reaches for.
             ("sudo mkdir -p \"$d\"", "mkdir"),
-            ("sudo systemctl restart libvirtd", "systemctl"),
+            ("sudo systemctl restart libvirtd", "systemctl restart"),
+            // systemctl is judged by its subcommand, and only the
+            // ones that read state are allowed.
+            ("systemctl enable --now x", "systemctl enable"),
+            ("systemctl --quiet stop x", "systemctl stop"),
+            ("systemctl daemon-reload", "systemctl daemon-reload"),
             ("env mkdir -p y", "mkdir"),
             ("command rm -f f", "rm"),
             ("nohup tar cf a.tar .", "tar"),
@@ -448,6 +465,8 @@ mod tests {
             "vagrant ssh",
             "vagrant plugin list",
             "vagrant status",
+            "systemctl is-active --quiet 'agent-vm-firewall.service'",
+            "systemctl --quiet is-active x",
         ] {
             assert_eq!(mutating_token(script), None, "{script:?}");
         }

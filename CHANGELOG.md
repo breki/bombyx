@@ -20,6 +20,19 @@ and this project adheres to
   `full` (the default) is every branch with its whole history, and `shallow` is
   one commit of `ref`, as before. Switching to `shallow` keeps the history a
   clone already has.
+- `bombyx doctor` has a `host firewall` row for libvirt projects. It fails
+  unless the VM host's `agent-vm-firewall.service` is active and its rules name
+  the bridge the `vagrant-libvirt` network uses now, so `doctor` now exits
+  non-zero on a VM host that never set the firewall up. It runs without root and
+  cannot read the loaded table; `sudo agent-vm-firewall status` does. A Hyper-V
+  project gets a `skip` row (#93).
+- Every Linux guest loads an egress rule of its own, a backstop to the VM host's
+  firewall: it refuses the guest's new connections to the private ranges
+  `scripts/agent-vm-firewall.sh` blocks, and all IPv6, on the interfaces that
+  carry a default route. A systemd unit reloads it at every boot. It is not
+  containment, because the agent has passwordless `sudo` and can remove it. A
+  box without `nft` or `systemctl` gets a warning and no rule; Windows guests
+  get no rule yet (#93).
 
 ### Changed
 

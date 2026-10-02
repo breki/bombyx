@@ -186,3 +186,88 @@ fn root_writes_nothing_into_the_agents_home() {
     assert!(!code.contains(">\"$home"), "{code}");
     assert!(!code.contains(">\"$3\""), "{code}");
 }
+
+// The egress step, as code: from its heading to the hand-over's.
+fn egress_step() -> String {
+    let start = ACCOUNT
+        .find("\n# 4. A BACKSTOP EGRESS RULE")
+        .expect("account.sh has the egress step");
+    let end = ACCOUNT
+        .find("\n# 5. THE HAND-OVER")
+        .expect("the hand-over follows it");
+    super::script_code(&ACCOUNT[start..end])
+}
+
+#[test]
+fn the_egress_rule_warns_and_never_refuses() {
+    // The rule is a backstop the agent can delete with one `sudo`
+    // command, so a box without nftables, or a rule that fails to
+    // load, must not stop the VM being built. Each failure prints
+    // a warning and the provision carries on.
+    let step = egress_step();
+    assert!(!step.contains("refuse"), "{step}");
+    assert!(!step.contains("exit"), "{step}");
+    assert!(step.contains("egress_warning"), "{step}");
+    for checked in ["command -v nft", "command -v systemctl"] {
+        assert!(step.contains(checked), "{checked}: {step}");
+    }
+}
+
+// The ranges inside `NAME="..."` in `text`, as a sorted list.
+fn ranges(text: &str, name: &str) -> Vec<String> {
+    let open = format!("{name}=\"");
+    let start = text.find(&open).expect("the range list") + open.len();
+    let len = text[start..].find('"').expect("a closing quote");
+    let mut out: Vec<String> = text[start..start + len]
+        .split(',')
+        .map(|r| r.trim().to_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+#[test]
+fn the_egress_rule_blocks_what_the_host_firewall_blocks() {
+    // The guest rule backs up scripts/agent-vm-firewall.sh, so the
+    // two layers state one policy. A range added to one and not
+    // the other would make the backstop disagree with the
+    // containment it stands behind.
+    let host = include_str!("../../../../scripts/agent-vm-firewall.sh");
+    assert_eq!(ranges(ACCOUNT, "blocked4"), ranges(host, "BLOCKED_V4"));
+}
+
+#[test]
+fn the_egress_rule_loads_before_the_agent_runs() {
+    // bootstrap.sh clones the repository and runs the project's
+    // script. Loading the rule after the hand-over would leave
+    // that first run unfiltered on the guest's side.
+    let code = account_code();
+    let load = code
+        .find("systemctl restart bombyx-guest-egress.service")
+        .expect("account.sh loads the rule");
+    let hand_over = code.find("exec sudo -u").expect("the hand-over");
+    assert!(load < hand_over, "{code}");
+    // Scoped to the interfaces that carry a default route, so a
+    // container bridge inside the guest keeps working.
+    assert!(code.contains("ip -4 route show default"), "{code}");
+}
+
+#[test]
+fn the_egress_rule_lets_the_session_loading_it_live() {
+    // A provision loads the rule inside Vagrant's SSH session. On
+    // a guest where conntrack is not yet running, that session's
+    // next packet counts as a new connection to the gateway, which
+    // is a blocked address, so without this accept the provision
+    // hangs. Reproduced on a freshly booted guest.
+    //
+    // nft applies a chain's rules in order, so the accept must sit
+    // above `$rules`, where the loader puts the rejects.
+    let code = account_code();
+    let start = code.find("chain output {").expect("the output chain");
+    let chain = &code[start..];
+    let accept = chain
+        .find("tcp sport 22 accept")
+        .expect("sshd's replies are accepted in the output chain");
+    let rejects = chain.find("$rules").expect("the rejects");
+    assert!(accept < rejects, "{chain}");
+}

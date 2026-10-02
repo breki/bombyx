@@ -6,6 +6,12 @@
 //! So a host that is missing something reports it half-way
 //! through. This module models the up-front check instead.
 //!
+//! One row checks a safety property rather than a precondition.
+//! `up` works without the VM host's firewall, but the firewall is
+//! the only containment a guest has, so a missing or stale one
+//! fails the `host firewall` row; `remote::probe::host_firewall`
+//! says what that row can and cannot see.
+//!
 //! Nothing here runs a process. It owns the probe list, the
 //! rules for reading a probe's result, the skip cascade and the
 //! report -- everything that decides anything. The binary

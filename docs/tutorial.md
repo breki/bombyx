@@ -791,7 +791,8 @@ $ bombyx doctor myproject
   vmhost  vagrant           skip  no ssh
   vmhost  project dir       skip  no ssh
   vmhost  libvirt provider  skip  no ssh
-1 check failed, 4 skipped
+  vmhost  host firewall     skip  no ssh
+1 check failed, 5 skipped
 ```
 
 That is what a missing or misspelled `Host` entry in
