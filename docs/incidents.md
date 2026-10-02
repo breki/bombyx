@@ -137,3 +137,102 @@ that root also reaches every secret the workstation holds. Only a
 kernel update closes this, and nothing in bombyx reports the VM
 host's kernel or a pending reboot; `doctor-host-kernel-state` in
 `docs/todo.md` tracks that.
+
+## KVM shadow-MMU escapes: Januscape and Zapscape, July and August 2026
+
+**What happened.** Two use-after-free bugs in KVM's shadow MMU,
+the code that tracks a nested guest's page tables, let code
+inside a guest corrupt host kernel memory. Januscape matched a
+reused shadow page by its address and ignored the page's type;
+Zapscape let page reclaim free a root page the fault handler was
+still using. Both need root inside the guest and a guest that
+runs a VM of its own (nested virtualization). Zapscape on Intel
+also needs 5-level EPT exposed to the guest. A public proof of
+concept for each crashes or takes over the host.
+
+**Source.**
+[CVE-2026-53359](https://www.cve.org/CVERecord?id=CVE-2026-53359),
+<https://thehackernews.com/2026/07/16-year-old-linux-kvm-flaw-lets-guest.html>,
+July 2026;
+[CVE-2026-64561](https://www.cve.org/CVERecord?id=CVE-2026-64561),
+<https://thehackernews.com/2026/08/new-zapscape-kvm-flaw-could-let.html>,
+August 2026.
+
+**What bombyx does about it.** Nothing yet. A kernel update closes
+each bug: Januscape is fixed in Ubuntu 24.04, and Zapscape is not
+as of 2026-10-02.
+
+**Where bombyx is exposed.** The agent has root in the guest
+through passwordless `sudo`, and bombyx's default CPU mode,
+`host-passthrough`, passes the host CPU's virtualization flag to
+the guest whenever the host's KVM allows nesting. So a default
+bombyx guest probably meets both conditions; we have not
+confirmed the flag from inside a guest. Issue #170 tracks hiding
+that flag by default.
+
+## Comment and Control: prompt injection through GitHub, April 2026
+
+**What happened.** A PR title, an issue body or a hidden HTML
+comment carried instructions that hijacked coding agents working
+in CI: Claude Code, Gemini CLI, Copilot's agent and Codex. The
+agents read secrets from their environment and sent them out
+through channels they were allowed to use: PR and issue comments,
+commits, `git push`, and in one case Hugging Face download
+counters on a pre-approved domain, one character at a time.
+
+**Source.**
+[CVE-2026-54316](https://www.cve.org/CVERecord?id=CVE-2026-54316)
+(Claude Code) and
+[CVE-2026-12537](https://www.cve.org/CVERecord?id=CVE-2026-12537)
+(Gemini CLI),
+<https://labs.cloudsecurityalliance.org/research/csa-research-note-ai-coding-agent-ci-prompt-injection-202608/>,
+first disclosed April 2026.
+
+**What bombyx does about it.** Nothing it can do. The VM keeps the
+workstation's secrets out of reach, but the agent in the guest
+reads issues and repository text, and it holds a git credential
+and the secrets file by design.
+
+**Where bombyx is exposed.** Everything the guest holds, sent out
+through a channel the guest must keep. `git push` is how work
+leaves the VM, so no firewall can close it, and an egress
+allowlist such as the one #130 proposes still leaks through each
+domain it allows. The token's scope sets the damage
+(`docs/trust-boundary.md`, "The guest needs a credential"), and
+#150 would keep the credential itself out of the guest.
+
+## Mini Shai-Hulud worms, April to August 2026
+
+**What happened.** A family of npm and PyPI worms spread through
+hijacked maintainer accounts and CI pipelines. A poisoned version
+runs a `preinstall` hook, or runs on import, and collects SSH
+keys, git and cloud tokens, `*.kdbx` password databases and AI
+tool configuration. It republishes every package the stolen token
+can publish. For persistence it writes `.claude/settings.json`
+hooks and `.vscode/tasks.json` folder-open tasks into the project,
+where they survive uninstalling the package. One wave, through
+TanStack, led to about 170 private repositories being copied from
+a single infected laptop.
+
+**Source.**
+[CVE-2026-45321](https://www.cve.org/CVERecord?id=CVE-2026-45321),
+<https://snyk.io/blog/tanstack-npm-packages-compromised/>,
+<https://www.aikido.dev/blog/keyv-and-friends-compromised-in-npm-supply-chain-attack>
+and
+<https://thehackernews.com/2026/09/crowdsec-says-tanstack-npm-attack-led.html>,
+April to September 2026.
+
+**What bombyx does about it.** This is the attack the README's
+"Why" section describes. An install run by the agent happens in
+the guest, so the worm finds the guest's credentials and none of
+the workstation's.
+
+**Where bombyx is exposed.** Two routes:
+
+- The guest's git credential and secrets file, which the worm
+  reads like any other file in the guest. #150 tracks keeping the
+  credential out of the guest.
+- The persistence files. They land in the working tree, so an
+  agent's `git push` can carry them to the workstation, where
+  Claude Code or VS Code runs them when the checkout is opened.
+  Issue #171 tracks that route.
