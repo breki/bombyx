@@ -45,8 +45,9 @@ pub enum Action {
     /// ignore. It refuses in the same way to delete a clone of
     /// another repository -- left by a change to `source.repo` --
     /// that holds any. Ignored files are not protected.
-    /// The checkout detaches HEAD, so a commit made in the guest
-    /// ends up on no branch after the next provision.
+    /// The checkout detaches HEAD, as a fresh clone does, so a
+    /// commit made in the guest ends up on no branch after the
+    /// next provision.
     /// `crates/bombyx/templates/bootstrap.sh` decides all of
     /// this and explains how loosely it compares the URLs.
     ///

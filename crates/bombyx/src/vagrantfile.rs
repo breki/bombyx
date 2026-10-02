@@ -482,6 +482,25 @@ fn script_code(script: &str) -> String {
         .join(" ")
 }
 
+/// `script_code` for a PowerShell script. A line ending in a
+/// backtick continues onto the next, so the backtick is dropped
+/// and the lines run together. Comment lines are dropped before
+/// backticks are stripped, because a comment ending in a
+/// backtick would otherwise join onto the next code line.
+#[cfg(test)]
+fn ps1_code(script: &str) -> String {
+    script
+        .lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .map(|l| l.strip_suffix('`').unwrap_or(l))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Wraps `value` in double quotes, ready to drop into Ruby.
 ///
 /// Three characters would otherwise change what the Ruby means

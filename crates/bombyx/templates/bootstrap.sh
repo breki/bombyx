@@ -1314,12 +1314,13 @@ if [ -d "$CLONE_DIR/.git" ]; then
     # does not have. Stale leftovers are a fair price for not
     # deleting the agent's work.
     #
-    # One loss remains. Checking out `FETCH_HEAD` detaches HEAD.
-    # A commit the agent makes after that sits on no branch, and
-    # the next provision moves HEAD away from it: `git log`
-    # stops showing it and only the reflog can find it.
-    # Committing inside the guest is therefore not a way to
-    # survive a provision -- pushing is.
+    # One loss remains. Checking out `FETCH_HEAD` detaches HEAD,
+    # and a fresh clone is detached to match, below. A commit the
+    # agent makes on a detached HEAD sits on no branch, and the
+    # next provision moves HEAD away from it: `git log` stops
+    # showing it and only the reflog can find it. Committing
+    # inside the guest is therefore not a way to survive a
+    # provision -- pushing is.
 else
     if [ "$CLONE_UPDATE" = keep ]; then
         refuse "--no-fetch runs the script from the clone, and" \
@@ -1348,6 +1349,47 @@ else
     else
         git_net clone --depth 1 --branch "$BOMBYX_REF" \
             -- "$BOMBYX_REPO" "$CLONE_DIR"
+    fi
+
+    # This runs for every fresh clone: the first `up`, and a
+    # provision that re-clones after a change of `source.repo`.
+    #
+    # `git clone --branch` leaves HEAD on a local branch named
+    # after `ref` -- for `ref = "main"`, a branch `main` -- while
+    # every later provision checks out `FETCH_HEAD` and so
+    # detaches it. Detaching here makes a fresh clone and an
+    # updated one agree. The "One loss remains" paragraph above,
+    # at the end of the path that updates an existing clone, says
+    # why detached is the state both keep. A tag `ref` is
+    # detached already, and `--detach` leaves it so.
+    #
+    # The branch the clone made is deleted too. No provision
+    # moves it, so it would stay at this clone's commit, and a
+    # `git switch` to it in the guest would land there. It holds
+    # nothing yet: the clone made it a moment ago.
+    #
+    # A failure here leaves the clone on disk, so every later
+    # provision takes the update path, which never deletes the
+    # branch. Both refusals therefore send the operator to remove
+    # the clone, which holds no work yet.
+    if ! git -C "$CLONE_DIR" checkout --quiet --detach; then
+        refuse "could not detach HEAD in the new clone at" \
+            "$CLONE_DIR. The message above says why." \
+            "Later provisions skip this step, so remove the" \
+            "clone in the guest, then provision again."
+    fi
+    if git -C "$CLONE_DIR" show-ref --verify --quiet \
+        -- "refs/heads/$BOMBYX_REF"
+    then
+        if ! git -C "$CLONE_DIR" branch --quiet -D \
+            -- "$BOMBYX_REF"
+        then
+            refuse "could not delete the branch $BOMBYX_REF in" \
+                "the new clone at $CLONE_DIR. The message above" \
+                "says why. Later provisions skip this step, so" \
+                "remove the clone in the guest, then provision" \
+                "again."
+        fi
     fi
 fi
 

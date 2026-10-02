@@ -142,10 +142,12 @@ enum VmCmd {
     /// deletes them with the clone. Keep nothing there you cannot
     /// make again.
     ///
-    /// The checkout detaches HEAD, so committing in the guest
-    /// does not protect work: the next provision moves HEAD away
-    /// and leaves that commit on no branch, findable only through
-    /// `git reflog`. Push it to survive a provision.
+    /// The guest's clone has no branch checked out: the first `up`
+    /// detaches HEAD, and so does every checkout after it. So
+    /// committing in the guest does not protect work: the next
+    /// provision moves HEAD away and leaves that commit on no
+    /// branch, findable only through `git reflog`. Push it to
+    /// survive a provision.
     ///
     /// Pointing `source.repo` at a different repository removes
     /// the clone and starts over. The guest refuses that too

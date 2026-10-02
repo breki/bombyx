@@ -6,6 +6,21 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-01-provision-help-detached-head
+
+**Category:** Comprehension
+
+The `provision` help paragraph on the detached HEAD (#163), which
+stage 3 may not edit because `bombyx --help` prints it. It chains a
+colon clause, "and so does every checkout after it", and then a
+sentence opening with "So", so the fact, the consequence and the
+instruction to push run together. It also says "the first `up`
+detaches HEAD", and does not say that a provision re-cloning after a
+change of `source.repo` does too. Three short sentences would fix it:
+the clone is on a detached HEAD after every fresh clone and every
+fetching provision; a commit made there is left behind by the next
+one; push it. `docs/usage.md` already carries that wording.
+
 ### fr-2026-10-01-provision-clone-mode-help-and-messages
 
 **Category:** Comprehension

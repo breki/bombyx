@@ -341,6 +341,37 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_ps1_detaches_a_fresh_clone_like_an_updated_one() {
+        // The Windows half of `bootstrap_tests`'
+        // `a_fresh_clone_ends_up_detached_like_an_updated_one`:
+        // after the clone, HEAD detaches and the branch the clone
+        // made is deleted. Each failure goes through `Refuse`, with
+        // a message that names the step and tells the operator to
+        // remove the clone. A failed native command does not stop
+        // PowerShell, so a missing `$LASTEXITCODE` check would carry
+        // on with HEAD still on the branch.
+        let code = super::super::ps1_code(BOOTSTRAP);
+        let at = |text: &str| {
+            code.find(text)
+                .unwrap_or_else(|| panic!("bootstrap.ps1: {text}"))
+        };
+        let clone = at("clone @depth --branch $Ref '--' $Repo");
+        let detach = at("Invoke-Native $Git -C $CloneDir checkout --quiet \
+             --detach if ($LASTEXITCODE -ne 0) { Refuse ('could not \
+             detach HEAD in the new clone at ' + \"$CloneDir. The message \
+             above says why. \" + 'Later provisions skip this step, so \
+             remove the ' + 'clone in the guest, then provision again.') }");
+        let delete = at("Invoke-Native $Git -C $CloneDir show-ref --verify \
+             --quiet '--' \"refs/heads/$Ref\" if ($LASTEXITCODE -eq 0) { \
+             Invoke-Native $Git -C $CloneDir branch --quiet -D '--' $Ref \
+             if ($LASTEXITCODE -ne 0) { Refuse (\"could not delete the \
+             branch $Ref in the new \" + \"clone at $CloneDir. The message \
+             above says why. \" + 'Later provisions skip this step, so \
+             remove the ' + 'clone in the guest, then provision again.') }");
+        assert!(clone < detach && detach < delete);
+    }
+
+    #[test]
     fn account_ps1_installs_the_helpers_where_the_refresh_calls_them() {
         // account.ps1 moves each helper from the staging directory into
         // the bombyx folder under Program Files; refresh-call.ps1 names

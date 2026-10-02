@@ -871,6 +871,50 @@ fn only_discard_forces_the_checkout() {
 }
 
 #[test]
+fn a_fresh_clone_ends_up_detached_like_an_updated_one() {
+    // `git clone --branch` leaves HEAD on a local branch named
+    // after `ref`, and an update detaches it by checking out
+    // `FETCH_HEAD`. The fresh clone detaches too, after either
+    // clone command, and deletes the branch it made, so a later
+    // `git switch` in the guest cannot land on the commit that
+    // branch froze at. The delete runs only when the branch
+    // exists, since a tag `ref` makes none.
+    //
+    // Each failure goes through `refuse`, with a message that
+    // names the step and tells the operator to remove the clone.
+    // A failure leaves the clone on disk, so every later
+    // provision takes the update path, which never deletes the
+    // branch. The needles run through each whole message, so
+    // dropping that instruction fails the test.
+    //
+    // `bootstrap_ps1_detaches_a_fresh_clone_like_an_updated_one`
+    // in `windows.rs` checks the same in `bootstrap.ps1`.
+    let code = bootstrap_code();
+    // Anchored on the `fi` closing the full-or-shallow choice, so
+    // the detach follows both clone commands, not one arm.
+    let detach = code_at(
+        &code,
+        "-- \"$BOMBYX_REPO\" \"$CLONE_DIR\" fi \
+         if ! git -C \"$CLONE_DIR\" checkout --quiet --detach; \
+         then refuse \"could not detach HEAD in the new clone at\" \
+         \"$CLONE_DIR. The message above says why.\" \
+         \"Later provisions skip this step, so remove the\" \
+         \"clone in the guest, then provision again.\" fi",
+    );
+    let delete = code_at(
+        &code,
+        "if git -C \"$CLONE_DIR\" show-ref --verify --quiet \
+         -- \"refs/heads/$BOMBYX_REF\" then \
+         if ! git -C \"$CLONE_DIR\" branch --quiet -D \
+         -- \"$BOMBYX_REF\" then refuse \"could not delete the branch \
+         $BOMBYX_REF in\" \"the new clone at $CLONE_DIR. The message \
+         above\" \"says why. Later provisions skip this step, so\" \
+         \"remove the clone in the guest, then provision\" \"again.\" fi",
+    );
+    assert!(detach < delete);
+}
+
+#[test]
 fn a_clone_holding_work_is_not_deleted_without_discard() {
     // A change of `source.repo` deletes the clone. That loses
     // everything the agent has not pushed, so it waits for
