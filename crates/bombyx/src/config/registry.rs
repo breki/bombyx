@@ -393,7 +393,7 @@ impl Registry {
     ) -> Result<(&ProjectName, &Project), ConfigError> {
         self.projects.get_key_value(name.as_str()).ok_or_else(|| {
             ConfigError::ProjectNotFound {
-                name: name.as_str().to_owned(),
+                name: name.clone(),
                 path: self.path.clone(),
             }
         })
@@ -435,7 +435,7 @@ fn refuse_windows_mismatch(
     if let Some(reason) = user.windows_refusal() {
         return Err(ConfigError::WindowsGuestUser {
             path: path.to_path_buf(),
-            project: key.as_str().to_owned(),
+            project: key.clone(),
             user: user.as_str().to_owned(),
             reason,
         });
@@ -456,7 +456,7 @@ fn refuse_windows_mismatch(
         if let Some(reason) = reason {
             return Err(ConfigError::WindowsGuestEnv {
                 path: path.to_path_buf(),
-                project: key.as_str().to_owned(),
+                project: key.clone(),
                 name: name.as_str().to_owned(),
                 reason,
             });
@@ -468,7 +468,7 @@ fn refuse_windows_mismatch(
     if !script.is_powershell() {
         return Err(ConfigError::WindowsGuestScript {
             path: path.to_path_buf(),
-            project: key.as_str().to_owned(),
+            project: key.clone(),
             script: script.as_str().to_owned(),
         });
     }
@@ -482,7 +482,7 @@ fn refuse_windows_mismatch(
     {
         return Err(ConfigError::WindowsGuestHook {
             path: path.to_path_buf(),
-            project: key.as_str().to_owned(),
+            project: key.clone(),
             hook: hook.as_str().to_owned(),
             reason,
         });
@@ -536,7 +536,7 @@ fn parse(source: &str, path: &Path) -> Result<Registry, ConfigError> {
         {
             return Err(ConfigError::HookWithoutSecrets {
                 path: path.to_path_buf(),
-                project: key.as_str().to_owned(),
+                project: key.clone(),
             });
         }
     }
@@ -572,6 +572,7 @@ mod tests {
 
     use super::*;
     use crate::config::Provider;
+    use crate::name::named;
 
     /// A registry naming one project, `myproject`.
     ///
@@ -623,11 +624,6 @@ mod tests {
     /// Parses `source` as a registry from a plausible path.
     fn parsed(source: &str) -> Registry {
         parse_at(source, "/home/dev/config.toml").unwrap()
-    }
-
-    /// `name` as a checked project name, for a lookup.
-    fn named(name: &str) -> ProjectName {
-        ProjectName::parse(name).expect("the fixture name is legal")
     }
 
     /// The host `name`'s entry names, without the key beside it.
@@ -991,12 +987,12 @@ mod tests {
         let key = ProjectName::parse(name).unwrap();
         let messages = [
             ConfigError::ProjectNotFound {
-                name: name.to_owned(),
+                name: key.clone(),
                 path: PathBuf::from("/home/dev/config.toml"),
             }
             .to_string(),
             ConfigError::RegistryNotFound {
-                name: name.to_owned(),
+                name: key.clone(),
                 place: "/home/dev/config.toml".to_owned(),
             }
             .to_string(),

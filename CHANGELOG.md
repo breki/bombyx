@@ -37,6 +37,11 @@ and this project adheres to
   shallow clone gets the rest of its history on its next provision. Set `history
   = "shallow"` to keep the one-commit clone. Linux and Windows guests both;
   verified on a Linux guest only.
+- **BREAKING:** The library error `config::EnvFileError` is now
+  `config::WorkstationFileError`, since `deploy_key` reads its file through it
+  too, and the `name` field of `ConfigError::ProjectNotFound` and
+  `ConfigError::RegistryNotFound` is a `ProjectName` rather than a `String`. The
+  CLI and its messages are unchanged.
 
 ### Fixed
 

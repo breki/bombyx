@@ -24,9 +24,11 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::env_file::{EnvFileError, read_capped, resolve_file};
 use super::error::FieldError;
 use super::workstation_path;
+use super::workstation_path::{
+    WorkstationFileError, read_capped, resolve_file,
+};
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
 /// A private key file on the workstation, as the operator wrote it.
@@ -84,7 +86,7 @@ pub enum DeployKeyError {
     /// file, including a `~` with no home directory to expand it
     /// against.
     #[error(transparent)]
-    File(#[from] EnvFileError),
+    File(#[from] WorkstationFileError),
 
     /// This machine has no file at the path.
     ///
@@ -145,7 +147,7 @@ impl DeployKeyPath {
         let path = resolve_file(Self::FIELD, &self.0, getenv)?;
         let bytes = match read_capped(Self::FIELD, path.clone()) {
             Ok(bytes) => bytes,
-            Err(EnvFileError::Read { source, .. })
+            Err(WorkstationFileError::Read { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
             {
                 return Err(DeployKeyError::Missing { path });

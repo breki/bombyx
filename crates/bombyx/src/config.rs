@@ -205,14 +205,8 @@ fn test_entry(name: &str, project_host: Option<&str>) -> String {
     test_entry_with(name, &entry_host_key(project_host))
 }
 
-/// `name` as a checked project name, for a test.
-///
-/// Every caller passes a literal the rule accepts, so a panic
-/// here means the fixture is wrong rather than the code.
 #[cfg(test)]
-fn named(name: &str) -> ProjectName {
-    ProjectName::parse(name).expect("the fixture name is legal")
-}
+use crate::name::named;
 
 /// The entry's own `host` line, or nothing when it has none.
 #[cfg(test)]
@@ -258,7 +252,7 @@ pub use deploy_key::{DeployKey, DeployKeyError, DeployKeyPath};
 #[cfg(test)]
 pub(crate) use env::RESERVED_PREFIX;
 pub use env::{EnvName, EnvValue};
-pub use env_file::{EnvFileError, EnvFilePath, Secrets};
+pub use env_file::{EnvFilePath, Secrets};
 
 pub use error::{ConfigError, FieldError};
 pub use guest_user::{GuestUser, WindowsUserRefusal};
@@ -281,6 +275,7 @@ pub use vault::{
     VaultKey, VaultRead,
 };
 pub use vm::{BoxName, CpuMode, Disk, Guest, Hostname, Memory, Provider, Vm};
+pub use workstation_path::WorkstationFileError;
 
 use read::{MAX_CONFIG_BYTES, from_toml, read_optional};
 use repo_token::SecretsOrigin;
@@ -469,7 +464,7 @@ impl Staged {
 pub enum StagedError {
     /// The file `env_file` names could not be read.
     #[error(transparent)]
-    File(#[from] EnvFileError),
+    File(#[from] WorkstationFileError),
 
     /// The secrets were read, from the file or the vault, and the
     /// token could not be taken out of them.
@@ -808,7 +803,7 @@ impl Config {
     ) -> Result<(Self, HostOrigin), ConfigError> {
         let registry = Registry::read(registry)?.ok_or_else(|| {
             ConfigError::RegistryNotFound {
-                name: name.as_str().to_owned(),
+                name: name.clone(),
                 place: registry_place(Some(registry)),
             }
         })?;
@@ -830,7 +825,7 @@ impl Config {
     #[must_use]
     pub fn no_config_directory(name: &ProjectName) -> ConfigError {
         ConfigError::RegistryNotFound {
-            name: name.as_str().to_owned(),
+            name: name.clone(),
             place: registry_place(None),
         }
     }

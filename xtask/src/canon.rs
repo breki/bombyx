@@ -206,11 +206,12 @@ fn blocks(content: &str) -> Vec<Block> {
 /// becomes citable too. Accepting those costs nothing -- a
 /// target nobody names is never looked up -- while missing
 /// one fails a correct pointer.
-fn reference_targets(content: &str) -> BTreeSet<String> {
+fn reference_targets(blocks: &[Block]) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for raw in content.lines() {
-        let line = raw.trim_start();
-        if let Some(rest) = line.strip_prefix('#') {
+    for block in blocks {
+        // `blocks` closes a heading as a block of its own, so
+        // its text is the whole heading line.
+        if let Some(rest) = block.text.strip_prefix('#') {
             let title = rest.trim_start_matches('#').trim();
             // `### 2. Snapshot` is referred to as **Snapshot**.
             let title = title.split_once(". ").map_or(title, |(head, tail)| {
@@ -221,9 +222,8 @@ fn reference_targets(content: &str) -> BTreeSet<String> {
                 }
             });
             out.insert(title.to_string());
+            continue;
         }
-    }
-    for block in blocks(content) {
         // Scanning from a line start rather than from the
         // whole block is what lets a `**` run that wraps
         // still close.
@@ -248,11 +248,11 @@ fn reference_targets(content: &str) -> BTreeSet<String> {
 /// **worked**".
 fn unresolved_xrefs(
     file: &str,
-    content: &str,
+    blocks: &[Block],
     targets: &BTreeSet<String>,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
-    for block in blocks(content) {
+    for block in blocks {
         let mut rest = block.text.as_str();
         let mut base = 0;
         while let Some((at, inner)) = between(rest, "under **", "**") {
@@ -573,9 +573,13 @@ fn collect() -> Result<(Vec<Finding>, usize), String> {
         sources.push((f.clone(), text));
     }
 
+    // Both checks walk the same paragraph blocks, so each
+    // file is split into them once.
+    let parsed: Vec<Vec<Block>> =
+        sources.iter().map(|(_, text)| blocks(text)).collect();
     let mut targets = BTreeSet::new();
-    for (_, text) in &sources {
-        targets.extend(reference_targets(text));
+    for file_blocks in &parsed {
+        targets.extend(reference_targets(file_blocks));
     }
 
     let mut known_ids = BTreeSet::new();
@@ -593,8 +597,8 @@ fn collect() -> Result<(Vec<Finding>, usize), String> {
 
     let exists = |p: &str| root.join(p).exists();
     let mut findings = Vec::new();
-    for (f, text) in &sources {
-        findings.extend(unresolved_xrefs(f, text, &targets));
+    for ((f, text), file_blocks) in sources.iter().zip(&parsed) {
+        findings.extend(unresolved_xrefs(f, file_blocks, &targets));
         findings.extend(missing_paths(f, text, &exists));
         findings.extend(ungranted_git(f, text));
         findings.extend(over_wide(f, text));
@@ -652,7 +656,15 @@ mod tests {
     use super::*;
 
     fn targets(from: &str) -> BTreeSet<String> {
-        reference_targets(from)
+        reference_targets(&blocks(from))
+    }
+
+    fn xrefs(
+        file: &str,
+        content: &str,
+        targets: &BTreeSet<String>,
+    ) -> Vec<Finding> {
+        unresolved_xrefs(file, &blocks(content), targets)
     }
 
     #[test]
@@ -671,11 +683,8 @@ mod tests {
     #[test]
     fn unresolved_xref_is_reported_and_resolved_one_is_not() {
         let t = targets("## Snapshot\n");
-        assert!(
-            unresolved_xrefs("a.md", "see under **Snapshot** ok", &t)
-                .is_empty()
-        );
-        let bad = unresolved_xrefs("a.md", "under **Nowhere** x", &t);
+        assert!(xrefs("a.md", "see under **Snapshot** ok", &t).is_empty());
+        let bad = xrefs("a.md", "under **Nowhere** x", &t);
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].kind, "xref");
     }
@@ -686,8 +695,7 @@ mod tests {
     fn bold_after_other_prepositions_is_not_a_reference() {
         let t = BTreeSet::new();
         assert!(
-            unresolved_xrefs("a.md", "the only one asked what **worked**", &t)
-                .is_empty()
+            xrefs("a.md", "the only one asked what **worked**", &t).is_empty()
         );
     }
 
@@ -741,7 +749,7 @@ mod tests {
     /// rest of a line to the rest of a paragraph.
     #[test]
     fn an_unclosed_bold_does_not_hide_the_next_pointer() {
-        let bad = unresolved_xrefs(
+        let bad = xrefs(
             "a.md",
             "see under **Unclosed and\nalso under **Nope** here\n",
             &BTreeSet::new(),
@@ -765,7 +773,7 @@ mod tests {
     /// reports a pointer nobody wrote.
     #[test]
     fn a_heading_does_not_join_the_paragraph_below_it() {
-        let bad = unresolved_xrefs(
+        let bad = xrefs(
             "a.md",
             "## Rules under **No\nsuch rule** x\n",
             &BTreeSet::new(),
@@ -802,7 +810,7 @@ mod tests {
     /// attributed to its own source line, not the first's.
     #[test]
     fn each_pointer_in_a_joined_paragraph_names_its_own_line() {
-        let bad = unresolved_xrefs(
+        let bad = xrefs(
             "a.md",
             "see under **Nope one** and\nalso under **Nope two** here\n",
             &BTreeSet::new(),
@@ -817,18 +825,10 @@ mod tests {
     fn a_wrapped_xref_is_checked_and_reported_on_its_own_line() {
         let t = targets("## Snapshot\n");
         assert!(
-            unresolved_xrefs(
-                "a.md",
-                "as it says\nunder **Snapshot**, do it\n",
-                &t
-            )
-            .is_empty()
+            xrefs("a.md", "as it says\nunder **Snapshot**, do it\n", &t)
+                .is_empty()
         );
-        let bad = unresolved_xrefs(
-            "a.md",
-            "one\ntwo under **No\nsuch rule** x\n",
-            &t,
-        );
+        let bad = xrefs("a.md", "one\ntwo under **No\nsuch rule** x\n", &t);
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].message, "**No such rule** names no heading");
         assert_eq!(bad[0].line, 2);

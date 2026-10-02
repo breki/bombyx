@@ -17,14 +17,14 @@
 //! here is about quoting.
 
 use std::fmt;
-use std::io::Read;
 use std::path::PathBuf;
 
 use serde::Deserialize;
-use thiserror::Error;
 
 use super::error::FieldError;
-use super::workstation_path;
+use super::workstation_path::{
+    self, WorkstationFileError, read_capped, resolve_file,
+};
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
 
 /// A secrets file on the workstation, as the operator wrote it.
@@ -105,104 +105,6 @@ impl fmt::Debug for Secrets {
     }
 }
 
-/// Largest file [`read_capped`] will read: a secrets file or a
-/// deploy key.
-///
-/// A secrets file holds a handful of `NAME=value` lines and a
-/// private key a few kilobytes, so the limit costs a real one
-/// nothing. What it buys: the path is checked with `metadata` and
-/// opened afterwards, and whoever can write the containing
-/// directory can swap a regular file for something that never ends
-/// between those two calls. The cap bounds what bombyx holds in
-/// memory either way. `super::read::MAX_CONFIG_BYTES` is the same
-/// number for the same reason.
-const MAX_ENV_FILE_BYTES: u64 = 64 * 1024;
-
-/// Why bombyx could not read a file on the workstation that
-/// `env_file` or `deploy_key` names.
-///
-/// Every variant carries the field it was read for, so the one
-/// type serves both.
-///
-/// Separate from [`FieldError`], which belongs to a value's
-/// shape and is raised while the config is being parsed. These
-/// happen later, when the file is opened, and every one of them
-/// names the path bombyx actually tried.
-#[derive(Debug, Error)]
-pub enum EnvFileError {
-    /// The value starts with `~/` and this machine's
-    /// environment names no home directory.
-    ///
-    /// "names no directory" rather than "is not set", because an
-    /// exported-but-empty `HOME` takes this branch too. An
-    /// operator told the variable is unset runs `echo $HOME`,
-    /// sees an empty line, and cannot tell whether bombyx read a
-    /// different environment.
-    #[error(
-        "`{field}` is `{value}`, and neither HOME nor USERPROFILE \
-         names a directory -- both are unset or empty -- so `~` \
-         names nothing"
-    )]
-    NoHome {
-        /// Name of the offending field.
-        field: &'static str,
-        /// The value, as the operator wrote it.
-        value: String,
-    },
-
-    /// The path names something that is not a regular file.
-    ///
-    /// A directory is the reachable case: `check` refuses every
-    /// spelling that reads as one, and a path spelled as a file
-    /// can still be a directory on disk.
-    ///
-    /// It also stands between bombyx and a character device or
-    /// a fifo. Reading `/dev/zero` returns bytes for as long as
-    /// bombyx is willing to hold them, and none of them is a
-    /// secret.
-    #[error("`{field}` names {path}, which is not a regular file")]
-    NotAFile {
-        /// Name of the offending field.
-        field: &'static str,
-        /// The path bombyx tried, after expanding `~`.
-        path: PathBuf,
-    },
-
-    /// The file is larger than `MAX_ENV_FILE_BYTES`.
-    ///
-    /// The limit is in the message because the operator cannot
-    /// otherwise tell how far over the file is, and the number
-    /// is the one thing they can act on.
-    #[error(
-        "`{field}` names {path}, which is larger than the \
-         {limit} byte limit on a file bombyx reads"
-    )]
-    TooLarge {
-        /// Name of the offending field.
-        field: &'static str,
-        /// The path bombyx tried, after expanding `~`.
-        path: PathBuf,
-        /// The limit, in bytes.
-        limit: u64,
-    },
-
-    /// The file could not be opened.
-    ///
-    /// The operating system's own words are left to `source`
-    /// rather than written into this line. The binary prints an
-    /// error together with its causes, so interpolating it here
-    /// would report "No such file or directory" twice.
-    #[error("`{field}` names {path}, which could not be read")]
-    Read {
-        /// Name of the offending field.
-        field: &'static str,
-        /// The path bombyx tried, after expanding `~`.
-        path: PathBuf,
-        /// What the operating system said.
-        source: std::io::Error,
-    },
-}
-
 impl EnvFilePath {
     /// The config key this type reads, and the name every one
     /// of its errors reports against.
@@ -234,9 +136,9 @@ impl EnvFilePath {
     ///
     /// # Errors
     ///
-    /// Returns [`EnvFileError::NoHome`] when the value needs a
+    /// Returns [`WorkstationFileError::NoHome`] when the value needs a
     /// home directory and the environment names none.
-    pub fn resolve<F>(&self, getenv: F) -> Result<PathBuf, EnvFileError>
+    pub fn resolve<F>(&self, getenv: F) -> Result<PathBuf, WorkstationFileError>
     where
         F: Fn(&str) -> Option<String>,
     {
@@ -252,104 +154,19 @@ impl EnvFilePath {
     ///
     /// # Errors
     ///
-    /// Returns [`EnvFileError::NoHome`] when `~` cannot be
-    /// expanded, [`EnvFileError::NotAFile`] when the path names
+    /// Returns [`WorkstationFileError::NoHome`] when `~` cannot be
+    /// expanded, [`WorkstationFileError::NotAFile`] when the path names
     /// something other than a regular file, and
-    /// [`EnvFileError::Read`] when the file is missing or cannot
-    /// be opened, and [`EnvFileError::TooLarge`] when it is
-    /// bigger than the cap this module sets.
-    pub fn read<F>(&self, getenv: F) -> Result<Secrets, EnvFileError>
+    /// [`WorkstationFileError::Read`] when the file is missing or cannot
+    /// be opened, and [`WorkstationFileError::TooLarge`] when it is
+    /// bigger than the cap `super::workstation_path` sets.
+    pub fn read<F>(&self, getenv: F) -> Result<Secrets, WorkstationFileError>
     where
         F: Fn(&str) -> Option<String>,
     {
         let path = self.resolve(getenv)?;
         read_capped(Self::FIELD, path).map(Secrets)
     }
-}
-
-/// Expands a leading `~/` in `value`, the file the config key
-/// `field` names, reporting a missing home as [`EnvFileError`].
-///
-/// Shared with `super::deploy_key`, so the two fields report it
-/// the same way.
-///
-/// # Errors
-///
-/// Returns [`EnvFileError::NoHome`] when the value needs a home
-/// directory and the environment names none.
-pub(super) fn resolve_file<F>(
-    field: &'static str,
-    value: &str,
-    getenv: F,
-) -> Result<PathBuf, EnvFileError>
-where
-    F: Fn(&str) -> Option<String>,
-{
-    workstation_path::resolve_home(field, value, getenv).map_err(|e| {
-        EnvFileError::NoHome {
-            field: e.field,
-            value: e.value,
-        }
-    })
-}
-
-/// Reads the regular file at `path`, which the config key `field`
-/// names, refusing anything larger than `MAX_ENV_FILE_BYTES`.
-///
-/// Shared with `super::deploy_key`, whose file is opened the same
-/// way on the same machine. Every error names `field`, so each
-/// caller's refusal points at its own config line.
-///
-/// # Errors
-///
-/// Returns [`EnvFileError::NotAFile`] when the path names something
-/// other than a regular file, [`EnvFileError::Read`] when the file
-/// is missing or cannot be opened, and [`EnvFileError::TooLarge`]
-/// when it is bigger than the cap.
-pub(super) fn read_capped(
-    field: &'static str,
-    path: PathBuf,
-) -> Result<Vec<u8>, EnvFileError> {
-    let read_error = |source| EnvFileError::Read {
-        field,
-        path: path.clone(),
-        source,
-    };
-
-    // Asked before the read rather than after it. A read of
-    // a fifo or a character device does not return, so a
-    // check made afterwards is one that never runs.
-    //
-    // `metadata` follows a symlink, which is the right
-    // question here: what matters is what bombyx will end
-    // up reading, not how it was named.
-    let meta = std::fs::metadata(&path).map_err(read_error)?;
-    if !meta.is_file() {
-        return Err(EnvFileError::NotAFile { field, path });
-    }
-
-    // One byte past the cap, so a file *at* the limit is
-    // read whole and anything beyond it is detectable
-    // rather than silently truncated into a secrets file
-    // the guest would accept and half-understand.
-    //
-    // `take` rather than a length taken from `meta`: the
-    // path is re-opened here, so the file the read gets is
-    // not provably the file `metadata` answered about.
-    let mut bytes = Vec::new();
-    std::fs::File::open(&path)
-        .map_err(read_error)?
-        .take(MAX_ENV_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(read_error)?;
-    if bytes.len() as u64 > MAX_ENV_FILE_BYTES {
-        return Err(EnvFileError::TooLarge {
-            field,
-            path,
-            limit: MAX_ENV_FILE_BYTES,
-        });
-    }
-    Ok(bytes)
 }
 
 checked_str_newtype!(
@@ -378,6 +195,7 @@ fn check(value: &str) -> Result<(), FieldError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::workstation_path::MAX_FILE_BYTES;
     use std::path::Path;
 
     /// A home directory every test below expands against, so
@@ -546,7 +364,7 @@ mod tests {
         let err = p
             .resolve(|k| (k == "HOME").then(String::new))
             .expect_err("an empty HOME names nothing");
-        assert!(matches!(err, EnvFileError::NoHome { .. }), "{err}");
+        assert!(matches!(err, WorkstationFileError::NoHome { .. }), "{err}");
         assert!(err.to_string().contains("env_file"), "{err}");
     }
 
@@ -597,7 +415,10 @@ mod tests {
         let p = EnvFilePath::parse(&inner.display().to_string())
             .expect("a temp path is absolute");
         let err = p.read(nothing).expect_err("a directory is not a file");
-        assert!(matches!(err, EnvFileError::NotAFile { .. }), "{err}");
+        assert!(
+            matches!(err, WorkstationFileError::NotAFile { .. }),
+            "{err}"
+        );
         assert!(err.to_string().contains("env_file"), "{err}");
     }
 
@@ -609,13 +430,16 @@ mod tests {
         // lines, so the limit costs a real one nothing.
         let dir = tempfile::tempdir().expect("a temp dir");
         let file = dir.path().join("x.env");
-        let over = usize::try_from(MAX_ENV_FILE_BYTES).expect("fits") + 1;
+        let over = usize::try_from(MAX_FILE_BYTES).expect("fits") + 1;
         std::fs::write(&file, vec![b'x'; over]).expect("write");
 
         let p = EnvFilePath::parse(&file.display().to_string())
             .expect("a temp path is absolute");
         let err = p.read(nothing).expect_err("the file is too large");
-        assert!(matches!(err, EnvFileError::TooLarge { .. }), "{err}");
+        assert!(
+            matches!(err, WorkstationFileError::TooLarge { .. }),
+            "{err}"
+        );
         let text = err.to_string();
         assert!(text.contains("env_file"), "{text}");
         assert!(text.contains("65536"), "{text}");
@@ -627,7 +451,7 @@ mod tests {
         // which side of the comparison the cap sits on.
         let dir = tempfile::tempdir().expect("a temp dir");
         let file = dir.path().join("x.env");
-        let at = usize::try_from(MAX_ENV_FILE_BYTES).expect("fits");
+        let at = usize::try_from(MAX_FILE_BYTES).expect("fits");
         std::fs::write(&file, vec![b'x'; at]).expect("write");
 
         let p = EnvFilePath::parse(&file.display().to_string())

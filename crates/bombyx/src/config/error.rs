@@ -52,6 +52,7 @@ use thiserror::Error;
 
 use super::registry::heading;
 use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
+use crate::name::ProjectName;
 
 /// A single configuration value broke its own rule.
 ///
@@ -196,14 +197,14 @@ pub enum ConfigError {
         "no `{}` in {} -- add that table with `{}` and `{}`, \
          and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
          where this project belongs",
-        heading(.name, ""),
+        heading(.name.as_str(), ""),
         .path.display(),
-        heading(.name, ".vm"),
-        heading(.name, ".source")
+        heading(.name.as_str(), ".vm"),
+        heading(.name.as_str(), ".source")
     )]
     ProjectNotFound {
         /// Project name that was looked up.
-        name: String,
+        name: ProjectName,
         /// The registry file that has no table for it.
         path: PathBuf,
     },
@@ -223,11 +224,11 @@ pub enum ConfigError {
     /// down.
     #[error(
         "no registry file -- create {place} with a `{}` table",
-        heading(.name, "")
+        heading(.name.as_str(), "")
     )]
     RegistryNotFound {
         /// Project name that was looked up.
-        name: String,
+        name: ProjectName,
         /// The registry file bombyx would have read.
         place: String,
     },
@@ -281,7 +282,7 @@ pub enum ConfigError {
         /// The registry file holding the project.
         path: PathBuf,
         /// The project whose table pairs them.
-        project: String,
+        project: ProjectName,
     },
 
     /// A project with `guest = "windows"` names a
@@ -305,7 +306,7 @@ pub enum ConfigError {
         /// The registry file holding the project.
         path: PathBuf,
         /// The project naming the hook.
-        project: String,
+        project: ProjectName,
         /// The hook, as the config spells it.
         hook: String,
         /// Why a Windows guest cannot run it.
@@ -330,7 +331,7 @@ pub enum ConfigError {
         /// The registry file holding the project.
         path: PathBuf,
         /// The project naming the script.
-        project: String,
+        project: ProjectName,
         /// The script, as the config spells it.
         script: String,
     },
@@ -352,7 +353,7 @@ pub enum ConfigError {
         /// The registry file holding the project.
         path: PathBuf,
         /// The project naming the account.
-        project: String,
+        project: ProjectName,
         /// The account name, as the config spells it.
         user: String,
         /// Which Windows rule the name breaks.
@@ -378,7 +379,7 @@ pub enum ConfigError {
         /// The registry file holding the project.
         path: PathBuf,
         /// The project naming the variable.
-        project: String,
+        project: ProjectName,
         /// The variable's name, as the config spells it.
         name: String,
         /// Which rule the name breaks.

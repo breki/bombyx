@@ -88,6 +88,12 @@ fn registry(preamble: &str, keys: &str) -> String {
     format!("{preamble}\n[projects.myproject]\n{keys}{tables}")
 }
 
+/// `myproject` as a checked project name, the name every
+/// `registry` fixture declares.
+fn myproject() -> bombyx::name::ProjectName {
+    bombyx::name::ProjectName::parse("myproject").unwrap()
+}
+
 /// A `Config` for `myproject` on `vmhost.invalid`, built the way the
 /// binary builds one.
 ///
@@ -97,11 +103,8 @@ fn registry(preamble: &str, keys: &str) -> String {
 fn load_cfg(dir: &std::path::Path) -> bombyx::config::Config {
     let path = dir.join(USER_CONFIG_FILE);
     std::fs::write(&path, registry("host = \"vmhost.invalid\"\n", "")).unwrap();
-    let (cfg, _) = bombyx::config::Config::load_project(
-        &bombyx::name::ProjectName::parse("myproject").unwrap(),
-        &path,
-    )
-    .unwrap();
+    let (cfg, _) =
+        bombyx::config::Config::load_project(&myproject(), &path).unwrap();
     cfg
 }
 
@@ -264,11 +267,8 @@ fn no_value_from_the_config_reaches_the_printed_plan() {
     // assertion above is about the printing rather than about a
     // fixture that never carried it.
     let path = dir.path().join(CONFIG_HOME).join(USER_CONFIG_FILE);
-    let (cfg, _) = bombyx::config::Config::load_project(
-        &bombyx::name::ProjectName::parse("myproject").unwrap(),
-        &path,
-    )
-    .unwrap();
+    let (cfg, _) =
+        bombyx::config::Config::load_project(&myproject(), &path).unwrap();
     // No `env_file` in this fixture, so nothing is staged and
     // the value under test is an `[env]` entry, which the
     // Vagrantfile carries itself.
@@ -1016,11 +1016,8 @@ fn the_generated_vagrantfile_is_one_vagrant_accepts() {
         ),
     )
     .unwrap();
-    let (cfg, _) = bombyx::config::Config::load_project(
-        &bombyx::name::ProjectName::parse("myproject").unwrap(),
-        &path,
-    )
-    .unwrap();
+    let (cfg, _) =
+        bombyx::config::Config::load_project(&myproject(), &path).unwrap();
     // Every file bombyx generates, not a hand-picked pair: the
     // Vagrantfile's shell provisioner names `account.sh` in its
     // `path:`, and vagrant refuses a path that does not exist.
@@ -1163,11 +1160,8 @@ mod snapshot_guard_states {
             .path()
             .join(CONFIG_HOME)
             .join(USER_CONFIG_FILE.rsplit('/').next().unwrap());
-        let (cfg, _) = Config::load_project(
-            &bombyx::name::ProjectName::parse("myproject").unwrap(),
-            &cfg_path,
-        )
-        .unwrap();
+        let (cfg, _) =
+            Config::load_project(&super::myproject(), &cfg_path).unwrap();
         let cmd = save_snapshot_if_absent(
             &cfg,
             &cfg.remote_project_dir(),

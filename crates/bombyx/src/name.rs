@@ -162,6 +162,15 @@ impl std::borrow::Borrow<str> for ProjectName {
     }
 }
 
+/// `name` as a checked project name, for a test.
+///
+/// Every caller passes a literal the rule accepts, so a panic
+/// here means the fixture is wrong rather than the code.
+#[cfg(test)]
+pub(crate) fn named(name: &str) -> ProjectName {
+    ProjectName::parse(name).expect("the fixture name is legal")
+}
+
 /// A validated name for an ephemeral (`scratch`) VM.
 ///
 /// Holding one is proof that the value passed

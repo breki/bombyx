@@ -68,9 +68,7 @@ cause, and it skips every refresh. `vagrantfile::assert_staged_matches`
 says "an env_file or a vault" where the check is `names_secrets`,
 false for a key-only vault. The generated Vagrantfile calls the key
 "The credential the guest clones a private repository with", while
-"credential" names the git credential file everywhere else. The
-renames `EnvFileError` and `MAX_ENV_FILE_BYTES` for the shared read
-are `aq-2026-09-30-workstation-file-error`.
+"credential" names the git credential file everywhere else.
 
 ### fr-2026-09-29-windows-env-refusal-message-reads-twice
 

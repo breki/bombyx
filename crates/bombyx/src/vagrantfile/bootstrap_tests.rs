@@ -13,16 +13,16 @@
 //! renderer's own tests, and the renderer's tests sit next to
 //! the code they exercise.
 //!
-//! **Three tests in `super::tests` span more than one file**,
-//! and stay there because no one file is the subject on its own:
-//! `the_account_script_reads_every_path_the_vagrantfile_stages`,
-//! `both_guest_scripts_spell_each_credential_path_the_same_way`,
-//! and `the_bootstrap_script_branches_on_the_announcement`. Each
-//! compares a script against a Rust constant or against the other
-//! script, so each catches a rename in *either* file. All three
-//! read the scripts through `super::script_code`, because a
-//! needle taken over the raw text can be satisfied by a script's
-//! own comments.
+//! **The tests that span more than one file live elsewhere**,
+//! because no one file is the subject on its own.
+//! `super::tests::staging_tests` holds the ones that compare the
+//! Vagrantfile and the two guest scripts with one another, and
+//! `the_bootstrap_script_branches_on_the_announcement` in
+//! `super::tests` compares this script against a Rust constant.
+//! Each catches a rename in *either* file. Every one that reads a
+//! script does so through `super::script_code`, because a needle
+//! taken over the raw text can be satisfied by a script's own
+//! comments.
 //!
 //! Two more stay there for different reasons, and it is worth
 //! knowing which is which. In `super::tests`,

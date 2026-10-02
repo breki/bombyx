@@ -255,8 +255,8 @@ does not control, e.g. `/tmp`. The fix is platform-specific
 (`O_NONBLOCK`, `O_NOFOLLOW`). Deferred: the `metadata` check
 already closes the `/dev/zero` case the review was about. The
 size cap this entry also asked for has landed as
-`MAX_ENV_FILE_BYTES`, which bounds what a fifo can feed bombyx
-but does not stop the block.
+`workstation_path::MAX_FILE_BYTES`, which bounds what a fifo can
+feed bombyx but does not stop the block.
 
 ### rt-2026-09-11-exit-rule-has-no-single-home
 
