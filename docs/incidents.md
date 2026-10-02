@@ -10,8 +10,9 @@ rather than retelling it.
 
 Each entry has four fields:
 
-- **What happened**: the mechanism, in two or three sentences.
-- **Source**: a link and its date.
+- **What happened**: the mechanism, in one short paragraph.
+- **Source**: a link and its date. For a CVE, link its record on
+  cve.org.
 - **What bombyx does about it**: the boundary that contains the
   attack, or the open issue or todo that would. If the answer is
   nothing, the entry says so.
@@ -28,12 +29,19 @@ entry links to it. So a gap never lives only in this file.
 ## Docker Sandboxes escapes, September 2026
 
 **What happened.** Docker Sandboxes runs a coding agent in a small
-VM with the project shared in. It kept a live host-guest file
-share (virtio-fs) and a guest-to-host socket relay. Code inside the
-sandbox escaped both by planting symlinks, which gave it read and
-write on host files as the hypervisor user.
+VM with the project shared in. It kept two live channels to the
+host: a file share (virtio-fs, which lets the guest read and write
+a host directory) and a socket relay, which forwards the guest's
+connections to sockets on the host. Code inside the sandbox
+escaped both by planting symlinks that the host side followed.
+That gave it read and write on host files, as the host account
+that runs the sandbox's VM.
 
-**Source.** CVE-2026-77179 and CVE-2026-79994, September 2026.
+**Source.**
+[CVE-2026-77179](https://www.cve.org/CVERecord?id=CVE-2026-77179)
+and
+[CVE-2026-79994](https://www.cve.org/CVERecord?id=CVE-2026-79994),
+September 2026.
 
 **What bombyx does about it.** bombyx runs no host-guest share.
 The guest clones the repository itself, and the generated
@@ -43,47 +51,55 @@ Vagrantfile disables Vagrant's default shared folder
 constraint" explains why nothing outside the guest holds project
 code.
 
-**Where bombyx is exposed.** The mechanism is the host opening a
-path or file whose content the guest controls. Without a share,
-two routes remain:
+**Where bombyx is exposed.** The general mechanism is the host
+acting on content the guest controls. Without a share, two routes
+remain:
 
-- Provisioning output crosses from the guest to the workstation's
-  terminal. `doctor` sanitizes what the VM host prints and `up`
-  does not; issue #80 tracks that.
+- The provisioner's output crosses from the guest to the
+  operator's terminal. Control characters in that output can
+  repaint lines the operator has already read. `up` prints the
+  `secrets_refreshed` hook's output with control characters shown
+  as `?` (`docs/trust-boundary.md`, "The secrets hook runs branch
+  code on every refresh"), but it prints the provisioner's output
+  unfiltered. Issue #80 tracks that.
 - Anything else the VM host reads that the guest can influence.
   Not checked; `host-reads-guest-paths` in `docs/todo.md` tracks
   it.
 
 ## Meta Muse zero-day, September 2026
 
-**What happened.** Muse is a desktop agent for macOS that users
-grant broad access: files, mail, calendar and the microphone. An
-undocumented setting, `endo_voyager_dictation_endpoint`, named the
-server that receives dictation audio, and any unprivileged local
-process could rewrite it. An attacker could point it at a proxy
-that kept the audio and auth tokens and passed traffic on to Meta.
-Prompt injection could then make the trusted agent copy out files.
-The attacker steers the agent instead of shipping malware that
-needs its own access.
+**What happened.** Muse is a desktop agent for macOS, and users
+grant it broad access: files, mail, calendar and the microphone.
+An undocumented setting, `endo_voyager_dictation_endpoint`, named
+the server that receives dictation audio, and any unprivileged
+local process could rewrite it. An attacker could point it at a
+proxy that kept the audio and auth tokens and passed the traffic
+on to Meta. The article also reports a second attack: prompt
+injection that makes the trusted agent copy out documents.
 
 **Source.**
 <https://www.infoq.com/news/2026/09/meta-muse-zeroday/>,
 September 2026.
 
-**What bombyx does about it.** The agent runs in a VM, so steering
-it reaches only what the guest holds, and nothing on the
-workstation. The README's "Why" section makes that case.
+**What bombyx does about it.** The agent runs in a VM, so an
+attacker who steers it reaches only what the guest holds, and
+nothing on the workstation. The README's "Why" section makes that
+case.
 
 **Where bombyx is exposed.** The guest is the agent's own machine,
 so an injected agent can change any setting inside it:
 
 - bombyx writes no API-endpoint or proxy setting into the guest.
-  It writes the git remote and the credential helper into the
-  clone's config, which the agent's account owns, so the agent can
-  point the push credential at any host. That adds nothing beyond
-  reading the credential directly, which the agent can always do
-  (`docs/trust-boundary.md`, "The agent can read the credential").
-  Issue #150 would keep the credential out of the guest.
+  It writes the git remote and a credential helper into the
+  clone's config, and the agent's account owns that config. The
+  helper is `git-credential-store`, which hands the token only to
+  the git host it was stored for. So a rewritten remote does not
+  send the token elsewhere. The agent can read the token file
+  directly, though (`docs/trust-boundary.md`, "The agent can read
+  the credential"). Issue #150 would keep the credential out of
+  the guest.
 - The guest keeps outbound internet access, so it can send what it
-  holds anywhere. Issue #130 would enforce an egress allowlist at
-  the router.
+  holds anywhere. The VM host's firewall (`host-network-isolation`
+  in `docs/todo.md`) blocks the router and the VM host itself, not
+  the internet. Issue #130 would put agent VMs on a VLAN of their
+  own, with an egress allowlist at the router.

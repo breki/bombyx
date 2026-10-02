@@ -148,10 +148,11 @@ A firewall on the host narrows this but does not close it:
   hypervisor the guest executes on, so a hypervisor escape reaches
   it without crossing the bridge.
 
-This is not hypothetical. In September 2026, code inside Docker
-Sandboxes escaped its host-guest file share and wrote to host
-files. bombyx runs no such share. `docs/incidents.md` holds the
-mechanism and what is still exposed here.
+A guest attacking the machine it shares files with is not
+hypothetical. In September 2026, code inside Docker Sandboxes
+escaped its host-guest file share and wrote to host files. bombyx
+runs no such share. `docs/incidents.md` holds the mechanism and
+what is still exposed here.
 
 The resulting `bombyx up` sequence -- bombyx generates the
 Vagrantfile, Vagrant boots a clean VM, a bombyx bootstrap
