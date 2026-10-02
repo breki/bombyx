@@ -102,6 +102,7 @@ cargo xtask check             # type-check all targets, run none
 cargo xtask validate          # every gate, in run order
 cargo xtask test [filter]     # tests only
 cargo xtask test --ignored    # run #[ignore]-tagged tests
+cargo xtask test --verbose [filter]  # raw output: each test that ran
 cargo xtask clippy            # lint only
 cargo xtask doc               # doc build + doc-link check
 cargo xtask coverage          # coverage only (>=90%)
@@ -385,6 +386,13 @@ everything here as well.
   call it and nothing about the paths that do not, and `Config`
   has public fields, so any code can build one by hand and skip
   every check.
+
+  `crates/bombyx/src/newtype.rs` holds three macros that write
+  the boilerplate for such a type: `checked_str_newtype!` writes
+  `as_str`, `Display` and `AsRef<str>`, `checked_str_parse!`
+  writes `parse`, and `checked_str_try_from!` writes
+  `TryFrom<String>`. Use them rather than hand-writing any of
+  the five.
 
   "The rules are generic" is not a reason to leave a value
   primitive. What a type promises is not that its rules are

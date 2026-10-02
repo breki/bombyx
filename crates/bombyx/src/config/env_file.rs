@@ -155,11 +155,12 @@ impl EnvFilePath {
     /// # Errors
     ///
     /// Returns [`WorkstationFileError::NoHome`] when `~` cannot be
-    /// expanded, [`WorkstationFileError::NotAFile`] when the path names
-    /// something other than a regular file, and
-    /// [`WorkstationFileError::Read`] when the file is missing or cannot
-    /// be opened, and [`WorkstationFileError::TooLarge`] when it is
-    /// bigger than the cap `super::workstation_path` sets.
+    /// expanded, [`WorkstationFileError::NotAFile`] when the path
+    /// names something other than a regular file,
+    /// [`WorkstationFileError::Read`] when the file is missing or
+    /// cannot be opened, and [`WorkstationFileError::TooLarge`]
+    /// when it is bigger than the cap `super::workstation_path`
+    /// sets.
     pub fn read<F>(&self, getenv: F) -> Result<Secrets, WorkstationFileError>
     where
         F: Fn(&str) -> Option<String>,

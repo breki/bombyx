@@ -408,8 +408,10 @@ impl Registry {
 /// The name is quoted because it may contain a `.`, which TOML
 /// reads as nesting, so every message calls this one function
 /// rather than spelling the heading itself and risking drift.
-pub(super) fn heading(name: &str, tail: &str) -> String {
-    format!("[projects.{name:?}{tail}]")
+/// It takes a [`ProjectName`] because the parser accepts the
+/// heading only for a name that passed that rule.
+pub(super) fn heading(name: &ProjectName, tail: &str) -> String {
+    format!("[projects.{:?}{tail}]", name.as_str())
 }
 
 /// Refuses what a Windows guest cannot take from `project`.
@@ -436,7 +438,7 @@ fn refuse_windows_mismatch(
         return Err(ConfigError::WindowsGuestUser {
             path: path.to_path_buf(),
             project: key.clone(),
-            user: user.as_str().to_owned(),
+            user: user.clone(),
             reason,
         });
     }
@@ -457,7 +459,7 @@ fn refuse_windows_mismatch(
             return Err(ConfigError::WindowsGuestEnv {
                 path: path.to_path_buf(),
                 project: key.clone(),
-                name: name.as_str().to_owned(),
+                name: name.clone(),
                 reason,
             });
         }
@@ -469,7 +471,7 @@ fn refuse_windows_mismatch(
         return Err(ConfigError::WindowsGuestScript {
             path: path.to_path_buf(),
             project: key.clone(),
-            script: script.as_str().to_owned(),
+            script: script.clone(),
         });
     }
     // The Windows hook runner starts the hook with `powershell
@@ -483,7 +485,7 @@ fn refuse_windows_mismatch(
         return Err(ConfigError::WindowsGuestHook {
             path: path.to_path_buf(),
             project: key.clone(),
-            hook: hook.as_str().to_owned(),
+            hook: hook.clone(),
             reason,
         });
     }

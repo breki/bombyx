@@ -25,9 +25,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use super::error::FieldError;
-use super::workstation_path;
 use super::workstation_path::{
-    WorkstationFileError, read_capped, resolve_file,
+    self, WorkstationFileError, read_capped, resolve_file,
 };
 use crate::newtype::{checked_str_newtype, checked_str_try_from};
 

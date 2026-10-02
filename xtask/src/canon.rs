@@ -566,19 +566,19 @@ fn collect() -> Result<(Vec<Finding>, usize), String> {
     let root = workspace_root();
     let files = canon_files(&root);
 
-    let mut sources: Vec<(String, String)> = Vec::new();
+    // `reference_targets` and `unresolved_xrefs` both walk the
+    // paragraph blocks, so each file is split into them once, as
+    // it is read, and kept beside its path and text.
+    let mut sources: Vec<(String, String, Vec<Block>)> = Vec::new();
     for f in &files {
         let text = std::fs::read_to_string(root.join(f))
             .map_err(|e| format!("cannot read {f}: {e}"))?;
-        sources.push((f.clone(), text));
+        let file_blocks = blocks(&text);
+        sources.push((f.clone(), text, file_blocks));
     }
 
-    // Both checks walk the same paragraph blocks, so each
-    // file is split into them once.
-    let parsed: Vec<Vec<Block>> =
-        sources.iter().map(|(_, text)| blocks(text)).collect();
     let mut targets = BTreeSet::new();
-    for file_blocks in &parsed {
+    for (_, _, file_blocks) in &sources {
         targets.extend(reference_targets(file_blocks));
     }
 
@@ -597,7 +597,7 @@ fn collect() -> Result<(Vec<Finding>, usize), String> {
 
     let exists = |p: &str| root.join(p).exists();
     let mut findings = Vec::new();
-    for ((f, text), file_blocks) in sources.iter().zip(&parsed) {
+    for (f, text, file_blocks) in &sources {
         findings.extend(unresolved_xrefs(f, file_blocks, &targets));
         findings.extend(missing_paths(f, text, &exists));
         findings.extend(ungranted_git(f, text));

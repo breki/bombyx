@@ -2,9 +2,15 @@
 //! on, as opposed to the VM host.
 //!
 //! Three fields name one, `env_file`, `deploy_key` and
-//! `vault.database`, and all three are spelled and opened the same
-//! way. So their rules live here, and each field's module states
-//! only what differs.
+//! `vault.database`. All three follow the same spelling rules and
+//! the same `~` expansion, so those live here, and each field's
+//! module states only what differs.
+//!
+//! `env_file` and `deploy_key` are also read the same way, through
+//! `read_capped`, which refuses a file over `MAX_FILE_BYTES` and
+//! reports every failure as a [`WorkstationFileError`].
+//! `vault.database` is not read here: bombyx hands its path to
+//! another program.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -17,7 +23,10 @@ use super::guards;
 /// A `~/` value with no home directory to expand it against.
 ///
 /// Its own type, rather than a variant of one field's error, so
-/// each field's module can report it in its own terms.
+/// each field's module can report it in its own terms: `vault`
+/// turns it into `VaultError::NoHome`, and `resolve_file` turns it
+/// into `WorkstationFileError::NoHome` for `env_file` and
+/// `deploy_key`.
 #[derive(Debug)]
 pub(super) struct NoHome {
     /// The config key naming the value.
@@ -263,14 +272,16 @@ where
 ///
 /// `super::env_file` and `super::deploy_key` both open their file
 /// through it. Every error names `field`, so each caller's refusal
-/// points at its own config line.
+/// points at its own config line. Its tests drive it through
+/// `EnvFilePath::read`, in `env_file`, which owns the fixtures.
 ///
 /// # Errors
 ///
-/// Returns [`WorkstationFileError::NotAFile`] when the path names something
-/// other than a regular file, [`WorkstationFileError::Read`] when the file
-/// is missing or cannot be opened, and [`WorkstationFileError::TooLarge`]
-/// when it is bigger than the cap.
+/// Returns [`WorkstationFileError::NotAFile`] when the path names
+/// something other than a regular file,
+/// [`WorkstationFileError::Read`] when the file is missing or
+/// cannot be opened, and [`WorkstationFileError::TooLarge`] when
+/// it is bigger than the cap.
 pub(super) fn read_capped(
     field: &'static str,
     path: PathBuf,

@@ -6,6 +6,45 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-02-heading-and-read-error-pointers
+
+**Category:** Comprehension
+
+Two pointers send a reader the wrong way, and each fix touches
+code or a rustdoc link, which the prose stage may not. The doc on
+`config::registry::heading` says "every message calls this one
+function", and `ConfigError::ProjectNotFound`'s doc says "this
+message and the two others" without naming them, yet five
+`ConfigError` messages (`HookWithoutSecrets` and the four
+`WindowsGuest*`) spell `[projects."<name>"...]` by hand. Routing
+them through `heading` or narrowing the claim settles it. Also,
+`DeployKeyPath::read`'s `# Errors` links to
+`EnvFilePath::read`'s list rather than to `WorkstationFileError`,
+which now names both fields, and that list's "`Read` when the
+file is missing" is wrong for a deploy key, whose missing file is
+`DeployKeyError::Missing`. The same list is written out three
+times (`read_capped`, `EnvFilePath::read`, `Config::read_staged`).
+
+### fr-2026-10-02-config-test-prose-predates
+
+**Category:** Comprehension
+
+Found reading files the artisan-backlog change touched, on lines
+it did not. `config/registry.rs` around line 766 points at a test
+`an_illegal_name_cannot_be_built_into_the_argument` in `config.rs`
+that does not exist (the table is
+`name::tests::a_project_name_is_one_path_segment_or_nothing`), and
+says "the old rule ... is now the argument type's". History
+phrasing also sits at `registry.rs` around 691 ("is now a checked
+type"), `remote.rs` around 25 ("an unchanged path") and
+`vagrantfile.rs` around 1846 ("a failure this repo has had
+before"). In `config.rs`, `registry_file_in_a_dir`'s doc says it
+writes what `registry_with` describes, though callers pass other
+text; `registry_with_source_key` lands its key in `[source]` only
+because `required_tables` writes that table last, unsaid; and
+`load_project_tests::load` calls `load_on`, defined about 600
+lines below with no pointer.
+
 ### fr-2026-10-01-provision-help-detached-head
 
 **Category:** Comprehension

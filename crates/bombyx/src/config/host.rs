@@ -324,7 +324,7 @@ impl HostOrigin {
             Self::ProjectEntry(name) => {
                 // `.host` sits outside the brackets, so the
                 // heading and the key are separate here.
-                let table = registry::heading(name.as_str(), "");
+                let table = registry::heading(name, "");
                 format!("{table}.host in {file}")
             }
             Self::UserFile => file.to_owned(),

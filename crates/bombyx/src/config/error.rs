@@ -15,11 +15,10 @@
 //! file.
 //!
 //! The reason for two is that [`RepoUrl`](super::RepoUrl) and
-//! [`ScriptPath`](super::ScriptPath) can be built by anyone, on
-//! a string from anywhere, with no config file in sight. Handing
-//! their callers an error type with a "config file is larger
-//! than 64 KiB" variant would make matching on the result
-//! meaningless.
+//! [`ScriptPath`] can be built by anyone, on a string from
+//! anywhere, with no config file in sight. Handing their callers
+//! an error type with a "config file is larger than 64 KiB"
+//! variant would make matching on the result meaningless.
 //!
 //! **There is no blanket conversion from one to the other**,
 //! and exactly one value converts by hand.
@@ -51,7 +50,10 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::registry::heading;
-use super::{DEFAULT_REMOTE_ROOT, MAX_CONFIG_BYTES};
+use super::{
+    DEFAULT_REMOTE_ROOT, EnvName, GuestUser, HookPath, MAX_CONFIG_BYTES,
+    ScriptPath,
+};
 use crate::name::ProjectName;
 
 /// A single configuration value broke its own rule.
@@ -197,10 +199,10 @@ pub enum ConfigError {
         "no `{}` in {} -- add that table with `{}` and `{}`, \
          and a `remote_root` if `{DEFAULT_REMOTE_ROOT}` is not \
          where this project belongs",
-        heading(.name.as_str(), ""),
+        heading(.name, ""),
         .path.display(),
-        heading(.name.as_str(), ".vm"),
-        heading(.name.as_str(), ".source")
+        heading(.name, ".vm"),
+        heading(.name, ".source")
     )]
     ProjectNotFound {
         /// Project name that was looked up.
@@ -224,7 +226,7 @@ pub enum ConfigError {
     /// down.
     #[error(
         "no registry file -- create {place} with a `{}` table",
-        heading(.name.as_str(), "")
+        heading(.name, "")
     )]
     RegistryNotFound {
         /// Project name that was looked up.
@@ -308,7 +310,7 @@ pub enum ConfigError {
         /// The project naming the hook.
         project: ProjectName,
         /// The hook, as the config spells it.
-        hook: String,
+        hook: HookPath,
         /// Why a Windows guest cannot run it.
         reason: super::WindowsHookRefusal,
     },
@@ -333,7 +335,7 @@ pub enum ConfigError {
         /// The project naming the script.
         project: ProjectName,
         /// The script, as the config spells it.
-        script: String,
+        script: ScriptPath,
     },
 
     /// A project with `guest = "windows"` names a `guest_user`
@@ -355,7 +357,7 @@ pub enum ConfigError {
         /// The project naming the account.
         project: ProjectName,
         /// The account name, as the config spells it.
-        user: String,
+        user: GuestUser,
         /// Which Windows rule the name breaks.
         reason: super::WindowsUserRefusal,
     },
@@ -381,7 +383,7 @@ pub enum ConfigError {
         /// The project naming the variable.
         project: ProjectName,
         /// The variable's name, as the config spells it.
-        name: String,
+        name: EnvName,
         /// Which rule the name breaks.
         reason: &'static str,
     },

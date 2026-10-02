@@ -96,7 +96,9 @@
 //! - `vm` -- the `[vm]` table.
 //! - `workstation_path` -- the rules for a path to a file on the
 //!   workstation, which `env_file`, `deploy_key` and
-//!   `vault.database` share, and the `~` expansion they all use.
+//!   `vault.database` share, and the `~` expansion they all use;
+//!   also the capped read, with its `WorkstationFileError`, that
+//!   `env_file` and `deploy_key` share.
 //!
 //! A new field rule belongs in the module that owns the field.
 //! Put it in `guards` only once a second field needs it.

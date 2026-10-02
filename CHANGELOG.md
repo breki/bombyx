@@ -39,9 +39,15 @@ and this project adheres to
   verified on a Linux guest only.
 - **BREAKING:** The library error `config::EnvFileError` is now
   `config::WorkstationFileError`, since `deploy_key` reads its file through it
-  too, and the `name` field of `ConfigError::ProjectNotFound` and
-  `ConfigError::RegistryNotFound` is a `ProjectName` rather than a `String`. The
-  CLI and its messages are unchanged.
+  too. Seven `ConfigError` variants now hold the checked value rather than a
+  `String`. The CLI and its messages are unchanged.
+  - `ProjectNotFound.name` and `RegistryNotFound.name` are a `ProjectName`.
+  - `project` in `HookWithoutSecrets`, `WindowsGuestHook`, `WindowsGuestScript`,
+    `WindowsGuestUser` and `WindowsGuestEnv` is a `ProjectName`.
+  - `WindowsGuestHook.hook` is a `HookPath`.
+  - `WindowsGuestScript.script` is a `ScriptPath`.
+  - `WindowsGuestUser.user` is a `GuestUser`.
+  - `WindowsGuestEnv.name` is an `EnvName`.
 
 ### Fixed
 

@@ -452,9 +452,10 @@ const BOMBYX_ENV_NAMES: [&str; 15] = [
 ///
 /// Line continuations are joined first, so a command wrapped
 /// across lines is one string here. It lives beside the
-/// production code rather than in either test module because
-/// both of them need it, the same reason [`BOMBYX_ENV_NAMES`]
-/// sits here.
+/// production code rather than in a test module because every
+/// test module that reads a guest script needs it, and a helper
+/// private to one module is out of reach of its siblings. That is
+/// also why [`BOMBYX_ENV_NAMES`] sits here.
 #[cfg(test)]
 fn bootstrap_code() -> String {
     script_code(BOOTSTRAP)
