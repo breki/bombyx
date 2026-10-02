@@ -83,11 +83,13 @@ separate.
      never-shipped behaviour produces exactly the
      spurious major bump it is meant to prevent.
 
-     The check is: `git tag --list` (no tags at all means
-     nothing has ever been released), and when tags do
-     exist, `git log <latest-tag>..HEAD` or the
+     The check is: `git tag --list --sort=-v:refname` (no
+     tags at all means nothing has ever been released), and
+     when tags do exist, `git log <latest-tag>..HEAD` or the
      `[Unreleased]` block -- behaviour introduced since
-     the last release never shipped either.
+     the last release never shipped either. The first line
+     is the latest tag. Without `--sort` the list is
+     alphabetical, so `v0.9.0` sorts after `v0.11.0`.
 
      When it did not ship, *correct the existing
      bullet* instead of adding a new one, and say which
