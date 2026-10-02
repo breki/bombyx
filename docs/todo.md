@@ -477,3 +477,17 @@ can influence. List each read the VM host makes during up, provision, shell,
 reset and destroy, and say for each one whether the guest can change what it
 reads.
 
+### doctor-host-kernel-state
+
+**Summary:** doctor shows the VM host's kernel and any reboot it waits on
+
+docs/incidents.md records CVE-2026-80521, a kernel privilege escalation that
+turns a QEMU escape, which lands as the unprivileged libvirt-qemu user, into
+root on the VM host. Only a kernel update closes it, and nothing in bombyx tells
+the operator what kernel the VM host runs or whether an installed update is
+still waiting on a reboot. A doctor row could print uname -r and warn when
+/var/run/reboot-required exists. That file is Debian and Ubuntu specific, and a
+WSL2 host runs Microsoft's kernel, which Windows updates; decide what the row
+says on each host kind before writing it. The row cannot say whether a kernel is
+vulnerable, only whether it is the newest one installed.
+

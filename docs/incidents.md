@@ -1,10 +1,10 @@
 # Incidents
 
-This file lists real security incidents in AI-agent isolation and
-in agents running with broad access. Each entry says how the
-attack worked, what bombyx does about it, and where bombyx is
-exposed to the same mechanism. Other docs link to an entry here
-rather than retelling it.
+This file lists real security incidents that bear on running
+untrusted code, an AI agent in particular, away from the machines
+it could harm. Each entry says how the attack worked, what bombyx
+does about it, and where bombyx is exposed to the same mechanism.
+Other docs link to an entry here rather than retelling it.
 
 ## How an entry is written
 
@@ -103,3 +103,37 @@ so an injected agent can change any setting inside it:
   in `docs/todo.md`) blocks the router and the VM host itself, not
   the internet. Issue #130 would put agent VMs on a VLAN of their
   own, with an egress allowlist at the router.
+
+## Ubuntu AF_UNIX kernel escape, September 2026
+
+**What happened.** The kernel's garbage collector for AF_UNIX
+sockets races with the code that queues new references to a
+socket, so it can free memory that something still points to.
+Unprivileged code can use that freed memory to become root.
+Docker's and Kubernetes' default seccomp profiles allow AF_UNIX
+sockets, so code in a container can use it to become root on the
+host, because a container shares the host's kernel. The upstream
+fix is in kernels 7.1.10 and 7.2. Ubuntu's tracker lists its 24.04
+and 26.04 kernels as vulnerable with no fix shipped, and a public
+exploit was released on 22 and 23 September 2026.
+
+**Source.**
+[CVE-2026-80521](https://www.cve.org/CVERecord?id=CVE-2026-80521),
+<https://thehackernews.com/2026/09/exploit-released-for-unpatched-ubuntu.html>
+and <https://ubuntu.com/security/CVE-2026-80521>, September 2026.
+
+**What bombyx does about it.** A bombyx guest is a VM with its own
+kernel, so the exploit makes the agent root only inside its own
+guest. The agent already has that through passwordless `sudo`, so
+the exploit gives it nothing new.
+
+**Where bombyx is exposed.** The exploit becomes the second step
+after a hypervisor escape, which `docs/trust-boundary.md` accepts
+as reaching the VM host. QEMU runs as the unprivileged
+`libvirt-qemu` user (measured on a WSL2 VM host and on a local
+host), so an escape alone lands as that user, and this bug turns
+it into root on the VM host. When the VM host is the workstation,
+that root also reaches every secret the workstation holds. Only a
+kernel update closes this, and nothing in bombyx reports the VM
+host's kernel or a pending reboot; `doctor-host-kernel-state` in
+`docs/todo.md` tracks that.
