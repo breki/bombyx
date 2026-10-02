@@ -148,12 +148,10 @@ A firewall on the host narrows this but does not close it:
   hypervisor the guest executes on, so a hypervisor escape reaches
   it without crossing the bridge.
 
-This is not hypothetical. Docker Sandboxes isolates coding agents
-the same way -- a small VM with the project shared in -- and kept
-a host-guest file share and a guest-to-host socket relay. Both
-were escaped from inside the sandbox by planted symlinks in
-September 2026 (CVE-2026-77179, CVE-2026-79994), giving in-sandbox
-code read and write on host files. bombyx runs no such share.
+This is not hypothetical. In September 2026, code inside Docker
+Sandboxes escaped its host-guest file share and wrote to host
+files. bombyx runs no such share. `docs/incidents.md` holds the
+mechanism and what is still exposed here.
 
 The resulting `bombyx up` sequence -- bombyx generates the
 Vagrantfile, Vagrant boots a clean VM, a bombyx bootstrap

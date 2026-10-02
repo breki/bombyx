@@ -30,6 +30,8 @@ your workstation the whole time.
 For what a VM can and cannot protect -- including the one credential
 that has to live inside the guest -- see
 [docs/trust-boundary.md](docs/trust-boundary.md).
+[docs/incidents.md](docs/incidents.md) lists real incidents and,
+for each one, where bombyx is still exposed.
 
 ## How it works
 
