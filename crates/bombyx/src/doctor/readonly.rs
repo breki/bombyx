@@ -43,10 +43,12 @@
 /// for a tool whose purpose is to write", not "doctor leaves the
 /// host byte-identical".
 ///
-/// A blocklist, knowingly. A real allowlist needs a shell parser
-/// to find the command in every segment of a script, and a parser
-/// that is subtly wrong inspires more confidence than this list
-/// while catching less.
+/// A blocklist, knowingly. A real allowlist of commands needs a
+/// shell parser to find the command in every segment of a script,
+/// and a parser that is subtly wrong inspires more confidence than
+/// this list while catching less. The subcommand allowlists below
+/// need no parser: the word scan has already found `systemctl` or
+/// `virsh`, and only the verb after it is judged.
 const MUTATING_COMMANDS: &[&str] = &[
     "mkdir", "rmdir", "rm", "touch", "unzip", "scp", "cp", "mv", "dd", "ln",
     "chmod", "chown", "truncate", "tee", "install", "mkfifo", "mknod", "sed",
@@ -68,6 +70,22 @@ const READ_ONLY_SYSTEMCTL: &[&str] = &[
     "status",
     "show",
     "cat",
+];
+
+/// `virsh` subcommands that only read state.
+///
+/// An allowlist, for the reason [`READ_ONLY_SYSTEMCTL`] gives:
+/// most of `virsh`'s verbs start, destroy, define or edit a
+/// domain or network. The firewall probe reads a network's XML,
+/// so `virsh` cannot sit in [`MUTATING_COMMANDS`] either.
+const READ_ONLY_VIRSH: &[&str] = &[
+    "net-dumpxml",
+    "net-list",
+    "net-info",
+    "list",
+    "dominfo",
+    "domstate",
+    "dumpxml",
 ];
 
 /// `vagrant` subcommands that change something.
@@ -117,9 +135,9 @@ const NOT_A_COMMAND: &[&str] = &[
 ///
 /// Without this the guard stops at the wrapper and never looks
 /// past it, and `sudo mkdir -p "$d"` reads as read-only. That is
-/// worse than a gap: `sudo` in front of `systemctl`, `apt` or
-/// `mkdir` is exactly what a probe author reaches for, so the
-/// blind spot sits precisely where the command list is aimed.
+/// worse than a gap: `sudo` in front of `apt`, `mkdir` or a
+/// `systemctl` verb is exactly what a probe author reaches for, so
+/// the blind spot sits precisely where the command list is aimed.
 const TRANSPARENT_PREFIX: &[&str] = &[
     "sudo", "doas", "env", "command", "nohup", "nice", "ionice", "setsid",
     "stdbuf", "xargs", "timeout",
@@ -336,6 +354,30 @@ fn mutating_systemctl_use(args: &[&str]) -> Option<String> {
     (!READ_ONLY_SYSTEMCTL.contains(sub)).then(|| (*sub).to_owned())
 }
 
+/// The `virsh` subcommand in `args` that is not known to only
+/// read, if any.
+///
+/// The subcommand is the first word that is neither a flag nor
+/// the URI after `-c` or `--connect`. Any other flag that takes a
+/// value leaves that value to be read as the verb, which is
+/// refused: the check fails closed. A bare `virsh` would open its
+/// interactive shell, which a probe never wants, so it is refused
+/// too.
+fn mutating_virsh_use(args: &[&str]) -> Option<String> {
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        if matches!(*word, "-c" | "--connect") {
+            words.next();
+            continue;
+        }
+        if word.starts_with('-') {
+            continue;
+        }
+        return (!READ_ONLY_VIRSH.contains(word)).then(|| (*word).to_owned());
+    }
+    Some("(interactive shell)".to_owned())
+}
+
 /// The first sign in `script` that it would change the host.
 ///
 /// Returns the offending word so a failure names what it objected
@@ -365,6 +407,11 @@ pub fn mutating_token(script: &str) -> Option<String> {
             && let Some(found) = mutating_systemctl_use(args)
         {
             return Some(format!("systemctl {found}"));
+        }
+        if bare == "virsh"
+            && let Some(found) = mutating_virsh_use(args)
+        {
+            return Some(format!("virsh {found}"));
         }
     }
     None
@@ -414,6 +461,14 @@ mod tests {
             ("systemctl enable --now x", "systemctl enable"),
             ("systemctl --quiet stop x", "systemctl stop"),
             ("systemctl daemon-reload", "systemctl daemon-reload"),
+            // virsh likewise: a verb that is not known to read is
+            // refused, and the connection URI is not the verb.
+            ("virsh net-destroy vagrant-libvirt", "virsh net-destroy"),
+            ("virsh -c qemu:///system undefine x", "virsh undefine"),
+            (
+                "sudo virsh --connect qemu:///system destroy x",
+                "virsh destroy",
+            ),
             ("env mkdir -p y", "mkdir"),
             ("command rm -f f", "rm"),
             ("nohup tar cf a.tar .", "tar"),
@@ -467,6 +522,8 @@ mod tests {
             "vagrant status",
             "systemctl is-active --quiet 'agent-vm-firewall.service'",
             "systemctl --quiet is-active x",
+            "virsh -c qemu:///system net-dumpxml \"$n\"",
+            "virsh net-list --all",
         ] {
             assert_eq!(mutating_token(script), None, "{script:?}");
         }

@@ -418,11 +418,15 @@ libvirt project; a Hyper-V project shows a `provider` row and a
 [vm-host-setup.md](vm-host-setup.md) for what to do about each
 failure.
 
-The `host firewall` row fails unless the VM host's firewall from
-[vm-host-firewall.md](vm-host-firewall.md) is active and names the
-bridge your guests use. It runs without root, so it cannot read
-the loaded rules; `sudo agent-vm-firewall status` on the VM host
-does.
+The `host firewall` row reads `skip` while the libvirt network the
+firewall filters does not exist: before the first `bombyx up`
+creates it, and again if vagrant-libvirt removes it as VMs are
+destroyed; [vm-host-firewall.md](vm-host-firewall.md) says when it
+does. While the network exists, the row fails unless the VM
+host's firewall from [vm-host-firewall.md](vm-host-firewall.md) is
+active and names the bridge your guests use. It runs without root,
+so it cannot read the loaded rules; `sudo agent-vm-firewall status`
+on the VM host does.
 
 **Changing `provider` on a project that already has a VM does
 nothing until you destroy it** -- vagrant records the provider it

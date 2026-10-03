@@ -27,6 +27,20 @@ fn refuse_body() -> String {
     super::script_code(&body[..end])
 }
 
+// `text` with the guest-egress loader's heredoc body cut out.
+//
+// The loader is a program of its own that systemd runs, so the
+// lints about account.sh's control flow -- where it exits, what
+// it refuses -- must not read it.
+fn without_loader(text: &str) -> String {
+    let start = text.find("<<'LOADER'").expect("the loader heredoc");
+    let close = "\nLOADER\n";
+    let end = start
+        + text[start..].find(close).expect("the heredoc's end")
+        + close.len();
+    format!("{}{}", &text[..start], &text[end..])
+}
+
 #[test]
 fn the_script_hands_over_through_sudo_with_the_preserve_list() {
     // `sudo` clears the environment by default, so without
@@ -47,8 +61,9 @@ fn the_script_hands_over_through_sudo_with_the_preserve_list() {
 fn every_exit_goes_through_refuse() {
     // `refuse` is what removes the staging directory, so an exit
     // anywhere else would leave the credentials in the login
-    // account's home.
-    let code = account_code();
+    // account's home. The loader's own `exit` leaves the loader,
+    // not this script, so it is not counted.
+    let code = super::script_code(&without_loader(ACCOUNT));
     assert_eq!(
         code.matches("exit").count(),
         1,
@@ -187,7 +202,8 @@ fn root_writes_nothing_into_the_agents_home() {
     assert!(!code.contains(">\"$3\""), "{code}");
 }
 
-// The egress step, as code: from its heading to the hand-over's.
+// The egress step, as code: from its heading to the hand-over's,
+// with the loader cut out, since the loader is not this script.
 fn egress_step() -> String {
     let start = ACCOUNT
         .find("\n# 4. A BACKSTOP EGRESS RULE")
@@ -195,7 +211,7 @@ fn egress_step() -> String {
     let end = ACCOUNT
         .find("\n# 5. THE HAND-OVER")
         .expect("the hand-over follows it");
-    super::script_code(&ACCOUNT[start..end])
+    super::script_code(&without_loader(&ACCOUNT[start..end]))
 }
 
 #[test]
@@ -255,10 +271,11 @@ fn the_egress_rule_loads_before_the_agent_runs() {
 #[test]
 fn the_egress_rule_lets_the_session_loading_it_live() {
     // A provision loads the rule inside Vagrant's SSH session. On
-    // a guest where conntrack is not yet running, that session's
-    // next packet counts as a new connection to the gateway, which
-    // is a blocked address, so without this accept the provision
-    // hangs. Reproduced on a freshly booted guest.
+    // a guest where conntrack is not yet running, the session
+    // predates the tracker, so its next packet counts as a new
+    // connection to the gateway, which is a blocked address, and
+    // without this accept the provision hangs. The comment above
+    // the ruleset in account.sh gives the whole mechanism.
     //
     // nft applies a chain's rules in order, so the accept must sit
     // above `$rules`, where the loader puts the rejects.
@@ -270,4 +287,36 @@ fn the_egress_rule_lets_the_session_loading_it_live() {
         .expect("sshd's replies are accepted in the output chain");
     let rejects = chain.find("$rules").expect("the rejects");
     assert!(accept < rejects, "{chain}");
+}
+
+// The guest-egress loader's own code: its heredoc body, as code.
+fn loader_code() -> String {
+    let start = ACCOUNT.find("<<'LOADER'").expect("the loader heredoc");
+    let body = &ACCOUNT[start..];
+    let body = &body[body.find('\n').expect("a body") + 1..];
+    let end = body.find("\nLOADER\n").expect("the heredoc's end");
+    super::script_code(&body[..end])
+}
+
+#[test]
+fn a_failed_load_shows_the_loaders_own_error() {
+    // The loader runs under systemd, so its stderr goes to the
+    // journal, not to the provision output. The warning branch
+    // prints the unit's journal so the cause reaches the operator.
+    let step = egress_step();
+    assert!(
+        step.contains("journalctl -u bombyx-guest-egress.service"),
+        "{step}"
+    );
+}
+
+#[test]
+fn the_loader_waits_for_a_default_route_and_names_a_missing_ip() {
+    // At boot the unit can start before DHCP has finished. The
+    // loader waits a bounded time for a default route rather than
+    // failing once and never retrying. And a box without `ip` must
+    // say so, not report "no default route".
+    let code = loader_code();
+    assert!(code.contains("command -v ip"), "{code}");
+    assert!(code.contains("sleep 1"), "{code}");
 }

@@ -50,7 +50,8 @@ pub use local::{
     LocalTool, local_tool_finding, local_tools, vault_platform_finding,
 };
 pub use probes::{
-    HostProbe, Verdict, classify, host_findings, host_probes, probe_commands,
+    HostProbe, Reading, Verdict, classify, host_findings, host_probes,
+    probe_commands,
 };
 pub use readonly::mutating_token;
 pub use report::Report;
@@ -72,11 +73,13 @@ pub enum Outcome {
     Pass(String),
     /// The precondition does not hold, with the reason.
     Fail(String),
-    /// Not run. Two reasons produce this, and the string says
-    /// which: a gating probe failed, so the rest would each
-    /// wait on a dead host; or the route makes the question
-    /// meaningless, the way reachability does when the VM host
-    /// is this machine.
+    /// Not run, or run and found not to apply. The string says
+    /// which reason: a gating probe failed, so the rest would each
+    /// wait on a dead host; the route or the provider makes the
+    /// question meaningless, the way reachability does when the VM
+    /// host is this machine; or a verdict read the probe's output
+    /// as `Reading::DoesNotApply`, as the firewall row does while
+    /// the libvirt network is absent.
     Skip(String),
 }
 

@@ -95,8 +95,9 @@ memory which half you are in.
 
 **A regression test must be proven to fail.** Write it, then
 break the guard it covers and confirm `cargo xtask test` goes
-red, then restore and run it green with `--verbose`, which
-shows the test ran. A test that passes whether or not the
+red, then restore and run it green with `--verbose`. A filter
+that matches no test still prints `Test OK`, so only the verbose
+list shows the test ran. A test that passes whether or not the
 behaviour is present is worse than no test: it reports that
 something is checked while nobody is checking it. A test that
 fails whether or not the behaviour is present looks the same in

@@ -41,7 +41,9 @@ you fix them in different places.
 
 This list is short and it rarely changes. It is also exactly
 what `bombyx doctor` checks, so you rarely need to work through
-it by hand.
+it by hand. `doctor` also has a `host firewall` row, which is not
+a requirement here;
+[Checking that it worked](#checking-that-it-worked) explains it.
 
 | Where | Requirement |
 |-------|-------------|
@@ -277,8 +279,9 @@ project from your `config.toml` -- the `<name>` in
 `[projects.<name>]`. Run it from anywhere, since bombyx reads
 nothing out of a project's own directory. It probes every
 precondition in this page's first table plus the Vagrant provider
-plugin, changes nothing on the host, and names each failure
-without offering a remedy — the remedies are here:
+plugin and the host firewall below, changes nothing on the host,
+and names each failure without offering a remedy — the remedies
+are here:
 
 ```console
 $ bombyx doctor <name>
@@ -288,9 +291,18 @@ $ bombyx doctor <name>
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/you (will create /home/you/vms/...
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
-  vmhost  host firewall     ok    active, bridge virbr1; table not read
-all checks passed
+  vmhost  host firewall     skip  network absent; `bombyx up` creates it
+all checks passed, 1 skipped
 ```
+
+The `host firewall` row reads `skip` here, on a host that has
+never run a VM, because the libvirt network the firewall filters
+does not exist until the first `bombyx up` creates it. It skips
+again if vagrant-libvirt later removes that network as VMs are
+destroyed. After that first `up`, set the firewall up as
+[Keeping agent VMs off your home network](#keeping-agent-vms-off-your-home-network)
+describes. While the network exists, the row fails until the
+firewall is in place and names the network's bridge.
 
 The manual equivalents are below, and remain useful when you
 want to see the raw output or are setting up before bombyx is
@@ -375,8 +387,11 @@ symlink into `/usr/local/bin`.
 
 By default an agent VM can reach far more of your network than
 its purpose suggests. Cutting that down with host-level nftables
-rules is its own topic, kept separate because it is optional and
-long: see [vm-host-firewall.md](vm-host-firewall.md).
+rules is its own topic, kept separate because it is long: see
+[vm-host-firewall.md](vm-host-firewall.md). It is optional in the
+sense that bombyx runs without it, but it is the only containment
+a guest has, so while the guests' libvirt network exists,
+`bombyx doctor` fails until it is in place.
 
 ## Configuration for each project
 

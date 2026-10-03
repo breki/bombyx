@@ -622,8 +622,8 @@ fn doctor_dry_run_lists_read_only_probes() {
     //
     // Six because the fixture is a libvirt project. A Hyper-V
     // one sends four, without the provider and firewall probes --
-    // see
-    // `probes::tests::the_libvirt_probe_is_only_sent_for_a_libvirt_project`.
+    // see `probes::tests::the_libvirt_probe_is_only_sent_for_a_libvirt_project`
+    // and `each_provider_gets_each_per_provider_row_exactly_once`.
     assert_eq!(lines.len(), 6, "{lines:?}");
     for l in &lines {
         // Asserted per line rather than "some line has each
