@@ -32,6 +32,7 @@ use bombyx::name::{ProjectName, ScratchName};
 use bombyx::plan::{self, Action, StagedRead, plan};
 use bombyx::remote::{self, CloneUpdate, RemoteCommand, Tty};
 use bombyx::term;
+use bombyx::up::{self, StepResult, UpNote, UpOutcome, UpStep};
 use bombyx::update::{self, asset};
 use clap::{Args, Parser, Subcommand};
 use tempfile::TempDir;
@@ -919,7 +920,15 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 }
 
 /// Runs `up`. On a running VM it only refreshes the secrets; on a
-/// VM that exists but is stopped it boots and then refreshes.
+/// VM that exists but is stopped it boots and then refreshes; on a
+/// VM it creates it boots, lets the provision write the secrets, and
+/// takes the `fresh-install` snapshot.
+///
+/// [`up::up_plan`] decides which steps run and in what order, from
+/// the probed state, and [`up::run_up_steps`] whether a failed step
+/// stops the run, both in the tested library; this function prints
+/// the note and runs the commands. The paragraphs below give the
+/// reasons behind those decisions.
 ///
 /// `up` on a running machine would rewrite the generated files,
 /// stage the project's secrets and take a mislabeled `fresh-install`
@@ -941,9 +950,9 @@ fn execute(commands: &[RemoteCommand], dry_run: bool) -> Result<Ran> {
 /// ([`listing::VmState::is_absent`]) or an unconfirmed state that
 /// might be a first boot. A machine the probe reports as present but
 /// stopped is only being booted, so snapshotting its in-use disk
-/// would mislabel it (`snapshot-precondition-on-halt`). The snapshot
-/// lives here rather than in `plan` for the same reason the running
-/// check does: `plan` cannot see the machine's state.
+/// would mislabel it. The snapshot is decided outside `plan` for the
+/// same reason the running check is: `plan` cannot see the machine's
+/// state.
 ///
 /// The probe is one `vagrant status` round trip, cheap beside a
 /// boot. The "is it running" test is
@@ -967,85 +976,83 @@ fn up_run(
     dry_run: bool,
 ) -> Result<Ran> {
     let boot = plan(&Action::Up, cfg, tty, staged);
-    // Built here rather than in `plan`, and appended below only when
-    // this `up` is creating the machine. `plan` cannot make that call
-    // because it cannot see the machine's state.
+    // Built here rather than in `plan`, because `plan` cannot see the
+    // machine's state, and `up::up_plan` lists it only when this `up`
+    // creates the machine or cannot tell.
     let snapshot =
         remote::save_snapshot_if_absent(cfg, &cfg.remote_project_dir(), tty);
+    let refresh = plan::refresh_secrets(cfg, staged);
+    let after = plan::refresh_after_provisioning(cfg, staged);
+    let has_refresh = !refresh.is_empty();
+    // The one place a step is paired with its commands, so a dry run
+    // prints the commands the real run executes.
+    let (boot, refresh, after, snapshot) = (
+        boot.as_slice(),
+        refresh.as_slice(),
+        after.as_slice(),
+        std::slice::from_ref(&snapshot),
+    );
+    let commands = move |step| match step {
+        UpStep::Boot => boot,
+        UpStep::RefreshSecrets => refresh,
+        UpStep::RefreshAfterProvisioning => after,
+        UpStep::Snapshot => snapshot,
+    };
     if dry_run {
+        // The shape of a first `up`: the probe, then the steps for a
+        // machine not yet created.
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
-        cmds.extend(boot);
-        cmds.extend(plan::refresh_after_provisioning(cfg, staged));
-        cmds.push(snapshot);
+        let first_up =
+            up::up_plan(Some(&listing::VmState::NotCreated), has_refresh);
+        for step in first_up.steps {
+            cmds.extend(commands(step).iter().cloned());
+        }
         return execute(&cmds, true);
     }
-    let state = probe_state(cfg);
-    let refresh = plan::refresh_secrets(cfg, staged);
-    if state.as_ref().is_some_and(listing::VmState::is_running) {
-        if refresh.is_empty() {
-            eprint_lines(&format!(
-                "bombyx: {} is already running; up did nothing\n",
-                cfg.project.as_str()
-            ));
-            return Ok(Ran::Ok);
-        }
-        eprint_lines(&format!(
-            "bombyx: {} is already running; refreshing its secrets\n",
-            cfg.project.as_str()
-        ));
-        return Ok(refreshed(run_refresh(&refresh)));
+    let planned = up::up_plan(probe_state(cfg).as_ref(), has_refresh);
+    let project = cfg.project.as_str();
+    if let Some(note) = planned.note {
+        eprint_lines(&match note {
+            UpNote::AlreadyUp => {
+                format!(
+                    "bombyx: {project} is already running; up did nothing\n"
+                )
+            }
+            UpNote::RefreshingRunning => format!(
+                "bombyx: {project} is already running; refreshing its \
+                 secrets\n"
+            ),
+            UpNote::Unconfirmed => format!(
+                "bombyx: could not confirm whether {project} is running; \
+                 running up anyway\n"
+            ),
+        });
     }
-    // A probe bombyx could not complete -- an unreachable host, a
-    // reply that did not parse -- must not block the boot, but it is
-    // said out loud: the machine might in fact be running, and then
-    // this boot would re-stage its secrets and re-snapshot it, the
-    // harm this command exists to prevent. A positive stopped state
-    // boots without the note.
-    if state.as_ref().is_none_or(listing::VmState::is_unknown) {
-        eprint_lines(&format!(
-            "bombyx: could not confirm whether {} is running; \
-             running up anyway\n",
-            cfg.project.as_str()
-        ));
-    }
-    let booted = execute(&boot, false)?;
-    if !booted.ok() {
-        return Ok(booted);
-    }
-    // After the boot, because the guest must be up to take the
-    // files. A boot that provisioned is followed, when a hook is
-    // configured, by the secrets rewrite carrying the hook, without
-    // the credential; one that did not provision gets the whole
-    // refresh.
-    let after = if listing::refreshes_secrets_after_up(state.as_ref()) {
-        refresh
-    } else {
-        plan::refresh_after_provisioning(cfg, staged)
-    };
-    let refresh_ok = run_refresh(&after);
-    // The refresh runs before the snapshot, so a `reset` returns to
-    // a guest holding the copy the hook made.
-    //
-    // The snapshot is taken only when this `up` creates the
-    // machine, or cannot tell -- never when the probe reports a
-    // present but stopped machine, whose in-use disk the name would
-    // mislabel. The policy is `listing::takes_fresh_snapshot`, in the
-    // tested library because this branch is otherwise uncovered; see
-    // its doc. This guard turns on the machine's state; the
-    // `_if_absent` inside the command is a different test -- it
-    // skips the save when the `fresh-install` name already exists --
-    // so the two do not overlap.
-    //
-    // It is taken even when the refresh failed: a later `up` finds
-    // the machine present and takes no `fresh-install` snapshot, so
-    // skipping it here would leave `reset` with nothing to return to.
-    if listing::takes_fresh_snapshot(state.as_ref()) {
-        let saved = execute(std::slice::from_ref(&snapshot), false)?;
-        if !saved.ok() {
-            return Ok(saved);
-        }
-    }
-    Ok(refreshed(refresh_ok))
+    let outcome = up::run_up_steps(&planned.steps, |step| {
+        let cmds = commands(step);
+        Ok::<_, anyhow::Error>(match step {
+            UpStep::Boot | UpStep::Snapshot => {
+                let ran = execute(cmds, false)?;
+                if ran.ok() {
+                    StepResult::Ok
+                } else {
+                    StepResult::Failed(ran)
+                }
+            }
+            UpStep::RefreshSecrets | UpStep::RefreshAfterProvisioning => {
+                if run_refresh(cmds) {
+                    StepResult::Ok
+                } else {
+                    StepResult::Failed(refreshed(false))
+                }
+            }
+        })
+    })?;
+    Ok(match outcome {
+        UpOutcome::Ok => Ran::Ok,
+        UpOutcome::Stopped(ran) => ran,
+        UpOutcome::RefreshFailed => refreshed(false),
+    })
 }
 
 /// Runs `provision`, then the project's `secrets_refreshed` hook

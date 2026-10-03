@@ -6,6 +6,30 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-03-snapshot-rule-stated-six-times
+
+**Category:** Duplicated rule deferred for its own commit
+
+The rule for `up`'s `fresh-install` snapshot -- a machine `up`
+creates, or one whose state it cannot tell -- is written out in
+`up_run`'s doc in `main.rs`, `up::up_plan`'s doc, `takes_fresh_snapshot`'s
+doc in `listing.rs`, `VmState::is_absent`'s doc, and two comments
+in `plan.rs`. The review on `refactor/up-steps-in-library` made
+every copy agree on the unknown case; the repair is one statement,
+on `takes_fresh_snapshot`, with the others naming it. A
+consolidation is its own commit per `/review`.
+
+### fr-2026-10-03-up-run-doc-repeats-up-plan
+
+**Category:** Doc length
+
+`up_run`'s doc in `main.rs` runs to about 48 lines, and most of
+it repeats reasoning that now lives with `up::up_plan`,
+`up::run_up_steps` and `listing::takes_fresh_snapshot`. Keeping the
+summary, the pointer to `up.rs`, what `up_run` itself does and the
+dry-run paragraph would cut about 25 lines. It removes rustdoc
+links, so the prose stage of that review could not make the cut.
+
 ### fr-2026-10-03-provision-advice-does-not-say-whose
 
 **Category:** Program output
