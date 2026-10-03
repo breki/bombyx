@@ -310,7 +310,9 @@ delete the entry or annotate it "superseded by ...". Without
 that, the backlog fills with items somebody already fixed, and
 the alarm below stops meaning anything. When ten or more sit
 open in one backlog, say so: the backlog has become the
-problem.
+problem. Before fixing a logged entry, reproduce its failing
+input against the current tree: a later change may have closed
+part of it, and the fix then shrinks.
 
 ## Stage 1 -- `artisan`, once
 
