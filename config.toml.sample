@@ -214,9 +214,11 @@ memory = "8GB"
 # vagrant's SSH communicator for Windows, with a box's remote
 # desktop forward switched off if it has one. bombyx creates the
 # agent's account as an administrator, installs git, clones the
-# project and runs `script`, which must be a `.ps1` file. On
-# Windows, `guest_user` is at most 20 characters and names none of
-# the box's built-in accounts, and its `[env]` names are compared
+# project and runs `script`, which must be a `.ps1` file with no `:`
+# in its path. On Windows, `guest_user` is at most 20 characters and
+# names none of the box's built-in accounts or groups, and neither
+# `guest_user` nor the project is a name Windows reserves for a
+# device, such as `con` or `com1`. The `[env]` names are compared
 # without regard to case (see the `[env]` table below). A
 # `deploy_key`, an `env_file` and a `repo_token` are placed in a
 # Windows guest when it is provisioned, and `up` and `shell` refresh

@@ -70,6 +70,17 @@ and this project adheres to
   `doctor::Reading` (`Holds`, `HoldsAs`, `Fails`, `DoesNotApply`) instead of
   `Result<(), String>`, so a verdict can report that a check does not apply and
   name its pass line. The CLI is unaffected (#93).
+- A Windows project is refused when the config is read, rather than failing in
+  the guest after the boot, when `guest_user` names a built-in group
+  (`administrators`, `users`, `guests`, `replicator`, `iis_iusrs`) or a device
+  (`con`, `prn`, `aux`, `nul`, `com0` to `com9`, `lpt0` to `lpt9`), when the
+  project is named after a device, or when `script` holds a `:`. The Windows
+  guest scripts also refuse a script or `secrets_refreshed` hook named only
+  `.ps1`.
+- **BREAKING:** The library error `ConfigError::WindowsGuestScript` has a new
+  `reason` field, a `WindowsScriptRefusal`, and `ConfigError` has a new
+  `WindowsGuestProject` variant, and `WindowsUserRefusal` has a new `DeviceName`
+  variant. The CLI is unaffected.
 
 ### Fixed
 
@@ -79,6 +90,16 @@ and this project adheres to
   behind a local branch named after `ref` that no provision moves. A guest that
   has been re-provisioned and one that has not now look the same in
   `git status` (#163).
+- When a Linux guest's fresh clone fails -- on the first `up`, or on a provision
+  that re-clones after a change of `source.repo` -- provisioning now stops with
+  a bombyx message and removes the uploaded deploy key, secrets file and git
+  credential from the guest, as a Windows guest already did. They were left in
+  place.
+- The Windows box build reports an answer file that Windows lets it read but not
+  delete, and leaves it, instead of failing after the update rounds. The file
+  names the install's old Administrator password, which the build has already
+  replaced, and vagrant's well-known one, which sshd refuses for password
+  logins.
 
 ### Removed
 

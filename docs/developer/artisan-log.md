@@ -4,6 +4,18 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-10-03-windows-env-refusal-is-a-string
+
+**Category:** Type Safety
+
+`ConfigError::WindowsGuestEnv` carries its reason as a
+`&'static str`, built in `refuse_windows_mismatch` in
+`config/registry.rs`, while the other Windows refusals carry an
+enum: `WindowsUserRefusal`, `WindowsHookRefusal` and
+`WindowsScriptRefusal`. A `WindowsEnvRefusal` enum would let a
+caller match on the reason. Raised as AQ-4 in the #175 review,
+outside that diff.
+
 ### aq-2026-10-02-hand-written-parse
 
 **Category:** Duplication

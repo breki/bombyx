@@ -416,13 +416,14 @@ pub(super) fn heading(name: &ProjectName, tail: &str) -> String {
 
 /// Refuses what a Windows guest cannot take from `project`.
 ///
-/// Four rules that only `[vm]`'s `guest = "windows"` switches on,
+/// Five rules that only `[vm]`'s `guest = "windows"` switches on,
 /// each spanning more than one table, so they run here rather than
 /// in a newtype.
 ///
 /// # Errors
 ///
-/// Returns [`ConfigError::WindowsGuestUser`],
+/// Returns [`ConfigError::WindowsGuestProject`],
+/// [`ConfigError::WindowsGuestUser`],
 /// [`ConfigError::WindowsGuestEnv`],
 /// [`ConfigError::WindowsGuestScript`] or
 /// [`ConfigError::WindowsGuestHook`], the first that applies.
@@ -431,6 +432,14 @@ fn refuse_windows_mismatch(
     project: &Project,
     path: &Path,
 ) -> Result<(), ConfigError> {
+    // The clone folder is named after the project, and Windows
+    // cannot create a folder named after a device.
+    if super::guards::is_windows_device_name(key.as_str()) {
+        return Err(ConfigError::WindowsGuestProject {
+            path: path.to_path_buf(),
+            project: key.clone(),
+        });
+    }
     // A name Windows cannot hold would fail only in the guest, after
     // the boot.
     let user = &project.vm.guest_user;
@@ -465,13 +474,15 @@ fn refuse_windows_mismatch(
         }
     }
     // bootstrap.ps1 runs the script with `powershell -File`, which
-    // runs a `.ps1` file and nothing else.
+    // runs a `.ps1` file and nothing else, and Windows reads a `:` in
+    // the path as a drive or a stream.
     let script = &project.source.script;
-    if !script.is_powershell() {
+    if let Some(reason) = script.windows_refusal() {
         return Err(ConfigError::WindowsGuestScript {
             path: path.to_path_buf(),
             project: key.clone(),
             script: script.clone(),
+            reason,
         });
     }
     // The Windows hook runner starts the hook with `powershell

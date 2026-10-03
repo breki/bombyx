@@ -211,10 +211,15 @@ try {
     Unregister-ScheduledTask -TaskName 'bombyx-build' -Confirm:$false
     # This script too: PowerShell read the whole file before it ran.
     Remove-Item -LiteralPath $RoundFile, $PSCommandPath -Force
-    # The answer files setup cached from the install hold the install's
-    # Administrator password, stale since the reset above. They are
-    # removed so no file in the box names it, under 'Stop' like every
-    # step that is not clean-up for size.
+    # The answer files Windows Setup cached from the install hold the
+    # install's Administrator password, stale since the reset above,
+    # and vagrant's well-known one. They are removed so no file in the
+    # box names them.
+    # A file Windows lets this read but not delete is reported and
+    # left, rather than failing the build after its update rounds.
+    # That is safe because the Administrator password opens nothing
+    # now, and sshd refuses password logins, so vagrant's opens nothing
+    # over SSH either. A file this cannot read is skipped unreported.
     Get-ChildItem -Path 'C:\Windows\Panther' -Recurse -Include '*.xml' -File `
             -ErrorAction SilentlyContinue |
         Where-Object {
@@ -222,8 +227,15 @@ try {
                 -Quiet -ErrorAction SilentlyContinue
         } |
         ForEach-Object {
-            Say "removing $($_.FullName)"
-            Remove-Item -LiteralPath $_.FullName -Force
+            $file = $_.FullName
+            Say "removing $file"
+            try {
+                Remove-Item -LiteralPath $file -Force
+            } catch {
+                Say ("could not remove $file, which names the stale " +
+                    "Administrator password and vagrant's well-known " +
+                    "one: $($_.Exception.Message)")
+            }
         }
     # Clean-up for size: superseded update files go, and freed blocks
     # are handed back to the disk image, which build.sh then copies

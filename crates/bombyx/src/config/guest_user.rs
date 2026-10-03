@@ -33,17 +33,26 @@ const REFUSED_GUEST_USERS: [&str; 2] = ["root", "vagrant"];
 /// The longest local account name Windows accepts.
 const MAX_WINDOWS_GUEST_USER_LEN: usize = 20;
 
-/// The accounts a Windows guest is born with, lower-cased as a
-/// [`GuestUser`] must be.
+/// The accounts and groups a Windows guest is born with,
+/// lower-cased as a [`GuestUser`] must be.
 ///
-/// Taking one would hand the agent an account the box already
+/// Taking an account would hand the agent one the box already
 /// uses, which is what `REFUSED_GUEST_USERS` keeps it from on
-/// every guest.
-const WINDOWS_BUILT_IN_USERS: [&str; 4] = [
+/// every guest. Windows keeps groups and accounts in one
+/// namespace, so a group's name cannot be an account either. The
+/// groups are those from Windows' built-in set whose names a
+/// [`GuestUser`] can spell, since most of the others hold a space.
+/// Nobody has listed the box's own groups to check the set.
+const WINDOWS_BUILT_IN_NAMES: [&str; 9] = [
     "administrator",
     "guest",
     "defaultaccount",
     "wdagutilityaccount",
+    "administrators",
+    "users",
+    "guests",
+    "replicator",
+    "iis_iusrs",
 ];
 
 /// A validated guest account name.
@@ -101,8 +110,11 @@ checked_str_try_from!(
 pub enum WindowsUserRefusal {
     /// Longer than Windows allows a local account name.
     TooLong,
-    /// One of the accounts a Windows guest is born with.
+    /// One of the accounts or groups a Windows guest is born with.
     BuiltIn,
+    /// A name Windows reserves for a device, which cannot be the
+    /// account's profile folder.
+    DeviceName,
 }
 
 impl std::fmt::Display for WindowsUserRefusal {
@@ -112,9 +124,13 @@ impl std::fmt::Display for WindowsUserRefusal {
                 f,
                 "must be at most {MAX_WINDOWS_GUEST_USER_LEN} characters"
             ),
-            Self::BuiltIn => {
-                f.write_str("must not name one of the box's built-in accounts")
-            }
+            Self::BuiltIn => f.write_str(
+                "must not name one of the box's built-in accounts or groups",
+            ),
+            Self::DeviceName => f.write_str(
+                "must not be a name Windows reserves for a device, such as \
+                 con or com1, because it names the account's profile folder",
+            ),
         }
     }
 }
@@ -136,8 +152,10 @@ impl GuestUser {
     pub(crate) fn windows_refusal(&self) -> Option<WindowsUserRefusal> {
         if self.0.len() > MAX_WINDOWS_GUEST_USER_LEN {
             Some(WindowsUserRefusal::TooLong)
-        } else if WINDOWS_BUILT_IN_USERS.contains(&self.0.as_str()) {
+        } else if WINDOWS_BUILT_IN_NAMES.contains(&self.0.as_str()) {
             Some(WindowsUserRefusal::BuiltIn)
+        } else if super::guards::is_windows_device_name(&self.0) {
+            Some(WindowsUserRefusal::DeviceName)
         } else {
             None
         }

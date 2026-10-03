@@ -315,18 +315,16 @@ pub enum ConfigError {
         reason: super::WindowsHookRefusal,
     },
 
-    /// A project with `guest = "windows"` names a `script` that is
-    /// not a `.ps1` file.
+    /// A project with `guest = "windows"` names a `script` that a
+    /// Windows guest cannot run: not a `.ps1` file, or holding a `:`.
     ///
-    /// The Windows bootstrap script runs the project's script with
-    /// `powershell -File`, which refuses any other file, so the VM
-    /// would boot and its provisioning then fail. A rule spanning
-    /// `[vm]` and `[source]`, checked in the registry's `parse`.
+    /// The guest would boot and its provisioning then fail. A rule
+    /// spanning `[vm]` and `[source]`, checked in the registry's
+    /// `parse`.
     #[error(
         "invalid config in {}: project \"{project}\" sets script = \
          \"{script}\", but [projects.\"{project}\".vm] sets guest = \
-         \"windows\", and a Windows guest runs the script with \
-         PowerShell, which needs a .ps1 file",
+         \"windows\", and {reason}",
         .path.display()
     )]
     WindowsGuestScript {
@@ -336,11 +334,35 @@ pub enum ConfigError {
         project: ProjectName,
         /// The script, as the config spells it.
         script: ScriptPath,
+        /// Why a Windows guest cannot run it.
+        reason: super::WindowsScriptRefusal,
+    },
+
+    /// A project with `guest = "windows"` is named after a device
+    /// Windows reserves, such as `con` or `com1`.
+    ///
+    /// The guest clones into a folder named after the project, and
+    /// Windows cannot create one with that name, so provisioning
+    /// would fail after the boot. Checked in the registry's `parse`,
+    /// because only `[vm]`'s `guest` switches it on.
+    #[error(
+        "invalid config in {}: [projects.\"{project}\".vm] sets guest = \
+         \"windows\", but a Windows guest clones into a folder named \
+         after the project, and Windows reserves \"{project}\" for a \
+         device; rename the project",
+        .path.display()
+    )]
+    WindowsGuestProject {
+        /// The registry file holding the project.
+        path: PathBuf,
+        /// The project, named after a device.
+        project: ProjectName,
     },
 
     /// A project with `guest = "windows"` names a `guest_user`
     /// that a Windows guest cannot hold: longer than Windows allows
-    /// a local account name, or one of the box's built-in accounts.
+    /// a local account name, one of the box's built-in accounts or
+    /// groups, or a name Windows reserves for a device.
     ///
     /// A rule on `guest_user` that only `[vm]`'s `guest` switches
     /// on, so it runs in the registry's `parse`, after

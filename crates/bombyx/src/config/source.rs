@@ -550,11 +550,52 @@ checked_str_try_from!(
 );
 
 impl ScriptPath {
-    /// Whether the path names a `.ps1` file, the only kind a
-    /// Windows guest runs; `guards::is_powershell_file` holds the rule.
+    /// Why a Windows guest cannot run this script, or `None` when it
+    /// can.
+    ///
+    /// A method rather than a rule in [`ScriptPath::parse`], because
+    /// only a Windows guest has these rules and the path is read
+    /// before the config says which guest it is for; the registry's
+    /// `parse` asks once `[vm]`'s `guest` is known.
     #[must_use]
-    pub(crate) fn is_powershell(&self) -> bool {
-        guards::is_powershell_file(&self.0)
+    pub(crate) fn windows_refusal(&self) -> Option<WindowsScriptRefusal> {
+        if !guards::is_powershell_file(&self.0) {
+            Some(WindowsScriptRefusal::NotPowerShell)
+        } else if self.0.contains(':') {
+            Some(WindowsScriptRefusal::Colon)
+        } else {
+            None
+        }
+    }
+}
+
+/// Which Windows rule a [`ScriptPath`] breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsScriptRefusal {
+    /// Not a `.ps1` file, the only kind `powershell -File` runs.
+    NotPowerShell,
+    /// Holds a `:`, which Windows reads as a drive (`C:x.ps1`) or an
+    /// NTFS alternate data stream (`setup.ps1:x`, a second, hidden
+    /// content attached to `setup.ps1`), so the path does not name a
+    /// file in the clone. `check_inside_clone` cannot see either. A
+    /// `\` never gets that far: `guards::check_renderable` refuses it
+    /// in any `script`, because the value is written into a Ruby
+    /// string in the Vagrantfile.
+    Colon,
+}
+
+impl std::fmt::Display for WindowsScriptRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NotPowerShell => {
+                "a Windows guest runs the script with PowerShell, which \
+                 needs a .ps1 file"
+            }
+            Self::Colon => {
+                "a Windows guest reads a `:` in a path as a drive or a \
+                 file stream, so the script must not hold one"
+            }
+        })
     }
 }
 

@@ -226,12 +226,20 @@ try {
     if ($User -cnotmatch '^[a-z_][a-z0-9_-]{0,19}$') {
         Refuse "guest_user (`"$User`") is not an account name bombyx creates."
     }
+    # Groups share one namespace with accounts, so a group's name
+    # cannot be an account either.
     $builtIn = @('administrator', 'guest', 'defaultaccount',
-        'wdagutilityaccount', 'root', 'vagrant')
+        'wdagutilityaccount', 'administrators', 'users', 'guests',
+        'replicator', 'iis_iusrs', 'root', 'vagrant')
     if ($builtIn -contains $User -or $User -eq $env:USERNAME) {
-        Refuse ("guest_user (`"$User`") is a built-in account or the " +
-            'account Vagrant logs in as. The agent needs an account ' +
-            'of its own.')
+        Refuse ("guest_user (`"$User`") is a built-in account or group, " +
+            'or the account Vagrant logs in as. The agent needs an ' +
+            'account of its own.')
+    }
+    # A device name cannot be the account's profile folder.
+    if ($User -match '^(con|prn|aux|nul|com[0-9]|lpt[0-9])$') {
+        Refuse ("guest_user (`"$User`") is a name Windows reserves " +
+            'for a device.')
     }
 
     $Preserve = Decode 'BOMBYX_PRESERVE_ENV'
