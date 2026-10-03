@@ -20,14 +20,12 @@ const TAG_WIDTH: usize = 4;
 /// Least detail a line will show, whatever the column widths.
 ///
 /// The budget is `LINE_WIDTH` minus the prefix, and the prefix
-/// grows with the host name, which `Config` does not bound. A
-/// 49-character host left three characters of detail and a
-/// 52-character one left none, so `FAIL` printed with no reason
-/// at all -- a report that still looked complete and aligned
-/// while having discarded the only actionable content in it.
-/// Past this floor the line is allowed to run over 80 columns
-/// instead: a wrapped reason can be read, a deleted one cannot.
-const MIN_DETAIL: usize = 24;
+/// grows with the host name, which `Config` does not bound. So
+/// without a floor a long host name squeezes the reason to
+/// nothing, and a `FAIL` row prints with no reason. Past this
+/// floor the line runs over 80 columns instead: a wrapped reason
+/// can be read, a deleted one cannot.
+pub(super) const MIN_DETAIL: usize = 24;
 
 /// Scope label for a check that runs on this workstation.
 ///

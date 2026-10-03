@@ -47,8 +47,8 @@ if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
 }
 if ($null -ne $missing) {
     [Console]::Error.WriteLine(
-        "bombyx: this guest $missing; run bombyx provision, or " +
-        'bombyx destroy then bombyx up if provisioning refuses. ' +
+        "bombyx: this guest $missing; run provision for this " +
+        'project, or destroy, then up, if provisioning refuses. ' +
         "Opening a shell as $env:USERNAME instead.")
     & powershell.exe -NoLogo
     exit $LASTEXITCODE
@@ -79,7 +79,7 @@ $code = $LASTEXITCODE
 if ($code -eq 255) {
     [Console]::Error.WriteLine(
         "bombyx: ssh exited 255. If that was the login to " +
-        "$User@localhost failing, run bombyx provision, which sets up " +
-        'the hand-over key again.')
+        "$User@localhost failing, run provision for this project, " +
+        'which sets up the hand-over key again.')
 }
 exit $code

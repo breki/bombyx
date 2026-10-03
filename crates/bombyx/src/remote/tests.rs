@@ -214,8 +214,8 @@ fn an_interactive_shell_starts_in_the_project_clone() {
                      sh 'myproject'; \
                      else echo \"bombyx: this guest has no account \
                      'agent', so it was never provisioned for it; \
-                     run bombyx provision, or bombyx destroy then \
-                     bombyx up if provisioning refuses. Opening a \
+                     run provision for this project, or destroy, \
+                     then up, if provisioning refuses. Opening a \
                      shell as $(id -un) instead.\" >&2; \
                      exec \"$SHELL\" -l; fi";
     let c = shell_into_vm(&cfg());
@@ -376,7 +376,7 @@ fn a_refresh_writes_the_file_as_the_agent_in_its_home() {
              then exec sudo -u 'agent' -H -- sh -c {} sh '.bombyx-env'; \
              else echo \"bombyx: this guest has no account \
              'agent', so it was never provisioned for it; \
-             run bombyx provision.\" >&2; exit 1; fi",
+             run provision for this project.\" >&2; exit 1; fi",
         shell_quote(REFRESH_SCRIPT)
     );
     let c = refresh_in_guest(&cfg(), GuestHomeFile::Secrets, b"K=v\n");
@@ -855,7 +855,7 @@ fn the_hook_travels_in_the_same_guest_command_as_the_write() {
              'myproject' '.bombyx/refresh-env.sh' '{HOOK_TIMEOUT_SECS}'; \
              else echo \"bombyx: this guest has no account \
              'agent', so it was never provisioned for it; \
-             run bombyx provision.\" >&2; exit 1; fi",
+             run provision for this project.\" >&2; exit 1; fi",
         shell_quote(REFRESH_THEN_HOOK_SCRIPT)
     );
     assert_eq!(

@@ -330,7 +330,8 @@ try {
     if ($CloneUpdate -cnotin @('checkout', 'discard', 'keep')) {
         Refuse ("BOMBYX_CLONE_UPDATE is `"$CloneUpdate`", which this " +
             'script does not know. The shell that ran vagrant on the VM ' +
-            'host set it; unset it there, or run bombyx provision.')
+            'host set it; unset it there, or run provision for this ' +
+            'project.')
     }
     # How much of the repository the clone holds, from
     # [source].history; bootstrap.sh says why each part is there.
@@ -341,8 +342,8 @@ try {
     if ($History -cnotin @('full', 'shallow')) {
         Refuse ("BOMBYX_HISTORY is `"$History`", which this script does " +
             'not know. bombyx refuses such a value in the config, so the ' +
-            'Vagrantfile on the VM host was edited by hand; run bombyx ' +
-            'provision to rewrite it.')
+            'Vagrantfile on the VM host was edited by hand; run ' +
+            'provision for this project to rewrite it.')
     }
 
     if (Test-Path -LiteralPath (Join-Path $CloneDir '.git') -PathType Container) {
@@ -361,7 +362,8 @@ try {
                 Refuse ("this VM holds a clone of $origin with uncommitted " +
                     "work in it, and the config now asks for $Repo, so the " +
                     'clone would be deleted. Push the work from the guest, ' +
-                    "or run bombyx provision --discard to delete it: $CloneDir")
+                    'or run provision with --discard for this project ' +
+                    "to delete it: $CloneDir")
             }
             [Console]::Error.WriteLine(
                 "bombyx: this VM holds a clone of $origin but " +
@@ -449,8 +451,9 @@ try {
                     Refuse ('did not update the clone. The message ' +
                         'above says why. When it lists files, they hold ' +
                         "the agent's work: push or stash it in the guest, " +
-                        'or run bombyx provision --discard to overwrite ' +
-                        'it. When something belongs to another user, ' +
+                        'or run provision with --discard for this ' +
+                        'project to overwrite it. When something belongs ' +
+                        'to another user, ' +
                         "clear it in the guest: $CloneDir")
                 }
             }

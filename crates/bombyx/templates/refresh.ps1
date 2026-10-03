@@ -50,7 +50,7 @@ function Fail([string] $Why, [int] $Code) {
 if ($Interface -ne $Supported) {
     Fail ("this guest's refresh.ps1 takes call $Supported and bombyx " +
         "sent call $Interface, so another version of bombyx provisioned " +
-        'it; run bombyx provision.') 1
+        'it; run provision for this project.') 1
 }
 
 # Gives `sid`, SYSTEM and the administrators full control of `path`
@@ -71,7 +71,7 @@ function Protect([string] $Path, [string] $Sid) {
 $account = Get-LocalUser -Name $User -ErrorAction SilentlyContinue
 if ($null -eq $account) {
     Fail ("this guest has no account $User, so it was never " +
-        'provisioned for it; run bombyx provision.') 1
+        'provisioned for it; run provision for this project.') 1
 }
 $sid = $account.SID.Value
 $profileKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' +
@@ -80,7 +80,8 @@ $agentHome = (Get-ItemProperty -LiteralPath $profileKey `
     -ErrorAction SilentlyContinue).ProfileImagePath
 if ([string]::IsNullOrEmpty($agentHome) -or
     -not (Test-Path -LiteralPath $agentHome -PathType Container)) {
-    Fail "the account $User has no profile folder; run bombyx provision." 1
+    Fail ("the account $User has no profile folder; run provision " +
+        'for this project.') 1
 }
 
 # The new copy is written beside the old one and renamed over it, so
@@ -147,7 +148,7 @@ $known = Join-Path $loginSsh 'bombyx-localhost-known-hosts'
 if (-not (Test-Path -LiteralPath $key -PathType Leaf)) {
     Fail ("the secrets are current, but this guest has no hand-over " +
         "key at $key, so the secrets_refreshed hook did not run; run " +
-        'bombyx provision.') $HookRefused
+        'provision for this project.') $HookRefused
 }
 $runner = Join-Path $PSScriptRoot 'hook.ps1'
 $encode = {
@@ -182,7 +183,7 @@ $code = $LASTEXITCODE
 if ($code -eq 255) {
     Fail ("the secrets are current, but the SSH login to " +
         "$User@localhost failed, so the secrets_refreshed hook did not " +
-        'run; run bombyx provision.') $HookRefused
+        'run; run provision for this project.') $HookRefused
 }
 # The file is written by now, so no status may read as a failed
 # write: anything hook.ps1 does not return becomes $HookRefused.

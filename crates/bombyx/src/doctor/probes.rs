@@ -291,9 +291,7 @@ fn firewall_verdict(stdout: &str) -> Reading {
         .clone()
         .any(|l| l == remote::probe::FIREWALL_NO_NETWORK)
     {
-        return Reading::DoesNotApply(
-            "network absent; `bombyx up` creates it".to_owned(),
-        );
+        return Reading::DoesNotApply("no network until `up`".to_owned());
     }
     if let Some(pass) =
         lines.find(|l| l.starts_with(remote::probe::FIREWALL_PASS_PREFIX))
@@ -586,7 +584,15 @@ mod tests {
             let Outcome::Skip(why) = out else {
                 panic!("expected a skip for {stdout:?}, got {out:?}");
             };
-            assert!(why.contains("`bombyx up` creates it"), "{why}");
+            // The step, not a command line: `bombyx up` alone is a
+            // usage error, because `up` takes the project. No longer
+            // than the report's `MIN_DETAIL`, the room a detail keeps
+            // whatever the host's length, so the line is never cut.
+            assert_eq!(why, "no network until `up`");
+            assert!(
+                why.chars().count() <= crate::doctor::report::MIN_DETAIL,
+                "{why}"
+            );
         }
     }
 
