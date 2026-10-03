@@ -144,9 +144,8 @@ A firewall on the host narrows this but does not close it:
   the host and the libvirt network the first `bombyx up` creates,
   and their document is marked *(unverified)*: its reboot check is
   `host-network-isolation` in `docs/todo.md`. On a host that
-  skipped them the path is open. While the guests' libvirt
-  network exists, the `host firewall` row of `bombyx doctor` fails
-  until they are in place.
+  skipped them the path is open. The `host firewall` row of
+  `bombyx doctor` reports whether they are in place.
 - **Packets are not the only way in.** The host runs the
   hypervisor the guest executes on, so a hypervisor escape reaches
   it without crossing the bridge.
@@ -410,12 +409,10 @@ firewall service, or naming a bridge libvirt has since moved.
   a warning in the provisioning output and no rule. A Windows
   guest gets no rule; `guest-egress-windows` in `docs/todo.md`
   tracks that.
-- **The host side.** While the guests' libvirt network exists,
-  the `host firewall` row of `bombyx doctor` fails unless the
-  firewall's unit is active and its rules name the bridge the
-  guests use; without the network it reads `skip`. `doctor` runs
-  without root, so it cannot read the loaded table;
-  `sudo agent-vm-firewall status` does.
+- **The host side.** The `host firewall` row of `bombyx doctor`
+  checks the VM host's firewall without root; `docs/usage.md` under
+  **doctor** says when it skips and when it fails. Only
+  `sudo agent-vm-firewall status` reads the loaded table.
 
 ### Open problems
 

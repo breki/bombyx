@@ -295,14 +295,12 @@ $ bombyx doctor <name>
 all checks passed, 1 skipped
 ```
 
-The `host firewall` row reads `skip` here, on a host that has
-never run a VM, because the libvirt network the firewall filters
-does not exist until the first `bombyx up` creates it. It skips
-again if vagrant-libvirt later removes that network as VMs are
-destroyed. After that first `up`, set the firewall up as
+The `host firewall` row reads `skip` here because this host has
+never run a VM, so the libvirt network the firewall filters does
+not exist yet. After the first `bombyx up`, set the firewall up as
 [Keeping agent VMs off your home network](#keeping-agent-vms-off-your-home-network)
-describes. While the network exists, the row fails until the
-firewall is in place and names the network's bridge.
+describes. [usage.md](usage.md) under **doctor** says when the row
+skips and when it fails.
 
 The manual equivalents are below, and remain useful when you
 want to see the raw output or are setting up before bombyx is
@@ -390,8 +388,8 @@ its purpose suggests. Cutting that down with host-level nftables
 rules is its own topic, kept separate because it is long: see
 [vm-host-firewall.md](vm-host-firewall.md). It is optional in the
 sense that bombyx runs without it, but it is the only containment
-a guest has, so while the guests' libvirt network exists,
-`bombyx doctor` fails until it is in place.
+a guest has, and the `host firewall` row of `bombyx doctor`
+reports whether it is in place.
 
 ## Configuration for each project
 
