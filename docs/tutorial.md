@@ -58,7 +58,7 @@ downstream, where it would be far harder to trace.
   - [Name your VM host, once](#name-your-vm-host-once)
 - [Part 2: the VM host](#part-2-the-vm-host)
   - [Running bombyx against your own machine](#running-bombyx-against-your-own-machine)
-  - [Optional: keep the VM from reaching your home network](#optional-keep-the-vm-from-reaching-your-home-network)
+  - [Later: keep the VM from reaching your home network](#later-keep-the-vm-from-reaching-your-home-network)
 - [Part 3: the sample project](#part-3-the-sample-project)
   - [The project's table in `config.toml`](#the-projects-table-in-configtoml)
   - [`.gitignore`](#gitignore)
@@ -298,7 +298,7 @@ applies to you, read it before you do the rest of Part 2.
 decides the route from `host`, why the name must match exactly,
 and the Windows and Hyper-V caveats.
 
-### Optional: keep the VM from reaching your home network
+### Later: keep the VM from reaching your home network
 
 By default a libvirt guest can reach everything the host can reach
 -- your LAN, your router, the host's own SSH port. If the VM is
@@ -310,8 +310,12 @@ home network** in `vm-host-firewall.md` explains what it does and
 does not buy you. That page is marked unverified, so read it
 before applying it.
 
-You may skip this and return to it later; the rest of the tutorial
-does not depend on it.
+You may skip this for now. The rules need the libvirt network that
+your first `bombyx up` creates, so after that first boot is the
+earliest you can apply them. Until then `bombyx doctor` reports its
+`host firewall` row as skipped; while that network exists, it
+reports a missing firewall as a failure, because the firewall is
+the only thing keeping the guest off your network.
 
 ## Part 3: the sample project
 
@@ -323,6 +327,13 @@ reach. bombyx sends no project file anywhere: the VM clones
 `source.repo` at `source.ref` for itself and runs `source.script`
 out of that clone. A directory that was never pushed leaves the
 guest failing at clone time, which is both late and confusing.
+
+> **Note**
+> The guest refuses its own connections to private addresses --
+> your LAN, a Tailscale network -- whether or not the VM host runs
+> a firewall. A repository on a git server at such an address
+> cannot be cloned from the guest, so push it to a host the
+> internet can reach.
 
 An empty repository will not do, for the same reason. By the end
 of this part the repository must hold `.bombyx/provision.sh`, on
@@ -635,8 +646,10 @@ bombyx doctor myproject
 
 `doctor` changes nothing, and runs every check rather than
 stopping at the first failure, so that a single run tells you
-everything that is wrong at once. You want every row to read `ok`,
-and you should fix anything that does not before continuing:
+everything that is wrong at once. You want every row to read `ok`
+-- apart from `host firewall`, which reads `skip` until this first
+boot has created the network it filters -- and you should fix
+anything else that does not before continuing:
 because `up` creates a directory on the host and writes three files
 before it runs `vagrant`, a missing piece would otherwise surface
 half-way through. [usage.md](usage.md) under **doctor** has a
@@ -697,6 +710,12 @@ bombyx shell myproject
 This is `ssh -t` through to `vagrant ssh` on the host. Vagrant
 logs in as its own account, and the guest then switches to the
 agent's account with `sudo -u` and opens a shell in the clone.
+
+This first boot has created the libvirt network the host firewall
+filters, so now is the time to go back to
+[Later: keep the VM from reaching your home network](#later-keep-the-vm-from-reaching-your-home-network)
+and apply it. From here on, `bombyx doctor` reports its
+`host firewall` row as a failure until you do.
 
 ### The snapshot that `reset` returns to
 
@@ -791,7 +810,8 @@ $ bombyx doctor myproject
   vmhost  vagrant           skip  no ssh
   vmhost  project dir       skip  no ssh
   vmhost  libvirt provider  skip  no ssh
-1 check failed, 4 skipped
+  vmhost  host firewall     skip  no ssh
+1 check failed, 5 skipped
 ```
 
 That is what a missing or misspelled `Host` entry in

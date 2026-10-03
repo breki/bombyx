@@ -10,12 +10,25 @@ use crate::config::{Config, Provider, Transport};
 use crate::remote::{self, RemoteCommand};
 use crate::term::{fail_reason, first_line, sanitize};
 
+/// What a verdict found in a probe's stdout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reading {
+    /// The check holds, and stdout's first line is the pass detail.
+    Holds,
+    /// The check holds, and this line is the pass detail. For a
+    /// verdict that found its line among others, so a line some
+    /// login file printed first does not take the detail's place.
+    HoldsAs(String),
+    /// The check does not hold, with the reason.
+    Fails(String),
+    /// The check does not apply to this host yet, with the
+    /// reason. It becomes an [`Outcome::Skip`] row.
+    DoesNotApply(String),
+}
+
 /// A check applied to a probe's stdout when a zero exit is not
 /// the whole answer.
-///
-/// `Ok` means the precondition holds; `Err` carries the reason
-/// it does not.
-pub type Verdict = fn(&str) -> Result<(), String>;
+pub type Verdict = fn(&str) -> Reading;
 
 /// A probe to run on the VM host.
 #[derive(Debug, Clone)]
@@ -38,7 +51,7 @@ pub struct HostProbe {
 impl HostProbe {
     /// A probe whose exit status is the whole verdict.
     ///
-    /// Every probe starts here. The two that need more chain
+    /// Every probe starts here. Those that need more chain
     /// `.gating()` or `.with_verdict()` on at their definition,
     /// where a reader scanning the list can see it -- there is
     /// no second constructor to look for.
@@ -66,6 +79,14 @@ impl HostProbe {
         self
     }
 }
+
+/// The name of the row reporting the VM host's firewall.
+///
+/// One row, produced by two places: the probe for a libvirt
+/// project in `host_probes`, and the skip `firewall_finding` gives
+/// any other provider. A shared name keeps the row's name the same
+/// whichever of the two produces it.
+const FIREWALL_ROW: &str = "host firewall";
 
 /// The host probes, in order.
 ///
@@ -116,11 +137,17 @@ pub fn host_probes(cfg: &Config) -> Vec<HostProbe> {
     //
     // A non-libvirt project gets `provider_finding` instead,
     // which is a skip row rather than an absent one.
+    //
+    // The firewall probe follows the same split, for its own
+    // reason: scripts/agent-vm-firewall.sh filters a libvirt
+    // bridge, so there is nothing of it to find on a Hyper-V
+    // host. `firewall_finding` gives that project its skip row.
     match cfg.vm.provider {
-        Provider::Libvirt => probes.push(HostProbe::plain(
-            "libvirt provider",
-            remote::probe::provider(cfg),
-        )),
+        Provider::Libvirt => probes.extend([
+            HostProbe::plain("libvirt provider", remote::probe::provider(cfg)),
+            HostProbe::plain(FIREWALL_ROW, remote::probe::host_firewall(cfg))
+                .with_verdict(firewall_verdict),
+        ]),
         Provider::Hyperv => {}
     }
     probes
@@ -188,14 +215,14 @@ pub fn probe_commands(probes: &[HostProbe]) -> Vec<RemoteCommand> {
 /// Every host finding for `cfg`, in report order.
 ///
 /// This runs the probes and adds the rows no probe can
-/// produce: `settled_findings` in front, `provider_finding`
-/// behind. Callers get this rather than composing the pieces
-/// themselves:
-/// `run_probes` and `provider_finding` are `pub(crate)`, so
-/// this is the only composition a caller outside the crate can
-/// reach. A report with no provider row is the state
-/// `provider_finding` exists to prevent, and the visibility is
-/// what stops a caller reaching it.
+/// produce: `settled_findings` in front, `provider_finding` and
+/// `firewall_finding` behind. Callers get this rather than
+/// composing the pieces themselves:
+/// `run_probes`, `provider_finding` and `firewall_finding` are
+/// `pub(crate)`, so this is the only composition a caller
+/// outside the crate can reach. A report with no provider or
+/// firewall row is the state those two exist to prevent, and the
+/// visibility is what stops a caller reaching it.
 ///
 /// `run` carries out one probe. It is a parameter so this stays
 /// free of process spawning; the binary passes the real one and
@@ -210,21 +237,72 @@ where
     let mut findings = settled_findings(cfg);
     findings.extend(run_probes(&host_probes(cfg), run));
     findings.extend(provider_finding(cfg));
+    findings.extend(firewall_finding(cfg));
     findings
+}
+
+/// The firewall row for a project `host_probes` cannot check.
+///
+/// This returns `None` for libvirt, whose probe is in the list.
+/// For Hyper-V it returns a skip: bombyx has no host firewall for
+/// that provider, and the report must say the guests are
+/// unchecked rather than drop the row, for the reason
+/// `provider_finding` gives.
+#[must_use]
+pub(crate) fn firewall_finding(cfg: &Config) -> Option<Finding> {
+    // Every variant named, so adding a provider is a compile
+    // error here rather than a row that silently stops printing.
+    match cfg.vm.provider {
+        Provider::Libvirt => None,
+        p @ Provider::Hyperv => Some(Finding::new(
+            Scope::Host,
+            FIREWALL_ROW,
+            Outcome::Skip(format!("no host firewall exists for {p}")),
+        )),
+    }
 }
 
 /// Confirms the host shell ran a POSIX construct correctly.
 ///
-/// # Errors
-///
-/// Returns the reason when the expected token is absent.
-fn posix_shell_verdict(stdout: &str) -> Result<(), String> {
+/// It fails with the reason when the expected token is absent.
+fn posix_shell_verdict(stdout: &str) -> Reading {
     if stdout.lines().any(|l| l.trim() == "posix") {
-        return Ok(());
+        return Reading::Holds;
     }
-    Err("shell did not run a POSIX construct; bombyx sends \
+    Reading::Fails(
+        "shell did not run a POSIX construct; bombyx sends \
          POSIX sh scripts"
-        .to_owned())
+            .to_owned(),
+    )
+}
+
+/// Reads the firewall probe's stdout, matching each outcome
+/// positively.
+///
+/// The missing-network token means libvirt has no
+/// `vagrant-libvirt` network, so the firewall cannot be set up yet
+/// and the row says what creates the network rather than failing.
+/// The probe's own pass line passes. Anything else fails: a login
+/// file printing to stdout over ssh must not turn a skip, or no
+/// output at all, into a pass.
+fn firewall_verdict(stdout: &str) -> Reading {
+    let mut lines = stdout.lines().map(str::trim);
+    if lines
+        .clone()
+        .any(|l| l == remote::probe::FIREWALL_NO_NETWORK)
+    {
+        return Reading::DoesNotApply(
+            "network absent; `bombyx up` creates it".to_owned(),
+        );
+    }
+    if let Some(pass) =
+        lines.find(|l| l.starts_with(remote::probe::FIREWALL_PASS_PREFIX))
+    {
+        return Reading::HoldsAs(pass.to_owned());
+    }
+    Reading::Fails(
+        "the firewall probe printed nothing it recognises".to_owned(),
+    )
 }
 
 /// Reads a probe's result into an outcome.
@@ -236,12 +314,12 @@ pub fn classify(result: &ProbeResult, verdict: Option<Verdict>) -> Outcome {
     if !result.success {
         return Outcome::Fail(fail_reason(&result.stdout, &result.stderr));
     }
-    if let Some(check) = verdict
-        && let Err(reason) = check(&result.stdout)
-    {
-        return Outcome::Fail(sanitize(&reason));
+    match verdict.map_or(Reading::Holds, |check| check(&result.stdout)) {
+        Reading::Holds => Outcome::Pass(first_line(&result.stdout)),
+        Reading::HoldsAs(line) => Outcome::Pass(sanitize(&line)),
+        Reading::Fails(reason) => Outcome::Fail(sanitize(&reason)),
+        Reading::DoesNotApply(reason) => Outcome::Skip(sanitize(&reason)),
     }
-    Outcome::Pass(first_line(&result.stdout))
 }
 
 /// Runs `probes` in order, skipping the rest once a gating
@@ -390,6 +468,38 @@ mod tests {
         assert!(!names(&cfg_with(Provider::Hyperv)).contains(&row));
     }
 
+    #[test]
+    fn each_provider_gets_each_per_provider_row_exactly_once() {
+        // The provider and firewall rows each come from two places:
+        // a probe for libvirt, a skip for anything else. Absent, a
+        // row reads as a check that passed; twice, the probe and
+        // the skip have both fired. So each must appear once, on
+        // both routes, and the Hyper-V one must be a skip.
+        let rows = [
+            (Provider::Libvirt, "libvirt provider", false),
+            (Provider::Libvirt, FIREWALL_ROW, false),
+            (Provider::Hyperv, "provider", true),
+            (Provider::Hyperv, FIREWALL_ROW, true),
+        ];
+        for route in [cfg(), local_cfg()] {
+            for (provider, row, skipped) in rows {
+                let mut c = route.clone();
+                c.vm.provider = provider;
+                let findings =
+                    host_findings(&c, |_| Outcome::Pass(String::new()));
+                let found: Vec<_> =
+                    findings.iter().filter(|f| f.name == row).collect();
+                assert_eq!(found.len(), 1, "{provider} {row}: {found:?}");
+                assert_eq!(
+                    matches!(found[0].outcome, Outcome::Skip(_)),
+                    skipped,
+                    "{provider} {row}: {:?}",
+                    found[0].outcome
+                );
+            }
+        }
+    }
+
     fn ran(success: bool, stdout: &str, stderr: &str) -> ProbeResult {
         ProbeResult {
             success,
@@ -467,12 +577,69 @@ mod tests {
     }
 
     #[test]
+    fn a_host_without_the_network_skips_the_firewall_row() {
+        // The firewall cannot be set up before `bombyx up` creates
+        // the network, so a host without it must not fail here.
+        let token = remote::probe::FIREWALL_NO_NETWORK;
+        for stdout in [format!("{token}\n"), format!("motd line\n{token}\n")] {
+            let out = classify(&ran(true, &stdout, ""), Some(firewall_verdict));
+            let Outcome::Skip(why) = out else {
+                panic!("expected a skip for {stdout:?}, got {out:?}");
+            };
+            assert!(why.contains("`bombyx up` creates it"), "{why}");
+        }
+    }
+
+    #[test]
+    fn a_stray_line_does_not_replace_the_firewall_pass_detail() {
+        // The pass detail carries "table not read", the row's one
+        // statement of what a pass does not prove. A login file's
+        // line ahead of it must not take its place.
+        let out = classify(
+            &ran(
+                true,
+                "motd line\nactive, bridge virbr1; table not read\n",
+                "",
+            ),
+            Some(firewall_verdict),
+        );
+        assert_eq!(
+            out,
+            Outcome::Pass("active, bridge virbr1; table not read".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_firewall_verdict_passes_only_on_the_probes_own_pass_line() {
+        // A login file can print to stdout over ssh. A stray line
+        // must neither hide the pass line nor become a pass.
+        for stdout in [
+            "active, bridge virbr1; table not read\n",
+            "motd line\nactive, bridge virbr1; table not read\n",
+        ] {
+            assert_eq!(
+                firewall_verdict(stdout),
+                Reading::HoldsAs(
+                    "active, bridge virbr1; table not read".to_owned()
+                ),
+                "{stdout:?}"
+            );
+        }
+        for stdout in ["", "motd line\n", "no-network-ish\n"] {
+            assert!(
+                matches!(firewall_verdict(stdout), Reading::Fails(_)),
+                "{stdout:?}"
+            );
+        }
+    }
+
+    #[test]
     fn posix_shell_verdict_rejects_silence() {
         // An unset variable or a shell that printed nothing must
         // not pass.
-        assert!(posix_shell_verdict("").is_err());
-        assert!(posix_shell_verdict("\n\n").is_err());
-        assert!(posix_shell_verdict("posix").is_ok());
+        assert!(matches!(posix_shell_verdict(""), Reading::Fails(_)));
+        assert!(matches!(posix_shell_verdict("\n\n"), Reading::Fails(_)));
+        assert_eq!(posix_shell_verdict("posix"), Reading::Holds);
     }
 
     #[test]

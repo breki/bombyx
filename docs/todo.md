@@ -491,3 +491,43 @@ WSL2 host runs Microsoft's kernel, which Windows updates; decide what the row
 says on each host kind before writing it. The row cannot say whether a kernel is
 vulnerable, only whether it is the newest one installed.
 
+### guest-egress-windows
+
+**Summary:** Windows guests get no egress rule of their own
+
+account.sh loads a backstop egress rule in every Linux guest (#93); account.ps1
+loads none, so a Windows guest relies on the VM host's firewall alone. Windows
+Firewall lets a block rule beat every allow rule, so the DNS exception for the
+default gateway cannot be an allow rule beside the block: the gateway has to be
+cut out of the blocked ranges, for example as address ranges either side of it.
+The rule must also let the session that loads it live, as the Linux rule does
+for sshd's replies. Verifying it needs a Windows guest booted on a VM host.
+
+### guest-egress-allow-list
+
+**Summary:** let a project allow a private address through the guest rule
+
+The guest egress rule that account.sh loads (#93) refuses every private IPv4
+range, so a project whose git host, package mirror or proxy sits on a LAN or
+tailnet address cannot reach it from the guest, and the clone fails as a refused
+connection. A per-project allow list, a checked config field passed to the
+loader as a BOMBYX_ variable, would let a project name the addresses it needs.
+The VM host's firewall refuses the same ranges, so an allow list there is the
+same question for scripts/agent-vm-firewall.sh. Decided on PR #173 to document
+the limit first and defer the setting.
+
+### host-defines-libvirt-network
+
+**Summary:** define vagrant-libvirt on the host so no VM's destroy removes it
+
+vagrant-libvirt 0.12.2 removes the vagrant-libvirt network when the machine
+whose up created it is destroyed and no other VM uses it, and the next up can
+create it on a different bridge, one the VM host's firewall rules do not name.
+management_network_keep = true did not stop it: a throwaway VM on PR #173 still
+had the network's UUID written to its created_networks file, and destroy removed
+the network. vagrant-libvirt removes only networks it created, so a host that
+defines vagrant-libvirt itself before the first up keeps it, with a fixed
+bridge, and could apply scripts/agent-vm-firewall.sh before any VM exists. That
+changes docs/vm-host-setup.md's procedure and needs checking on a fresh host.
+Until then doctor's host firewall row skips while the network is absent.
+

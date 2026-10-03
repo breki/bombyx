@@ -408,13 +408,25 @@ $ bombyx doctor myproject
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/igor (will create /home/igor/vms/myproject)
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
+  vmhost  host firewall     ok    active, bridge virbr1; table not read
 all checks passed
 ```
 
-The `libvirt provider` row appears only for a libvirt project; a
-Hyper-V project shows a `provider` row reading `skip` instead. See
+The `libvirt provider` and `host firewall` rows appear only for a
+libvirt project; a Hyper-V project shows a `provider` row and a
+`host firewall` row reading `skip` instead. See
 [vm-host-setup.md](vm-host-setup.md) for what to do about each
 failure.
+
+The `host firewall` row reads `skip` while the libvirt network the
+firewall filters does not exist: before the first `bombyx up`
+creates it, and again if vagrant-libvirt removes it as VMs are
+destroyed; [vm-host-firewall.md](vm-host-firewall.md) says when it
+does. While the network exists, the row fails unless the VM
+host's firewall from [vm-host-firewall.md](vm-host-firewall.md) is
+active and names the bridge your guests use. It runs without root,
+so it cannot read the loaded rules; `sudo agent-vm-firewall status`
+on the VM host does.
 
 **Changing `provider` on a project that already has a VM does
 nothing until you destroy it** -- vagrant records the provider it

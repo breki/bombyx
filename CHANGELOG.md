@@ -20,9 +20,27 @@ and this project adheres to
   `full` (the default) is every branch with its whole history, and `shallow` is
   one commit of `ref`, as before. Switching to `shallow` keeps the history a
   clone already has.
+- `bombyx doctor` has a `host firewall` row for libvirt projects. It reads
+  `skip` while the `vagrant-libvirt` network does not exist: before the first
+  `bombyx up`, and again if vagrant-libvirt removes it as VMs are destroyed.
+  While the network exists, it fails unless the VM host's
+  `agent-vm-firewall.service` is active and its rules name the bridge that
+  network uses now, so `doctor` now exits non-zero on such a VM host without the
+  firewall. It runs without root and cannot read the loaded table; `sudo
+  agent-vm-firewall status` does. A Hyper-V project gets a `skip` row (#93).
 
 ### Changed
 
+- Every Linux guest loads an egress rule of its own, a backstop to the VM host's
+  firewall: it refuses the guest's new connections to the private ranges
+  `scripts/agent-vm-firewall.sh` blocks, and all IPv6, on the interfaces that
+  carry a default route. So a guest on a VM host without that firewall can no
+  longer reach a git server, package mirror or proxy on a LAN or tailnet
+  address, and a clone from one fails as a refused connection. A systemd unit
+  reloads the rule at every boot, waiting up to 30 seconds for a default route.
+  It is not containment, because the agent has passwordless `sudo` and can
+  remove it. A box without `nft` or `systemctl` gets a warning and no rule;
+  Windows guests get no rule yet (#93).
 - `bombyx provision` no longer overwrites the agent's uncommitted work in the
   guest's clone. The checkout refuses, listing the files, when it would
   overwrite an edited tracked file or an untracked file the fetched commit adds,
@@ -48,6 +66,10 @@ and this project adheres to
   - `WindowsGuestScript.script` is a `ScriptPath`.
   - `WindowsGuestUser.user` is a `GuestUser`.
   - `WindowsGuestEnv.name` is an `EnvName`.
+- **BREAKING:** The library type `doctor::Verdict` now returns the new
+  `doctor::Reading` (`Holds`, `HoldsAs`, `Fails`, `DoesNotApply`) instead of
+  `Result<(), String>`, so a verdict can report that a check does not apply and
+  name its pass line. The CLI is unaffected (#93).
 
 ### Fixed
 

@@ -140,10 +140,13 @@ A firewall on the host narrows this but does not close it:
 - `docs/vm-host-firewall.md` describes an nftables ruleset that
   drops new connections on the guest bridge, so a guest cannot
   open an SSH session to the host.
-- **The rules are not loaded.** That work is
-  `host-network-isolation`, its section is marked *(unverified)*,
-  and applying it needs a host password -- so on a host set up as
-  documented today the path is open.
+- **The rules may not be loaded.** Applying them needs root on
+  the host and the libvirt network the first `bombyx up` creates,
+  and their document is marked *(unverified)*: its reboot check is
+  `host-network-isolation` in `docs/todo.md`. On a host that
+  skipped them the path is open. While the guests' libvirt
+  network exists, the `host firewall` row of `bombyx doctor` fails
+  until they are in place.
 - **Packets are not the only way in.** The host runs the
   hypervisor the guest executes on, so a hypervisor escape reaches
   it without crossing the bridge.
@@ -340,8 +343,9 @@ endpoints -- a chain bombyx already depends on to download the box
   the ability to serve a repository of their own -- and
   `bootstrap.sh` runs the script from whatever it clones, as the
   key's owner. So the key does leave, by code execution rather
-  than by the handshake. The `host-network-isolation` egress rules
-  would narrow this; they are not loaded.
+  than by the handshake. The VM host's firewall
+  (`docs/vm-host-firewall.md`) would narrow this; it may not be
+  loaded.
 
 What this defends and does not defend:
 
@@ -354,7 +358,7 @@ What this defends and does not defend:
   certificate store, and the fetched `known_hosts` file. A guest
   that has run untrusted code with `sudo` cannot be defended from
   inside itself -- which is why the VM is disposable, and
-  `bombyx destroy` and the egress rules are what narrow it.
+  `bombyx destroy` and the VM host's firewall are what narrow it.
 
 The verification also stops at the clone: `bootstrap.sh` writes
 the host keys into the clone rather than exporting them, so it
@@ -381,9 +385,41 @@ alone. `bootstrap.sh` and `hostkeys.rs` hold the mechanism.
 `docs/developer/redteam-log.md` records why this is open, and
 GitHub issue #57 carries the decision it waits on.
 
+### The guest's egress rule is a backstop
+
+The VM host's firewall, `scripts/agent-vm-firewall.sh`, is what
+keeps a guest off the home network. `account.sh` also loads an
+egress rule inside each Linux guest. The rule refuses the guest's
+new connections to the same private ranges the host refuses, and
+all IPv6. A systemd unit loads it again at every boot, waiting
+up to 30 seconds for the guest to get a default route.
+
+The rule is not containment. The agent has passwordless `sudo`,
+so it can delete the rule with one command, and the guest is the
+party the VM exists to contain. What the rule catches is a mistake
+on the VM host: rules never applied, flushed at boot by another
+firewall service, or naming a bridge libvirt has since moved.
+
+- **What passes.** Replies to connections made from outside, DHCP,
+  and DNS to each default gateway. sshd's replies pass by port as
+  well as by connection state, because a provision loads the rule
+  inside Vagrant's own SSH session.
+- **What it covers.** Only the interfaces that carry a default
+  route, so a container bridge inside the guest keeps working.
+- **Where it is missing.** A box without `nft` or `systemctl` gets
+  a warning in the provisioning output and no rule. A Windows
+  guest gets no rule; `guest-egress-windows` in `docs/todo.md`
+  tracks that.
+- **The host side.** While the guests' libvirt network exists,
+  the `host firewall` row of `bombyx doctor` fails unless the
+  firewall's unit is active and its rules name the bridge the
+  guests use; without the network it reads `skip`. `doctor` runs
+  without root, so it cannot read the loaded table;
+  `sudo agent-vm-firewall status` does.
+
 ### Open problems
 
 | Problem | Why it is open | Tracked by |
 |---|---|---|
 | **Sizing** | bombyx cannot read a project's CPU and memory needs from its repository, because it cannot read the repository until the machine those numbers size has booted. So sizing lives in configuration, or the boot has to happen in two phases. | `per-host-resource-profiles` in `docs/todo.md` |
-| **Egress** | The guest must reach the git host to clone, so a host firewall (`docs/vm-host-firewall.md`) has to allow that egress deliberately. Getting it wrong fails at clone time rather than at boot. | `host-network-isolation` in `docs/todo.md` |
+| **Egress** | The guest must reach the git host to clone. Both the host firewall (`docs/vm-host-firewall.md`) and the guest's own egress rule refuse private addresses, so a git host on a LAN or tailnet address cannot be cloned, and the failure shows at clone time as a refused connection rather than at boot. No setting lets a project allow one address. | `host-network-isolation` and `guest-egress-allow-list` in `docs/todo.md` |

@@ -14,7 +14,7 @@
 # `vagrant`, and this script refuses a guest_user equal to
 # SUDO_USER, which names the account Vagrant logged in as.
 #
-# It does four things, and then hands over:
+# It does five things, and then hands over:
 #
 #   1. creates the account the agent works as, named by
 #      BOMBYX_GUEST_USER, if the box does not have it yet;
@@ -23,17 +23,19 @@
 #   3. moves each file Vagrant staged -- the deploy key, the
 #      secrets file, the git credential -- into that account's
 #      home;
-#   4. installs bootstrap.sh root-owned, and runs it as that
+#   4. loads an egress rule in the guest, as a backstop to the
+#      VM host's firewall;
+#   5. installs bootstrap.sh root-owned, and runs it as that
 #      account.
 #
 # Root is needed throughout: to create the account and its
 # sudoers file, to read the staging directory in the login
-# account's home, and to install bootstrap.sh root-owned. Only
-# the writes into the agent's own home run as the agent. So this
-# file stays short, and it reads nothing from the project's
-# repository: the clone does not exist until bootstrap.sh makes
-# it, as the agent. docs/trust-boundary.md describes the
-# isolation this serves.
+# account's home, to install the egress rule's loader and unit and
+# load the rule, and to install bootstrap.sh root-owned. Only the
+# writes into the agent's own home run as the agent. This file
+# reads nothing from the project's repository: the clone does not
+# exist until bootstrap.sh makes it, as the agent.
+# docs/trust-boundary.md describes the isolation this serves.
 #
 # Like bootstrap.sh, this file is the same for every project, and
 # bombyx pastes nothing into it. Everything that changes per
@@ -282,7 +284,188 @@ place "${BOMBYX_ENV_FILE_PRESENT:-}" "$STAGING/env" "$home/.bombyx-env"
 place "${BOMBYX_GIT_CRED_PRESENT:-}" "$STAGING/git-credentials" \
     "$home/.bombyx-git-credentials"
 
-# 4. THE HAND-OVER. bootstrap.sh is installed root-owned before
+# 4. A BACKSTOP EGRESS RULE. The guest refuses its own new
+# connections to the private address ranges that
+# scripts/agent-vm-firewall.sh refuses on the VM host, and all
+# IPv6, as that script does. This is a backstop, not containment:
+# the agent has passwordless `sudo` and can delete the rule with
+# one command. What it catches is a mistake on the VM host, such
+# as rules never applied, wiped at boot, or naming a bridge
+# libvirt has moved. docs/trust-boundary.md says the same.
+#
+# A systemd unit loads the rule at every boot, after the network
+# is up. Its loader reads the guest's default routes at that
+# moment, so a renumbered libvirt network cannot leave a stale
+# gateway in the rule. The rule covers only the interfaces that
+# carry a default route, so a container bridge inside the guest
+# keeps working. Replies to connections made from outside, such
+# as `vagrant ssh`, pass. DHCP passes, and DNS passes to each
+# default gateway.
+#
+# Every failure here warns and carries on, and none refuses: a
+# backstop the agent can remove must not stop a VM being built.
+readonly EGRESS_LOADER=/usr/local/libexec/bombyx/guest-egress.sh
+readonly EGRESS_UNIT=/etc/systemd/system/bombyx-guest-egress.service
+
+# Callers give the cause; this states the outcome, once.
+egress_warning() {
+    echo "bombyx: warning: $* So the guest has no egress rule of" \
+        "its own, and the VM host's firewall is still its only" \
+        "containment." >&2
+}
+
+# The loader is written from a quoted heredoc, so nothing in it is
+# expanded here: every `$` in it is read when it runs, at boot or
+# when a provision restarts the unit. It is a program of its own,
+# so its `exit` leaves the loader, never this script; systemd
+# records a non-zero exit as a failed unit.
+write_egress_loader() {
+    install -d -m 0755 -o root -g root "${EGRESS_LOADER%/*}" &&
+        cat >"$EGRESS_LOADER" <<'LOADER' && chmod 0755 "$EGRESS_LOADER"
+#!/bin/sh
+# Loads bombyx's egress rule in this guest. account.sh writes this
+# file on every provision, and bombyx-guest-egress.service runs it
+# at boot. A backstop, not containment: account.sh says why.
+set -eu
+
+blocked4="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+          169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8,
+          224.0.0.0/4"
+# nft ends a statement at a newline, even inside a set's braces,
+# so the list is joined onto one line before it reaches a rule.
+blocked4=$(printf '%s' "$blocked4" | tr -s ' \n' '  ')
+
+# Checked apart from the routes, so a box without `ip` is not
+# reported as one without a default route.
+if ! command -v ip >/dev/null 2>&1; then
+    echo "bombyx-guest-egress: ip is not installed, so no rule" \
+        "was loaded" >&2
+    exit 1
+fi
+
+# One "<interface> <gateway>" line per IPv4 default route.
+default_routes() {
+    ip -4 route show default | awk '{
+        d = ""; g = ""
+        for (i = 1; i < NF; i++) {
+            if ($i == "dev") d = $(i + 1)
+            if ($i == "via") g = $(i + 1)
+        }
+        if (d != "") print d, g
+    }'
+}
+
+# At boot the unit can start before DHCP has given the guest a
+# default route, so the loader waits up to 30 seconds for one
+# rather than failing once and never trying again.
+routes=$(default_routes)
+waited=0
+while [ -z "$routes" ] && [ "$waited" -lt 30 ]; do
+    sleep 1
+    waited=$((waited + 1))
+    routes=$(default_routes)
+done
+if [ -z "$routes" ]; then
+    echo "bombyx-guest-egress: no IPv4 default route after 30" \
+        "seconds, so no rule was loaded" >&2
+    exit 1
+fi
+
+rules=""
+while read -r dev gw; do
+    if [ -n "$gw" ]; then
+        rules="$rules
+        oifname \"$dev\" ip daddr $gw udp dport 53 accept
+        oifname \"$dev\" ip daddr $gw tcp dport 53 accept"
+    fi
+    rules="$rules
+        oifname \"$dev\" ip daddr { $blocked4 } counter reject
+        oifname \"$dev\" meta nfproto ipv6 counter reject"
+done <<ROUTES
+$routes
+ROUTES
+
+# Declaring the table, deleting it and declaring it again in one
+# file replaces it in one transaction, on the first load and on
+# every later one.
+#
+# `tcp sport 22` lets sshd's replies out whatever conntrack says.
+# conntrack is the kernel's connection tracker, which `ct state`
+# reads, and it starts tracking only once a rule first needs it.
+# A provision runs this loader inside Vagrant's SSH session, which
+# the VM host opened from its address on the libvirt network: the
+# guest's default gateway, inside the blocked 192.168.0.0/16. When
+# this rule is the first to need conntrack, the session predates
+# it, so the session's next packet counts as a new connection to
+# the gateway, not an established one. Without the accept, loading
+# the rule cuts the session that is loading it.
+nft -f - <<RULES
+table inet bombyx_guest
+delete table inet bombyx_guest
+table inet bombyx_guest {
+    chain output {
+        type filter hook output priority 0; policy accept;
+        oifname "lo" accept
+        ct state established,related accept
+        tcp sport 22 accept
+        udp dport 67 accept
+$rules
+    }
+    chain forward {
+        type filter hook forward priority 0; policy accept;
+        ct state established,related accept
+        udp dport 67 accept
+$rules
+    }
+}
+RULES
+LOADER
+}
+
+# $1 is the absolute path to `nft`, for the unit's stop command;
+# older systemd versions take only an absolute path there. The `-`
+# in front of it makes a stop with the table already gone count as
+# success. The unit starts after nftables.service because a box's
+# /etc/nftables.conf may open with `flush ruleset`, which would
+# delete this table if that service ran second.
+write_egress_unit() {
+    printf '%s\n' \
+        "[Unit]" \
+        "Description=bombyx guest egress rule, a backstop" \
+        "Wants=network-online.target" \
+        "After=network-online.target nftables.service" \
+        "" \
+        "[Service]" \
+        "Type=oneshot" \
+        "RemainAfterExit=yes" \
+        "ExecStart=$EGRESS_LOADER" \
+        "ExecStop=-$1 delete table inet bombyx_guest" \
+        "" \
+        "[Install]" \
+        "WantedBy=multi-user.target" >"$EGRESS_UNIT"
+}
+
+if ! nft_bin=$(command -v nft); then
+    egress_warning "nft is not installed in this box."
+elif ! command -v systemctl >/dev/null 2>&1; then
+    egress_warning "this box has no systemctl to load the rule at boot."
+elif ! write_egress_loader || ! write_egress_unit "$nft_bin" ||
+    ! systemctl daemon-reload ||
+    ! systemctl enable --quiet bombyx-guest-egress.service ||
+    ! systemctl restart bombyx-guest-egress.service; then
+    # The loader runs under systemd, so its own error is in the
+    # journal rather than in this output. Print it here. `:` does
+    # nothing, so `|| :` keeps a missing journal from counting as
+    # an error in this branch.
+    journalctl -u bombyx-guest-egress.service -n 20 --no-pager -o cat \
+        >&2 || :
+    egress_warning "the egress rule did not load; its log is above."
+else
+    echo "bombyx: loaded the guest's egress rule, a backstop to" \
+        "the VM host's firewall."
+fi
+
+# 5. THE HAND-OVER. bootstrap.sh is installed root-owned before
 # the staging directory goes, and then runs as the agent.
 if ! install -D -m 0755 -o root -g root "$STAGING/bootstrap.sh" \
     "$BOOTSTRAP"; then

@@ -227,6 +227,109 @@ pub fn provider(cfg: &Config) -> RemoteCommand {
     )
 }
 
+/// The systemd unit `scripts/agent-vm-firewall.sh persist`
+/// installs.
+const FIREWALL_UNIT: &str = "agent-vm-firewall.service";
+/// Where that script writes the rules the unit loads.
+const FIREWALL_RULES_DIR: &str = "/etc/agent-vm-firewall";
+/// The rules file's name inside [`FIREWALL_RULES_DIR`].
+const FIREWALL_RULES_NAME: &str = "agentvm.nft";
+/// The libvirt network every bombyx guest joins.
+///
+/// The generated Vagrantfile names no network, so vagrant-libvirt
+/// attaches the guest to its default management network, and
+/// this is that network's default name.
+const LIBVIRT_NETWORK: &str = "vagrant-libvirt";
+
+/// What [`host_firewall`] prints, alone on stdout, when the
+/// libvirt network does not exist.
+///
+/// The network is absent before the first `vagrant up` creates it,
+/// and again after vagrant-libvirt removes it with the machine
+/// that created it; `docs/vm-host-firewall.md` under **Only the
+/// one libvirt network is protected** says when. The firewall
+/// script's `apply` reads the bridge name from the network, so
+/// while it is absent the firewall cannot be set up, and
+/// `doctor`'s verdict turns this token into a skip.
+pub const FIREWALL_NO_NETWORK: &str = "no-network";
+
+/// How [`host_firewall`]'s pass line starts.
+///
+/// `doctor` passes the row only on a line with this prefix, so a
+/// line some login file printed to stdout cannot pass it.
+pub const FIREWALL_PASS_PREFIX: &str = "active, bridge ";
+
+/// Builds the probe that checks the VM host's firewall is in
+/// place and still names the bridge the guests use.
+///
+/// `scripts/agent-vm-firewall.sh` is the only containment a guest
+/// has, and each way it fails is silent: the rules were never
+/// persisted, the unit is stopped, or libvirt moved the network to
+/// another bridge, so the rules match nothing. This probe catches
+/// all three, as the SSH user and without root:
+///
+/// 1. `systemctl is-active` on the unit `persist` installs, which
+///    catches rules never persisted and a stopped unit;
+/// 2. the bridge named in the rules file the unit loads, and
+/// 3. the bridge `virsh` reports for the network now, which
+///    together catch a moved bridge.
+///
+/// It fails unless the unit is active and the two bridges agree.
+/// Before any of that it lists libvirt's networks. When
+/// `LIBVIRT_NETWORK` is not among them -- before the first `up`,
+/// or after vagrant-libvirt removed it -- the firewall cannot be
+/// set up, and the probe prints [`FIREWALL_NO_NETWORK`] and exits
+/// zero for `doctor` to report as a skip.
+///
+/// Every `virsh` call names `qemu:///system`. A non-root `virsh`
+/// otherwise reaches the per-user session daemon, which cannot
+/// see `vagrant-libvirt`, so the row would skip on every host.
+/// Reading the system networks needs the SSH user in the `libvirt`
+/// group; `docs/vm-host-setup.md` covers both.
+///
+/// # What a pass does not prove
+///
+/// Reading the loaded table needs root, which `doctor` does not
+/// have, so the probe never reads it. The unit is a one-shot that
+/// stays "active" after it loads the file at boot. A table
+/// flushed later, by hand or by a second firewall service, still
+/// passes here; `sudo agent-vm-firewall status` is the check
+/// that reads the table itself. The pass detail says so.
+#[must_use]
+pub fn host_firewall(cfg: &Config) -> RemoteCommand {
+    let unit = shell_quote(FIREWALL_UNIT);
+    let rules =
+        shell_quote(&format!("{FIREWALL_RULES_DIR}/{FIREWALL_RULES_NAME}"));
+    let network = shell_quote(LIBVIRT_NETWORK);
+    probe(
+        cfg,
+        &format!(
+            "u={unit}; f={rules}; n={network}; \
+             l=$(virsh -c qemu:///system net-list --all --name) || {{ \
+             echo \"cannot list libvirt networks with virsh\" >&2; \
+             exit 1; }}; \
+             printf '%s\\n' \"$l\" | grep -qx \"$n\" || {{ \
+             echo {FIREWALL_NO_NETWORK}; exit 0; }}; \
+             systemctl is-active --quiet \"$u\" || {{ \
+             echo \"$u is not active, so the firewall is not \
+             persisted; doctor cannot see whether its rules are loaded \
+             now (sudo agent-vm-firewall status can)\" >&2; \
+             exit 1; }}; \
+             b=$(grep -m1 -o 'iifname \"[^\"]*\"' \"$f\" | cut -d'\"' -f2); \
+             [ -n \"$b\" ] || {{ \
+             echo \"cannot read a bridge from $f\" >&2; exit 1; }}; \
+             c=$(virsh -c qemu:///system net-dumpxml \"$n\" | \
+             grep -o \"bridge name='[^']*'\" | cut -d\"'\" -f2); \
+             [ -n \"$c\" ] || {{ \
+             echo \"cannot read network $n with virsh\" >&2; exit 1; }}; \
+             [ \"$b\" = \"$c\" ] || {{ \
+             echo \"rules name $b but the network $n is on $c\" >&2; \
+             exit 1; }}; \
+             echo \"{FIREWALL_PASS_PREFIX}$c; table not read\""
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,5 +465,55 @@ mod tests {
         // Anchored: an unanchored `libvirt` also matches
         // `vagrant-libvirt-qemu` or a local fork.
         assert!(script.contains("grep '^vagrant-libvirt"), "{script}");
+    }
+
+    #[test]
+    fn host_firewall_names_each_failure() {
+        let c = host_firewall(&cfg());
+        let script = script_without_disarm(&c);
+        // A stopped unit, an unreadable bridge (from the rules
+        // file or from virsh) and a moved bridge each have their
+        // own message, so the row says which one to fix.
+        for named in ["is not active", "cannot read", "but the network"] {
+            assert!(script.contains(named), "{named}: {script}");
+        }
+        // The unit is asked about by name, read-only.
+        assert!(script.contains("systemctl is-active --quiet"), "{script}");
+        // The bridge comes from libvirt's network now, not from
+        // the rules file alone: comparing the two is the check.
+        assert!(script.contains("net-dumpxml"), "{script}");
+    }
+
+    #[test]
+    fn host_firewall_reports_a_missing_network_before_the_unit() {
+        // On a fresh host neither the network nor the unit exists
+        // yet. The missing network is the cause, so it is checked
+        // first and reported as the token doctor turns into a skip.
+        let script = script_without_disarm(&host_firewall(&cfg()));
+        let listed = script.find("net-list").expect("lists networks");
+        let unit = script.find("systemctl is-active").expect("the unit");
+        assert!(listed < unit, "{script}");
+        assert!(
+            script.contains(&format!("echo {FIREWALL_NO_NETWORK}")),
+            "{script}"
+        );
+    }
+
+    #[test]
+    fn host_firewall_uses_the_names_the_host_script_defines() {
+        // The probe and scripts/agent-vm-firewall.sh must agree
+        // on the unit, the rules file and the network. A rename
+        // on one side would leave the row failing on every
+        // contained host, or reading a file nobody writes.
+        let host_script =
+            include_str!("../../../../scripts/agent-vm-firewall.sh");
+        for line in [
+            format!("UNIT_NAME=\"{FIREWALL_UNIT}\""),
+            format!("RULES_DIR=\"{FIREWALL_RULES_DIR}\""),
+            format!("RULES_FILE=\"$RULES_DIR/{FIREWALL_RULES_NAME}\""),
+            format!("NETWORK=\"${{NETWORK:-{LIBVIRT_NETWORK}}}\""),
+        ] {
+            assert!(host_script.contains(&line), "missing: {line}");
+        }
     }
 }

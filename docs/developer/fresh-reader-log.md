@@ -6,20 +6,19 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-10-02-firewall-loaded-state-contradicts
+### fr-2026-10-03-firewall-doc-narrates-incidents
 
-**Category:** Accuracy
+**Category:** Comprehension
 
-Two docs disagree on whether the VM host's firewall is in force.
-`docs/trust-boundary.md` says "**The rules are not loaded.**" in
-the list under "Two ways to satisfy the constraint", and again
-near "Host-key verification". `host-network-isolation` in
-`docs/todo.md` says `apply` and `persist` have run on the Linux VM
-host and the in-VM checks pass; only the reboot check is left. A
-reader judging today's exposure gets two opposite answers. Found
-while reviewing `docs/incidents.md` (#168), outside that change's
-diff, so it was left for its own fix: decide which statement is
-current, then make the other match.
+`docs/vm-host-firewall.md` tells two stories where a rule would
+do. Under "Checking that it worked", one paragraph recounts a host
+that ran a predecessor ruleset for weeks while reporting green, and
+another says earlier versions of the section each gave a wrong
+one-sentence reading. `CLAUDE.md` under **Writing** calls "an
+earlier version" a defect. Keep the rules -- a table from an older
+script passes `status`; read results against the scoped table --
+and drop the incidents. Found reviewing PR #173 (#93), in passages
+that change did not write, so it was left for its own edit.
 
 ### fr-2026-10-02-heading-and-read-error-pointers
 

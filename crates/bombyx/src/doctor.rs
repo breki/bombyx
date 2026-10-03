@@ -6,6 +6,12 @@
 //! So a host that is missing something reports it half-way
 //! through. This module models the up-front check instead.
 //!
+//! One row checks a safety property rather than a precondition.
+//! `up` works without the VM host's firewall, but the firewall is
+//! the only containment a guest has, so a missing or stale one
+//! fails the `host firewall` row; `remote::probe::host_firewall`
+//! says what that row can and cannot see.
+//!
 //! Nothing here runs a process. It owns the probe list, the
 //! rules for reading a probe's result, the skip cascade and the
 //! report -- everything that decides anything. The binary
@@ -44,7 +50,8 @@ pub use local::{
     LocalTool, local_tool_finding, local_tools, vault_platform_finding,
 };
 pub use probes::{
-    HostProbe, Verdict, classify, host_findings, host_probes, probe_commands,
+    HostProbe, Reading, Verdict, classify, host_findings, host_probes,
+    probe_commands,
 };
 pub use readonly::mutating_token;
 pub use report::Report;
@@ -66,11 +73,13 @@ pub enum Outcome {
     Pass(String),
     /// The precondition does not hold, with the reason.
     Fail(String),
-    /// Not run. Two reasons produce this, and the string says
-    /// which: a gating probe failed, so the rest would each
-    /// wait on a dead host; or the route makes the question
-    /// meaningless, the way reachability does when the VM host
-    /// is this machine.
+    /// Not run, or run and found not to apply. The string says
+    /// which reason: a gating probe failed, so the rest would each
+    /// wait on a dead host; the route or the provider makes the
+    /// question meaningless, the way reachability does when the VM
+    /// host is this machine; or a verdict read the probe's output
+    /// as `Reading::DoesNotApply`, as the firewall row does while
+    /// the libvirt network is absent.
     Skip(String),
 }
 
