@@ -218,47 +218,13 @@ for tools that are not present:
   does not require a prior `Read`, so a `sed -n` of the range is
   enough before editing, whatever the tool description gives as
   the precondition.
-- **Edit YAML and doc-comment neighbourhoods with `Edit`, not a
-  slurp-mode regex.** A whole-file `perl -0pi -e 's/.../.../'`
-  has no idea which block it lands in. Two shapes are reliably
-  dangerous: indentation-carrying formats, where a wrong-block
-  match still parses, and anything next to a `///` block, where
-  inserting before an item silently reassigns the comment above
-  it to the new one. `sed`/`perl` are fine for flat text and
-  one-line substitutions.
-
-  **A scripted string replace over Rust is the same hazard**,
-  whatever language does the replacing: a rename catches the
-  word in a sentence, a `map_err` closure nests wrongly, a
-  signature change misses a call site -- and each such edit
-  tends to sit next to a `///` block. Reach for `Edit` with an
-  anchor unique in the file, and keep a scripted replace for a
-  substitution that fits on one line.
-
-  **Python's `open()` rewrites line endings.** A `.ps1` file
-  checks out with CRLF, and the default `open()` reads it as LF
-  and, on Linux and macOS, writes LF back, so the tests read
-  other bytes than a fresh checkout or CI does. Open it with
-  `newline=''` so the CRLF survives, and check that `file` still
-  prints "with CRLF line terminators".
-
-  **A batched replace that writes the file once at the end
-  reports success for edits it never made.** A failed assertion
-  raises and the write never runs, while the shell's next
-  `echo ok` prints anyway, because nothing reads the script's
-  exit status. Write the file after **each** successful
-  replacement and read it back: a fix is landed when `grep` or
-  `sed -n` shows it, not when the script that made it says so.
-
-  **End an `Edit`'s `old_string` at a newline.** Ending it partway
-  through a wrapped line leaves the rest of that line untouched,
-  and the rest fuses onto the last line of `new_string`, making a
-  line over 80 columns or two words run together. Extend the
-  anchor to the end of the line and reflow the whole span in the
-  one edit. Rust has the same hazard, and rustfmt does not repair
-  a fused token inside a string. A scripted replace, such as
-  Python's `str.replace`, has it too: its old and new text also
-  end at a newline.
+- **Edit with `Edit`, anchored on whole lines.** Give it an
+  anchor unique in the file that ends at a newline, and keep `sed`,
+  `perl` and scripted replaces for substitutions that fit on one
+  line. Write a scripted edit's file after each replacement and
+  read it back, and open a `.ps1` file with `newline=''`.
+  `docs/developer/editing-hazards.md` gives the five hazards
+  behind this rule.
 - **Print the variable before claiming what it holds.** A claim
   about what a variable, a file or a platform actually contains
   needs the command that read it, in the same breath --
