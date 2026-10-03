@@ -223,7 +223,7 @@ for tools that are not present:
   `perl` and scripted replaces for substitutions that fit on one
   line. Write a scripted edit's file after each replacement and
   read it back, and open a `.ps1` file with `newline=''`.
-  `docs/developer/editing-hazards.md` gives the five hazards
+  `docs/developer/editing-hazards.md` gives the six hazards
   behind this rule.
 - **Print the variable before claiming what it holds.** A claim
   about what a variable, a file or a platform actually contains

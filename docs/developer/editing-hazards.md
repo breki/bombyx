@@ -1,6 +1,6 @@
 # Editing hazards
 
-Five ways a scripted or anchored edit lands somewhere other than
+Six ways a scripted or anchored edit lands somewhere other than
 where it was aimed, or reports success for an edit it never made.
 `CLAUDE.md` under **Environment Constraints** holds the rule they
 add up to; this file holds the detail, so it does not sit in every
@@ -60,3 +60,13 @@ Rust has the same hazard, and rustfmt does not repair a fused
 token inside a string. A scripted replace, such as Python's
 `str.replace`, has it too: its old and new text also end at a
 newline.
+
+## A splice between computed positions overruns the item
+
+Replacing a whole function or test by slicing the file between two
+`index()` results trusts the end index to stop where the item does.
+An end found by searching for the next `}` or blank line can land
+in the item after it, and the slice then deletes that item too.
+Replace a whole item with `Edit`, anchored on its own text from the
+first line to the last, and check with `git diff` that nothing else
+was removed.
