@@ -550,8 +550,8 @@ checked_str_try_from!(
 );
 
 impl ScriptPath {
-    /// The rule a Windows guest holds this script to and it breaks,
-    /// or `None`.
+    /// Why a Windows guest cannot run this script, or `None` when it
+    /// can.
     ///
     /// A method rather than a rule in [`ScriptPath::parse`], because
     /// only a Windows guest has these rules and the path is read
@@ -574,10 +574,13 @@ impl ScriptPath {
 pub enum WindowsScriptRefusal {
     /// Not a `.ps1` file, the only kind `powershell -File` runs.
     NotPowerShell,
-    /// Holds a `:`, which Windows reads as a drive (`C:x.ps1`) or a
-    /// file stream (`setup.ps1:x`). `check_inside_clone` cannot see
-    /// either; a `\` never gets that far, because the config refuses
-    /// it in any `script`.
+    /// Holds a `:`, which Windows reads as a drive (`C:x.ps1`) or an
+    /// NTFS alternate data stream (`setup.ps1:x`, a second, hidden
+    /// content attached to `setup.ps1`), so the path does not name a
+    /// file in the clone. `check_inside_clone` cannot see either. A
+    /// `\` never gets that far: `guards::check_renderable` refuses it
+    /// in any `script`, because the value is written into a Ruby
+    /// string in the Vagrantfile.
     Colon,
 }
 

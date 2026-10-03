@@ -40,9 +40,10 @@ const MAX_WINDOWS_GUEST_USER_LEN: usize = 20;
 /// uses, which is what `REFUSED_GUEST_USERS` keeps it from on
 /// every guest. Windows keeps groups and accounts in one
 /// namespace, so a group's name cannot be an account either. The
-/// groups are the built-in ones whose names a [`GuestUser`] can
-/// spell; the others hold a space.
-const WINDOWS_BUILT_IN_NAMES: [&str; 8] = [
+/// groups are those from Windows' built-in set whose names a
+/// [`GuestUser`] can spell, since most of the others hold a space.
+/// Nobody has listed the box's own groups to check the set.
+const WINDOWS_BUILT_IN_NAMES: [&str; 9] = [
     "administrator",
     "guest",
     "defaultaccount",
@@ -51,6 +52,7 @@ const WINDOWS_BUILT_IN_NAMES: [&str; 8] = [
     "users",
     "guests",
     "replicator",
+    "iis_iusrs",
 ];
 
 /// A validated guest account name.

@@ -1825,11 +1825,11 @@ mod load_project_tests {
     #[test]
     fn a_windows_guest_refuses_a_script_holding_a_colon() {
         // Windows reads `C:x.ps1` as a path on drive C and
-        // `setup.ps1:x` as a stream of `setup.ps1`, and the config's
-        // check for leaving the clone splits on `/` alone. Without
-        // this rule each passes the config and fails in the guest,
-        // after the boot. A `\` is refused for every guest already,
-        // by the Vagrantfile rule.
+        // `setup.ps1:x` as an alternate data stream of `setup.ps1`,
+        // and the config's check for leaving the clone splits on `/`
+        // alone. Without this rule each passes the config and fails
+        // in the guest, after the boot. A `\` is refused for every
+        // guest already, by `guards::check_renderable`.
         for script in ["C:x.ps1", "setup.ps1:x.ps1", "vagrant/a:b.ps1"] {
             let src = windows_registry_with_source_key("").replacen(
                 "vagrant/provision.ps1",
@@ -1882,6 +1882,7 @@ mod load_project_tests {
             ("users", BuiltIn),
             ("guests", BuiltIn),
             ("replicator", BuiltIn),
+            ("iis_iusrs", BuiltIn),
             ("con", DeviceName),
             ("prn", DeviceName),
             ("aux", DeviceName),
@@ -1890,6 +1891,8 @@ mod load_project_tests {
             ("com9", DeviceName),
             ("lpt1", DeviceName),
             ("lpt9", DeviceName),
+            ("com0", DeviceName),
+            ("lpt0", DeviceName),
         ] {
             let src = windows_registry_with_source_key("").replacen(
                 "guest = \"windows\"\n",
@@ -1919,7 +1922,7 @@ mod load_project_tests {
         );
         load(&src, "myproject").expect("a 20-character name must load");
         // A name that only starts like a device is an ordinary name.
-        for user in ["console", "com0", "com10", "lpt", "nulls"] {
+        for user in ["console", "com10", "lpt", "nulls"] {
             let src = windows_registry_with_source_key("").replacen(
                 "guest = \"windows\"\n",
                 &format!("guest = \"windows\"\nguest_user = \"{user}\"\n"),
@@ -1933,8 +1936,8 @@ mod load_project_tests {
     fn a_windows_guest_refuses_a_project_named_after_a_device() {
         // The clone folder is named after the project, and Windows
         // cannot create a folder named after a device, with or
-        // without an extension, in any case. The quotes let a
-        // table header hold a name with a dot.
+        // without an extension, in upper or lower case. The quotes
+        // let a table header hold a name with a dot.
         let named = |src: &str, project: &str| {
             src.replace(
                 "[projects.myproject",
@@ -1942,7 +1945,7 @@ mod load_project_tests {
             )
             .replace("myproject", project)
         };
-        for project in ["con", "AUX", "nul.web", "Com1", "lpt9.x"] {
+        for project in ["con", "AUX", "nul.web", "Com1", "lpt9.x", "com0"] {
             let src = named(&windows_registry_with_source_key(""), project);
             let err = load(&src, project).expect_err(project);
             assert!(

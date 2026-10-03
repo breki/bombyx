@@ -544,7 +544,7 @@ try {
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
         Refuse "$Script is not a regular file."
     }
-    # `-ne` ignores case, as `ScriptPath::is_powershell` does, so
+    # `-ne` ignores case, as `guards::is_powershell_file` does, so
     # `Setup.PS1` passes. A file named only `.ps1` has that extension
     # and no name, and the config refuses it, so this does too.
     if (([IO.Path]::GetExtension($full) -ne '.ps1') -or

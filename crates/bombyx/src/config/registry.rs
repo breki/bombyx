@@ -474,7 +474,8 @@ fn refuse_windows_mismatch(
         }
     }
     // bootstrap.ps1 runs the script with `powershell -File`, which
-    // runs a `.ps1` file and nothing else.
+    // runs a `.ps1` file and nothing else, and Windows reads a `:` in
+    // the path as a drive or a stream.
     let script = &project.source.script;
     if let Some(reason) = script.windows_refusal() {
         return Err(ConfigError::WindowsGuestScript {

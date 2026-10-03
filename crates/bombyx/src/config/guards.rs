@@ -9,7 +9,8 @@
 //! blank check, the character check and the inside-the-clone
 //! check have several callers each.
 //!
-//! Everything here returns [`FieldError`], not `ConfigError`.
+//! Each `check_*` function returns [`FieldError`], not
+//! `ConfigError`; the `is_*` predicates return a `bool`.
 //! These functions check a value and nothing else. The caller
 //! decides whether the value came from a file, and reports it
 //! that way. See `config::error`.
@@ -33,19 +34,21 @@ pub(super) fn is_powershell_file(path: &str) -> bool {
 }
 
 /// Whether Windows reserves `name` for a device: `con`, `prn`,
-/// `aux`, `nul`, `com1` to `com9` or `lpt1` to `lpt9`, in any case
-/// and with any extension.
+/// `aux`, `nul`, `com0` to `com9` or `lpt0` to `lpt9`, in upper or
+/// lower case and with any extension. Microsoft's naming rules include `com0`
+/// and `lpt0`, which Windows may accept in practice. They are refused
+/// anyway: a refused name costs a rename, while a name Windows then
+/// refuses fails the guest after the boot.
 ///
-/// Windows cannot create a file or folder with such a name, so a
-/// value that names a folder in a Windows guest is refused instead.
+/// Windows cannot create a file or folder with such a name, so the
+/// config refuses a value that names a folder in a Windows guest,
+/// before the guest boots rather than in it.
 pub(super) fn is_windows_device_name(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or_default();
     let stem = stem.to_ascii_lowercase();
     match stem.as_bytes() {
         b"con" | b"prn" | b"aux" | b"nul" => true,
-        [b'c', b'o', b'm', d] | [b'l', b'p', b't', d] => {
-            (b'1'..=b'9').contains(d)
-        }
+        [b'c', b'o', b'm', d] | [b'l', b'p', b't', d] => d.is_ascii_digit(),
         _ => false,
     }
 }

@@ -165,8 +165,12 @@ Read from a VM made from the box, on 2026-09-29:
 - **The built-in Administrator disabled.** Before sysprep,
   `stage.ps1` gives it a fresh random password, made in the guest and
   written nowhere, so any copy of the install's password left in the
-  image is stale, and then disables it. No answer file under
-  `C:\Windows\Panther` holds a password. `vagrant` is the way in.
+  image is stale, and then disables it. `stage.ps1` also removes each
+  answer file under `C:\Windows\Panther` that holds a password. An
+  answer file that Windows lets `stage.ps1` read but not delete is
+  named in `serial.log` and left in place; it holds the stale
+  Administrator password and vagrant's well-known one. `vagrant` is
+  the way in.
 - **WinRM stopped and disabled**, and its firewall rules off, because
   bombyx reaches the guest over SSH alone.
 - **Updates set to download only**, Windows' default, as SConfig,

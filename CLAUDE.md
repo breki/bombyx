@@ -204,7 +204,8 @@ for tools that are not present:
   neither. Search for one distinctive word, or flatten first:
   `tr '\n' ' ' < FILE | grep -o 'the phrase'`. The guest
   scripts under `crates/bombyx/templates/` wrap a long command
-  with `\` the same way, so search them for one argument.
+  across lines too -- with `\` in the `.sh` scripts, a backtick
+  in the `.ps1` ones -- so search them for one argument.
 - **Read a large file in pieces.** Over roughly 500 lines,
   `grep -n` for the item you want and then `sed -n` the range
   around it; reading a whole large file (e.g.
@@ -236,8 +237,10 @@ for tools that are not present:
 
   **Python's `open()` rewrites line endings.** A `.ps1` file
   checks out with CRLF, and the default `open()` reads it as LF
-  and writes LF back. Open it with `newline=''` so the CRLF
-  survives, and check with `file` afterwards.
+  and, on Linux and macOS, writes LF back, so the tests read
+  other bytes than a fresh checkout or CI does. Open it with
+  `newline=''` so the CRLF survives, and check that `file` still
+  prints "with CRLF line terminators".
 
   **A batched replace that writes the file once at the end
   reports success for edits it never made.** A failed assertion

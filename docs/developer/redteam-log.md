@@ -4,6 +4,23 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-10-03-box-build-skips-unreadable-answer-files
+
+**Category:** Correctness
+
+`boxes/windows-server-2025/stage.ps1` picks the answer files to
+remove with `Select-String -Quiet -ErrorAction SilentlyContinue`,
+and lists `C:\Windows\Panther` with `Get-ChildItem -ErrorAction
+SilentlyContinue`. A file Windows holds open without read sharing,
+or a subdirectory it cannot list, is skipped with no line in the
+build log, so a box can ship an answer file naming the stale
+Administrator password and vagrant's well-known one without a
+trace. The fix collects those read errors (`-ErrorVariable`) and
+reports each file as the delete failure is reported. Deferred from
+the #175 review: found in its third red-team round, the ceiling,
+so a behaviour fix there would have had no review, and no box
+build has run it.
+
 ### rt-2026-09-30-windows-refresh-mixed-advice
 
 **Category:** Correctness

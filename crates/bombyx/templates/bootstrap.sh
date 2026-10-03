@@ -1074,9 +1074,10 @@ update_failed() {
         "user, clear it in the guest: $CLONE_DIR"
 }
 
-# Refuses because the first clone failed. Under `set -e` a bare
-# failed clone would end the script without `refuse`, leaving
-# the uploaded secrets in the guest.
+# Refuses because a fresh clone failed (see the clone below for
+# when one runs). Under `set -e` a bare failed clone would end the
+# script without `refuse`, leaving the uploaded secrets in the
+# guest.
 clone_failed() {
     refuse "could not clone $BOMBYX_REPO. The message above" \
         "says why."

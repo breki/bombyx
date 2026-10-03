@@ -230,14 +230,14 @@ try {
     # cannot be an account either.
     $builtIn = @('administrator', 'guest', 'defaultaccount',
         'wdagutilityaccount', 'administrators', 'users', 'guests',
-        'replicator', 'root', 'vagrant')
+        'replicator', 'iis_iusrs', 'root', 'vagrant')
     if ($builtIn -contains $User -or $User -eq $env:USERNAME) {
         Refuse ("guest_user (`"$User`") is a built-in account or group, " +
             'or the account Vagrant logs in as. The agent needs an ' +
             'account of its own.')
     }
     # A device name cannot be the account's profile folder.
-    if ($User -match '^(con|prn|aux|nul|com[1-9]|lpt[1-9])$') {
+    if ($User -match '^(con|prn|aux|nul|com[0-9]|lpt[0-9])$') {
         Refuse ("guest_user (`"$User`") is a name Windows reserves " +
             'for a device.')
     }

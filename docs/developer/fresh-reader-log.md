@@ -6,6 +6,40 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-03-colon-refusal-message-says-file-stream
+
+**Category:** Program output
+
+`WindowsScriptRefusal::Colon`'s `Display` in
+`config/source.rs` tells the operator a Windows guest reads a `:`
+"as a drive or a file stream". "File stream" is not a term an
+operator knows; "an alternate data stream (`setup.ps1:x`)" names
+it. The text is program output, so the #175 review's prose stage
+could not change it.
+
+### fr-2026-10-03-credential-lists-comment-narrates-history
+
+**Category:** History in a comment
+
+`crates/bombyx/src/vagrantfile/bootstrap_tests.rs` explains that
+the credential lists are built from `CREDENTIALS` by recounting
+how adding a credential "used to mean editing three separate
+lists" and a review that found them lagging. The rule fits in one
+sentence: the lists come from `CREDENTIALS`, so a new row reaches
+every guard. Raised in the #175 review, outside its diff.
+
+### fr-2026-10-03-unset-home-test-misdescribes-its-sibling
+
+**Category:** False claim in a comment
+
+A comment in `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
+says `every_refusal_clears_every_uploaded_credential` "compares
+the offsets of `exit 1` and the removal". That test compares no
+offsets: it refuses any `exit` or `return` outside `refuse()` and
+checks one `rm -f` line removes every credential. The comment
+should say an `unbound variable` abort is not an `exit`, so that
+test cannot see it. Raised in the #175 review, outside its diff.
+
 ### fr-2026-10-03-firewall-doc-narrates-incidents
 
 **Category:** Comprehension
