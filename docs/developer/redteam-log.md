@@ -4,19 +4,6 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
-### rt-2026-10-01-first-clone-aborts-without-refuse
-
-**Category:** Correctness
-
-The first `git_net clone` in `bootstrap.sh` runs bare under
-`set -e`, so a failed clone aborts the script without `refuse`, and
-the uploaded deploy key, secrets file and git credential stay in the
-guest. `bootstrap.ps1` refuses with "could not clone" there. True on
-`main` before the history change; raised by the fresh-reader stage of
-the #160 review and logged rather than fixed, because it is outside
-that change. The fix is an `if ! git_net clone ...; then refuse ...;
-fi` around both clone lines.
-
 ### rt-2026-09-30-windows-refresh-mixed-advice
 
 **Category:** Correctness
@@ -32,52 +19,6 @@ fix is a status of its own for "provision needed", which
 enum. Deferred on 2026-09-30: Windows guests have not shipped, so no
 guest can be in this state yet. Found as RT-5 in the first red-team
 round on PR #152.
-
-### rt-2026-09-29-bare-ps1-script-checks-disagree
-
-**Category:** Correctness
-
-`ScriptPath::is_powershell` refuses a script named `.ps1` with nothing
-before the extension, while `bootstrap.ps1` would accept one, because
-`[IO.Path]::GetExtension('.ps1')` returns `.ps1`. The config refusal makes
-the case unreachable today; the two checks still disagree on it. Raised by
-fresh-reader in the #145 review, after stage 2 had closed.
-
-### rt-2026-09-29-windows-guest-user-misses-groups-and-devices
-
-**Category:** Correctness
-
-`WINDOWS_BUILT_IN_USERS` and `account.ps1`'s copy refuse four built-in
-accounts, but Windows also cannot give an agent account a built-in
-group's name (`users`, `guests`, `administrators`, `replicator`) or a
-DOS device name (`con`, `prn`, `aux`, `nul`, `com1`-`com9`,
-`lpt1`-`lpt9`), which cannot be a profile folder. A project name that is
-a device name cannot be the clone folder either. Each fails in the guest
-after the boot. Deferred in the #145 review by the operator's choice.
-
-### rt-2026-09-29-windows-script-backslash-traversal
-
-**Category:** Correctness
-
-`check_inside_clone` splits a `script` on `/` only, so a Windows
-`script` such as `..\setup.ps1` or `C:\x.ps1` passes the config and is
-refused by `bootstrap.ps1` in the guest, after the boot. For a Windows
-project the config could refuse a `\` or a `:` in `script`. Deferred in
-the #145 review by the operator's choice; not a security gap, because
-the guest refuses it.
-
-### rt-2026-09-29-box-build-answer-file-delete-is-fatal
-
-**Category:** Correctness
-
-`boxes/windows-server-2025/stage.ps1` deletes each answer file under
-`C:\Windows\Panther` that holds `<PlainText>` under
-`$ErrorActionPreference = 'Stop'`, so a file Windows holds locked
-fails the whole build after the update rounds. Since the build resets
-the Administrator password first, those files name only a stale
-password, so the delete may be better reported and skipped than made
-fatal. No build has hit a locked file. Raised by fresh-reader in the
-#144 review, after stage 2 had closed.
 
 ---
 
@@ -231,25 +172,15 @@ the secrets file. A value pairing a `Config` with its read
 `Option` of it and the three write arms would panic on `None`
 instead. Decide what those calls are handed first.
 
-### rt-2026-09-13-cross-key-rule-count-stated-in-six-places
-
-**Category:** Correctness (escalated consolidation)
-
-The rules spanning more than one `[source]` key are stated in five
-places -- `config.toml.sample`, `docs/usage.md`,
-`docs/architecture.md` twice (prose and the refusal table), and
-`llms.txt` -- so a new rule means five edits, and `canon-check`
-reads only `CLAUDE.md`, `llms.txt` and `.claude/`. Repair: one
-authoritative list, the others pointing at it. Deferred: a
-many-to-one consolidation is its own commit per `/review`.
-
 ### rt-2026-09-13-env-file-read-has-no-size-cap-and-a-toctou-gap
 
 **Category:** Security (low)
 
-`EnvFilePath::read` in `crates/bombyx/src/config/env_file.rs`
-checks the path with `std::fs::metadata` and then opens it again,
-so a fifo swapped in between the two makes bombyx block in
+The workstation-file read in
+`crates/bombyx/src/config/workstation_path.rs`, which
+`EnvFilePath::read` goes through, checks the path with
+`std::fs::metadata` and then opens it again, so a fifo swapped in
+between the two makes bombyx block in
 `File::open` with no message. It needs a directory the operator
 does not control, e.g. `/tmp`. The fix is platform-specific
 (`O_NONBLOCK`, `O_NOFOLLOW`). Deferred: the `metadata` check
@@ -258,14 +189,3 @@ size cap this entry also asked for has landed as
 `workstation_path::MAX_FILE_BYTES`, which bounds what a fifo can
 feed bombyx but does not stop the block.
 
-### rt-2026-09-11-exit-rule-has-no-single-home
-
-**Category:** Duplicated rule deferred for its own commit
-
-`bombyx list`'s exit-status rule is stated in five places (clap
-help in `main.rs`, `README.md`, `docs/usage.md`, `llms.txt`,
-`CHANGELOG.md`) and the `--project` requirement in three, with
-none owning the rule. Repair: one owner, pointers behind. Deferred
-per `/review` (a consolidation is its own commit); worth deciding
-whether the clap help can be a pointer at all, since it is what
-`bombyx list --help` prints.

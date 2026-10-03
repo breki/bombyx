@@ -545,8 +545,10 @@ try {
         Refuse "$Script is not a regular file."
     }
     # `-ne` ignores case, as `ScriptPath::is_powershell` does, so
-    # `Setup.PS1` passes.
-    if ([IO.Path]::GetExtension($full) -ne '.ps1') {
+    # `Setup.PS1` passes. A file named only `.ps1` has that extension
+    # and no name, and the config refuses it, so this does too.
+    if (([IO.Path]::GetExtension($full) -ne '.ps1') -or
+        -not [IO.Path]::GetFileNameWithoutExtension($full)) {
         Refuse ("$Script is not a .ps1 file, and a Windows guest runs " +
             'the script with PowerShell.')
     }

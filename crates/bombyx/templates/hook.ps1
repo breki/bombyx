@@ -76,7 +76,9 @@ if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
 if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
     Refuse "no secrets_refreshed hook at $Hook in the clone"
 }
-if ([IO.Path]::GetExtension($full) -ne '.ps1') {
+# A file named only `.ps1` is refused, as the config refuses it.
+if (([IO.Path]::GetExtension($full) -ne '.ps1') -or
+    -not [IO.Path]::GetFileNameWithoutExtension($full)) {
     Refuse ("the secrets_refreshed hook $Hook is not a .ps1 file, so it " +
         'did not run')
 }

@@ -1074,6 +1074,14 @@ update_failed() {
         "user, clear it in the guest: $CLONE_DIR"
 }
 
+# Refuses because the first clone failed. Under `set -e` a bare
+# failed clone would end the script without `refuse`, leaving
+# the uploaded secrets in the guest.
+clone_failed() {
+    refuse "could not clone $BOMBYX_REPO. The message above" \
+        "says why."
+}
+
 # If the clone came from a different repository than the one
 # bombyx was asked for, throw it away rather than fetching over
 # it.
@@ -1344,11 +1352,15 @@ else
     # A clone without `--depth` writes git's default refspec (see
     # the fetch above), which names every branch.
     if [ "$HISTORY" = full ]; then
-        git_net clone --branch "$BOMBYX_REF" \
+        if ! git_net clone --branch "$BOMBYX_REF" \
             -- "$BOMBYX_REPO" "$CLONE_DIR"
-    else
-        git_net clone --depth 1 --branch "$BOMBYX_REF" \
-            -- "$BOMBYX_REPO" "$CLONE_DIR"
+        then
+            clone_failed
+        fi
+    elif ! git_net clone --depth 1 --branch "$BOMBYX_REF" \
+        -- "$BOMBYX_REPO" "$CLONE_DIR"
+    then
+        clone_failed
     fi
 
     # This runs for every fresh clone: the first `up`, and a

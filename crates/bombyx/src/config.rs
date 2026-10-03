@@ -271,7 +271,9 @@ pub use repo_token::{
     GitCredential, RepoToken, RepoTokenError, RepoTokenVar, RepoUser,
 };
 pub use root::RemoteRoot;
-pub use source::{GitRef, History, RepoUrl, ScriptPath, Source};
+pub use source::{
+    GitRef, History, RepoUrl, ScriptPath, Source, WindowsScriptRefusal,
+};
 pub use vault::{
     AttachmentName, EntryPath, SecretName, Vault, VaultDatabase, VaultError,
     VaultKey, VaultRead,
@@ -1797,7 +1799,13 @@ mod load_project_tests {
             );
             let err = load(&src, "myproject").expect_err(script);
             assert!(
-                matches!(err, ConfigError::WindowsGuestScript { .. }),
+                matches!(
+                    err,
+                    ConfigError::WindowsGuestScript {
+                        reason: WindowsScriptRefusal::NotPowerShell,
+                        ..
+                    }
+                ),
                 "{script}: {err:?}"
             );
             let text = err.to_string();
@@ -1815,6 +1823,38 @@ mod load_project_tests {
     }
 
     #[test]
+    fn a_windows_guest_refuses_a_script_holding_a_colon() {
+        // Windows reads `C:x.ps1` as a path on drive C and
+        // `setup.ps1:x` as a stream of `setup.ps1`, and the config's
+        // check for leaving the clone splits on `/` alone. Without
+        // this rule each passes the config and fails in the guest,
+        // after the boot. A `\` is refused for every guest already,
+        // by the Vagrantfile rule.
+        for script in ["C:x.ps1", "setup.ps1:x.ps1", "vagrant/a:b.ps1"] {
+            let src = windows_registry_with_source_key("").replacen(
+                "vagrant/provision.ps1",
+                script,
+                1,
+            );
+            let err = load(&src, "myproject").expect_err(script);
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::WindowsGuestScript {
+                        reason: WindowsScriptRefusal::Colon,
+                        ..
+                    }
+                ),
+                "{script}: {err:?}"
+            );
+            let text = err.to_string();
+            for part in ["myproject", script, "`:`"] {
+                assert!(text.contains(part), "{script}: {part}: {text}");
+            }
+        }
+    }
+
+    #[test]
     fn a_linux_guest_runs_a_script_of_any_name() {
         let src = registry_with_source_key("").replacen(
             "vagrant/provision.sh",
@@ -1827,15 +1867,29 @@ mod load_project_tests {
     #[test]
     fn a_windows_guest_refuses_a_guest_user_windows_cannot_hold() {
         // Windows caps a local account name at 20 characters, and
-        // these names are the box's own built-in accounts. The
-        // rules `GuestUser` applies to every guest still run first.
-        use crate::config::WindowsUserRefusal::{BuiltIn, TooLong};
+        // these names are the box's own built-in accounts and
+        // groups, which share one namespace with accounts. A device
+        // name cannot be the account's profile folder. The rules
+        // `GuestUser` applies to every guest still run first.
+        use crate::config::WindowsUserRefusal::{BuiltIn, DeviceName, TooLong};
         for (user, why) in [
             ("a23456789012345678901", TooLong),
             ("administrator", BuiltIn),
             ("guest", BuiltIn),
             ("defaultaccount", BuiltIn),
             ("wdagutilityaccount", BuiltIn),
+            ("administrators", BuiltIn),
+            ("users", BuiltIn),
+            ("guests", BuiltIn),
+            ("replicator", BuiltIn),
+            ("con", DeviceName),
+            ("prn", DeviceName),
+            ("aux", DeviceName),
+            ("nul", DeviceName),
+            ("com1", DeviceName),
+            ("com9", DeviceName),
+            ("lpt1", DeviceName),
+            ("lpt9", DeviceName),
         ] {
             let src = windows_registry_with_source_key("").replacen(
                 "guest = \"windows\"\n",
@@ -1864,6 +1918,46 @@ mod load_project_tests {
             1,
         );
         load(&src, "myproject").expect("a 20-character name must load");
+        // A name that only starts like a device is an ordinary name.
+        for user in ["console", "com0", "com10", "lpt", "nulls"] {
+            let src = windows_registry_with_source_key("").replacen(
+                "guest = \"windows\"\n",
+                &format!("guest = \"windows\"\nguest_user = \"{user}\"\n"),
+                1,
+            );
+            load(&src, "myproject").expect(user);
+        }
+    }
+
+    #[test]
+    fn a_windows_guest_refuses_a_project_named_after_a_device() {
+        // The clone folder is named after the project, and Windows
+        // cannot create a folder named after a device, with or
+        // without an extension, in any case. The quotes let a
+        // table header hold a name with a dot.
+        let named = |src: &str, project: &str| {
+            src.replace(
+                "[projects.myproject",
+                &format!("[projects.\"{project}\""),
+            )
+            .replace("myproject", project)
+        };
+        for project in ["con", "AUX", "nul.web", "Com1", "lpt9.x"] {
+            let src = named(&windows_registry_with_source_key(""), project);
+            let err = load(&src, project).expect_err(project);
+            assert!(
+                matches!(err, ConfigError::WindowsGuestProject { .. }),
+                "{project}: {err:?}"
+            );
+            assert!(err.to_string().contains(project), "{err}");
+        }
+        for project in ["console", "com10", "aux-tools", "nulls.web"] {
+            let src = named(&windows_registry_with_source_key(""), project);
+            load(&src, project).expect(project);
+        }
+        // A Linux guest names nothing after a device.
+        let src = registry_with_source_key("").replace("myproject", "con");
+        load(&src, "con").expect("a Linux guest takes any project name");
     }
 
     #[test]

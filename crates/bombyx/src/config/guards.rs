@@ -32,6 +32,24 @@ pub(super) fn is_powershell_file(path: &str) -> bool {
     file.len() > ".ps1".len() && file.to_ascii_lowercase().ends_with(".ps1")
 }
 
+/// Whether Windows reserves `name` for a device: `con`, `prn`,
+/// `aux`, `nul`, `com1` to `com9` or `lpt1` to `lpt9`, in any case
+/// and with any extension.
+///
+/// Windows cannot create a file or folder with such a name, so a
+/// value that names a folder in a Windows guest is refused instead.
+pub(super) fn is_windows_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or_default();
+    let stem = stem.to_ascii_lowercase();
+    match stem.as_bytes() {
+        b"con" | b"prn" | b"aux" | b"nul" => true,
+        [b'c', b'o', b'm', d] | [b'l', b'p', b't', d] => {
+            (b'1'..=b'9').contains(d)
+        }
+        _ => false,
+    }
+}
+
 /// Requires a name a shell would accept as a variable: letters,
 /// digits and underscores, not starting with a digit.
 ///

@@ -822,8 +822,30 @@ fn a_full_history_clone_fetches_every_branch() {
     assert!(widen < unshallow && unshallow < every && every < the_ref);
     code_at(
         &code,
-        "if [ \"$HISTORY\" = full ]; then git_net clone --branch \
+        "if [ \"$HISTORY\" = full ]; then if ! git_net clone --branch \
          \"$BOMBYX_REF\" -- \"$BOMBYX_REPO\" \"$CLONE_DIR\"",
+    );
+}
+
+#[test]
+fn a_failed_clone_refuses() {
+    // Under `set -e` a bare failed clone ends the script without
+    // `refuse`, so the uploaded deploy key, secrets file and git
+    // credential would stay in the guest. Every clone line is
+    // tested, and a failure goes through `refuse`.
+    let code = bootstrap_code();
+    code_at(
+        &code,
+        "if ! git_net clone --branch \"$BOMBYX_REF\" -- \
+         \"$BOMBYX_REPO\" \"$CLONE_DIR\" then clone_failed fi \
+         elif ! git_net clone --depth 1 --branch \"$BOMBYX_REF\" -- \
+         \"$BOMBYX_REPO\" \"$CLONE_DIR\" then clone_failed fi",
+    );
+    code_at(&code, "clone_failed() { refuse \"could not clone");
+    assert_eq!(
+        code.matches("git_net clone").count(),
+        code.matches("! git_net clone").count(),
+        "{code}"
     );
 }
 
@@ -842,7 +864,7 @@ fn shallow_never_cuts_the_history_of_a_full_clone() {
     );
     code_at(
         &code,
-        "else git_net clone --depth 1 --branch \"$BOMBYX_REF\" -- \
+        "elif ! git_net clone --depth 1 --branch \"$BOMBYX_REF\" -- \
          \"$BOMBYX_REPO\" \"$CLONE_DIR\"",
     );
     assert_eq!(code.matches("--depth 1").count(), 2, "{code}");
@@ -894,7 +916,7 @@ fn a_fresh_clone_ends_up_detached_like_an_updated_one() {
     // the detach follows both clone commands, not one arm.
     let detach = code_at(
         &code,
-        "-- \"$BOMBYX_REPO\" \"$CLONE_DIR\" fi \
+        "-- \"$BOMBYX_REPO\" \"$CLONE_DIR\" then clone_failed fi \
          if ! git -C \"$CLONE_DIR\" checkout --quiet --detach; \
          then refuse \"could not detach HEAD in the new clone at\" \
          \"$CLONE_DIR. The message above says why.\" \

@@ -213,8 +213,9 @@ try {
     Remove-Item -LiteralPath $RoundFile, $PSCommandPath -Force
     # The answer files setup cached from the install hold the install's
     # Administrator password, stale since the reset above. They are
-    # removed so no file in the box names it, under 'Stop' like every
-    # step that is not clean-up for size.
+    # removed so no file in the box names it. A file Windows holds
+    # locked is reported and left, rather than failing the build after
+    # its update rounds, because the password it names opens nothing.
     Get-ChildItem -Path 'C:\Windows\Panther' -Recurse -Include '*.xml' -File `
             -ErrorAction SilentlyContinue |
         Where-Object {
@@ -222,8 +223,14 @@ try {
                 -Quiet -ErrorAction SilentlyContinue
         } |
         ForEach-Object {
-            Say "removing $($_.FullName)"
-            Remove-Item -LiteralPath $_.FullName -Force
+            $file = $_.FullName
+            Say "removing $file"
+            try {
+                Remove-Item -LiteralPath $file -Force
+            } catch {
+                Say ("could not remove $file, which names " +
+                    "only the stale password: $($_.Exception.Message)")
+            }
         }
     # Clean-up for size: superseded update files go, and freed blocks
     # are handed back to the disk image, which build.sh then copies
