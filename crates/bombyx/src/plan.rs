@@ -207,15 +207,15 @@ pub fn plan(
 ) -> Vec<RemoteCommand> {
     match action {
         // The `fresh-install` snapshot is *not* appended here. It is
-        // taken only when this `up` creates the machine -- a clean
-        // install is what the name promises -- and `plan` cannot see
-        // whether the machine already exists, because it returns the
-        // whole list before anything runs. So the binary's `up_run`,
-        // which probes the state for issue #89, owns that decision and
-        // appends `remote::save_snapshot_if_absent` when the machine
-        // is absent. `provision` and `scratch` share `write_then` and
-        // want no snapshot at all, the other reason it is not in the
-        // helper.
+        // taken only when this `up` creates the machine, or cannot
+        // tell -- a clean install is what the name promises -- and
+        // `plan` cannot see whether the machine already exists,
+        // because it returns the whole list before anything runs. So
+        // `up::up_plan` decides from the probed state (issue #89) when
+        // the snapshot is taken, and the binary's `up_run` supplies
+        // `remote::save_snapshot_if_absent` for that step. `provision`
+        // and `scratch` share `write_then` and want no snapshot at
+        // all, the other reason it is not in the helper.
         Action::Up => write_then(
             cfg,
             &cfg.remote_project_dir(),
@@ -745,10 +745,11 @@ mod tests {
         // has to be written before the boot, into a directory
         // that already exists.
         //
-        // The `fresh-install` snapshot is not part of this plan: the
-        // binary's `up_run` appends it, and only when it is creating
-        // the machine. So `plan(Up)` is the five boot steps, and the
-        // length assertion catches one going missing.
+        // The `fresh-install` snapshot is not part of this plan:
+        // `up::up_plan` decides whether `up` takes it, and the
+        // binary's `up_run` supplies its command. So `plan(Up)` is the
+        // five boot steps, and the length assertion catches one going
+        // missing.
         let s = scripts_without_payloads(&Action::Up);
         assert_eq!(s.len(), 5, "up lost or gained a step: {s:?}");
         assert_eq!(
@@ -1028,9 +1029,10 @@ mod tests {
         // file-writing logic could boot against a stale Vagrantfile
         // on the host.
         //
-        // `up`'s snapshot is not part of the plan -- the binary
-        // appends it -- so the two plans are the same length and the
-        // comparison runs to the last step.
+        // `up`'s snapshot is not part of the plan -- `up::up_plan`
+        // decides it and the binary supplies its command -- so the two
+        // plans are the same length and the comparison runs to the
+        // last step.
         let up = run(&Action::Up);
         let pr = run(&Action::Provision(CloneUpdate::Checkout));
         assert_eq!(up.len(), pr.len());
@@ -1076,8 +1078,8 @@ mod tests {
     #[test]
     fn scratch_and_up_take_the_same_shape() {
         // The two lifecycles must not drift apart in how they write
-        // and boot. `up`'s snapshot is not in the plan -- the binary
-        // appends it -- and a scratch VM never gets one anyway (it is
+        // and boot. `up`'s snapshot is not in the plan -- `up::up_plan`
+        // decides it -- and a scratch VM never gets one anyway (it is
         // discarded, not reset), so the two plans match step for step
         // and both end at the boot.
         let up = run(&Action::Up);
@@ -1125,11 +1127,13 @@ mod tests {
         assert!(s.contains("has no VM yet"), "{s}");
     }
 
-    // The snapshot is not part of `plan(Up)`: the binary's `up_run`
-    // appends it, and only when it is creating the machine
-    // (`snapshot-precondition-on-halt`). The boot-then-snapshot order
-    // is pinned end-to-end by the `up --dry-run` integration test, and
-    // "snapshot only when absent" by `VmState::is_absent`'s unit test.
+    // The snapshot is not part of `plan(Up)`: `up::up_plan` decides
+    // whether `up` takes it, and the binary's `up_run` supplies its
+    // command. The boot-then-snapshot order is pinned end-to-end by
+    // the `up --dry-run` integration test and by `up.rs`'s tests, and
+    // the rule -- a machine absent or in an unknown state gets the
+    // snapshot -- by `listing`'s
+    // `up_snapshots_only_when_creating_or_unsure`.
 
     #[test]
     fn snapshot_replaces_the_snapshot_without_consulting_the_listing() {
@@ -1154,8 +1158,8 @@ mod tests {
         // the name `snapshot` writes. Asserted across the plans rather
         // than inside `remote`, because `plan` chooses which builder
         // each action gets and could hand `reset` a different one.
-        // `up` writes that same snapshot too, but the binary's
-        // `up_run` appends it, not `plan` (`snapshot-precondition-on-halt`).
+        // `up` writes that same snapshot too, but `up::up_plan`
+        // decides that step, not `plan`.
         let restored = script(&run(&Action::Reset)[0]);
         assert!(restored.contains("'fresh-install'"), "{restored}");
         let saved = scripts(&Action::Snapshot);

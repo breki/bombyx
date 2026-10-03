@@ -32,5 +32,6 @@ pub mod remote;
 pub mod run;
 pub mod term;
 pub mod tool;
+pub mod up;
 pub mod update;
 pub mod vagrantfile;

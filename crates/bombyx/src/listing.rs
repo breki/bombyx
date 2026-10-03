@@ -112,7 +112,8 @@ impl VmState {
     /// reply that did not parse. `up` still boots (a probe bombyx
     /// cannot complete must not block the command), but it says so,
     /// because a machine that is in fact running would otherwise be
-    /// re-staged and re-snapshotted without a word.
+    /// re-staged -- its generated files and secrets written onto the
+    /// VM host again -- and re-snapshotted without a word.
     #[must_use]
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown(_))
@@ -120,7 +121,8 @@ impl VmState {
 
     /// Whether the host has no domain for this machine yet.
     ///
-    /// What `bombyx up` uses to decide the `fresh-install` snapshot:
+    /// One of the two inputs `bombyx up` uses to decide the
+    /// `fresh-install` snapshot, beside `VmState::is_unknown`:
     /// an absent machine is one this `up` creates, so its disk is a
     /// clean install worth snapshotting, while a machine already on
     /// the host is only being booted and must not be renamed
@@ -222,11 +224,13 @@ impl std::fmt::Display for VmState {
 /// what state the machine is in ([`VmState::is_unknown`], and `None`
 /// when no state was probed) -- an unconfirmed state might be a first
 /// boot, and losing the `reset` baseline to a flaky check is worse
-/// than the snapshot the `if-absent` guard skips on a repeat. A
+/// than the snapshot the `if-absent` guard skips on a repeat
+/// (`remote::save_snapshot_if_absent` saves nothing when a
+/// `fresh-install` snapshot already exists). A
 /// machine the probe reports as present but stopped is only being
 /// booted, so snapshotting its in-use disk would mislabel it.
 ///
-/// This is the decision the binary's `up_run` acts on. It lives here,
+/// `up::up_plan` asks it when it lists `up`'s steps. It lives here,
 /// in the tested library, rather than inline in `src/bin`, for the
 /// reason [`VmState::is_running`] gives: getting it wrong would
 /// mislabel an in-use disk `fresh-install`, and `src/bin` is outside
@@ -251,9 +255,9 @@ pub fn takes_fresh_snapshot(state: Option<&VmState>) -> bool {
 /// the refresh writes the same bytes again, which costs one round
 /// trip and nothing else.
 ///
-/// This decides the boot path only. The binary's `up_run` handles
-/// a machine that is already running before it asks, by refreshing
-/// and stopping. The policy is kept here for the reason
+/// This decides the boot path only. `up::up_plan` handles a machine
+/// that is already running before it asks, with a refresh and no
+/// boot. The policy is kept here for the reason
 /// [`takes_fresh_snapshot`] gives.
 #[must_use]
 pub fn refreshes_secrets_after_up(state: Option<&VmState>) -> bool {
@@ -1418,10 +1422,10 @@ mod tests {
 
     #[test]
     fn up_snapshots_only_when_creating_or_unsure() {
-        // The policy `up_run` acts on. A machine being created, or one
-        // whose state could not be read, gets the snapshot; a present
-        // but stopped machine does not, because booting it is not a
-        // fresh install. `None` (no probe) counts as unsure.
+        // The policy `up::up_plan` acts on. A machine being created,
+        // or one whose state could not be read, gets the snapshot; a
+        // present but stopped machine does not, because booting it is
+        // not a fresh install. `None` (no probe) counts as unsure.
         assert!(takes_fresh_snapshot(None));
         for take in [
             VmState::NotCreated,

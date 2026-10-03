@@ -76,23 +76,6 @@ dependency. Found as RT-2 in the second red-team round.
 
 ---
 
-### rt-2026-09-28-up-run-sequence-untested
-
-**Category:** Correctness
-
-`up_run` in `crates/bombyx/src/bin/bombyx/main.rs` decides the
-order of the boot, the secrets refresh, the `secrets_refreshed`
-hook and the `fresh-install` snapshot, and whether each runs, from
-the probed machine state. The binary is outside the tests, so that
-sequence is covered only by real runs, and it has been reordered
-seven times in a week. `listing::takes_fresh_snapshot` and
-`listing::refreshes_secrets_after_up` already hold two of its
-decisions in the tested library. Move the rest there too: a
-function returning the ordered steps for a probed state and a
-config, which `up_run` executes, so the next reordering fails a
-test. Found as RT-6 in round 2 of the review on PR #128; deferred
-because it restructures a function that PR only extended.
-
 ### rt-2026-09-28-up-stages-secrets-for-a-boot-that-reads-none
 
 **Category:** Security
