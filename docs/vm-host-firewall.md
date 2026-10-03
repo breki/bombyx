@@ -2,12 +2,12 @@
 
 This is the network-isolation step for a VM host; set the host
 up with [vm-host-setup.md](vm-host-setup.md) first. bombyx runs
-without it, but it is the only containment a guest has, so while
-the libvirt network the guests use exists, the `host firewall` row
-of `bombyx doctor` fails until it is in place. `apply` reads the
-bridge name out of that network, which the first `bombyx up`
-creates, so this step comes after it. Reloading the saved rules at
-boot needs neither the network nor the bridge.
+without it, but it is the only containment a guest has, and the
+`host firewall` row of `bombyx doctor` reports whether it is in
+place. `apply` reads the bridge name out of the libvirt network
+the guests use, which the first `bombyx up` creates, so this step
+comes after it. Reloading the saved rules at boot needs neither
+the network nor the bridge.
 
 By default an agent VM can reach far more of your network than
 its purpose suggests, and nothing warns you about it. This page
@@ -192,12 +192,10 @@ To undo everything: `sudo agent-vm-firewall revert`.
 
 ## Checking that it worked
 
-`bombyx doctor` checks the host side without entering a guest.
-Its `host firewall` row reads `skip` while the `vagrant-libvirt`
-network does not exist, and while it exists fails unless the unit
-`persist` installs is active and the rules name the bridge that
-network uses now. It cannot read the loaded table, because that
-needs root, so the checks below still matter.
+`bombyx doctor` checks the host side without entering a guest;
+[usage.md](usage.md) under **doctor** says what its `host firewall`
+row checks and when it skips. It cannot read the loaded table,
+because that needs root, so the checks below still matter.
 
 Every Linux guest bombyx builds also loads an egress rule of its
 own, which `docs/trust-boundary.md` describes under **The guest's
@@ -460,12 +458,12 @@ and a guest elsewhere is one bombyx did not build. That network
 does not last forever: vagrant-libvirt removes it when the machine
 whose `up` created it is destroyed and no other VM uses it, and
 the next `up` creates it again, possibly on a different bridge.
-Between those two, `bombyx doctor` reads `skip`; once the network
-is back on a new bridge, it fails until you re-run
-`sudo agent-vm-firewall apply`. `status` re-checks that the named
-bridge still exists and still belongs to the network, because
-nftables happily accepts a rule naming an interface that is gone
--- which would list perfectly while matching nothing.
+If it comes back on a new bridge, re-run
+`sudo agent-vm-firewall apply`; `bombyx doctor` reports the
+mismatch. `status` re-checks that the named bridge still exists
+and still belongs to the network, because nftables happily
+accepts a rule naming an interface that is gone -- which would
+list perfectly while matching nothing.
 
 **A guest cannot reach services on the host, including ones it
 may want.** The input chain drops everything the guest starts.

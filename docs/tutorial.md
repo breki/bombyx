@@ -313,9 +313,8 @@ before applying it.
 You may skip this for now. The rules need the libvirt network that
 your first `bombyx up` creates, so after that first boot is the
 earliest you can apply them. Until then `bombyx doctor` reports its
-`host firewall` row as skipped; while that network exists, it
-reports a missing firewall as a failure, because the firewall is
-the only thing keeping the guest off your network.
+`host firewall` row as skipped, and Part 4 tells you when to come
+back here.
 
 ## Part 3: the sample project
 
