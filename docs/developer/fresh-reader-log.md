@@ -6,6 +6,29 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-03-provision-advice-does-not-say-whose
+
+**Category:** Program output
+
+Advice such as "run provision for this project" in `bootstrap.sh`
+(the `BOMBYX_CLONE_UPDATE` and `BOMBYX_HISTORY` refusals) and
+`bootstrap.ps1` sits beside text about "the shell that ran vagrant
+on the VM host". An operator who ran `vagrant provision` by hand
+may read it as running that again, which does not rewrite the
+Vagrantfile. Naming bombyx's step, run from the workstation, would
+settle it. The text is program output, so the prose stage of the
+review on `fix/advice-names-the-project` could not change it.
+
+### fr-2026-10-03-doctor-firewall-skip-names-no-network
+
+**Category:** Program output
+
+`doctor`'s firewall skip row reads "no network until `up`" without
+saying it means vagrant-libvirt's network, on a host whose earlier
+rows show SSH working. "libvirt net needs `up`" fits the report's
+24-character floor. The text is program output, so the prose stage
+of the review on `fix/advice-names-the-project` could not change it.
+
 ### fr-2026-10-03-colon-refusal-message-says-file-stream
 
 **Category:** Program output

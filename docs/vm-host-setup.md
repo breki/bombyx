@@ -291,7 +291,7 @@ $ bombyx doctor <name>
   vmhost  vagrant           ok    /usr/bin/vagrant
   vmhost  project dir       ok    /home/you (will create /home/you/vms/...
   vmhost  libvirt provider  ok    vagrant-libvirt (0.12.2, global)
-  vmhost  host firewall     skip  network absent; `bombyx up` creates it
+  vmhost  host firewall     skip  no network until `up`
 all checks passed, 1 skipped
 ```
 

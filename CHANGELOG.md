@@ -100,6 +100,11 @@ and this project adheres to
   names the install's old Administrator password, which the build has already
   replaced, and vagrant's well-known one, which sshd refuses for password
   logins.
+- When a guest needed provisioning again, or a fresh `up`, bombyx advised a
+  command line with no project, such as `bombyx provision`, which fails as typed
+  because every VM command takes the project. The advice now names the step
+  instead: "run provision for this project", or "run destroy, then up, for this
+  project". Linux and Windows guests both; seen on a Linux guest only.
 
 ### Removed
 

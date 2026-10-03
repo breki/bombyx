@@ -13,8 +13,8 @@
 $helper = Join-Path $env:ProgramFiles 'bombyx\refresh.ps1'
 if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
     [Console]::Error.WriteLine(
-        "bombyx: this guest has no $helper; run bombyx provision, " +
-        'which installs it.')
+        "bombyx: this guest has no $helper; run provision for this " +
+        'project, which installs it.')
     exit 1
 }
 # A helper that does not start -- one that no longer parses, say --

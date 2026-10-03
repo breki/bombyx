@@ -1227,6 +1227,64 @@ mod tests {
     // reviewed in one place.
     mod staging_tests;
 
+    #[test]
+    fn guest_advice_names_a_step_not_a_command_line() {
+        // Every VM command takes the project as its first argument,
+        // so advice spelled `bombyx provision` fails as typed. The
+        // advice names the step instead ("run provision for this
+        // project"). Each script goes through `script_code` or
+        // `ps1_code` first, which drop comment lines and join
+        // continued lines, so only message text is scanned and a
+        // shell `\` continuation arrives as a space. A message may
+        // still be split across strings, so after `bombyx` the check
+        // skips quotes, `+` and spaces, the characters that join two
+        // pieces, and then looks for a verb as a whole word:
+        // "bombyx provisioned it" is not advice. `vault-password.sh`
+        // is left out: it prints no advice.
+        use crate::remote::windows as remote_windows;
+        let names_a_verb = |code: &str| {
+            code.match_indices("bombyx").any(|(at, word)| {
+                let rest =
+                    code[at + word.len()..].trim_start_matches(|c: char| {
+                        c.is_whitespace() || "\"'+".contains(c)
+                    });
+                ["provision", "destroy", "up"].iter().any(|verb| {
+                    rest.strip_prefix(verb).is_some_and(|after| {
+                        !after.starts_with(|c: char| c.is_ascii_alphanumeric())
+                    })
+                })
+            })
+        };
+        let scripts = [
+            ("bootstrap.sh", script_code(BOOTSTRAP)),
+            ("account.sh", script_code(ACCOUNT)),
+            ("bootstrap.ps1", ps1_code(windows::BOOTSTRAP)),
+            ("account.ps1", ps1_code(windows::ACCOUNT)),
+            ("refresh.ps1", ps1_code(windows::REFRESH)),
+            ("hook.ps1", ps1_code(windows::HOOK)),
+            ("shell.ps1", ps1_code(remote_windows::SHELL)),
+            ("refresh-call.ps1", ps1_code(remote_windows::REFRESH_CALL)),
+            (
+                "PROVISION_ADVICE",
+                crate::remote::PROVISION_ADVICE.to_owned(),
+            ),
+            ("SHELL_ADVICE", crate::remote::SHELL_ADVICE.to_owned()),
+        ];
+        for (name, code) in scripts {
+            assert!(!names_a_verb(&code), "{name} advises a command line");
+        }
+        // The check sees each split shape a message can take.
+        for split in [
+            "run bombyx provision.",
+            "\"run bombyx\" \"provision\"",
+            "'or bombyx ' + 'destroy, then'",
+            "'run bombyx' + ' up'",
+        ] {
+            assert!(names_a_verb(split), "{split}");
+        }
+        assert!(!names_a_verb("another version of bombyx provisioned it"));
+    }
+
     /// A `deploy_key` value every rule accepts, written once so
     /// the tests below and the expected Ruby agree.
     const KEY: &str = "~/.secrets/myproject-deploy-key";

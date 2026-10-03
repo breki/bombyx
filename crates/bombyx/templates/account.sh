@@ -177,7 +177,8 @@ for granted in /etc/sudoers.d/bombyx-*; do
         refuse "this VM was set up for guest_user" \
             "\"${granted#/etc/sudoers.d/bombyx-}\", and the config now" \
             "names \"$user\". bombyx does not move a VM from one" \
-            "account to another; run bombyx destroy, then bombyx up."
+            "account to another; run destroy, then up, for this" \
+            "project."
     fi
 done
 for left in "$staging_home/.ssh/bombyx-deploy-key" \
@@ -187,7 +188,8 @@ for left in "$staging_home/.ssh/bombyx-deploy-key" \
         refuse "this VM was set up by bombyx 0.7.0 or earlier, which" \
             "left a credential at $left, in the home of the account" \
             "Vagrant logs in as. bombyx does not move a VM to the" \
-            "agent's own account; run bombyx destroy, then bombyx up."
+            "agent's own account; run destroy, then up, for this" \
+            "project."
     fi
 done
 

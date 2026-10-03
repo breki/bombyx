@@ -281,8 +281,8 @@ try {
         if ($recorded -ne $User) {
             Refuse ("this VM was set up for guest_user `"$recorded`", " +
                 "and the config now names `"$User`". bombyx does not " +
-                'move a VM from one account to another; run bombyx ' +
-                'destroy, then bombyx up.')
+                'move a VM from one account to another; run destroy, ' +
+                'then up, for this project.')
         }
     }
 
@@ -328,7 +328,7 @@ try {
         Refuse ("the account $User has its profile at `"$AgentHome`", " +
             "and bombyx needs it at $expected. A folder of that name " +
             'probably existed before the account did. Choose another ' +
-            'guest_user, or run bombyx destroy, then bombyx up.')
+            'guest_user, or run destroy, then up, for this project.')
     }
 
     # git, unless this version is already installed.

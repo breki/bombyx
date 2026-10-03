@@ -1314,8 +1314,7 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
         cfg,
         r#"cd "$HOME/$1" || cd; exec "$SHELL" -l"#,
         &[cfg.project.as_str()],
-        "run bombyx provision, or bombyx destroy then bombyx up if \
-         provisioning refuses. Opening a shell as $(id -un) instead.",
+        SHELL_ADVICE,
         "exec \"$SHELL\" -l",
     );
     vagrant_in(
@@ -1325,6 +1324,22 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
         Tty::Allocate,
     )
 }
+
+/// What a guest with no agent account prints before a refresh gives
+/// up: the step that sets the account up.
+///
+/// A constant so the test `guest_advice_names_a_step_not_a_command_line`
+/// in `vagrantfile` can check it with the guest scripts. That test
+/// refuses advice spelled as a `bombyx <verb>` command line, which
+/// fails as typed because every VM command takes the project.
+pub(crate) const PROVISION_ADVICE: &str = "run provision for this project.";
+
+/// What [`shell_into_vm`] prints on a guest with no agent account,
+/// before it opens a shell as the login account instead. A constant
+/// for the same test as `PROVISION_ADVICE`.
+pub(crate) const SHELL_ADVICE: &str = "run provision for this project, or \
+    destroy, then up, if provisioning refuses. Opening a shell as \
+    $(id -un) instead.";
 
 /// The guest command that runs `script` as the agent's account,
 /// with `args` as its `$1`, `$2` and on, or reports the account
@@ -1451,7 +1466,7 @@ pub fn refresh_in_guest(
             cfg,
             REFRESH_SCRIPT,
             &[file.path()],
-            "run bombyx provision.",
+            PROVISION_ADVICE,
             "exit 1",
         )
     };
@@ -1647,7 +1662,7 @@ pub fn refresh_secrets_then_hook(
                 hook.as_str(),
                 &timeout,
             ],
-            "run bombyx provision.",
+            PROVISION_ADVICE,
             "exit 1",
         )
     };

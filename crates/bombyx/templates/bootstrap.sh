@@ -1006,8 +1006,8 @@ case "$CLONE_UPDATE" in
     checkout|discard|keep) ;;
     *) refuse "BOMBYX_CLONE_UPDATE is \"$CLONE_UPDATE\", which" \
         "this script does not know. The shell that ran vagrant on" \
-        "the VM host set it; unset it there, or run bombyx" \
-        "provision." ;;
+        "the VM host set it; unset it there, or run provision" \
+        "for this project." ;;
 esac
 readonly CLONE_UPDATE
 
@@ -1024,7 +1024,7 @@ case "$HISTORY" in
     *) refuse "BOMBYX_HISTORY is \"$HISTORY\", which this" \
         "script does not know. bombyx refuses such a value in the" \
         "config, so the Vagrantfile on the VM host was edited by" \
-        "hand; run bombyx provision to rewrite it." ;;
+        "hand; run provision for this project to rewrite it." ;;
 esac
 readonly HISTORY
 
@@ -1142,8 +1142,8 @@ if [ -d "$CLONE_DIR/.git" ]; then
                     "with uncommitted work in it, and the config" \
                     "now asks for $BOMBYX_REPO, so the clone would" \
                     "be deleted. Push the work from the guest, or" \
-                    "run bombyx provision --discard to delete it:" \
-                    "$CLONE_DIR"
+                    "run provision with --discard for this project" \
+                    "to delete it: $CLONE_DIR"
             fi
             # Announced, never silent. This throws away
             # uncommitted work, and an operator who sees a fresh
@@ -1306,7 +1306,8 @@ if [ -d "$CLONE_DIR/.git" ]; then
             refuse "did not update the clone. The message above" \
                 "says why. When it lists files, they hold the" \
                 "agent's work: push or stash it in the guest, or" \
-                "run bombyx provision --discard to overwrite it." \
+                "run provision with --discard for this project to" \
+                "overwrite it." \
                 "When something belongs to another user, clear" \
                 "it in the guest: $CLONE_DIR"
         fi
