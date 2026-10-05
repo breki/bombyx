@@ -341,6 +341,10 @@ everything here as well.
   judgement back onto the user and usually costs a round-trip.
   Ask without a recommendation only when the choice genuinely
   turns on preference or context you do not have.
+- **Keep a fix honest before review.** Fix or log a gap your own
+  summary names, make a deliberate break compile, and read a
+  tool's source before trusting its file;
+  `docs/developer/working-rules.md` gives each rule's reason.
 
 ## Coding Standards
 
