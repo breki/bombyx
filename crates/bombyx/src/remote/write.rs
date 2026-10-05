@@ -13,6 +13,12 @@
 //! names, or the vault it names. So a project cannot supply any of
 //! them however it arranges its own directory. See `docs/trust-boundary.md`.
 //!
+//! A write in the plan does not always land. Under `up` and
+//! `scratch` the plan holds each secret's write, but the VM host's
+//! shell skips it when vagrant has already provisioned the machine;
+//! `SecretStaging` says when. So a `--dry-run` shows every write
+//! that might happen, not every file that will be written.
+//!
 //! The command that carries a file is as short as it looks:
 //!
 //! ```sh
@@ -63,9 +69,11 @@ const FILE_MODE: &str = "600";
 /// split is what lets the interesting part be unit-tested
 /// without a VM host anywhere near it.
 ///
-/// Used for every staged file whose length a dry run may
-/// print. [`write_file_of_hidden_size`] below is the one whose
-/// length may not, and it says why.
+/// Used for the generated files, whose length a dry run may print.
+/// The staged secrets go through `write_secret` and
+/// `write_secret_of_hidden_size`. [`write_file_of_hidden_size`]
+/// below is the variant whose length a dry run may not print, and
+/// it says why.
 ///
 /// `contents` is bytes rather than text, because one of these
 /// files is the project's secrets and a password need not be
@@ -79,16 +87,106 @@ pub fn write_file(
     name: &str,
     contents: &[u8],
 ) -> RemoteCommand {
-    let path = quote_remote_path(&format!("{dir}/{name}"));
-    // `umask` sets the mode a *newly created* file gets, so the
-    // contents never exist at a readable mode even briefly. It
-    // leaves an existing file alone, and a re-provision writes
-    // over one -- `cat >` truncates and does not touch the mode
-    // -- so `chmod` is what corrects a file an earlier run left
-    // readable. The `&&` keeps the `chmod` from running on a
-    // write that failed.
-    let script = format!("umask 077; cat > {path} && chmod {FILE_MODE} {path}");
+    let script = write_script(dir, name);
     super::transport(cfg, &script, super::Tty::NoPty).with_stdin(contents)
+}
+
+/// The shell that writes the file `name` in `dir` from its input.
+///
+/// `umask` sets the mode a *newly created* file gets, so the
+/// contents never exist at a readable mode even briefly. It leaves
+/// an existing file alone, and a re-provision writes over one --
+/// `cat >` truncates and does not touch the mode -- so `chmod` is
+/// what corrects a file an earlier run left readable. The `&&`
+/// keeps the `chmod` from running on a write that failed.
+fn write_script(dir: &str, name: &str) -> String {
+    let path = quote_remote_path(&format!("{dir}/{name}"));
+    format!("umask 077; cat > {path} && chmod {FILE_MODE} {path}")
+}
+
+/// When a secret-carrying file is staged for a `vagrant` run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretStaging {
+    /// Every run. `vagrant provision` always provisions, so it
+    /// always reads the file.
+    Always,
+    /// Only while vagrant has not provisioned the machine.
+    ///
+    /// Vagrant writes its provision marker
+    /// (`remote::provision_marker`) after the boot and before its
+    /// provisioners run, and `vagrant up` provisions only a machine
+    /// without one: a machine it creates, or one whose first `up`
+    /// stopped before the boot finished. A provision that started
+    /// and failed leaves the marker, so only `vagrant provision`
+    /// runs it again. A marker whose machine is gone is wiped when
+    /// vagrant loads the machine, which `remote::load_machine` has
+    /// it do first. With the marker there, `up` boots without
+    /// provisioning and nothing reads a staged secret, so nothing
+    /// is written. Only the VM host has the marker, so the test runs
+    /// there.
+    UnlessProvisioned,
+}
+
+/// The shell that writes the secret `name` in `dir` from its input,
+/// as `staging` says.
+///
+/// Under `UnlessProvisioned` the marker test runs in the same shell
+/// that would write, and a present marker makes the shell read its
+/// input into `/dev/null` rather than leave it unread: the bytes
+/// still have to be read, or the writer on the other end of the
+/// pipe fails.
+fn secret_script(
+    cfg: &Config,
+    dir: &str,
+    name: &str,
+    staging: SecretStaging,
+) -> String {
+    let write = write_script(dir, name);
+    match staging {
+        SecretStaging::Always => write,
+        SecretStaging::UnlessProvisioned => {
+            let marker = quote_remote_path(&format!(
+                "{dir}/{}",
+                super::provision_marker(cfg.vm.provider)
+            ));
+            format!(
+                "if [ -e {marker} ]; then cat > /dev/null; else {write}; fi"
+            )
+        }
+    }
+}
+
+/// [`write_file`] for a secret-carrying file, staged as `staging`
+/// says.
+#[must_use]
+pub fn write_secret(
+    cfg: &Config,
+    dir: &str,
+    name: &str,
+    contents: &[u8],
+    staging: SecretStaging,
+) -> RemoteCommand {
+    let script = secret_script(cfg, dir, name, staging);
+    super::transport(cfg, &script, super::Tty::NoPty).with_stdin(contents)
+}
+
+/// [`write_secret`] for a file whose size a dry run must not print,
+/// as [`write_file_of_hidden_size`] is to [`write_file`].
+///
+/// It carries the git credential: `https://` plus a username, a host
+/// and two separators the reader already has, so a byte count would
+/// measure the token.
+#[must_use]
+pub fn write_secret_of_hidden_size(
+    cfg: &Config,
+    dir: &str,
+    name: &str,
+    contents: &[u8],
+    staging: SecretStaging,
+) -> RemoteCommand {
+    let script = secret_script(cfg, dir, name, staging);
+    super::transport(cfg, &script, super::Tty::NoPty)
+        .with_stdin_of_hidden_size(contents)
 }
 
 /// [`write_file`] for a file whose size a dry run must not
@@ -106,8 +204,7 @@ pub fn write_file_of_hidden_size(
     name: &str,
     contents: &[u8],
 ) -> RemoteCommand {
-    let path = quote_remote_path(&format!("{dir}/{name}"));
-    let script = format!("umask 077; cat > {path} && chmod {FILE_MODE} {path}");
+    let script = write_script(dir, name);
     super::transport(cfg, &script, super::Tty::NoPty)
         .with_stdin_of_hidden_size(contents)
 }
@@ -170,6 +267,51 @@ mod tests {
         let c = write_file(&cfg(), "/srv/x", "Vagrantfile", b"x\n");
         let script = c.args.last().expect("a script argument");
         assert!(script.contains("cat > '/srv/x/Vagrantfile'"), "{script}");
+    }
+
+    #[test]
+    fn a_guarded_write_tests_the_provision_marker_and_drains_otherwise() {
+        // The marker sits in the machine's data directory under the
+        // provider's name. When it is there the input is read into
+        // `/dev/null`, so the writer's pipe never breaks; when it is
+        // not, the ordinary private write runs.
+        let c = write_secret(
+            &cfg(),
+            "~/vms/p",
+            "bombyx.env",
+            b"TOKEN=hunter2\n",
+            SecretStaging::UnlessProvisioned,
+        );
+        let script = c.args.last().expect("a script argument");
+        assert!(
+            script.ends_with(
+                "if [ -e ~/'vms/p/.vagrant/machines/default/libvirt/\
+                 action_provision' ]; then cat > /dev/null; else umask 077; \
+                 cat > ~/'vms/p/bombyx.env' && chmod 600 ~/'vms/p/bombyx.env'; \
+                 fi"
+            ),
+            "{script}"
+        );
+        assert_eq!(
+            c.stdin.as_ref().map(Stdin::bytes),
+            Some(&b"TOKEN=hunter2\n"[..])
+        );
+        assert!(!c.to_string().contains("hunter2"), "{c}");
+    }
+
+    #[test]
+    fn a_guarded_write_of_hidden_size_still_hides_it() {
+        let c = write_secret_of_hidden_size(
+            &cfg(),
+            "~/vms/p",
+            "bombyx.git-credentials",
+            b"https://u:tok@host\n",
+            SecretStaging::UnlessProvisioned,
+        );
+        let shown = c.to_string();
+        assert!(shown.contains("action_provision"), "{shown}");
+        assert!(!shown.contains("tok"), "{shown}");
+        assert!(shown.contains("not shown"), "{shown}");
     }
 
     #[test]

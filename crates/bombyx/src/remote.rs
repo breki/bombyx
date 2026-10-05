@@ -33,7 +33,10 @@ mod write;
 
 pub use command::{RemoteCommand, Stdin};
 pub use quote::{quote_remote_path, shell_quote};
-pub use write::{write_file, write_file_of_hidden_size};
+pub use write::{
+    SecretStaging, write_file, write_file_of_hidden_size, write_secret,
+    write_secret_of_hidden_size,
+};
 
 use crate::config::{Config, Guest, HookPath, Provider, Secrets, Transport};
 use crate::vagrantfile::GuestHomeFile;
@@ -595,6 +598,36 @@ pub fn vagrant_in(
     transport(cfg, &script, tty)
 }
 
+/// Builds the command that has vagrant load the project's machine
+/// in `dir`, discarding what it prints.
+///
+/// To *load* a machine, vagrant reads its id from the data
+/// directory and asks the provider for that machine's state; it
+/// starts nothing. Every vagrant command does this first, and
+/// `vagrant status` does nothing else, so it is the cheapest.
+///
+/// Loading a machine whose provider no longer has it -- a libvirt
+/// domain undefined or lost outside vagrant -- makes vagrant clear
+/// the machine's id and wipe its data directory, provision marker
+/// included. That is vagrant 2.4.9's `Machine#initialize`, which
+/// clears the id when the provider reports `not_created`, with
+/// vagrant-libvirt 0.12.2; on frosti, `scratch` after a `virsh
+/// undefine` staged the secrets and provisioned the re-created
+/// machine. [`SecretStaging::UnlessProvisioned`] tests that marker,
+/// so this runs first: without it, a marker left by a vanished
+/// machine would hold back the secrets from the provision vagrant
+/// then runs on the machine it re-creates. Its status is ignored,
+/// because the boot that follows reports any real problem.
+#[must_use]
+pub fn load_machine(cfg: &Config, dir: &str) -> RemoteCommand {
+    let status = vagrant_script(cfg, dir, &["status"], None);
+    transport(
+        cfg,
+        &format!("{status} >/dev/null 2>&1 || true"),
+        Tty::NoPty,
+    )
+}
+
 /// Builds the command running `vagrant` in `dir`, then removing
 /// `name` from `dir` whether `vagrant` succeeded or not.
 ///
@@ -1092,16 +1125,30 @@ pub fn destroy_vm_if_present(
 pub(crate) const ANY_RECORDED_MACHINE: &str =
     "find .vagrant/machines -name id -type f 2>/dev/null | grep -q .";
 
-/// The file vagrant writes when it creates a machine under
+/// Vagrant's data directory for the project's machine under
 /// `provider`, relative to the project directory.
 ///
 /// The machine is `default` because the generated Vagrantfile
 /// defines no machine name, and the directory is `.vagrant`
 /// because `DISARM_VAGRANT_REDIRECTS` clears
-/// `VAGRANT_DOTFILE_PATH`. [`destroy_vm_if_present`] tests for
+/// `VAGRANT_DOTFILE_PATH`.
+fn machine_dir(provider: Provider) -> String {
+    format!(".vagrant/machines/default/{provider}")
+}
+
+/// The file vagrant writes in `machine_dir` when it creates a
+/// machine under `provider`. [`destroy_vm_if_present`] tests for
 /// it to learn which provider built the machine.
 pub(crate) fn recorded_machine_id(provider: Provider) -> String {
-    format!(".vagrant/machines/default/{provider}/id")
+    format!("{}/id", machine_dir(provider))
+}
+
+/// The file vagrant writes in `machine_dir` after the boot and
+/// before its provisioners run, so it means a provision started,
+/// not that it finished. `vagrant up` provisions only a machine
+/// without one, so [`SecretStaging::UnlessProvisioned`] tests for it.
+pub(crate) fn provision_marker(provider: Provider) -> String {
+    format!("{}/action_provision", machine_dir(provider))
 }
 
 /// The snapshot name bombyx saves and restores.

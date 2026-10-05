@@ -4,6 +4,29 @@ Quality (Artisan) review findings. Newest first.
 
 ---
 
+### aq-2026-10-05-write-file-of-hidden-size-has-no-caller
+
+**Category:** Dead code
+
+`remote::write_file_of_hidden_size` lost its only production caller
+when the git credential moved to `remote::write_secret_of_hidden_size`
+on `fix/stage-secrets-only-when-provisioning`. It is still exported,
+so no dead-code lint flags it, and `write_secret_of_hidden_size`'s
+doc still explains itself by analogy to it. Remove it, or fold the
+dry-run rule it documents into `write_secret_of_hidden_size`. A
+public item, so the review's prose stage could not.
+
+### aq-2026-10-05-load-machine-reads-as-a-boot
+
+**Category:** Naming
+
+`remote::load_machine` runs `vagrant status` to have vagrant load
+the machine's record, but next to `up` the name reads as "start
+the VM". Its doc now defines the vagrant term; a name such as
+`refresh_machine_record` would not need the definition. Raised by
+fresh-reader on `fix/stage-secrets-only-when-provisioning`, whose
+prose stage cannot rename code.
+
 ### aq-2026-10-03-windows-env-refusal-is-a-string
 
 **Category:** Type Safety

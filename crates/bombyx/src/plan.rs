@@ -221,6 +221,7 @@ pub fn plan(
             &cfg.remote_project_dir(),
             &["up"],
             None,
+            remote::SecretStaging::UnlessProvisioned,
             tty,
             staged,
         ),
@@ -229,6 +230,7 @@ pub fn plan(
             &cfg.remote_project_dir(),
             &["provision"],
             Some(*clone_update),
+            remote::SecretStaging::Always,
             tty,
             staged,
         ),
@@ -254,6 +256,7 @@ pub fn plan(
             &cfg.remote_scratch_dir(name),
             &["up"],
             None,
+            remote::SecretStaging::UnlessProvisioned,
             tty,
             staged,
         ),
@@ -419,11 +422,18 @@ fn tear_down(cfg: &Config, dir: &str, tty: Tty) -> Vec<RemoteCommand> {
 /// The three verbs sharing this helper are the three that boot
 /// or provision, and so the three that stage the deploy key. The
 /// teardown verbs go through [`tear_down`] and stage nothing.
+///
+/// `staging` says when the secrets are written. `provision` passes
+/// `Always`, because it always provisions. `up` and `scratch` pass
+/// `UnlessProvisioned`, so their plan holds each secret's write but
+/// the VM host's shell skips it on a machine vagrant has already
+/// provisioned, where nothing would read it.
 fn write_then(
     cfg: &Config,
     dir: &str,
     args: &[&str],
     clone_update: Option<CloneUpdate>,
+    staging: remote::SecretStaging,
     tty: Tty,
     staged: &Staged,
 ) -> Vec<RemoteCommand> {
@@ -434,35 +444,49 @@ fn write_then(
 
     // The three secret-carrying files are written after the
     // generated ones, so the window in which the VM host holds
-    // them is the `vagrant` run and nothing more.
+    // them is the `vagrant` run and nothing more. A guarded write
+    // tests vagrant's provision marker, and the marker's presence can
+    // be trusted only after vagrant has loaded the machine, because
+    // the load deletes a marker whose machine no longer exists;
+    // `remote::load_machine` says more. A project that stages nothing
+    // has nothing to guard, so it does not pay for the load.
+    let stages_any = staged.secrets().is_some()
+        || staged.credential().is_some()
+        || staged.deploy_key().is_some();
+    if staging == remote::SecretStaging::UnlessProvisioned && stages_any {
+        cmds.push(remote::load_machine(cfg, dir));
+    }
     if let Some(secrets) = staged.secrets() {
-        cmds.push(remote::write_file(
+        cmds.push(remote::write_secret(
             cfg,
             dir,
             vagrantfile::ENV_FILE_NAME,
             secrets.as_bytes(),
+            staging,
         ));
     }
-    // `write_file_of_hidden_size`, not `write_file`, and the
+    // `write_secret_of_hidden_size`, not `write_secret`, and the
     // difference is only in what a dry run prints. This file is
     // `https://` plus the username, the host and two
     // separators, all of which the reader already has -- so a
     // byte count would measure the token. `remote::Stdin` holds
     // the rule.
     if let Some(credential) = staged.credential() {
-        cmds.push(remote::write_file_of_hidden_size(
+        cmds.push(remote::write_secret_of_hidden_size(
             cfg,
             dir,
             vagrantfile::CREDENTIAL_FILE_NAME,
             credential.as_bytes(),
+            staging,
         ));
     }
     if let Some(key) = staged.deploy_key() {
-        cmds.push(remote::write_file(
+        cmds.push(remote::write_secret(
             cfg,
             dir,
             vagrantfile::DEPLOY_KEY_FILE_NAME,
             key.as_bytes(),
+            staging,
         ));
     }
 
@@ -1515,6 +1539,83 @@ mod tests {
     }
 
     #[test]
+    fn a_boot_stages_secrets_only_when_vagrant_will_provision() {
+        // `vagrant up` provisions a machine only while its
+        // `action_provision` marker is missing, so on an existing,
+        // provisioned machine nothing reads the staged secrets. Under
+        // `up` and `scratch` each secret-carrying write therefore
+        // checks the marker on the VM host and, when it is there,
+        // drains its input without writing. `provision` always
+        // provisions, so it writes unconditionally. The generated
+        // files are written either way.
+        const MARKER: &str =
+            ".vagrant/machines/default/libvirt/action_provision";
+        let secret_names = [
+            vagrantfile::ENV_FILE_NAME,
+            vagrantfile::CREDENTIAL_FILE_NAME,
+            KEY_FILE,
+        ];
+        for (cfg, staged) in [staged_project(true), cfg_with_key()] {
+            for (action, guarded) in [
+                (Action::Up, true),
+                (Action::Scratch(scratch("pr-1234")), true),
+                (Action::Provision(CloneUpdate::Checkout), false),
+            ] {
+                let cmds = plan(&action, &cfg, Tty::NoPty, &staged);
+                let mut secret_writes = 0;
+                for s in cmds.iter().map(script) {
+                    let Some(at) = s.find("cat > ") else { continue };
+                    let target = &s[at..];
+                    let is_secret =
+                        secret_names.iter().any(|n| target.contains(n));
+                    if is_secret {
+                        secret_writes += 1;
+                        assert_eq!(
+                            s.contains(MARKER) && s.contains("cat > /dev/null"),
+                            guarded,
+                            "{action:?}: {s}"
+                        );
+                    } else if s.contains("Vagrantfile") {
+                        assert!(!s.contains(MARKER), "{action:?}: {s}");
+                    }
+                }
+                assert!(secret_writes > 0, "{action:?}: no secret written");
+            }
+        }
+    }
+
+    #[test]
+    fn a_guarded_boot_lets_vagrant_load_the_machine_before_the_check() {
+        // Loading a machine whose provider no longer has it makes
+        // vagrant wipe its data directory, marker included. Without
+        // that load first, a marker left by a vanished machine would
+        // hold back the secrets from the provision vagrant then
+        // runs. So the load sits after the Vagrantfile is written and
+        // before the first guarded write; `provision`, which stages
+        // unconditionally, has no need of it.
+        let (cfg, staged) = staged_project(false);
+        for (action, loads) in [
+            (Action::Up, true),
+            (Action::Scratch(scratch("pr-1234")), true),
+            (Action::Provision(CloneUpdate::Checkout), false),
+        ] {
+            let scripts: Vec<String> = plan(&action, &cfg, Tty::NoPty, &staged)
+                .iter()
+                .map(script)
+                .collect();
+            let find =
+                |needle: &str| scripts.iter().position(|s| s.contains(needle));
+            let load = find("vagrant 'status' >/dev/null 2>&1 || true");
+            assert_eq!(load.is_some(), loads, "{action:?}: {scripts:#?}");
+            if let Some(load) = load {
+                let vagrantfile = find("/Vagrantfile'").expect("written");
+                let secret = find(vagrantfile::ENV_FILE_NAME).expect("staged");
+                assert!(vagrantfile < load && load < secret, "{action:?}");
+            }
+        }
+    }
+
+    #[test]
     fn only_the_verbs_that_boot_need_the_secrets_file() {
         // Classifying every action is what makes a new one a
         // decision rather than an omission.
@@ -1815,9 +1916,11 @@ mod tests {
                 .iter()
                 .position(|c| script(c).contains("bombyx.git-credentials"))
                 .unwrap_or_else(|| panic!("{action:?}: nothing writes it"));
+            // The boot is the last vagrant call; `up` and `scratch`
+            // run a `vagrant status` before the writes as well.
             let vagrant = cmds
                 .iter()
-                .position(|c| script(c).contains(" vagrant '"))
+                .rposition(|c| script(c).contains(" vagrant '"))
                 .unwrap_or_else(|| panic!("{action:?}: nothing runs vagrant"));
             assert!(
                 write < vagrant,

@@ -76,27 +76,6 @@ dependency. Found as RT-2 in the second red-team round.
 
 ---
 
-### rt-2026-09-28-up-stages-secrets-for-a-boot-that-reads-none
-
-**Category:** Security
-
-`bombyx up` on a VM that exists but is stopped runs the same plan
-as a first `up`, so `write_then` stages `bombyx.env` and the git
-credential in the project directory on the VM host for the whole
-`vagrant up`. Vagrant usually does not provision an existing
-machine, so usually nothing reads those copies; since #125 the
-secrets reach the guest through the refresh that follows the boot.
-
-Skipping the staging whenever the status probe says the machine
-exists is wrong. vagrant-libvirt's `up` provisions an existing
-machine whose `.vagrant/machines/default/<provider>/action_provision`
-marker is missing -- a first `up` killed partway, or a `vagrant up
---no-provision` by hand -- and that provision then refuses for want
-of the files. The fix has to follow the marker, not the probe: have
-the staging writes on the VM host test for it and stage only when
-it is absent. Found as RT-1 on PR #126; the probe-based fix was
-reverted after its second round (RT-3 there).
-
 ### rt-2026-09-25-the-root-script-runs-in-the-projects-environment
 
 **Category:** Security
