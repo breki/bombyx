@@ -4,6 +4,20 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-10-05-self-update-takes-an-unpublished-tag
+
+**Category:** Correctness
+
+`update::version::newest_release` picks the highest version among
+the remote's tags (`git ls-remote`), whether or not a GitHub
+release exists for it. Between a tag push and the release
+workflow's Publish step -- several minutes -- `bombyx self-update`
+therefore tries to install a version with no assets and fails on
+a 404 for `SHA256SUMS`, with advice that the release "predates
+checksummed releases". Seen with v0.12.0 on 2026-10-05. Two fixes:
+ask for published releases rather than tags, or treat a missing
+`SHA256SUMS` on the newest tag as "not published yet" and say so.
+
 ### rt-2026-10-03-firewall-skip-wins-over-a-pass-line
 
 **Category:** Correctness (unverified)
