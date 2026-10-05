@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.12.0] - 2026-10-05
+
+### Added
+
 - `bombyx provision --discard` overwrites the agent's uncommitted work, as
   `provision` did before, and `bombyx provision --no-fetch` re-runs the
   provisioning script from the guest's current checkout without fetching or
