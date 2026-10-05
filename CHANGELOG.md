@@ -81,6 +81,14 @@ and this project adheres to
   `reason` field, a `WindowsScriptRefusal`, and `ConfigError` has a new
   `WindowsGuestProject` variant, and `WindowsUserRefusal` has a new `DeviceName`
   variant. The CLI is unaffected.
+- `bombyx up` and `bombyx scratch` no longer write the secrets file, git
+  credential and deploy key onto the VM host when they boot a machine vagrant
+  has already provisioned, because that boot reads none of them. They are still
+  written when vagrant will provision: a first `up`, one stopped before its boot
+  finished, or a machine re-created because its libvirt domain was lost.
+  `provision` writes them every time, and is what retries a provision that
+  failed. A re-run `scratch` never updated a guest's secrets, and still does
+  not; `up` still refreshes them after the boot.
 
 ### Fixed
 

@@ -192,30 +192,44 @@ copies, which no design can keep off the VM host: the guest's
 disk image and its `fresh-install` snapshot are files there, so
 root on the VM host can read every secret the guest holds.
 
-The second is the staging for a `vagrant` run. `vagrant`
-uploads a file, so bombyx writes each secret into the project
-directory on the VM host, owner-only, just before the run, and
-removes it in the same step when the run ends, whether the run
+The second is the staging for a `vagrant` run that provisions.
+`vagrant` uploads a file, so bombyx writes each secret into the
+project directory on the VM host, owner-only, just before the run,
+and removes it in the same step when the run ends, whether the run
 succeeded or not. A run interrupted before the removal leaves the
 files there until the next run in that directory. Each secret
 reaches the VM host on a pipe, so it stays off both machines'
 command lines and out of every generated file.
 
+`provision` always stages them. `up` and `scratch` stage them only
+while vagrant has not provisioned the VM. Vagrant records a
+provision with an `action_provision` file in the VM's `.vagrant`
+directory, written after the boot and before the provisioners
+run. `vagrant up` provisions only a VM without that file, so when
+the file exists, no step reads a staged copy. bombyx first has
+vagrant load the VM's record, which wipes the file when the VM it
+belongs to no longer exists, and then tests for the file on the
+VM host, in the same shell that would write. A provision that
+started and failed leaves the file, so it is retried by `bombyx
+provision`, not by `up`.
+
 `up` and `shell` also rewrite the copy of the secrets, from
 `env_file` or `vault`, the `repo_token` credential and the deploy
 key inside a guest that already exists, so a rotated token or key
 reaches it without a provision. That route stores nothing on the
-VM host at all; an `up` that has to boot the VM still stages the
-files for its `vagrant` run, as above, before it refreshes. Each
-file travels on a pipe: from bombyx to `ssh`, through `vagrant ssh
---no-tty` on the VM host, and into a `cat` that the agent's
-account runs in the guest. On the VM host the file exists only in
-the memory of the processes passing it along. Nothing in the path
-asks for a terminal, because a terminal's line discipline can echo
-input back into the output. We have not checked whether Vagrant's
-own debug log (`VAGRANT_LOG=debug`, set on the VM host) records
-what passes through; the staging route has the same unknown for
-its upload.
+VM host at all. An `up` that boots a machine vagrant has already
+provisioned stages nothing and gets its secrets from this refresh;
+one that creates the machine stages them for its `vagrant` run, as
+above. `scratch` has no refresh, so a re-run `scratch` leaves the
+guest's secrets as they were. Each file travels on a pipe: from
+bombyx to `ssh`, through `vagrant ssh --no-tty` on the VM host,
+and into a `cat` that the agent's account runs in the guest. On
+the VM host the file exists only in the memory of the processes
+passing it along. Nothing in the path asks for a terminal, because
+a terminal's line discipline can echo input back into the output.
+We have not checked whether Vagrant's own debug log
+(`VAGRANT_LOG=debug`, set on the VM host) records what passes
+through; the staging route has the same unknown for its upload.
 
 Whichever route a secret takes, the outcome is the same for all
 three, and it is the cost: **the agent needs the value to work, so
