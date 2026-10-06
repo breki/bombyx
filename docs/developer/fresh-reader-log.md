@@ -6,20 +6,6 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-10-06-windows-shell-advice-its
-
-**Category:** Printed message, outside stage 3's limit
-
-On a Windows guest whose agent login fails, `bombyx shell` prints
-`bombyx: could not log in to the guest as agent: its SSH server did
-not answer, or it was provisioned before ...`. The noun just before
-"its" and "it" is the agent, but both mean the guest, so an operator
-can read "its SSH server" as the agent account's. The fix is to name
-the guest in `WINDOWS_SHELL_ADVICE` (`remote.rs`): "the guest's SSH
-server did not answer, or the guest was provisioned before ...".
-Deferred because it changes what bombyx prints, which `/review`'s
-prose-only stage does not edit.
-
 ### fr-2026-10-03-snapshot-rule-stated-six-times
 
 **Category:** Duplicated rule deferred for its own commit

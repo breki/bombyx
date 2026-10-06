@@ -1379,9 +1379,10 @@ pub(crate) const SHELL_ADVICE: &str = "run provision for this project, or \
 /// and one provisioned before the agent accepted the VM host's key,
 /// which only a provision cures. A constant for the same test as
 /// `PROVISION_ADVICE`.
-pub(crate) const WINDOWS_SHELL_ADVICE: &str = "its SSH server did not \
-    answer, or it was provisioned before the agent accepted this VM \
-    host's key; if the guest is up, run provision for this project.";
+pub(crate) const WINDOWS_SHELL_ADVICE: &str = "the guest's SSH server did \
+    not answer, or the guest was provisioned before the agent accepted \
+    this VM host's key; if the guest is up, run provision for this \
+    project.";
 
 /// The guest command that runs `script` as the agent's account,
 /// with `args` as its `$1`, `$2` and on, or reports the account
