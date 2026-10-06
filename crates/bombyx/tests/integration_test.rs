@@ -325,10 +325,9 @@ fn a_plain_shell_reads_no_secrets() {
 
 #[test]
 fn refresh_secrets_reads_them_and_refreshes_before_the_shell() {
-    // `--refresh-secrets` keeps what `shell` always did: the
-    // secrets are read, and the refresh runs between the probe and
-    // the shell. A file it cannot read is a warning, and the shell
-    // still opens.
+    // With `--refresh-secrets` the secrets are read, and the
+    // refresh runs between the probe and the shell. A file it
+    // cannot read is a warning, and the shell still opens.
     let files = TempDir::new().unwrap();
     let env = files.path().join("myproject.env");
     std::fs::write(&env, "TOKEN=abc\n").unwrap();

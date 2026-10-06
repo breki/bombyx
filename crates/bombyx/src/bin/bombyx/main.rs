@@ -536,9 +536,10 @@ fn run() -> Result<Ran> {
     //
     // Only for the actions that consume them, which
     // `Action::staged_read` decides and explains. The verbs it
-    // skips are the ones that must keep working after the
-    // operator has deleted the file, and a best-effort read turns
-    // a failure into a warning and an empty `Staged`, which
+    // skips either send no secrets, such as a plain `shell` or
+    // `status`, or must keep working after the operator has
+    // deleted the file, such as `destroy`. A best-effort read
+    // turns a failure into a warning and an empty `Staged`, which
     // refreshes nothing.
     let staged = match action.staged_read() {
         StagedRead::Skip => Staged::default(),
@@ -847,11 +848,7 @@ fn action_of(cmd: &VmCmd) -> Result<Action> {
         VmCmd::Down(_) => Action::Down,
         VmCmd::Shell {
             refresh_secrets, ..
-        } => Action::Shell(if *refresh_secrets {
-            ShellSecrets::Refresh
-        } else {
-            ShellSecrets::Leave
-        }),
+        } => Action::Shell(ShellSecrets::from_flag(*refresh_secrets)),
         VmCmd::Status(_) => Action::Status,
         VmCmd::Reset(_) => Action::Reset,
         VmCmd::Snapshot(_) => Action::Snapshot,

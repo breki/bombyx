@@ -63,12 +63,15 @@ pub enum Action {
     Down,
     /// Open a shell inside the project VM, in the project clone.
     ///
-    /// With [`ShellSecrets::Refresh`] the binary runs
-    /// [`refresh_secrets`] first and warns rather than stops when it
-    /// fails, so it is not part of this plan.
+    /// A plan stops at its first failing command, and a failed
+    /// secrets refresh must not stop the shell from opening. So with
+    /// [`ShellSecrets::Refresh`] the binary runs [`refresh_secrets`]
+    /// itself, before this plan, and warns when the refresh fails;
     /// [`Action::staged_read`] says [`StagedRead::BestEffort`] for
-    /// the same reason: `shell` reads the files when it can and
-    /// opens the shell when it cannot.
+    /// the same reason: `shell --refresh-secrets` reads the files
+    /// when it can and opens the shell when it cannot. With
+    /// [`ShellSecrets::Leave`] it says [`StagedRead::Skip`], and
+    /// nothing is read.
     Shell(ShellSecrets),
     /// Show VM status on the host.
     Status,
@@ -94,17 +97,30 @@ pub enum Action {
 
 /// Whether [`Action::Shell`] sends the project's secrets to the
 /// guest again before the shell opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellSecrets {
     /// Read no secrets and send none: no vault, no `env_file`, no
     /// deploy key, no `secrets_refreshed` hook. The guest keeps the
-    /// copies it has. The default, so a shell asks for no vault
-    /// password.
-    #[default]
+    /// copies it has. What a plain `shell` gets, so it asks for no
+    /// vault password.
     Leave,
     /// Send them and run the hook, as `up` does on a running
     /// machine: `shell --refresh-secrets`.
     Refresh,
+}
+
+impl ShellSecrets {
+    /// The choice `shell`'s `--refresh-secrets` flag makes: set, it
+    /// refreshes; absent, it leaves the guest's secrets alone. The
+    /// one place that decides what a plain `shell` does.
+    #[must_use]
+    pub fn from_flag(refresh_secrets: bool) -> Self {
+        if refresh_secrets {
+            Self::Refresh
+        } else {
+            Self::Leave
+        }
+    }
 }
 
 /// How an [`Action`] treats the secrets `source.env_file` or
@@ -145,7 +161,7 @@ impl Action {
     /// is already wrong, so a missing secrets file must not also
     /// cost them the shell.
     ///
-    /// **The teardown verbs are why `Skip` exists.** A
+    /// **The teardown verbs are one reason `Skip` exists.** A
     /// `destroy` refused because the secrets file has gone would
     /// leave the VM and the directory it was asked to remove,
     /// with no bombyx command able to clear either. The deploy
@@ -1226,6 +1242,14 @@ mod tests {
     }
 
     #[test]
+    fn the_refresh_flag_alone_decides_the_shell_secrets() {
+        // A plain `shell` leaves the guest's secrets alone, so it
+        // opens no vault; only `--refresh-secrets` sends them (#180).
+        assert_eq!(ShellSecrets::from_flag(false), ShellSecrets::Leave);
+        assert_eq!(ShellSecrets::from_flag(true), ShellSecrets::Refresh);
+    }
+
+    #[test]
     fn shell_forces_a_tty() {
         let cmds = run(&Action::Shell(ShellSecrets::Leave));
         assert_eq!(cmds[0].args[0], "-t");
@@ -1640,13 +1664,13 @@ mod tests {
         // Classifying every action is what makes a new one a
         // decision rather than an omission.
         //
-        // The teardown verbs are the ones that matter. `destroy`
-        // must work after the operator has rotated or deleted
-        // the secrets file on the workstation, or the VM and its
-        // directory become unremovable by bombyx. That is the
-        // rule `plan::write_then` already states for the deploy
-        // key, aimed at the other machine. `shell` reads the file
-        // to refresh the guest's copy, and must open all the same.
+        // The teardown verbs are the ones that matter. `destroy` must
+        // work after the operator has rotated or deleted the secrets
+        // file on the workstation, or the VM and its directory become
+        // unremovable by bombyx. That is the rule `plan::write_then`
+        // already states for the deploy key, aimed at the other
+        // machine. `shell --refresh-secrets` reads the file to
+        // refresh the guest's copy, and must open all the same.
         for action in all_actions() {
             let want = match action {
                 Action::Up | Action::Provision(_) | Action::Scratch(_) => {
@@ -1872,8 +1896,9 @@ mod tests {
 
     #[test]
     fn nothing_is_refreshed_when_nothing_was_staged() {
-        // A project without an `env_file`, or a `shell` that could
-        // not read it, sends nothing and costs no round trip.
+        // A project without an `env_file`, or a
+        // `shell --refresh-secrets` that could not read it, sends
+        // nothing and costs no round trip.
         assert!(refresh_secrets(&cfg(), &Staged::default()).is_empty());
     }
 

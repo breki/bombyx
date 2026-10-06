@@ -1564,11 +1564,12 @@ const HOOK_OUTPUT_CAP: usize = 65536;
 /// How long a `secrets_refreshed` hook may run before the guest
 /// stops it.
 ///
-/// `shell` waits for the hook before it opens, so a hook waiting
-/// on the network or on input would otherwise hold the shell
-/// indefinitely. Fixed rather than a setting until a project needs
-/// longer. It bounds the hook's own run; `REFRESH_THEN_HOOK_SCRIPT`
-/// says why a process the hook leaves behind does not extend it.
+/// `shell --refresh-secrets` waits for the hook before it opens, so a
+/// hook waiting on the network or on input would otherwise hold the
+/// shell indefinitely. Fixed rather than a setting until a project
+/// needs longer. It bounds the hook's own run;
+/// `REFRESH_THEN_HOOK_SCRIPT` says why a process the hook leaves
+/// behind does not extend it.
 const HOOK_TIMEOUT_SECS: u32 = 60;
 
 /// [`REFRESH_SCRIPT`], then the project's `secrets_refreshed` hook.

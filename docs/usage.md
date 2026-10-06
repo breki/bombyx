@@ -171,23 +171,23 @@ over the attachment with
 (without `-f` the import refuses an attachment that exists):
 
 ```bash
-bombyx up myproject   # or: bombyx shell myproject
+bombyx up myproject   # or: bombyx shell --refresh-secrets myproject
 ```
 
 Both commands write the file over its copy in the guest,
-`~/.bombyx-env` in the agent's home: `shell` before the shell
-opens, and `up` once the VM is up. When the config names a
-`repo_token`, they rewrite the git credential built from it too,
-and when it names a deploy key, the key at
+`~/.bombyx-env` in the agent's home: `shell --refresh-secrets`
+before the shell opens, and `up` once the VM is up. When the config
+names a `repo_token`, they rewrite the git credential built from it
+too, and when it names a deploy key, the key at
 `~/.ssh/bombyx-deploy-key`. So a key you rotate reaches the guest
 the same way, without a provision. Nothing is fetched or checked
 out, so the work in the guest's clone is not touched. `up` on a
 running VM does only this. When a rewrite fails, `up` exits
-non-zero, and `shell` warns and opens the shell anyway. A `shell`
-that cannot read your `env_file` or `deploy_key` on the
-workstation, or unlock your `vault`, also warns and opens, and
-then refreshes nothing: one failed read skips every file, not only
-the one that failed.
+non-zero, and `shell --refresh-secrets` warns and opens the shell
+anyway. A `shell --refresh-secrets` that cannot read your `env_file`
+or `deploy_key` on the workstation, or unlock your `vault`, also
+warns and opens, and then refreshes nothing: one failed read skips
+every file, not only the one that failed.
 
 A Windows guest is refreshed the same way. There the refresh calls
 `refresh.ps1`, which provisioning installs, so a Windows VM that
@@ -298,26 +298,26 @@ is empty, and the guest stops it after 60 seconds: with `SIGTERM`,
 then `SIGKILL` five seconds later if it ignores that.
 
 What it prints, on either stream, goes to a temporary file in the
-guest, which bombyx relays to your terminal once the hook ends:
-the first 65536 bytes, with any control character shown as `?`,
-and a note when there was more. So a process the hook leaves
-running, such as a dev server it restarted, does not keep `shell`
-waiting. Give that process its own log: what it prints after the
-hook ends goes to a file that has already been removed, and that
-file keeps taking disk, or memory where `/tmp` is a tmpfs, until
-the process stops.
+guest, which bombyx relays to your terminal once the hook ends: the
+first 65536 bytes, with any control character shown as `?`, and a
+note when there was more. So a process the hook leaves running, such
+as a dev server it restarted, does not keep
+`shell --refresh-secrets` waiting. Give that process its own log:
+what it prints after the hook ends goes to a file that has already
+been removed, and that file keeps taking disk, or memory where
+`/tmp` is a tmpfs, until the process stops.
 
 When the hook is missing, leads out of the clone, fails or runs too
 long, bombyx says so and says the secrets themselves are current:
-`up` and `provision` exit non-zero, and `shell` warns and opens the
-shell anyway. After a first `up` the snapshot is taken all the
-same, because no later `up` would take it. A hook that itself exits
-with status 124 or 137 is reported as having run too long, because
-those are the statuses `timeout` uses.
+`up` and `provision` exit non-zero, and `shell --refresh-secrets`
+warns and opens the shell anyway. After a first `up` the snapshot is
+taken all the same, because no later `up` would take it. A hook that
+itself exits with status 124 or 137 is reported as having run too
+long, because those are the statuses `timeout` uses.
 
-`--dry-run` prints the hook's command for `shell`, `provision` and
-`up`; for `up` it shows the shape of a first `up`, where the hook
-follows provisioning.
+`--dry-run` prints the hook's command for `shell --refresh-secrets`,
+`provision` and `up`; for `up` it shows the shape of a first `up`,
+where the hook follows provisioning.
 
 [trust-boundary.md](trust-boundary.md) says what the empty
 environment protects and what it does not.
@@ -328,7 +328,9 @@ environment protects and what it does not.
 `up` takes that snapshot on the first boot only, after
 provisioning finishes, and never overwrites it -- so it keeps
 pointing at the clean install rather than whatever an agent has
-done since.
+done since. A reset guest holds the secrets it had at that moment,
+so after rotating one, run `up` or `shell --refresh-secrets` to
+bring it up to date.
 
 When a snapshot cannot be taken -- a provider without snapshot
 support, for one -- `up` warns on stderr and still succeeds. So a
@@ -469,9 +471,9 @@ to do, `destroy` above all. The plan is for reading, and for
 pasting one line at a time.
 
 A dry run still reads the project's secrets, because the plan it
-prints includes the step that writes them. So with a `vault`, a
-dry run of `up`, `provision`, `shell` or `scratch` asks for the
-master password as a real run would.
+prints includes the step that writes them. So with a `vault`, a dry
+run of `up`, `provision`, `shell --refresh-secrets` or `scratch`
+asks for the master password as a real run would.
 
 **Do not pipe the plan into a shell.**
 `bombyx --dry-run up myproject | sh` writes the generated files

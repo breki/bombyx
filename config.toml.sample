@@ -293,9 +293,9 @@ history = "full"             # full or shallow
 # at all. See docs/trust-boundary.md.
 #
 # Inside the guest it lands at `~/.ssh/bombyx-deploy-key`, mode
-# 0600. `bombyx up` and `bombyx shell` rewrite it whenever the VM
-# already exists, so a key you rotate here reaches the guest
-# without a provision.
+# 0600. `bombyx up` and `bombyx shell --refresh-secrets` rewrite it
+# whenever the VM already exists, so a key you rotate here reaches
+# the guest without a provision.
 #
 # The value follows the rules of `env_file` below: it starts with
 # `~/` or is an absolute path on this machine, and it names a
@@ -342,14 +342,14 @@ history = "full"             # full or shallow
 #
 #   install -m 600 "$BOMBYX_ENV_FILE" .env
 #
-# `bombyx up` and `bombyx shell` rewrite `~/.bombyx-env` whenever
-# the VM already exists, which is how a token you rotate here
-# reaches the guest without a provision. A copy made at provision
-# time keeps the old value, so make the copy a step you can run
-# again, and name that step as the `secrets_refreshed` hook at the
-# end of this file so bombyx runs it after each rewrite.
-# docs/usage.md, under "Rotating a secret", shows how, and says
-# when a link works instead.
+# `bombyx up` and `bombyx shell --refresh-secrets` rewrite
+# `~/.bombyx-env` whenever the VM already exists, which is how a
+# token you rotate here reaches the guest without a provision. A
+# copy made at provision time keeps the old value, so make the copy
+# a step you can run again, and name that step as the
+# `secrets_refreshed` hook at the end of this file so bombyx runs it
+# after each rewrite. docs/usage.md, under "Rotating a secret",
+# shows how, and says when a link works instead.
 #
 # That variable is always set. It holds the path when this key
 # is present and an empty string when it is not, so a script
@@ -393,13 +393,16 @@ history = "full"             # full or shallow
 # can tell the difference. `repo_token` below names one of these
 # variables.
 #
-# bombyx asks for the master password once per run, through
-# `keepassxc-cli`, which has to be installed and on PATH. The
-# password goes from your terminal to `keepassxc-cli` without
-# passing through bombyx, and bombyx reads only the entries listed
-# here. A `--dry-run` of `up`, `provision`, `shell` or `scratch`
-# asks too: the plan it prints includes the step that writes the
-# secrets, and that step exists only once they have been read.
+# bombyx asks for the master password once per run of a command
+# that sends the secrets: `up`, `provision`, `scratch` and
+# `shell --refresh-secrets`. Every other command, a plain `shell`
+# included, never opens the vault. The password goes through
+# `keepassxc-cli`, which has to be installed and on PATH, from your
+# terminal to `keepassxc-cli` without passing through bombyx, and
+# bombyx reads only the entries listed here. A `--dry-run` of those
+# four commands asks too: the plan it prints includes the step that
+# writes the secrets, and that step exists only once they have been
+# read.
 #
 # Not yet on a Windows workstation: bombyx refuses a `vault` there.
 # An entry path may not hold `"`, `\` or a control character, which
@@ -675,10 +678,11 @@ history = "full"             # full or shallow
 # and it is stopped after 60 seconds. It runs every time, whether
 # the secrets changed or not, so it must be safe to run twice. What
 # it prints is shown after it ends, cut at 65536 bytes. A failure
-# makes `up` and `provision` exit non-zero, and `shell` warns and
-# opens anyway. docs/usage.md, under "Rotating a secret", has the
-# rest, and docs/trust-boundary.md says what the empty environment
-# does and does not protect.
+# makes `up` and `provision` exit non-zero, and
+# `shell --refresh-secrets` warns and opens anyway. docs/usage.md,
+# under "Rotating a secret", has the rest, and
+# docs/trust-boundary.md says what the empty environment does and
+# does not protect.
 #
 # On a Windows guest the hook is a `.ps1` file, which PowerShell
 # runs with `-File`. It starts from the system's own variables (such
