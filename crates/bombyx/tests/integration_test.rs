@@ -288,6 +288,68 @@ fn shell_probes_the_machine_before_it_opens() {
     assert!(lines[1].contains("vagrant 'ssh' '-c'"), "{}", lines[1]);
 }
 
+/// A `myproject` fixture whose `[source]` names `env_file` at
+/// `path`. `[source]` is the last table `REQUIRED_TABLES` writes,
+/// so a line appended to the registry joins it.
+fn project_dir_with_env_file(path: &std::path::Path) -> TempDir {
+    let dir = TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join(CONFIG_HOME)).unwrap();
+    let source = format!(
+        "{}env_file = {:?}\n",
+        registry("host = \"vmhost.invalid\"\n", ""),
+        path.display()
+    );
+    write_user_config(&dir, &source);
+    dir
+}
+
+#[test]
+fn a_plain_shell_reads_no_secrets() {
+    // `shell` opens without reading `env_file` or the vault unless
+    // asked (#180), so it asks for no vault password. The proof is
+    // a file the config names that this machine lacks: reading it
+    // would warn, and a plain shell neither warns nor plans a
+    // refresh.
+    let dir = TempDir::new().unwrap();
+    let dir = project_dir_with_env_file(&dir.path().join("missing.env"));
+    let out = bombyx_in(&dir)
+        .args(["--dry-run", "shell", "myproject"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(!stderr.contains("not refreshing"), "{stderr}");
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let lines: Vec<String> = stdout.lines().map(str::to_owned).collect();
+    assert_eq!(programs(&lines), vec!["ssh", "ssh"], "{stdout}");
+}
+
+#[test]
+fn refresh_secrets_reads_them_and_refreshes_before_the_shell() {
+    // With `--refresh-secrets` the secrets are read, and the
+    // refresh runs between the probe and the shell. A file it
+    // cannot read is a warning, and the shell still opens.
+    let files = TempDir::new().unwrap();
+    let env = files.path().join("myproject.env");
+    std::fs::write(&env, "TOKEN=abc\n").unwrap();
+    let dir = project_dir_with_env_file(&env);
+    let lines = dry_run(
+        &dir,
+        &["--dry-run", "shell", "--refresh-secrets", "myproject"],
+    );
+    assert_eq!(programs(&lines), vec!["ssh", "ssh", "ssh"], "{lines:?}");
+    assert!(lines[0].contains("vagrant 'status'"), "{}", lines[0]);
+    assert!(!lines[1].contains("vagrant 'status'"), "{}", lines[1]);
+    assert!(lines[2].contains("vagrant 'ssh' '-c'"), "{}", lines[2]);
+
+    let missing = project_dir_with_env_file(&files.path().join("gone.env"));
+    let out = bombyx_in(&missing)
+        .args(["--dry-run", "shell", "--refresh-secrets", "myproject"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("not refreshing"), "{stderr}");
+}
+
 #[test]
 fn up_makes_the_dir_writes_the_files_then_boots() {
     // Order is the assertion: a `contains` check would pass

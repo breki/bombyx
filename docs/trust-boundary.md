@@ -103,17 +103,18 @@ differences:
   the administrators before it holds the secret: the counterpart of
   mode `0600`. `bootstrap.ps1` pins the git host's published keys as
   `bootstrap.sh` does.
-- **The refresh writes as the login account.** `up` and `shell` call
-  `refresh.ps1`, which `account.ps1` installs under Program Files.
-  It runs as vagrant's login account, writes the new file beside
-  the old one under a fresh ACL for the agent, SYSTEM and the
-  administrators, renames it into place, and makes the agent its
-  owner, because Windows' `ssh` refuses a private key another
-  account owns. Writing as another account is safe here, unlike on
-  Linux, because the agent is an administrator too: a link it
-  leaves at the path leads nowhere the agent could not write. The
-  `secrets_refreshed` hook then runs as the agent, over the same
-  loopback login as the hand-over, from a pruned environment.
+- **The refresh writes as the login account.** `up` and
+  `shell --refresh-secrets` call `refresh.ps1`, which `account.ps1`
+  installs under Program Files. It runs as vagrant's login account,
+  writes the new file beside the old one under a fresh ACL for the
+  agent, SYSTEM and the administrators, renames it into place, and
+  makes the agent its owner, because Windows' `ssh` refuses a
+  private key another account owns. Writing as another account is
+  safe here, unlike on Linux, because the agent is an administrator
+  too: a link it leaves at the path leads nowhere the agent could
+  not write. The `secrets_refreshed` hook then runs as the agent,
+  over the same loopback login as the hand-over, from a pruned
+  environment.
 - **Every `env:` value travels base64-encoded**, because vagrant's
   Windows provisioner pastes it into the script unescaped. `[env]`
   names are compared without regard to case, as Windows compares
@@ -221,21 +222,21 @@ VM host, in the same shell that would write. A provision that
 started and failed leaves the file, so it is retried by `bombyx
 provision`, not by `up`.
 
-`up` and `shell` also rewrite the copy of the secrets, from
-`env_file` or `vault`, the `repo_token` credential and the deploy
-key inside a guest that already exists, so a rotated token or key
-reaches it without a provision. That route stores nothing on the
-VM host at all. An `up` that boots a machine vagrant has already
-provisioned stages nothing and gets its secrets from this refresh;
-one that creates the machine stages them for its `vagrant` run, as
-above. `scratch` has no refresh, so a re-run `scratch` leaves the
-guest's secrets as they were. Each file travels on a pipe: from
-bombyx to `ssh`, through `vagrant ssh --no-tty` on the VM host,
-and into a `cat` that the agent's account runs in the guest. On
-the VM host the file exists only in the memory of the processes
-passing it along. Nothing in the path asks for a terminal, because
-a terminal's line discipline can echo input back into the output.
-We have not checked whether Vagrant's own debug log
+`up` and `shell --refresh-secrets` also rewrite the copy of the
+secrets, from `env_file` or `vault`, the `repo_token` credential and
+the deploy key inside a guest that already exists, so a rotated
+token or key reaches it without a provision. That route stores
+nothing on the VM host at all. An `up` that boots a machine vagrant
+has already provisioned stages nothing and gets its secrets from
+this refresh; one that creates the machine stages them for its
+`vagrant` run, as above. `scratch` has no refresh, so a re-run
+`scratch` leaves the guest's secrets as they were. Each file travels
+on a pipe: from bombyx to `ssh`, through `vagrant ssh --no-tty` on
+the VM host, and into a `cat` that the agent's account runs in the
+guest. On the VM host the file exists only in the memory of the
+processes passing it along. Nothing in the path asks for a terminal,
+because a terminal's line discipline can echo input back into the
+output. We have not checked whether Vagrant's own debug log
 (`VAGRANT_LOG=debug`, set on the VM host) records what passes
 through; the staging route has the same unknown for its upload.
 
@@ -302,14 +303,13 @@ bombyx's memory, or the terminal, while the vault is open.
 
 ### The secrets hook runs branch code on every refresh
 
-A project's `secrets_refreshed` hook is a script from the clone,
-so the branch checked out in the guest decides what it does, and
-bombyx runs it every time it writes the secrets: after
-provisioning, and on every `up` and `shell` that rewrites them.
-That is the trust provisioning already gives the project's
-`script`. Running the hook gives the branch no access it lacks: the
-hook runs as the agent's account, which can already read
-`~/.bombyx-env`.
+A project's `secrets_refreshed` hook is a script from the clone, so
+the branch checked out in the guest decides what it does, and bombyx
+runs it every time it writes the secrets: after provisioning, and on
+every `up` and `shell --refresh-secrets` that rewrites them. That is
+the trust provisioning already gives the project's `script`. Running
+the hook gives the branch no access it lacks: the hook runs as the
+agent's account, which can already read `~/.bombyx-env`.
 
 - **The empty environment guards against accidents, not against
   the agent.** `/usr/bin/env -i` keeps what the calling shells

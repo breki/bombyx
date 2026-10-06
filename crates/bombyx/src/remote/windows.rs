@@ -36,8 +36,8 @@ use super::{
 use crate::config::{Config, HookPath};
 use crate::powershell::{code_lines, encoded_command, quote, run_encoded};
 
-/// The call `bombyx up` and `shell` make to refresh a running
-/// Windows guest's secrets; its header names the arguments.
+/// The call `bombyx up` and `shell --refresh-secrets` make to refresh a
+/// running Windows guest's secrets; its header names the arguments.
 pub(crate) const REFRESH_CALL: &str =
     include_str!("../../templates/refresh-call.ps1");
 

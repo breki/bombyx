@@ -37,6 +37,7 @@ bombyx doctor myproject     # check the preconditions, change nothing
 bombyx up myproject         # write the generated files, boot the VM
 bombyx provision myproject  # re-run provisioning in the guest
 bombyx shell myproject      # open a shell inside the VM
+bombyx shell --refresh-secrets myproject  # send the secrets, then open it
 bombyx status myproject     # vagrant status on the host
 bombyx reset myproject      # restore the fresh-install snapshot
 bombyx snapshot myproject   # replace the fresh-install snapshot
@@ -59,6 +60,12 @@ There are two lifecycles, on purpose:
 
 A scratch VM lives in `<remote_root>/scratch/<project>/<name>`, so
 the same name in two projects does not collide.
+
+`shell` reads no secrets: it opens no `vault`, so it asks for no
+master password, and the guest keeps the secrets it has. Add
+`--refresh-secrets` to send them again first and run the
+`secrets_refreshed` hook, as `up` does; "Rotating a secret" below
+says when that is needed.
 
 On a Windows guest (`guest = "windows"`), `shell` opens PowerShell as
 the agent's account, in its clone, by logging in to the agent from
@@ -152,33 +159,35 @@ it targets the project VM only; for a scratch VM the answer is
 
 ## Rotating a secret
 
-To change a value in your `env_file`, such as an expired token,
-edit the file on your workstation and run `up` or `shell`. With a
-`vault`, edit the entry in KeePassXC instead; `up` and `shell`
-then ask for the master password once and read every entry again.
-To rotate a deploy key, replace its file, or with a vault import
-the new key over the attachment with `keepassxc-cli
-attachment-import -f DATABASE "ENTRY" id_ed25519 KEYFILE` (without
-`-f` the import refuses an attachment that exists):
+To change a value in your `env_file`, such as an expired token, edit
+the file on your workstation and run `up` or
+`shell --refresh-secrets`. A plain `shell` sends no secrets, so it
+leaves the guest's copy as it was. With a `vault`, edit the entry in
+KeePassXC instead; `up` and `shell --refresh-secrets` then ask for
+the master password once and read every entry again. To rotate a
+deploy key, replace its file, or with a vault import the new key
+over the attachment with
+`keepassxc-cli attachment-import -f DATABASE "ENTRY" id_ed25519 KEYFILE`
+(without `-f` the import refuses an attachment that exists):
 
 ```bash
-bombyx up myproject   # or: bombyx shell myproject
+bombyx up myproject   # or: bombyx shell --refresh-secrets myproject
 ```
 
 Both commands write the file over its copy in the guest,
-`~/.bombyx-env` in the agent's home: `shell` before the shell
-opens, and `up` once the VM is up. When the config names a
-`repo_token`, they rewrite the git credential built from it too,
-and when it names a deploy key, the key at
+`~/.bombyx-env` in the agent's home: `shell --refresh-secrets`
+before the shell opens, and `up` once the VM is up. When the config
+names a `repo_token`, they rewrite the git credential built from it
+too, and when it names a deploy key, the key at
 `~/.ssh/bombyx-deploy-key`. So a key you rotate reaches the guest
 the same way, without a provision. Nothing is fetched or checked
 out, so the work in the guest's clone is not touched. `up` on a
 running VM does only this. When a rewrite fails, `up` exits
-non-zero, and `shell` warns and opens the shell anyway. A `shell`
-that cannot read your `env_file` or `deploy_key` on the
-workstation, or unlock your `vault`, also warns and opens, and
-then refreshes nothing: one failed read skips every file, not only
-the one that failed.
+non-zero, and `shell --refresh-secrets` warns and opens the shell
+anyway. A `shell --refresh-secrets` that cannot read your `env_file`
+or `deploy_key` on the workstation, or unlock your `vault`, also
+warns and opens, and then refreshes nothing: one failed read skips
+every file, not only the one that failed.
 
 A Windows guest is refreshed the same way. There the refresh calls
 `refresh.ps1`, which provisioning installs, so a Windows VM that
@@ -212,16 +221,16 @@ Only those copies change:
   refuse the link as well.
 - **A running process keeps the values it read.** Restart it.
 - **Adding `env_file`, `repo_token` or a deploy key to a project
-  still needs `provision`**, because the provisioning script is
-  what uses the file, and `bootstrap.sh` is what tells `git` about
-  the credential and the key. `up` and `shell` do write a new key
-  into the guest, but `git` uses it only once `provision` has
-  pointed it there.
-- **So does removing one.** `up` and `shell` send only the files
-  the config names, so taking `env_file`, `repo_token` or the key
-  out leaves the guest's copy in place, and `git` keeps sending a
-  token or a key you meant to withdraw. `provision` deletes the
-  copies the config no longer names.
+  still needs `provision`**, because the provisioning script is what
+  uses the file, and `bootstrap.sh` is what tells `git` about the
+  credential and the key. `up` and `shell --refresh-secrets` do
+  write a new key into the guest, but `git` uses it only once
+  `provision` has pointed it there.
+- **So does removing one.** `up` and `shell --refresh-secrets` send
+  only the files the config names, so taking `env_file`,
+  `repo_token` or the key out leaves the guest's copy in place, and
+  `git` keeps sending a token or a key you meant to withdraw.
+  `provision` deletes the copies the config no longer names.
 
 ### The `secrets_refreshed` hook
 
@@ -254,15 +263,15 @@ that stays inside the clone, and its whole path,
 
 When it runs: whenever bombyx has written `~/.bombyx-env`. That is
 after the provisioning run of the `up` that creates the VM (before
-the `fresh-install` snapshot, so `reset` returns to a guest with
-the copy), after the provisioning run of `provision`, and after
-`up` or `shell` has rewritten the file in a running guest. In every
-case the hook runs in the same guest command as a rewrite of
-`~/.bombyx-env`, and only once that rewrite succeeded. In a running
-guest the credential is rewritten first, so a hook that runs `git`
-sees a rotated token. It runs every time,
-whether the secrets changed or not, so it must be safe to run
-twice.
+the `fresh-install` snapshot, so `reset` returns to a guest with the
+copy), after the provisioning run of `provision`, and after `up` or
+`shell --refresh-secrets` has rewritten the file in a running guest.
+A plain `shell` rewrites nothing and runs no hook. In every case the
+hook runs in the same guest command as a rewrite of `~/.bombyx-env`,
+and only once that rewrite succeeded. In a running guest the
+credential is rewritten first, so a hook that runs `git` sees a
+rotated token. It runs every time, whether the secrets changed or
+not, so it must be safe to run twice.
 
 So for a project VM the hook is the copy step, and your
 provisioning script needs none of its own. Two exceptions keep one
@@ -289,26 +298,26 @@ is empty, and the guest stops it after 60 seconds: with `SIGTERM`,
 then `SIGKILL` five seconds later if it ignores that.
 
 What it prints, on either stream, goes to a temporary file in the
-guest, which bombyx relays to your terminal once the hook ends:
-the first 65536 bytes, with any control character shown as `?`,
-and a note when there was more. So a process the hook leaves
-running, such as a dev server it restarted, does not keep `shell`
-waiting. Give that process its own log: what it prints after the
-hook ends goes to a file that has already been removed, and that
-file keeps taking disk, or memory where `/tmp` is a tmpfs, until
-the process stops.
+guest, which bombyx relays to your terminal once the hook ends: the
+first 65536 bytes, with any control character shown as `?`, and a
+note when there was more. So a process the hook leaves running, such
+as a dev server it restarted, does not keep
+`shell --refresh-secrets` waiting. Give that process its own log:
+what it prints after the hook ends goes to a file that has already
+been removed, and that file keeps taking disk, or memory where
+`/tmp` is a tmpfs, until the process stops.
 
 When the hook is missing, leads out of the clone, fails or runs too
 long, bombyx says so and says the secrets themselves are current:
-`up` and `provision` exit non-zero, and `shell` warns and opens the
-shell anyway. After a first `up` the snapshot is taken all the
-same, because no later `up` would take it. A hook that itself exits
-with status 124 or 137 is reported as having run too long, because
-those are the statuses `timeout` uses.
+`up` and `provision` exit non-zero, and `shell --refresh-secrets`
+warns and opens the shell anyway. After a first `up` the snapshot is
+taken all the same, because no later `up` would take it. A hook that
+itself exits with status 124 or 137 is reported as having run too
+long, because those are the statuses `timeout` uses.
 
-`--dry-run` prints the hook's command for `shell`, `provision` and
-`up`; for `up` it shows the shape of a first `up`, where the hook
-follows provisioning.
+`--dry-run` prints the hook's command for `shell --refresh-secrets`,
+`provision` and `up`; for `up` it shows the shape of a first `up`,
+where the hook follows provisioning.
 
 [trust-boundary.md](trust-boundary.md) says what the empty
 environment protects and what it does not.
@@ -319,7 +328,9 @@ environment protects and what it does not.
 `up` takes that snapshot on the first boot only, after
 provisioning finishes, and never overwrites it -- so it keeps
 pointing at the clean install rather than whatever an agent has
-done since.
+done since. A reset guest holds the secrets it had at that moment,
+so after rotating one, run `up` or `shell --refresh-secrets` to
+bring it up to date.
 
 When a snapshot cannot be taken -- a provider without snapshot
 support, for one -- `up` warns on stderr and still succeeds. So a
@@ -460,9 +471,9 @@ to do, `destroy` above all. The plan is for reading, and for
 pasting one line at a time.
 
 A dry run still reads the project's secrets, because the plan it
-prints includes the step that writes them. So with a `vault`, a
-dry run of `up`, `provision`, `shell` or `scratch` asks for the
-master password as a real run would.
+prints includes the step that writes them. So with a `vault`, a dry
+run of `up`, `provision`, `shell --refresh-secrets` or `scratch`
+asks for the master password as a real run would.
 
 **Do not pipe the plan into a shell.**
 `bombyx --dry-run up myproject | sh` writes the generated files

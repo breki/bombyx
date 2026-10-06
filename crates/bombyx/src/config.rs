@@ -392,9 +392,9 @@ pub struct Config {
 /// Everything bombyx reads off the workstation and stages on
 /// the VM host for one run.
 ///
-/// The same contents also feed the refresh that `up` and `shell`
-/// run on a VM that already exists, which pipes them into the
-/// guest without staging them anywhere.
+/// The same contents also feed the refresh that `up` and
+/// `shell --refresh-secrets` run on a VM that already exists, which pipes
+/// them into the guest without staging them anywhere.
 ///
 /// The secrets and the credential come out of one source, the
 /// file `source.env_file` names or the vault `source.vault` names;

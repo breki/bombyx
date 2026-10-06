@@ -221,17 +221,17 @@ memory = "8GB"
 # device, such as `con` or `com1`. The `[env]` names are compared
 # without regard to case (see the `[env]` table below). A
 # `deploy_key`, an `env_file` and a `repo_token` are placed in a
-# Windows guest when it is provisioned, and `up` and `shell` refresh
-# a running one, as on Linux. A Windows project's `secrets_refreshed`
-# hook must be a `.ps1` file of at most 200 characters, and fewer
-# when `guest_user` and the project name are long: its whole path,
-# C:\Users\<guest_user>\<project>\<hook>, must fit the 259 characters
-# Windows allows by default. Use the box built from
+# Windows guest when it is provisioned, and `up` and
+# `shell --refresh-secrets` refresh a running one, as on Linux. A
+# Windows project's `secrets_refreshed` hook must be a `.ps1` file
+# of at most 200 characters, and fewer when `guest_user` and the
+# project name are long: its whole path,
+# C:\Users\<guest_user>\<project>\<hook>, must fit the 259
+# characters Windows allows by default. Use the box built from
 # Microsoft's ISO by the recipe in boxes/windows-server-2025/, added
 # as `bombyx/windows-server-2025`; docs/windows-guest-box.md says
-# how.
-# That box has no git: the `box` rule above that a box has git is
-# for a Linux guest, and a Windows guest's provisioning installs
+# how. That box has no git: the `box` rule above that a box has git
+# is for a Linux guest, and a Windows guest's provisioning installs
 # git.
 #
 # guest = "linux"
@@ -293,9 +293,9 @@ history = "full"             # full or shallow
 # at all. See docs/trust-boundary.md.
 #
 # Inside the guest it lands at `~/.ssh/bombyx-deploy-key`, mode
-# 0600. `bombyx up` and `bombyx shell` rewrite it whenever the VM
-# already exists, so a key you rotate here reaches the guest
-# without a provision.
+# 0600. `bombyx up` and `bombyx shell --refresh-secrets` rewrite it
+# whenever the VM already exists, so a key you rotate here reaches
+# the guest without a provision.
 #
 # The value follows the rules of `env_file` below: it starts with
 # `~/` or is an absolute path on this machine, and it names a
@@ -342,14 +342,14 @@ history = "full"             # full or shallow
 #
 #   install -m 600 "$BOMBYX_ENV_FILE" .env
 #
-# `bombyx up` and `bombyx shell` rewrite `~/.bombyx-env` whenever
-# the VM already exists, which is how a token you rotate here
-# reaches the guest without a provision. A copy made at provision
-# time keeps the old value, so make the copy a step you can run
-# again, and name that step as the `secrets_refreshed` hook at the
-# end of this file so bombyx runs it after each rewrite.
-# docs/usage.md, under "Rotating a secret", shows how, and says
-# when a link works instead.
+# `bombyx up` and `bombyx shell --refresh-secrets` rewrite
+# `~/.bombyx-env` whenever the VM already exists, which is how a
+# token you rotate here reaches the guest without a provision. A
+# copy made at provision time keeps the old value, so make the copy
+# a step you can run again, and name that step as the
+# `secrets_refreshed` hook at the end of this file so bombyx runs it
+# after each rewrite. docs/usage.md, under "Rotating a secret",
+# shows how, and says when a link works instead.
 #
 # That variable is always set. It holds the path when this key
 # is present and an empty string when it is not, so a script
@@ -393,13 +393,16 @@ history = "full"             # full or shallow
 # can tell the difference. `repo_token` below names one of these
 # variables.
 #
-# bombyx asks for the master password once per run, through
-# `keepassxc-cli`, which has to be installed and on PATH. The
-# password goes from your terminal to `keepassxc-cli` without
-# passing through bombyx, and bombyx reads only the entries listed
-# here. A `--dry-run` of `up`, `provision`, `shell` or `scratch`
-# asks too: the plan it prints includes the step that writes the
-# secrets, and that step exists only once they have been read.
+# bombyx asks for the master password once per run of a command
+# that sends the secrets: `up`, `provision`, `scratch` and
+# `shell --refresh-secrets`. Every other command, a plain `shell`
+# included, never opens the vault. The password goes through
+# `keepassxc-cli`, which has to be installed and on PATH, from your
+# terminal to `keepassxc-cli` without passing through bombyx, and
+# bombyx reads only the entries listed here. A `--dry-run` of those
+# four commands asks too: the plan it prints includes the step that
+# writes the secrets, and that step exists only once they have been
+# read.
 #
 # Not yet on a Windows workstation: bombyx refuses a `vault` there.
 # An entry path may not hold `"`, `\` or a control character, which
@@ -652,15 +655,15 @@ history = "full"             # full or shallow
 # `.env`, or wherever your project keeps them, and bombyx runs it
 # whenever it has written `~/.bombyx-env`: after the provisioning
 # run of the first `bombyx up` and of `bombyx provision`, and after
-# `bombyx up` or `bombyx shell` rewrites the file in a running
-# guest. So a project VM needs no copy step in your provisioning
-# script. `scratch` VMs run no hook, though, so a project that uses
-# them calls the hook script from its provisioning script too. The
-# hook runs after that script, so a script that needs a secret
-# during its run reads `$BOMBYX_ENV_FILE` instead of `.env`. The
-# hook needs `env_file`, or a `vault` with `entries`, above:
-# without one there is nothing for it to copy, so bombyx refuses
-# the pair.
+# `bombyx up` or `bombyx shell --refresh-secrets` rewrites the file
+# in a running guest. So a project VM needs no copy step in your
+# provisioning script. `scratch` VMs run no hook, though, so a
+# project that uses them calls the hook script from its provisioning
+# script too. The hook runs after that script, so a script that
+# needs a secret during its run reads `$BOMBYX_ENV_FILE` instead of
+# `.env`. The hook needs `env_file`, or a `vault` with `entries`,
+# above: without one there is nothing for it to copy, so bombyx
+# refuses the pair.
 #
 # The path is relative to the clone root, like `script`, and holds
 # no `..` segment. It does not start with `-`, holds only letters,
@@ -675,10 +678,11 @@ history = "full"             # full or shallow
 # and it is stopped after 60 seconds. It runs every time, whether
 # the secrets changed or not, so it must be safe to run twice. What
 # it prints is shown after it ends, cut at 65536 bytes. A failure
-# makes `up` and `provision` exit non-zero, and `shell` warns and
-# opens anyway. docs/usage.md, under "Rotating a secret", has the
-# rest, and docs/trust-boundary.md says what the empty environment
-# does and does not protect.
+# makes `up` and `provision` exit non-zero, and
+# `shell --refresh-secrets` warns and opens anyway. docs/usage.md,
+# under "Rotating a secret", has the rest, and
+# docs/trust-boundary.md says what the empty environment does and
+# does not protect.
 #
 # On a Windows guest the hook is a `.ps1` file, which PowerShell
 # runs with `-File`. It starts from the system's own variables (such
