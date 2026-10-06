@@ -26,6 +26,11 @@ Every exposure is tracked. If an entry names an exposure that no
 issue or todo covers, we file one as we write the entry, and the
 entry links to it. So a gap never lives only in this file.
 
+Before an entry says where a key or a secret rests, check the
+statement against `docs/trust-boundary.md`, which owns that answer.
+An older issue or another entry may describe a design that has
+since changed.
+
 ## Vercel Sandbox KVM escape, October 2026
 
 **What happened.** A researcher escaped from a Firecracker microVM
