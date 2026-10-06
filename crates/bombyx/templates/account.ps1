@@ -273,9 +273,9 @@ try {
         Refuse ("bootstrap.ps1 did not arrive at $staged, so there " +
             "is nothing to hand to the agent's account.")
     }
-    # The secrets refresh a running guest's `up` and `shell` call, and
-    # the runner it starts for the project's hook, each with the path
-    # it is installed at. bombyx names them rather than sending them,
+    # The secrets refresh a running guest's `up` and `shell --refresh-secrets`
+    # call, and the runner it starts for the project's hook, each with the
+    # path it is installed at. bombyx names them rather than sending them,
     # because they are too long for the guest's command line.
     $helpers = @(
         @((Join-Path $Staging 'refresh.ps1'),
@@ -418,12 +418,12 @@ try {
     Place (Decode 'BOMBYX_GIT_CRED_PRESENT') 'git credential for repo_token' `
         'git-credentials' $gitCred $sid
 
-    # bootstrap.ps1 and the helpers, installed afresh on every
-    # provision. bootstrap.ps1 runs only right after, so the agent's
-    # own edits to an earlier copy never run. The helpers run between
-    # provisions, when `up` and `shell` call them, so the agent, an
-    # administrator, can change them in that time, as it could change
-    # anything else on the guest.
+    # bootstrap.ps1 and the helpers, installed afresh on every provision.
+    # bootstrap.ps1 runs only right after, so the agent's own edits to an
+    # earlier copy never run. The helpers run between provisions, when `up`
+    # and `shell --refresh-secrets` call them, so the agent, an administrator,
+    # can change them in that time, as it could change anything else on the
+    # guest.
     Copy-Item -LiteralPath $staged -Destination $Bootstrap -Force
     foreach ($helper in $helpers) {
         Copy-Item -LiteralPath $helper[0] -Destination $helper[1] -Force

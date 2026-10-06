@@ -29,7 +29,7 @@ use bombyx::doctor::{
 };
 use bombyx::listing;
 use bombyx::name::{ProjectName, ScratchName};
-use bombyx::plan::{self, Action, StagedRead, plan};
+use bombyx::plan::{self, Action, ShellSecrets, StagedRead, plan};
 use bombyx::remote::{self, CloneUpdate, RemoteCommand, Tty};
 use bombyx::term;
 use bombyx::up::{self, StepResult, UpNote, UpOutcome, UpStep};
@@ -185,12 +185,22 @@ enum VmCmd {
     Down(ProjectArg),
     /// Open a shell inside the project VM, in the project clone
     ///
-    /// First rewrites the guest's copy of the secrets from
-    /// `env_file` or `vault`, and the git credential when
-    /// `repo_token` is set, and runs the `secrets_refreshed` hook,
-    /// as `up` does. If any of that fails, bombyx warns and opens
-    /// the shell anyway.
-    Shell(ProjectArg),
+    /// Reads no secrets unless `--refresh-secrets` is given: it
+    /// opens no vault, so it asks for no master password, and the
+    /// guest keeps the secrets it has.
+    Shell {
+        #[command(flatten)]
+        project: ProjectArg,
+        /// Send the secrets to the guest again before the shell opens
+        ///
+        /// Rewrites the guest's copy of the secrets from `env_file`
+        /// or `vault`, and the git credential when `repo_token` is
+        /// set, and runs the `secrets_refreshed` hook, as `up` does.
+        /// If any of that fails, bombyx warns and opens the shell
+        /// anyway.
+        #[arg(long)]
+        refresh_secrets: bool,
+    },
     /// Show VM status on the host
     Status(ProjectArg),
     /// Restore the project VM to its `fresh-install` snapshot
@@ -272,7 +282,7 @@ impl VmCmd {
             Self::Up(p)
             | Self::Provision { project: p, .. }
             | Self::Down(p)
-            | Self::Shell(p)
+            | Self::Shell { project: p, .. }
             | Self::Status(p)
             | Self::Reset(p)
             | Self::Snapshot(p)
@@ -554,8 +564,8 @@ fn run() -> Result<Ran> {
     if matches!(action, Action::Up) {
         return up_run(&cfg, tty, &staged, cli.dry_run);
     }
-    if matches!(action, Action::Shell) {
-        return shell_run(&cfg, tty, &staged, cli.dry_run);
+    if let Action::Shell(secrets) = action {
+        return shell_run(&cfg, secrets, tty, &staged, cli.dry_run);
     }
     if let Action::Provision(clone_update) = action {
         return provision_run(&cfg, clone_update, tty, &staged, cli.dry_run);
@@ -835,7 +845,13 @@ fn action_of(cmd: &VmCmd) -> Result<Action> {
             _ => CloneUpdate::Checkout,
         }),
         VmCmd::Down(_) => Action::Down,
-        VmCmd::Shell(_) => Action::Shell,
+        VmCmd::Shell {
+            refresh_secrets, ..
+        } => Action::Shell(if *refresh_secrets {
+            ShellSecrets::Refresh
+        } else {
+            ShellSecrets::Leave
+        }),
         VmCmd::Status(_) => Action::Status,
         VmCmd::Reset(_) => Action::Reset,
         VmCmd::Snapshot(_) => Action::Snapshot,
@@ -1117,23 +1133,30 @@ fn probe_state(cfg: &Config) -> Option<listing::VmState> {
 /// command it ran. [`listing::shell_refusal`] decides, and holds
 /// why an unknown state still opens the shell.
 ///
-/// Before the shell opens, the project's secrets are written over
-/// the guest's copies ([`plan::refresh_secrets`]), so a token
-/// rotated on the workstation reaches the guest with no provision.
+/// With [`ShellSecrets::Refresh`], the project's secrets are written
+/// over the guest's copies first ([`plan::refresh_secrets`]), so a
+/// token rotated on the workstation reaches the guest with no
+/// provision. With [`ShellSecrets::Leave`], the default, nothing is
+/// sent and no hook runs; `main` has already skipped reading the
+/// secrets, so no vault was opened.
 ///
 /// A refresh that fails is a warning and the shell opens anyway,
 /// because the operator may be opening the shell to find out why.
 ///
 /// A dry run contacts nothing, so it prints the probe, the
-/// refresh and then the shell, as `up_run` does.
+/// refresh when there is one, and then the shell, as `up_run` does.
 fn shell_run(
     cfg: &Config,
+    secrets: ShellSecrets,
     tty: Tty,
     staged: &Staged,
     dry_run: bool,
 ) -> Result<Ran> {
-    let shell = plan(&Action::Shell, cfg, tty, staged);
-    let refresh = plan::refresh_secrets(cfg, staged);
+    let shell = plan(&Action::Shell(secrets), cfg, tty, staged);
+    let refresh = match secrets {
+        ShellSecrets::Refresh => plan::refresh_secrets(cfg, staged),
+        ShellSecrets::Leave => Vec::new(),
+    };
     if dry_run {
         let mut cmds = listing::status_commands(std::slice::from_ref(cfg));
         cmds.extend(refresh);
@@ -1165,12 +1188,12 @@ fn shell_run(
 /// either. The caller decides what a failure costs.
 ///
 /// **The output is captured and relayed, never streamed.** The
-/// secrets command can carry the project's `secrets_refreshed`
-/// hook, which is code from the branch checked out in the guest,
-/// and it runs on every `shell`. [`term::relay`] keeps that code
-/// from repainting the operator's terminal, the rule `doctor`
-/// follows for the same reason. Nothing here is interactive, so
-/// capturing costs only the order between the two streams:
+/// secrets command can carry the project's `secrets_refreshed` hook,
+/// which is code from the branch checked out in the guest, and it
+/// runs on every `shell --refresh-secrets`. [`term::relay`] keeps
+/// that code from repainting the operator's terminal, the rule
+/// `doctor` follows for the same reason. Nothing here is interactive,
+/// so capturing costs only the order between the two streams:
 /// standard output is printed first, then standard error.
 ///
 /// **The exit status names the part that failed**, which

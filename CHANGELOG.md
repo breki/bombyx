@@ -14,6 +14,12 @@ and this project adheres to
 
 ### Changed
 
+- `bombyx shell` reads no secrets by default: it opens no `vault`, so it asks
+  for no master password, sends nothing into the guest and runs no
+  `secrets_refreshed` hook (#180). Pass `--refresh-secrets` to send them again
+  before the shell opens, as `shell` always did; `up` and `provision` are
+  unchanged.
+
 ### Fixed
 
 - Arrow keys work in `bombyx shell` on a Windows guest, in PowerShell and in

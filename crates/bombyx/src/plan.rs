@@ -63,12 +63,13 @@ pub enum Action {
     Down,
     /// Open a shell inside the project VM, in the project clone.
     ///
-    /// The binary runs [`refresh_secrets`] first and warns rather
-    /// than stops when it fails, so it is not part of this plan.
+    /// With [`ShellSecrets::Refresh`] the binary runs
+    /// [`refresh_secrets`] first and warns rather than stops when it
+    /// fails, so it is not part of this plan.
     /// [`Action::staged_read`] says [`StagedRead::BestEffort`] for
     /// the same reason: `shell` reads the files when it can and
     /// opens the shell when it cannot.
-    Shell,
+    Shell(ShellSecrets),
     /// Show VM status on the host.
     Status,
     /// Restore the project VM's `fresh-install` snapshot.
@@ -89,6 +90,21 @@ pub enum Action {
     Scratch(ScratchName),
     /// Destroy a throwaway VM.
     Discard(ScratchName),
+}
+
+/// Whether [`Action::Shell`] sends the project's secrets to the
+/// guest again before the shell opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShellSecrets {
+    /// Read no secrets and send none: no vault, no `env_file`, no
+    /// deploy key, no `secrets_refreshed` hook. The guest keeps the
+    /// copies it has. The default, so a shell asks for no vault
+    /// password.
+    #[default]
+    Leave,
+    /// Send them and run the hook, as `up` does on a running
+    /// machine: `shell --refresh-secrets`.
+    Refresh,
 }
 
 /// How an [`Action`] treats the secrets `source.env_file` or
@@ -121,11 +137,13 @@ impl Action {
     /// actions either failure is allowed to stop: only the
     /// [`StagedRead::Required`] ones.
     ///
-    /// `shell` is [`StagedRead::BestEffort`]. It refreshes the
-    /// guest's copies before the shell opens, and it is the
-    /// command an operator reaches for when something is already
-    /// wrong, so a missing secrets file must not also cost them the
-    /// shell.
+    /// A plain `shell` is [`StagedRead::Skip`]: it sends nothing, so
+    /// it reads nothing, and a `vault` asks for no master password.
+    /// `shell --refresh-secrets` is [`StagedRead::BestEffort`]. It
+    /// refreshes the guest's copies before the shell opens, and
+    /// `shell` is the command an operator reaches for when something
+    /// is already wrong, so a missing secrets file must not also
+    /// cost them the shell.
     ///
     /// **The teardown verbs are why `Skip` exists.** A
     /// `destroy` refused because the secrets file has gone would
@@ -146,8 +164,9 @@ impl Action {
             Self::Up | Self::Provision(_) | Self::Scratch(_) => {
                 StagedRead::Required
             }
-            Self::Shell => StagedRead::BestEffort,
-            Self::Down
+            Self::Shell(ShellSecrets::Refresh) => StagedRead::BestEffort,
+            Self::Shell(ShellSecrets::Leave)
+            | Self::Down
             | Self::Status
             | Self::Reset
             | Self::Snapshot
@@ -235,7 +254,7 @@ pub fn plan(
             staged,
         ),
         Action::Down => vec![remote::vagrant(cfg, &["halt"], tty)],
-        Action::Shell => vec![remote::shell_into_vm(cfg)],
+        Action::Shell(_) => vec![remote::shell_into_vm(cfg)],
         Action::Status => vec![remote::status_or_never_built(cfg, tty)],
         Action::Reset => {
             let dir = cfg.remote_project_dir();
@@ -272,10 +291,10 @@ pub fn plan(
 /// Provisioning is the only other thing that writes them, and it
 /// also re-runs `bootstrap.sh`, which checks `ref` out in the
 /// guest's clone and refuses when that would overwrite the agent's
-/// work. So `up` and `shell` send the files this way instead:
-/// nothing but those files changes, and a token or key rotated on
-/// the workstation reaches the guest without the operator
-/// committing or pushing anything first.
+/// work. So `up` and `shell --refresh-secrets` send the files this
+/// way instead: nothing but those files changes, and a token or key
+/// rotated on the workstation reaches the guest without the
+/// operator committing or pushing anything first.
 ///
 /// One command per file, and none for a file `staged` lacks, so a
 /// project with no `env_file` pays no round trip. The credential
@@ -589,7 +608,7 @@ mod tests {
 
             // Under NoPty only `shell` keeps its `-t`, because it
             // asks for one regardless of the local stdio.
-            let without = usize::from(matches!(action, Action::Shell));
+            let without = usize::from(matches!(action, Action::Shell(_)));
             assert_eq!(
                 dash_t_count(&plan_for(&action, Tty::NoPty)),
                 without,
@@ -655,7 +674,7 @@ mod tests {
         match action {
             Action::Up | Action::Provision(_) | Action::Scratch(_) => true,
             Action::Down
-            | Action::Shell
+            | Action::Shell(_)
             | Action::Status
             | Action::Reset
             | Action::Snapshot
@@ -676,7 +695,8 @@ mod tests {
             Action::Up,
             Action::Provision(CloneUpdate::Checkout),
             Action::Down,
-            Action::Shell,
+            Action::Shell(ShellSecrets::Leave),
+            Action::Shell(ShellSecrets::Refresh),
             Action::Status,
             Action::Reset,
             Action::Snapshot,
@@ -692,7 +712,7 @@ mod tests {
                 Action::Up
                 | Action::Provision(_)
                 | Action::Down
-                | Action::Shell
+                | Action::Shell(_)
                 | Action::Status
                 | Action::Reset
                 | Action::Snapshot
@@ -1207,7 +1227,7 @@ mod tests {
 
     #[test]
     fn shell_forces_a_tty() {
-        let cmds = run(&Action::Shell);
+        let cmds = run(&Action::Shell(ShellSecrets::Leave));
         assert_eq!(cmds[0].args[0], "-t");
     }
 
@@ -1632,7 +1652,7 @@ mod tests {
                 Action::Up | Action::Provision(_) | Action::Scratch(_) => {
                     StagedRead::Required
                 }
-                Action::Shell => StagedRead::BestEffort,
+                Action::Shell(ShellSecrets::Refresh) => StagedRead::BestEffort,
                 _ => StagedRead::Skip,
             };
             assert_eq!(action.staged_read(), want, "{action:?}");

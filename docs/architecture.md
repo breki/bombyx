@@ -67,13 +67,13 @@ the isolation that depends on the host being a separate machine.
 The diagram contains no box for the project's repository, because
 neither the workstation nor the VM host reads a file from it; the
 guest clones it. The only files that reach the VM host are the two
-that bombyx generates and, when configured, a staged `env_file`
-and a `repo_token` credential derived from it. bombyx removes both
-when the `vagrant` run ends. When `up` or `shell` rewrites them in
-a guest that already exists, they pass through the VM host on a
-pipe and are not stored there at all. The workstation reads only
-`config.toml`, which is why each command names the project
-instead of inferring it from the working directory.
+that bombyx generates and, when configured, a staged `env_file` and
+a `repo_token` credential derived from it. bombyx removes both when
+the `vagrant` run ends. When `up` or `shell --refresh-secrets`
+rewrites them in a guest that already exists, they pass through the
+VM host on a pipe and are not stored there at all. The workstation
+reads only `config.toml`, which is why each command names the
+project instead of inferring it from the working directory.
 `docs/trust-boundary.md` explains the reasoning.
 
 ## Library modules
@@ -342,10 +342,10 @@ sequenceDiagram
 
 This is the sequence for a Linux guest. A Windows guest
 (`guest = "windows"`) follows it with `bootstrap.ps1` and
-`account.ps1` in place of the two shell scripts. It stages the
-same credentials, and `account.ps1` also installs `refresh.ps1` and
-`hook.ps1`, which `up` and `shell` call to refresh the running
-guest.
+`account.ps1` in place of the two shell scripts. It stages the same
+credentials, and `account.ps1` also installs `refresh.ps1` and
+`hook.ps1`, which `up` and `shell --refresh-secrets` call to refresh
+the running guest.
 
 The order matters in three places. bombyx creates the directory
 first, because the writes redirect into it. `vagrant up` runs

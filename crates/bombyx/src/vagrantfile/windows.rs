@@ -1,14 +1,13 @@
 //! The provisioners that set up a Windows guest, and the four
 //! PowerShell scripts they ship.
 //!
-//! The split mirrors the Linux one. [`ACCOUNT`] runs first, as the
-//! account vagrant logs in as, which is an administrator on the
-//! box bombyx targets. It creates the agent's account, installs
-//! git, and hands [`BOOTSTRAP`] to the agent. [`BOOTSTRAP`] clones
-//! the project and runs its script, as the agent. The other two,
-//! `REFRESH` and `HOOK`, are helpers [`ACCOUNT`] installs for later:
-//! `up` and `shell` call them to refresh a running guest's secrets
-//! and run the project's hook.
+//! The split mirrors the Linux one. [`ACCOUNT`] runs first, as the account
+//! vagrant logs in as, which is an administrator on the box bombyx targets.
+//! It creates the agent's account, installs git, and hands [`BOOTSTRAP`] to
+//! the agent. [`BOOTSTRAP`] clones the project and runs its script, as the
+//! agent. The other two, `REFRESH` and `HOOK`, are helpers [`ACCOUNT`]
+//! installs for later: `up` and `shell --refresh-secrets` call them to
+//! refresh a running guest's secrets and run the project's hook.
 //!
 //! Windows has no `sudo -u`, so the hand-over is an SSH login from
 //! the guest to itself, as the agent, with a key [`ACCOUNT`] makes
@@ -54,10 +53,9 @@ pub(crate) const ACCOUNT: &str = include_str!("../../templates/account.ps1");
 /// [`ACCOUNT`]'s name on the VM host, next to the Vagrantfile.
 pub(crate) const ACCOUNT_NAME: &str = "account.ps1";
 
-/// The secrets refresh a running guest's `up` and `shell` call,
-/// shipped to the host unchanged. [`ACCOUNT`] installs it, because
-/// it is too long to send with each call; its header says what it
-/// does.
+/// The secrets refresh a running guest's `up` and `shell --refresh-secrets`
+/// call, shipped to the host unchanged. [`ACCOUNT`] installs it, because it
+/// is too long to send with each call; its header says what it does.
 pub(crate) const REFRESH: &str = include_str!("../../templates/refresh.ps1");
 
 /// [`REFRESH`]'s name on the VM host, next to the Vagrantfile.

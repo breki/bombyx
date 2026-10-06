@@ -1,13 +1,12 @@
 //! The `[hooks]` table: scripts from the project's clone that
 //! bombyx runs in the guest at a named moment.
 //!
-//! One moment exists: `secrets_refreshed`, whenever bombyx has
-//! written `~/.bombyx-env` -- after the provisioning run of the
-//! first `up` and of `provision`, and after `up` or `shell`
-//! rewrites the file in a running guest. The project names the
-//! script that puts the secrets where it keeps them, usually `.env`
-//! in the clone, and that script is its one copy step.
-//! `crate::plan::refresh_after_provisioning` and
+//! One moment exists: `secrets_refreshed`, whenever bombyx has written
+//! `~/.bombyx-env` -- after the provisioning run of the first `up` and of
+//! `provision`, and after `up` or `shell --refresh-secrets` rewrites the file
+//! in a running guest. The project names the script that puts the secrets
+//! where it keeps them, usually `.env` in the clone, and that script is its
+//! one copy step. `crate::plan::refresh_after_provisioning` and
 //! `crate::plan::refresh_secrets` say when each path runs it.
 //!
 //! The table is named for hooks in general, not for this one,

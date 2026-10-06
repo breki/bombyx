@@ -221,17 +221,17 @@ memory = "8GB"
 # device, such as `con` or `com1`. The `[env]` names are compared
 # without regard to case (see the `[env]` table below). A
 # `deploy_key`, an `env_file` and a `repo_token` are placed in a
-# Windows guest when it is provisioned, and `up` and `shell` refresh
-# a running one, as on Linux. A Windows project's `secrets_refreshed`
-# hook must be a `.ps1` file of at most 200 characters, and fewer
-# when `guest_user` and the project name are long: its whole path,
-# C:\Users\<guest_user>\<project>\<hook>, must fit the 259 characters
-# Windows allows by default. Use the box built from
+# Windows guest when it is provisioned, and `up` and
+# `shell --refresh-secrets` refresh a running one, as on Linux. A
+# Windows project's `secrets_refreshed` hook must be a `.ps1` file
+# of at most 200 characters, and fewer when `guest_user` and the
+# project name are long: its whole path,
+# C:\Users\<guest_user>\<project>\<hook>, must fit the 259
+# characters Windows allows by default. Use the box built from
 # Microsoft's ISO by the recipe in boxes/windows-server-2025/, added
 # as `bombyx/windows-server-2025`; docs/windows-guest-box.md says
-# how.
-# That box has no git: the `box` rule above that a box has git is
-# for a Linux guest, and a Windows guest's provisioning installs
+# how. That box has no git: the `box` rule above that a box has git
+# is for a Linux guest, and a Windows guest's provisioning installs
 # git.
 #
 # guest = "linux"
@@ -652,15 +652,15 @@ history = "full"             # full or shallow
 # `.env`, or wherever your project keeps them, and bombyx runs it
 # whenever it has written `~/.bombyx-env`: after the provisioning
 # run of the first `bombyx up` and of `bombyx provision`, and after
-# `bombyx up` or `bombyx shell` rewrites the file in a running
-# guest. So a project VM needs no copy step in your provisioning
-# script. `scratch` VMs run no hook, though, so a project that uses
-# them calls the hook script from its provisioning script too. The
-# hook runs after that script, so a script that needs a secret
-# during its run reads `$BOMBYX_ENV_FILE` instead of `.env`. The
-# hook needs `env_file`, or a `vault` with `entries`, above:
-# without one there is nothing for it to copy, so bombyx refuses
-# the pair.
+# `bombyx up` or `bombyx shell --refresh-secrets` rewrites the file
+# in a running guest. So a project VM needs no copy step in your
+# provisioning script. `scratch` VMs run no hook, though, so a
+# project that uses them calls the hook script from its provisioning
+# script too. The hook runs after that script, so a script that
+# needs a secret during its run reads `$BOMBYX_ENV_FILE` instead of
+# `.env`. The hook needs `env_file`, or a `vault` with `entries`,
+# above: without one there is nothing for it to copy, so bombyx
+# refuses the pair.
 #
 # The path is relative to the clone root, like `script`, and holds
 # no `..` segment. It does not start with `-`, holds only letters,
