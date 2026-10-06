@@ -445,3 +445,15 @@ bridge, and could apply scripts/agent-vm-firewall.sh before any VM exists. That
 changes docs/vm-host-setup.md's procedure and needs checking on a fresh host.
 Until then doctor's host firewall row skips while the network is absent.
 
+### kvm-escape-writeup
+
+**Summary:** revisit the Vercel KVM escape entry when its write-up lands
+
+docs/incidents.md records the KVM guest-to-host escape Vercel confirmed on
+2026-10-03, with its preconditions, affected kernels and fix all unknown. When
+the write-up or a CVE appears: fill in the entry, say whether the bug is in KVM
+itself (which bombyx guests run on) or in Firecracker (which they do not), and
+check whether #170 or #172 removes a precondition it needs. Also decide whether
+docs/local-host.md should warn that a hypervisor escape on a local VM host lands
+on the workstation, the machine bombyx exists to protect; no doc says so today.
+

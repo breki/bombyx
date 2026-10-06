@@ -26,6 +26,45 @@ Every exposure is tracked. If an entry names an exposure that no
 issue or todo covers, we file one as we write the entry, and the
 entry links to it. So a gap never lives only in this file.
 
+## Vercel Sandbox KVM escape, October 2026
+
+**What happened.** A researcher escaped from a Firecracker microVM
+in Vercel's Sandbox to root on the EC2 host beneath it. From there
+the escape could read, change and run code in other customers'
+sandboxes. The bug sits in KVM, the Linux hypervisor, or in the
+code that drives it. Vercel confirmed the report and rated it
+Critical. As of 2026-10-06 the write-up is not published, so none
+of these is known: a CVE, the affected kernel versions, a fix, the
+preconditions (root in the guest, nested virtualization, a CPU
+vendor), or whether the bug is in KVM itself or in Firecracker's
+own code. No attack using it has been reported.
+
+**Source.**
+<https://cybersecuritynews.com/kvm-zero-day-vm-escape/> and
+<https://cyberstack.org/n/vercel-kvm-escape-20261003>, 3 October
+2026. No CVE assigned as of 2026-10-06.
+
+**What bombyx does about it.** Nothing yet, and nothing specific
+is possible until the preconditions are known. Two open issues
+each remove a condition an escape of this kind may need: #170
+hides nested virtualization from the guest, and #172 would take
+root in the guest away from the agent. Once a fix ships,
+`doctor-host-kernel-state` in `docs/todo.md` would show whether a
+VM host runs the newest installed kernel.
+
+**Where bombyx is exposed.** bombyx guests run on KVM through
+libvirt and QEMU, not through Firecracker. If the bug is in KVM
+itself, a bombyx guest is exposed the same way; if it is in
+Firecracker, it is not. Not checked, because the details needed
+to check are not public. An escape reaches the VM host, whose
+root can read every guest's disk image, and with it the deploy
+key and secrets each guest holds (`docs/trust-boundary.md`). When
+the VM host is the workstation, as in `docs/local-host.md`, the
+escape lands on the machine bombyx exists to protect.
+`kvm-escape-writeup` in `docs/todo.md` tracks filling in this
+entry when the details appear, and deciding whether
+`docs/local-host.md` should warn about that setup.
+
 ## Docker Sandboxes escapes, September 2026
 
 **What happened.** Docker Sandboxes runs a coding agent in a small
