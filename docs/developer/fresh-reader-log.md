@@ -6,18 +6,6 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-10-06-refresh-secrets-help-omits-deploy-key
-
-**Category:** clap help, outside stage 3's limit
-
-The long help for `bombyx shell --refresh-secrets` (`main.rs`) lists
-the secrets from `env_file` or `vault`, the git credential and the
-hook, but not the deploy key, which the flag also rewrites
-(`plan::refresh_secrets`; `docs/usage.md` under "Rotating a secret"
-says so). An operator who rotates a deploy key and reads only
-`--help` may run a provision instead. The fix is one clause in that
-help. Deferred because editing clap help changes what bombyx prints.
-
 ### fr-2026-10-03-snapshot-rule-stated-six-times
 
 **Category:** Duplicated rule deferred for its own commit

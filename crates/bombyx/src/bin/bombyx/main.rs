@@ -194,8 +194,9 @@ enum VmCmd {
         /// Send the secrets to the guest again before the shell opens
         ///
         /// Rewrites the guest's copy of the secrets from `env_file`
-        /// or `vault`, and the git credential when `repo_token` is
-        /// set, and runs the `secrets_refreshed` hook, as `up` does.
+        /// or `vault`, the git credential when `repo_token` is set,
+        /// and the deploy key when the config names one, and runs
+        /// the `secrets_refreshed` hook, as `up` does.
         /// If any of that fails, bombyx warns and opens the shell
         /// anyway.
         #[arg(long)]
