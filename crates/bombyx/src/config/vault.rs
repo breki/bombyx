@@ -1486,7 +1486,7 @@ mod tests {
             Some(&k),
         )
         .expect("the key is there");
-        assert!(driven.values.is_empty());
+        assert!(driven.values.is_empty(), "{:?}", driven.values);
         assert!(driven.key.is_some());
     }
 

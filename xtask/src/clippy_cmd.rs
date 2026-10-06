@@ -168,7 +168,7 @@ error: aborting due to 1 previous error";
     #[test]
     fn empty_input() {
         let lines = extract_warning_lines("");
-        assert!(lines.is_empty());
+        assert!(lines.is_empty(), "{lines:?}");
     }
 
     #[test]
@@ -176,6 +176,6 @@ error: aborting due to 1 previous error";
         let stderr = "    Checking rustbase v0.2.1\n\
             Finished `dev` profile";
         let lines = extract_warning_lines(stderr);
-        assert!(lines.is_empty());
+        assert!(lines.is_empty(), "{lines:?}");
     }
 }

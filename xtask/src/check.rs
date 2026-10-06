@@ -170,14 +170,14 @@ error: aborting due to 2 previous errors";
     #[test]
     fn empty_input_gives_empty_result() {
         let errors = extract_error_lines("");
-        assert!(errors.is_empty());
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]
     fn warnings_only_gives_empty_result() {
         let stderr = "warning: unused variable: `x`";
         let errors = extract_error_lines(stderr);
-        assert!(errors.is_empty());
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]

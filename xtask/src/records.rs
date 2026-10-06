@@ -400,7 +400,7 @@ Prose body.
                 "### aq-2026-09-13-two\n\n**Depends on:** rt-2026-09-13-one\n\nBody.\n",
             ),
         ]);
-        assert!(findings_for(&f).is_empty());
+        assert!(findings_for(&f).is_empty(), "{:?}", findings_for(&f));
     }
 
     #[test]
@@ -432,7 +432,7 @@ Prose body.
             "a.md",
             "### rt-2026-09-13-one\n\n**Depends on:** \u{2014}\n\nBody.\n",
         )]);
-        assert!(findings_for(&f).is_empty());
+        assert!(findings_for(&f).is_empty(), "{:?}", findings_for(&f));
     }
 
     #[test]
@@ -481,6 +481,6 @@ Prose body.
             "a.md",
             "### rt-2026-09-13-one\n\n**Category:** X\n\nSupersedes tf-2026-01-01-gone in prose.\n",
         )]);
-        assert!(findings_for(&f).is_empty());
+        assert!(findings_for(&f).is_empty(), "{:?}", findings_for(&f));
     }
 }

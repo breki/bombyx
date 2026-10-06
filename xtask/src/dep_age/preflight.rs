@@ -476,7 +476,7 @@ mod tests {
         };
         let r = run(&io).unwrap();
         assert!(r.clean);
-        assert!(r.pinned.is_empty());
+        assert!(r.pinned.is_empty(), "{:?}", r.pinned);
         assert_eq!(r.iterations, 1);
     }
 
@@ -509,7 +509,7 @@ mod tests {
         let r = run(&io).unwrap();
         assert!(r.clean);
         assert_eq!(r.pinned, vec!["foo: 1.5.0 -> 1.4.0".to_string()]);
-        assert!(r.dead_ends.is_empty());
+        assert!(r.dead_ends.is_empty(), "{:?}", r.dead_ends);
         assert_eq!(r.iterations, 2);
     }
 
@@ -585,7 +585,7 @@ mod tests {
         let r = run(&io).unwrap();
         assert!(!r.clean);
         assert_eq!(r.unresolved, 1);
-        assert!(r.dead_ends.is_empty());
+        assert!(r.dead_ends.is_empty(), "{:?}", r.dead_ends);
         assert!(r.warnings.iter().any(|w| w.contains("network down")));
     }
 

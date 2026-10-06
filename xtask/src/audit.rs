@@ -196,7 +196,7 @@ mod tests {
             warnings: 1,
         }));
         assert!(r.error.is_none());
-        assert!(r.warnings.is_empty());
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         assert!(r.detail.contains("cargo: 0 vuln, 1 warn"));
     }
 
