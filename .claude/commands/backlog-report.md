@@ -26,14 +26,20 @@ holds no secrets or machine names. Read that file and
 
 ```bash
 cat docs/todo.md
-gh issue list --state open --limit 200 --json number,title,labels,body
+gh issue list --state open --limit 200 --json number,title,labels,body \
+  > <scratchpad>/issues.json
 ```
 
-An issue body often states the problem first and the proposed fix
-last. For every issue whose body runs past about 1500 characters,
-read the rest with `gh issue view <n> --json body` before describing
-it. A description written from the first half of an issue misses the
-options it asks us to choose between.
+Save the list to a file and read the bodies from it with `Read`, in
+pieces if needed. Printing them all to the terminal overflows the
+output, and the tool then saves it to a file you have to read anyway.
+
+`gh issue list` returns each body in full. An issue body often
+states the problem first and the proposed fix last, so read every
+body to the end before describing the issue. A description written
+from the first half misses the options it asks us to choose between.
+Fetch a body again with `gh issue view <n> --json body` only if it
+looks cut short.
 
 ## 2. Merge the duplicates
 
@@ -139,8 +145,19 @@ grep -c '<tr class="grp"' "$F"   # must equal the number of areas
 grep -o '<td class="item">' "$F" | wc -l   # must equal "distinct items"
 ```
 
-Recount the stat tiles the same way, one `grep -o ... | wc -l` per
-figure, and fix any tile that disagrees. Finally, grep the page for
+So the trackers can be counted, open each item row with
+`<tr data-ref="issue">`, `<tr data-ref="todo">` or
+`<tr data-ref="both">`. Do not name the attribute `data-src`: the
+`/html-report` check for `src=` would match every row.
+
+```bash
+grep -o '<tr data-ref="both"' "$F" | wc -l                # tracked in both
+grep -oE '<tr data-ref="(issue|both)"' "$F" | wc -l      # GitHub issues
+grep -oE '<tr data-ref="(todo|both)"' "$F" | wc -l       # todo entries
+```
+
+Recount the other stat tiles the same way, one `grep -o ... | wc -l`
+per figure, and fix any tile that disagrees. Finally, grep the page for
 every `host` value in the operator's config and for every machine
 name that appeared in the issue bodies. Expect zero matches.
 
