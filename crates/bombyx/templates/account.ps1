@@ -54,6 +54,26 @@ $HandoverKey = Join-Path $LoginSsh 'bombyx-handover'
 $LocalKnownHosts = Join-Path $LoginSsh 'bombyx-localhost-known-hosts'
 $Ssh = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh.exe'
 $SshKeygen = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh-keygen.exe'
+# The login account's authorized_keys; the agent's file gains each key
+# in it except vagrant's insecure keys.
+$LoginAuthorized = Join-Path $LoginSsh 'authorized_keys'
+# The key bodies of vagrant's two public insecure keys, whose private
+# halves ship with every vagrant install: ed25519
+# (SHA256:WkvqjnyPAeC0cbPErYiGP9vqHdgL1MqqvPdIe3lvHgI) and RSA
+# (SHA256:1M4RzhMyWuFS/86uPY/ce2prh/dVTHW7iD2RhpquOZA), read from
+# vagrant 2.4.9's keys/vagrant.pub.ed25519 and keys/vagrant.pub.rsa.
+# vagrant adds its machine key at a guest's first boot but leaves
+# these in the login account's file on this box (bombyx #183), so
+# they must be filtered out. The agent never accepts them.
+$InsecureVagrantKeys = @(
+    'AAAAC3NzaC1lZDI1NTE5AAAAIN1YdxBpNlzxDqfJyw/QKow1F+wvG9hXGoqiysfJOn5Y',
+    ('AAAAB3NzaC1yc2EAAAABIwAAAQEA6NF8iallvQVp22WDkTkyrtvp9eWW6A8YVr+kz4' +
+        'TjGYe7gHzIw+niNltGEFHzD8+v1I2YJ6oXevct1YeS0o9HZyN1Q9qgCgzUFtdOKL' +
+        'v6IedplqoPkcmF0aYet2PkEDo3MlTBckFXPITAMzF8dJSIFo9D8HfdOV0IAdx4O7' +
+        'PtixWKn5y2hMNG0zQPyUecp4pzC6kivAIhyfHilFR61RGL+GPXQ2MWZWFYbAGjyi' +
+        'YJnAmCP3NOTd0jMZEnDkbUvxhMmBYSdETk1rRgm+R4LOzFUGaHqHDLKLX+FIPKcF' +
+        '96hrucXzcWyLbIbEgE98OHlnVYCzRdK8jlqm8tehUc9c9WhQ==')
+)
 
 # The well-known SIDs, so nothing here depends on the language
 # the box was installed in.
@@ -430,6 +450,20 @@ try {
     # Authorized in the agent's own .ssh. sshd reads that file for
     # an administrator too on this box, because its sshd_config
     # leaves the administrators_authorized_keys block commented out.
+    #
+    # Besides the hand-over key, the agent gains each key this account
+    # accepts. Among them is vagrant's machine key: the key pair
+    # vagrant makes for this guest at its first boot, whose private
+    # half stays on the VM host and whose public half it adds here. So
+    # the VM host logs in as the agent and `bombyx shell` opens in one
+    # SSH login: a second login from this guest to itself splits an
+    # arrow key's escape sequence (bombyx #182). Whoever holds one of
+    # those keys already logs in as this account, an administrator
+    # that reaches the agent with the hand-over key, so they gain
+    # nothing. vagrant's insecure keys are left out, because their
+    # private halves are public. Keys are added on each provision and
+    # never removed, so revoking one means editing the agent's file
+    # too.
     $agentSsh = Join-Path $AgentHome '.ssh'
     New-Item -ItemType Directory -Force -Path $agentSsh | Out-Null
     Protect $agentSsh $sid
@@ -438,8 +472,26 @@ try {
     if (Test-Path -LiteralPath $authorized) {
         $lines = @(Get-Content -LiteralPath $authorized)
     }
-    if ($lines -notcontains $public) {
-        Set-Content -LiteralPath $authorized -Value ($lines + $public) `
+    $wanted = @($public)
+    if (Test-Path -LiteralPath $LoginAuthorized) {
+        foreach ($line in Get-Content -LiteralPath $LoginAuthorized) {
+            $line = $line.Trim()
+            if (-not $line -or $line.StartsWith('#')) {
+                continue
+            }
+            # Every field, not just the second: a line may begin with
+            # options such as from="..." before its key type.
+            $fields = -split $line
+            if (@($fields | Where-Object {
+                    $InsecureVagrantKeys -contains $_ }).Count -gt 0) {
+                continue
+            }
+            $wanted += $line
+        }
+    }
+    $missing = @($wanted | Where-Object { $lines -notcontains $_ })
+    if ($missing.Count -gt 0) {
+        Set-Content -LiteralPath $authorized -Value ($lines + $missing) `
             -Encoding ASCII
     }
     Protect $authorized $sid

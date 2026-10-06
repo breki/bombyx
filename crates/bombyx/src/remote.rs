@@ -1335,27 +1335,12 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 /// inner `'` first -- vagrant 2.4.9's `ssh_run.rb` shows it.
 ///
 /// **A Windows guest takes a different route**, because it has no
-/// `sudo -u` for an interactive session: the login account logs in
-/// to the agent's account over SSH to `localhost`, with the key
-/// `account.ps1` made for the hand-over. `templates/shell.ps1` holds
-/// the steps, including the same fallback for a missing account,
-/// and the module `remote::windows` says how the script travels.
-/// vagrant reaches a Windows guest through its `winssh`
-/// communicator, which the box sets, and asks such a guest for no
-/// terminal, so `-t` goes after `--`, which vagrant passes to its
-/// `ssh`. Windows' sshd reports exit status 0 for a session with a
-/// terminal, whatever it exited with, so this route always ends 0.
+/// `sudo -u` that keeps the terminal: the VM host logs in as the
+/// agent directly. `windows::shell_script` says how and why.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
     if cfg.vm.guest == Guest::Windows {
-        // vagrant asks a winssh guest for no terminal unless `-t`
-        // reaches its `ssh`, which the arguments after `--` do.
-        return vagrant_in(
-            cfg,
-            &cfg.remote_project_dir(),
-            &["ssh", "-c", &windows::shell_command(cfg), "--", "-t"],
-            Tty::Allocate,
-        );
+        return transport(cfg, &windows::shell_script(cfg), Tty::Allocate);
     }
     let guest = as_guest_user(
         cfg,
@@ -1387,6 +1372,17 @@ pub(crate) const PROVISION_ADVICE: &str = "run provision for this project.";
 pub(crate) const SHELL_ADVICE: &str = "run provision for this project, or \
     destroy, then up, if provisioning refuses. Opening a shell as \
     $(id -un) instead.";
+
+/// What [`shell_into_vm`] prints on a Windows guest when the agent's
+/// login fails, before it stops. It names both causes, because the
+/// script cannot tell them apart: a guest whose sshd did not answer,
+/// and one provisioned before the agent accepted the VM host's key,
+/// which only a provision cures. A constant for the same test as
+/// `PROVISION_ADVICE`.
+pub(crate) const WINDOWS_SHELL_ADVICE: &str = "the guest's SSH server did \
+    not answer, or the guest was provisioned before the agent accepted \
+    this VM host's key; if the guest is up, run provision for this \
+    project.";
 
 /// The guest command that runs `script` as the agent's account,
 /// with `args` as its `$1`, `$2` and on, or reports the account

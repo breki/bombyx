@@ -61,9 +61,12 @@ A scratch VM lives in `<remote_root>/scratch/<project>/<name>`, so
 the same name in two projects does not collide.
 
 On a Windows guest (`guest = "windows"`), `shell` opens PowerShell as
-the agent's account, in its clone. It always exits 0 there, because
-Windows' sshd reports 0 for a session with a terminal, whatever the
-session exited with.
+the agent's account, in its clone, by logging in to the agent from
+the VM host. When that login fails, `shell` says the guest's SSH
+server did not answer or the guest needs a provision, and exits
+non-zero without opening a shell. A session that opened ends 0,
+because Windows' sshd reports 0 for a session with a terminal,
+whatever the session exited with; a dropped connection ends 255.
 
 ## up and provision
 

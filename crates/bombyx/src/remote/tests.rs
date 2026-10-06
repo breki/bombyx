@@ -249,36 +249,39 @@ fn the_shell_opens_where_the_bootstrap_script_clones() {
 }
 
 #[test]
-fn a_windows_shell_logs_in_as_the_agent_through_the_hand_over_key() {
-    // A Windows guest has no `sudo -u` for an interactive session,
-    // so the login account reaches the agent's account by an SSH
-    // login to localhost, the one account.ps1 uses to hand
-    // bootstrap.ps1 to the agent. shell.ps1 holds the steps. The
-    // script travels
-    // base64-encoded, its comments dropped, because vagrant
-    // rewrites every `'` in a PowerShell command and Windows caps
-    // the command line's length; `-- -t` asks for the terminal
-    // vagrant does not request on a winssh guest.
+fn a_windows_shell_logs_in_as_the_agent_in_one_hop() {
+    // A Windows guest has no `sudo -u` that keeps the terminal, and
+    // a second SSH login inside the guest splits an arrow key's
+    // escape sequence (#182). So the VM host logs in as the agent
+    // itself, with the machine key vagrant uses, which account.ps1
+    // authorizes for the agent. `vagrant ssh -- -l` cannot do it,
+    // because vagrant's own user wins; plain ssh with vagrant's
+    // config can. A probe that cannot log in says why it might have
+    // failed and stops, rather than open another account's shell.
     let mut cfg = cfg();
     cfg.vm.guest = crate::config::Guest::Windows;
     let c = shell_into_vm(&cfg);
     assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
-    let script = format!(
-        "$User = 'agent'\n$Project = 'myproject'\n{}",
-        crate::powershell::code_lines(windows::SHELL)
+    let encoded = crate::powershell::encoded_command(
+        "Set-Location -LiteralPath (Join-Path $env:USERPROFILE 'myproject')",
     );
-    let guest = format!(
-        "iex ([Text.Encoding]::UTF8.GetString(\
-             [Convert]::FromBase64String(\"{}\")))",
-        crate::powershell::base64(script.as_bytes())
-    );
-    assert!(!guest.contains('\''), "{guest}");
+    let env = vagrant_env();
     assert_eq!(
         remote_script(&c),
         format!(
-            "cd ~/'vms/myproject' && {} vagrant 'ssh' '-c' {} '--' '-t'",
-            vagrant_env(),
-            shell_quote(&guest)
+            "cd ~/'vms/myproject' && c=$(mktemp) && \
+             trap 'rm -f \"$c\"' EXIT && trap 'exit 129' HUP && \
+             trap 'exit 130' INT && trap 'exit 143' TERM && {{ \
+             VAGRANT_CHECKPOINT_DISABLE=1 \
+             {env} vagrant 'ssh-config' '--host' 'guest' > \"$c\" || exit; \
+             ssh -n -F \"$c\" -o BatchMode=yes -l 'agent' guest exit; \
+             rc=$?; if [ \"$rc\" = 0 ]; then \
+             ssh -F \"$c\" -t -l 'agent' guest powershell.exe -NoLogo \
+             -NoExit -EncodedCommand {encoded}; \
+             else \
+             printf 'bombyx: could not log in to the guest as %s: %s\\n' \
+             'agent' {advice} >&2; exit \"$rc\"; fi; }}",
+            advice = shell_quote(WINDOWS_SHELL_ADVICE),
         )
     );
 }
@@ -319,16 +322,6 @@ fn longest_windows_cfg() -> Config {
         crate::name::ProjectName::parse(&"a".repeat(crate::name::MAX_NAME_LEN))
             .expect("a name at the limit");
     cfg
-}
-
-#[test]
-fn the_longest_windows_shell_command_fits_the_guest_command_line() {
-    // A template that grows fails here rather than on a guest.
-    let sent = sent_by_vagrant(&windows::shell_command(&longest_windows_cfg()));
-    assert!(
-        sent <= WINDOWS_COMMAND_BUDGET,
-        "{sent} characters, over the {WINDOWS_COMMAND_BUDGET} budget"
-    );
 }
 
 #[test]

@@ -16,6 +16,15 @@ and this project adheres to
 
 ### Fixed
 
+- Arrow keys work in `bombyx shell` on a Windows guest, in PowerShell and in
+  Claude Code, instead of arriving as `[A` (#182). The VM host now logs in as
+  the agent directly with the vagrant machine key, which `account.ps1`
+  authorizes for the agent along with the other keys the login account accepts,
+  never vagrant's public insecure keys. A guest provisioned earlier refuses the
+  login until it is provisioned again; `shell` then says the guest may need
+  provisioning, or that its SSH server did not answer, and exits non-zero
+  rather than open a shell.
+
 ### Removed
 
 ## [0.12.0] - 2026-10-05

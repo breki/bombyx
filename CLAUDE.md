@@ -100,7 +100,7 @@ removed. `/template-sync` will default those paths to
 ```bash
 cargo xtask check             # type-check all targets, run none
 cargo xtask validate          # every gate, in run order
-cargo xtask test [filter]     # tests only
+cargo xtask test [filter]     # tests only; substring filter, one name
 cargo xtask test --ignored    # run #[ignore]-tagged tests
 cargo xtask test --verbose [filter]  # raw output: each test that ran
 cargo xtask clippy            # lint only

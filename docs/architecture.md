@@ -403,8 +403,12 @@ differences:
   the output and returns the exit code. From vagrant's session,
   Windows refuses an S4U scheduled task, and
   `Start-Process -Credential` returns neither output nor an exit
-  code, so neither can do the hand-over. `bombyx shell` reaches the
-  agent's account by the same login, with a terminal.
+  code, so neither can do the hand-over. `bombyx shell` does not use
+  that login, because a second SSH login inside the guest splits an
+  arrow key's escape sequence. The VM host logs in as the agent
+  directly, with vagrant's machine key, which `account.ps1` also
+  authorizes for the agent; `remote::windows::shell_script` gives the
+  command.
 - **Every value arrives base64-encoded.** vagrant's `winssh` shell
   provisioner writes each `env:` value into the script it runs as
   `$env:NAME="value"` and escapes nothing, so a `"` or a `$` in a

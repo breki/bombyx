@@ -86,9 +86,17 @@ differences:
   administrator too, the counterpart of passwordless `sudo`.
 - **The hand-over is an SSH login from the guest to itself** as the
   agent, with a key `account.ps1` makes in the guest and keeps in the
-  login account's home, rather than `sudo -u`. `bombyx shell` opens
-  the agent's session over the same login, with the same key, so no
-  key for the agent leaves the guest.
+  login account's home, rather than `sudo -u`. That key never leaves
+  the guest.
+- **`bombyx shell` logs in as the agent from the VM host**, because
+  a second SSH login inside the guest splits an arrow key's escape
+  sequence. `account.ps1` authorizes for the agent the keys the login
+  account accepts, which include vagrant's machine key on the VM
+  host. Their holders gain nothing: each already logs in as the login
+  account, an administrator that reaches the agent with the
+  hand-over key. vagrant's two public insecure keys are left out,
+  since anyone holds those; issue #183 tracks that the login account
+  itself still accepts them.
 - **The same secrets, protected by ACL.** `account.ps1` places the
   deploy key, the secrets file and the git credential in the agent's
   profile, each created empty and limited to the agent, SYSTEM and
