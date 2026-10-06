@@ -18,23 +18,14 @@
 //! characters. So a script loses its comments before it is encoded
 //! ([`code_lines`]); the template keeps them for the reader.
 //! `docs/windows-guest-box.md` records the measured lengths, and
-//! `the_longest_windows_shell_command_fits_the_guest_command_line`
-//! and `the_longest_windows_refresh_command_fits_the_guest_command_line`
-//! hold [`shell_command`] and `refresh_command` to a budget of 7800.
+//! `the_longest_windows_refresh_command_fits_the_guest_command_line`
+//! holds `refresh_command` to a budget of 7800.
 //! The refresh helpers themselves would not fit: sent this way, the
 //! code of `refresh.ps1` and `hook.ps1` measured about 33700
 //! characters, so `account.ps1` installs them and the call names them.
 
 use crate::config::{Config, HookPath};
 use crate::powershell::{code_lines, quote, run_encoded};
-
-/// The script `bombyx shell` runs on a Windows guest; its header says
-/// how it reaches the agent's account.
-pub(crate) const SHELL: &str = include_str!("../../templates/shell.ps1");
-
-/// The file [`SHELL`] is read from, for a test naming the script.
-#[cfg(test)]
-pub(crate) const SHELL_NAME: &str = "shell.ps1";
 
 /// The call `bombyx up` and `shell` make to refresh a running
 /// Windows guest's secrets; its header names the arguments.
@@ -75,16 +66,4 @@ pub(super) fn refresh_command(
 /// as the module doc says.
 fn guest_command(prefix: &str, template: &str) -> String {
     run_encoded(&format!("{prefix}{}", code_lines(template)))
-}
-
-/// The `vagrant ssh -c` text that opens the agent's shell on a
-/// Windows guest: [`SHELL`]'s code, after the two lines that give it
-/// the account and the clone's folder name.
-pub(super) fn shell_command(cfg: &Config) -> String {
-    let prefix = format!(
-        "$User = {}\n$Project = {}\n",
-        quote(cfg.vm.guest_user.as_str()),
-        quote(cfg.project.as_str()),
-    );
-    guest_command(&prefix, SHELL)
 }

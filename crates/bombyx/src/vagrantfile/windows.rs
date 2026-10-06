@@ -238,14 +238,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_windows_shell_uses_the_paths_the_provisioning_scripts_write() {
-        // Three files that cannot see each other agree on three paths:
+    fn the_windows_guest_scripts_agree_on_their_paths() {
+        // Files that cannot see each other agree on three paths:
         // account.ps1 keeps the hand-over key and localhost's host key
-        // in the login account's `.ssh`, bootstrap.ps1 clones into
-        // `$env:USERPROFILE\<project>`, and shell.ps1 reads the first
-        // two and enters the third. A change to one would open no
-        // shell, or one outside the clone, and fail nothing else.
-        use crate::remote::windows::{SHELL, SHELL_NAME};
+        // in the login account's `.ssh`, and refresh.ps1 reads them;
+        // bootstrap.ps1 clones into `$env:USERPROFILE\<project>`, and
+        // `bombyx shell` enters it. A change to one would refresh no
+        // secrets, or open a shell outside the clone, and fail nothing
+        // else.
         for text in [
             "$LoginSsh = Join-Path $env:USERPROFILE '.ssh'",
             "Join-Path $LoginSsh 'bombyx-handover'",
@@ -257,9 +257,8 @@ mod tests {
             "$loginSsh = Join-Path $env:USERPROFILE '.ssh'",
             "Join-Path $loginSsh 'bombyx-handover'",
             "Join-Path $loginSsh 'bombyx-localhost-known-hosts'",
-            "(Join-Path `$env:USERPROFILE $projectLiteral)",
         ] {
-            assert!(SHELL.contains(text), "{SHELL_NAME}: {text}");
+            assert!(REFRESH.contains(text), "{REFRESH_NAME}: {text}");
         }
         for text in [
             "$AgentHome = $env:USERPROFILE",
@@ -267,6 +266,11 @@ mod tests {
         ] {
             assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
         }
+        let entry = crate::remote::windows_shell_entry("p");
+        assert!(
+            entry.contains("(Join-Path $env:USERPROFILE 'p')"),
+            "{entry}"
+        );
     }
 
     #[test]
@@ -423,10 +427,6 @@ mod tests {
         for (name, text) in [
             (ACCOUNT_NAME, ACCOUNT),
             (BOOTSTRAP_NAME, BOOTSTRAP),
-            (
-                crate::remote::windows::SHELL_NAME,
-                crate::remote::windows::SHELL,
-            ),
             (REFRESH_NAME, REFRESH),
             (HOOK_NAME, HOOK),
             ("refresh-call.ps1", crate::remote::windows::REFRESH_CALL),

@@ -1262,13 +1262,16 @@ mod tests {
             ("account.ps1", ps1_code(windows::ACCOUNT)),
             ("refresh.ps1", ps1_code(windows::REFRESH)),
             ("hook.ps1", ps1_code(windows::HOOK)),
-            ("shell.ps1", ps1_code(remote_windows::SHELL)),
             ("refresh-call.ps1", ps1_code(remote_windows::REFRESH_CALL)),
             (
                 "PROVISION_ADVICE",
                 crate::remote::PROVISION_ADVICE.to_owned(),
             ),
             ("SHELL_ADVICE", crate::remote::SHELL_ADVICE.to_owned()),
+            (
+                "WINDOWS_SHELL_ADVICE",
+                crate::remote::WINDOWS_SHELL_ADVICE.to_owned(),
+            ),
         ];
         for (name, code) in scripts {
             assert!(!names_a_verb(&code), "{name} advises a command line");

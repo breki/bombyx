@@ -47,6 +47,16 @@ pub(crate) fn run_encoded(script: &str) -> String {
     )
 }
 
+/// `script` as the argument `powershell.exe -EncodedCommand` takes:
+/// its UTF-16LE bytes, the encoding .NET calls `Unicode`, in base64.
+/// For a command line PowerShell itself parses, where the
+/// `Invoke-Expression` form of [`run_encoded`] would need quotes.
+pub(crate) fn encoded_command(script: &str) -> String {
+    let utf16: Vec<u8> =
+        script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64(&utf16)
+}
+
 /// `script` without its blank lines and whole-line `#` comments, so
 /// the text a guest's command line carries stays short. It keeps a
 /// `#` inside a line. It reads lines, not PowerShell, so `script`
