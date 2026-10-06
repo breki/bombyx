@@ -133,8 +133,10 @@ Vagrantfile asks libvirt for the same hardware.
 Read from a VM made from the box, on 2026-09-29:
 
 - **sshd, running at boot**, OpenSSH 9.5, with vagrant's insecure key
-  for the `vagrant` account. vagrant swaps it for a generated key at a
-  VM's first boot.
+  for the `vagrant` account. vagrant adds a generated key at a VM's
+  first boot and uses that one, but the insecure keys stay accepted
+  (#183), which is why `account.ps1` filters them out of the keys it
+  gives the agent.
 - **Password logins refused** (`PasswordAuthentication no`).
 - **The firewall admits TCP only to sshd.** Windows' firewall keeps
   separate rules for three network profiles, Domain, Private and
@@ -249,15 +251,21 @@ The box is an evaluation, licensed for testing, not for routine use.
   A command of about 20500 characters fails with `exec request failed
   on channel 0`. So bombyx drops a script's comments before encoding
   it, and encodes it as UTF-8 for `Invoke-Expression` rather than as
-  UTF-16. For the longest names the config accepts, `bombyx shell`'s
-  command is about 6500 characters, and
-  `the_longest_windows_shell_command_fits_the_guest_command_line`
-  keeps it under 7800.
+  UTF-16. `the_longest_windows_refresh_command_fits_the_guest_command_line`
+  keeps the secrets refresh call, at the longest names the config
+  accepts, under 7800. `bombyx shell` sends no script this way: it
+  logs in with plain `ssh`, and its PowerShell is one
+  `Set-Location`.
 - **A session with a terminal always returns exit status 0.** Windows'
   sshd reports 0 for it, whatever the session exited with: measured
-  for `vagrant ssh -c 'exit 3' -- -t` and for the loopback login
-  inside it. Without a terminal the status comes back. So
-  `bombyx shell` on a Windows guest always exits 0.
+  for `vagrant ssh -c 'exit 3' -- -t`, for a loopback login inside it,
+  and on 2026-10-06 for the direct login `bombyx shell` makes, `ssh -F
+  <vagrant ssh-config> -t -l agent guest`, with a session ending
+  `exit 3`. Without a terminal the status comes back: 3 on that same
+  direct login. So a
+  `bombyx shell` session on a Windows guest ends 0 however it ended,
+  and only a failure before the session, or a dropped connection,
+  ends non-zero.
 - **Windows PowerShell 5.1 passes `""` for `$null`** to a .NET
   method's `string` parameter, so `[IO.File]::Replace` refuses its
   backup path as "not of a legal form". `refresh.ps1` passes

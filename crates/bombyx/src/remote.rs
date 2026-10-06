@@ -39,7 +39,6 @@ pub use write::{
 };
 
 use crate::config::{Config, Guest, HookPath, Provider, Secrets, Transport};
-use crate::powershell;
 use crate::vagrantfile::GuestHomeFile;
 
 /// Environment variable carrying the VM host's SSH alias into
@@ -1337,11 +1336,11 @@ pub fn remove_dir(cfg: &Config, dir: &str) -> RemoteCommand {
 ///
 /// **A Windows guest takes a different route**, because it has no
 /// `sudo -u` that keeps the terminal: the VM host logs in as the
-/// agent directly. `windows_shell_script` says how and why.
+/// agent directly. `windows::shell_script` says how and why.
 #[must_use]
 pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
     if cfg.vm.guest == Guest::Windows {
-        return transport(cfg, &windows_shell_script(cfg), Tty::Allocate);
+        return transport(cfg, &windows::shell_script(cfg), Tty::Allocate);
     }
     let guest = as_guest_user(
         cfg,
@@ -1357,84 +1356,6 @@ pub fn shell_into_vm(cfg: &Config) -> RemoteCommand {
         Tty::Allocate,
     )
 }
-
-/// The VM-host script that opens the agent's shell on a Windows
-/// guest, in the clone, in one SSH login.
-///
-/// **One login, because a second one breaks the terminal.** Windows
-/// has no `sudo -u` that keeps the terminal, so the login account
-/// could only reach the agent by a second SSH login from the guest
-/// to itself, and Windows' `ssh.exe` on that hop splits an arrow
-/// key's `ESC [ A` into Escape and the text `[A` (#182). So the VM
-/// host logs in as the agent itself, with the machine key vagrant
-/// uses, which `account.ps1` authorizes for the agent.
-///
-/// **Plain `ssh` with vagrant's config, because `vagrant ssh` keeps
-/// its own user.** `vagrant ssh -- -l agent` still logs in as the
-/// login account, measured with vagrant 2.4.9. `vagrant ssh-config`
-/// writes the address, port and key vagrant would use, and a
-/// command-line `-l` overrides the `User` in that file. The file
-/// lives in a `mktemp` name, and a `trap` removes it when the script
-/// exits or the connection drops; it names the key's path, not the
-/// key.
-///
-/// **The clone path is spelled in the guest.** The agent's
-/// PowerShell `Set-Location`s into `$env:USERPROFILE\<project>`,
-/// where `bootstrap.ps1` clones. The command travels as
-/// `-EncodedCommand`, which holds no character the VM host's `sh`
-/// or the guest's shell reads. A missing clone prints the error and
-/// leaves the shell in the profile, to look into why.
-///
-/// **A failed login opens the login account's shell.** Windows'
-/// sshd reports 0 for a session with a terminal whatever it exited
-/// with, so 255 is `ssh` failing to log in: a guest provisioned
-/// before its agent accepted the key, or one with no agent account.
-/// The script then says so and opens PowerShell as the login account
-/// through `vagrant ssh`, which asks a `winssh` guest for no terminal
-/// unless `-t` follows `--`. Any other status, such as a
-/// `vagrant ssh-config` that failed, is the script's own.
-fn windows_shell_script(cfg: &Config) -> String {
-    let enter =
-        powershell::encoded_command(&windows_shell_entry(cfg.project.as_str()));
-    format!(
-        "cd {dir} && c=$(mktemp) && \
-         trap 'rm -f \"$c\"' EXIT HUP INT TERM && {{ {config} > \"$c\" && \
-         ssh -F \"$c\" -t -l {user} {WINDOWS_SHELL_HOST} powershell.exe \
-         -NoLogo -NoExit -EncodedCommand {enter}; rc=$?; \
-         if [ \"$rc\" = 255 ]; then \
-         printf 'bombyx: could not log in to the guest as %s; %s\\n' \
-         {user} {advice} >&2; {fallback}; rc=$?; fi; exit \"$rc\"; }}",
-        dir = quote_remote_path(&cfg.remote_project_dir()),
-        config = vagrant_command(
-            cfg,
-            &["ssh-config", "--host", WINDOWS_SHELL_HOST],
-            None
-        ),
-        user = shell_quote(cfg.vm.guest_user.as_str()),
-        advice = shell_quote(WINDOWS_SHELL_ADVICE),
-        fallback = vagrant_command(
-            cfg,
-            &["ssh", "-c", "powershell.exe -NoLogo", "--", "-t"],
-            None
-        ),
-    )
-}
-
-/// The PowerShell the agent's shell on a Windows guest runs first:
-/// it enters `$env:USERPROFILE\<project>`, the folder `bootstrap.ps1`
-/// clones into. A test in `vagrantfile::windows` holds the two
-/// spellings together.
-pub(crate) fn windows_shell_entry(project: &str) -> String {
-    format!(
-        "Set-Location -LiteralPath (Join-Path $env:USERPROFILE {})",
-        powershell::quote(project)
-    )
-}
-
-/// The name [`windows_shell_script`] gives the guest in the config
-/// `vagrant ssh-config` writes, and then logs in to. A fixed word,
-/// so it needs no quoting where the script uses it bare.
-const WINDOWS_SHELL_HOST: &str = "guest";
 
 /// What a guest with no agent account prints before a refresh gives
 /// up: the step that sets the account up.
@@ -1453,13 +1374,14 @@ pub(crate) const SHELL_ADVICE: &str = "run provision for this project, or \
     $(id -un) instead.";
 
 /// What [`shell_into_vm`] prints on a Windows guest when the agent's
-/// login fails, before it opens a shell as the login account instead.
-/// A guest provisioned before the agent accepted the VM host's key
-/// lands here, so the advice names the step that authorizes it. A
-/// constant for the same test as `PROVISION_ADVICE`.
-pub(crate) const WINDOWS_SHELL_ADVICE: &str = "run provision for this \
-    project, which lets the agent accept this VM host's key. Opening a \
-    shell as the login account instead.";
+/// login fails, before it stops. It names both causes, because the
+/// script cannot tell them apart: a guest whose sshd did not answer,
+/// and one provisioned before the agent accepted the VM host's key,
+/// which only a provision cures. A constant for the same test as
+/// `PROVISION_ADVICE`.
+pub(crate) const WINDOWS_SHELL_ADVICE: &str = "its SSH server did not \
+    answer, or it was provisioned before the agent accepted this VM \
+    host's key; if the guest is up, run provision for this project.";
 
 /// The guest command that runs `script` as the agent's account,
 /// with `args` as its `$1`, `$2` and on, or reports the account

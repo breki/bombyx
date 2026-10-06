@@ -266,7 +266,7 @@ mod tests {
         ] {
             assert!(BOOTSTRAP.contains(text), "bootstrap.ps1: {text}");
         }
-        let entry = crate::remote::windows_shell_entry("p");
+        let entry = crate::remote::windows::shell_entry("p");
         assert!(
             entry.contains("(Join-Path $env:USERPROFILE 'p')"),
             "{entry}"

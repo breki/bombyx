@@ -256,30 +256,31 @@ fn a_windows_shell_logs_in_as_the_agent_in_one_hop() {
     // itself, with the machine key vagrant uses, which account.ps1
     // authorizes for the agent. `vagrant ssh -- -l` cannot do it,
     // because vagrant's own user wins; plain ssh with vagrant's
-    // config can. A failed login opens the login account's shell.
+    // config can. A probe that cannot log in says why it might have
+    // failed and stops, rather than open another account's shell.
     let mut cfg = cfg();
     cfg.vm.guest = crate::config::Guest::Windows;
     let c = shell_into_vm(&cfg);
     assert_eq!(opts_before_host(&c), vec!["-t", "-o", "LogLevel=ERROR"]);
-    let enter =
-        "Set-Location -LiteralPath (Join-Path $env:USERPROFILE 'myproject')";
-    let utf16: Vec<u8> =
-        enter.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let encoded = crate::powershell::base64(&utf16);
+    let encoded = crate::powershell::encoded_command(
+        "Set-Location -LiteralPath (Join-Path $env:USERPROFILE 'myproject')",
+    );
     let env = vagrant_env();
     assert_eq!(
         remote_script(&c),
         format!(
             "cd ~/'vms/myproject' && c=$(mktemp) && \
-             trap 'rm -f \"$c\"' EXIT HUP INT TERM && {{ \
-             {env} vagrant 'ssh-config' '--host' 'guest' > \"$c\" && \
+             trap 'rm -f \"$c\"' EXIT && trap 'exit 129' HUP && \
+             trap 'exit 130' INT && trap 'exit 143' TERM && {{ \
+             VAGRANT_CHECKPOINT_DISABLE=1 \
+             {env} vagrant 'ssh-config' '--host' 'guest' > \"$c\" || exit; \
+             ssh -n -F \"$c\" -o BatchMode=yes -l 'agent' guest exit; \
+             rc=$?; if [ \"$rc\" = 0 ]; then \
              ssh -F \"$c\" -t -l 'agent' guest powershell.exe -NoLogo \
-             -NoExit -EncodedCommand {encoded}; rc=$?; \
-             if [ \"$rc\" = 255 ]; then \
-             printf 'bombyx: could not log in to the guest as %s; %s\\n' \
-             'agent' {advice} >&2; \
-             {env} vagrant 'ssh' '-c' 'powershell.exe -NoLogo' '--' '-t'; \
-             rc=$?; fi; exit \"$rc\"; }}",
+             -NoExit -EncodedCommand {encoded}; \
+             else \
+             printf 'bombyx: could not log in to the guest as %s: %s\\n' \
+             'agent' {advice} >&2; exit \"$rc\"; fi; }}",
             advice = shell_quote(WINDOWS_SHELL_ADVICE),
         )
     );

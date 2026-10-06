@@ -20,8 +20,10 @@ and this project adheres to
   Claude Code, instead of arriving as `[A` (#182). The VM host now logs in as
   the agent directly with the vagrant machine key, which `account.ps1`
   authorizes for the agent along with the other keys the login account accepts,
-  never vagrant's public insecure keys; a guest provisioned earlier says to run
-  provision and opens a shell as the login account until then.
+  never vagrant's public insecure keys. A guest provisioned earlier refuses the
+  login until it is provisioned again; `shell` then says the guest may need
+  provisioning, or that its SSH server did not answer, and exits non-zero
+  rather than open a shell.
 
 ### Removed
 

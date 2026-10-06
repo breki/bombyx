@@ -49,8 +49,11 @@ pub(crate) fn run_encoded(script: &str) -> String {
 
 /// `script` as the argument `powershell.exe -EncodedCommand` takes:
 /// its UTF-16LE bytes, the encoding .NET calls `Unicode`, in base64.
-/// For a command line PowerShell itself parses, where the
-/// `Invoke-Expression` form of [`run_encoded`] would need quotes.
+/// For a `powershell.exe` command line that the VM host's `sh` and
+/// then the guest sshd's shell read before PowerShell does: the `"`,
+/// `(` and `)` in the `Invoke-Expression` form of [`run_encoded`]
+/// mean something to both, so each would need its own layer of
+/// quoting, while this argument is base64 alone and needs none.
 pub(crate) fn encoded_command(script: &str) -> String {
     let utf16: Vec<u8> =
         script.encode_utf16().flat_map(u16::to_le_bytes).collect();
@@ -124,6 +127,15 @@ mod tests {
             "iex ([Text.Encoding]::UTF8.GetString(\
              [Convert]::FromBase64String(\"YWInYw==\")))"
         );
+    }
+
+    #[test]
+    fn an_encoded_command_is_utf16le_in_base64() {
+        // `ab'c` is the bytes 61 00 62 00 27 00 63 00 in UTF-16LE,
+        // which PowerShell's `-EncodedCommand` reads; the values are
+        // `printf "ab'c" | iconv -t UTF-16LE | base64`.
+        assert_eq!(encoded_command("a"), "YQA=");
+        assert_eq!(encoded_command("ab'c"), "YQBiACcAYwA=");
     }
 
     #[test]

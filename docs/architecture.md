@@ -407,7 +407,7 @@ differences:
   that login, because a second SSH login inside the guest splits an
   arrow key's escape sequence. The VM host logs in as the agent
   directly, with vagrant's machine key, which `account.ps1` also
-  authorizes for the agent; `remote::windows_shell_script` gives the
+  authorizes for the agent; `remote::windows::shell_script` gives the
   command.
 - **Every value arrives base64-encoded.** vagrant's `winssh` shell
   provisioner writes each `env:` value into the script it runs as
