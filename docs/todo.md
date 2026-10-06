@@ -400,10 +400,14 @@ turns a QEMU escape, which lands as the unprivileged libvirt-qemu user, into
 root on the VM host. Only a kernel update closes it, and nothing in bombyx tells
 the operator what kernel the VM host runs or whether an installed update is
 still waiting on a reboot. A doctor row could print uname -r and warn when
-/var/run/reboot-required exists. That file is Debian and Ubuntu specific, and a
-WSL2 host runs Microsoft's kernel, which Windows updates; decide what the row
-says on each host kind before writing it. The row cannot say whether a kernel is
-vulnerable, only whether it is the newest one installed.
+/var/run/reboot-required exists. That file is Debian and Ubuntu specific. A
+WSL2 host runs Microsoft's kernel, which changes only through `wsl --update` on
+the Windows side. Measured on a WSL VM host on 2026-10-06: a Windows restart
+left the kernel at 6.18.33.2 with no reboot-required file, and `wsl --update`
+then `wsl --shutdown` moved it to 6.18.40.1. So on WSL the row cannot learn
+that an update is waiting; it can only print the version. Decide what the row
+says on each host kind before writing it. The row cannot say whether a kernel
+is vulnerable, only whether it is the newest one installed.
 
 ### guest-egress-windows
 
