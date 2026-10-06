@@ -283,7 +283,7 @@ test third::fail ... FAILED";
         let stdout = "test foo::bar ... ok\n\
             test result: ok. 1 passed";
         let names = extract_failed_names(stdout);
-        assert!(names.is_empty());
+        assert!(names.is_empty(), "{names:?}");
     }
 
     #[test]

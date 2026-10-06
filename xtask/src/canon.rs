@@ -683,7 +683,11 @@ mod tests {
     #[test]
     fn unresolved_xref_is_reported_and_resolved_one_is_not() {
         let t = targets("## Snapshot\n");
-        assert!(xrefs("a.md", "see under **Snapshot** ok", &t).is_empty());
+        assert!(
+            xrefs("a.md", "see under **Snapshot** ok", &t).is_empty(),
+            "{:?}",
+            xrefs("a.md", "see under **Snapshot** ok", &t)
+        );
         let bad = xrefs("a.md", "under **Nowhere** x", &t);
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].kind, "xref");
@@ -695,7 +699,9 @@ mod tests {
     fn bold_after_other_prepositions_is_not_a_reference() {
         let t = BTreeSet::new();
         assert!(
-            xrefs("a.md", "the only one asked what **worked**", &t).is_empty()
+            xrefs("a.md", "the only one asked what **worked**", &t).is_empty(),
+            "{:?}",
+            xrefs("a.md", "the only one asked what **worked**", &t)
         );
     }
 
@@ -826,7 +832,9 @@ mod tests {
         let t = targets("## Snapshot\n");
         assert!(
             xrefs("a.md", "as it says\nunder **Snapshot**, do it\n", &t)
-                .is_empty()
+                .is_empty(),
+            "{:?}",
+            xrefs("a.md", "as it says\nunder **Snapshot**, do it\n", &t)
         );
         let bad = xrefs("a.md", "one\ntwo under **No\nsuch rule** x\n", &t);
         assert_eq!(bad.len(), 1);
@@ -863,7 +871,9 @@ mod tests {
     fn non_repo_backticks_are_not_paths() {
         let none = |_: &str| false;
         assert!(
-            missing_paths("a.md", "`--dry-run` and `String`", &none).is_empty()
+            missing_paths("a.md", "`--dry-run` and `String`", &none).is_empty(),
+            "{:?}",
+            missing_paths("a.md", "`--dry-run` and `String`", &none)
         );
     }
 
@@ -878,7 +888,11 @@ mod tests {
     #[test]
     fn granted_subcommand_and_narrower_grant_both_pass() {
         let doc = "allowed-tools: Bash(git status:*), Bash(git config --get:*)\n\n`git status` and `git config --get user.email`\n";
-        assert!(ungranted_git("c.md", doc).is_empty());
+        assert!(
+            ungranted_git("c.md", doc).is_empty(),
+            "{:?}",
+            ungranted_git("c.md", doc)
+        );
     }
 
     /// A quoted line is text the skill prints for the operator,
@@ -887,7 +901,11 @@ mod tests {
     fn git_inside_a_quoted_span_is_not_the_skills_own_command() {
         let doc =
             "allowed-tools: Bash(git log:*)\n\n- \"Push with `git push`\"\n";
-        assert!(ungranted_git("c.md", doc).is_empty());
+        assert!(
+            ungranted_git("c.md", doc).is_empty(),
+            "{:?}",
+            ungranted_git("c.md", doc)
+        );
     }
 
     /// The declaration is prose and wraps, so the match has
@@ -895,19 +913,31 @@ mod tests {
     #[test]
     fn a_declared_missing_grant_is_accepted_even_when_wrapped() {
         let doc = "allowed-tools: Bash(git log:*)\n\ntell them to run\n`git reset -- <path>` themselves; this skill has no\n`git reset` grant, deliberately.\n";
-        assert!(ungranted_git("c.md", doc).is_empty());
+        assert!(
+            ungranted_git("c.md", doc).is_empty(),
+            "{:?}",
+            ungranted_git("c.md", doc)
+        );
     }
 
     #[test]
     fn a_file_without_allowed_tools_is_not_checked_for_grants() {
-        assert!(ungranted_git("x.md", "run `git push`\n").is_empty());
+        assert!(
+            ungranted_git("x.md", "run `git push`\n").is_empty(),
+            "{:?}",
+            ungranted_git("x.md", "run `git push`\n")
+        );
     }
 
     #[test]
     fn over_wide_prose_is_reported() {
         let long = "x".repeat(81);
         assert_eq!(over_wide("a.md", &long).len(), 1);
-        assert!(over_wide("a.md", &"y".repeat(80)).is_empty());
+        assert!(
+            over_wide("a.md", &"y".repeat(80)).is_empty(),
+            "{:?}",
+            over_wide("a.md", &"y".repeat(80))
+        );
     }
 
     #[test]
@@ -933,7 +963,9 @@ mod tests {
         let known: BTreeSet<String> =
             ["rt-2026-09-03-real".to_string()].into_iter().collect();
         assert!(
-            unknown_ids("a.md", "see rt-2026-09-03-real", &known).is_empty()
+            unknown_ids("a.md", "see rt-2026-09-03-real", &known).is_empty(),
+            "{:?}",
+            unknown_ids("a.md", "see rt-2026-09-03-real", &known)
         );
         let f = unknown_ids("a.md", "see rt-2026-09-03-ghost", &known);
         assert_eq!(f.len(), 1);
