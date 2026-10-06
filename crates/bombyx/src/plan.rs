@@ -359,8 +359,8 @@ fn secrets_command(cfg: &Config, staged: &Staged) -> Option<RemoteCommand> {
 /// that script cannot rely on the copy the hook makes; one that
 /// needs a secret during its run reads `BOMBYX_ENV_FILE`, which
 /// provisioning exports. Running it before the script needs the
-/// hook inside `bootstrap.sh`, which is left to
-/// `provision-lifecycle-hooks` in `docs/todo.md`.
+/// hook inside `bootstrap.sh`, which is left to issue #12
+/// (`provision-lifecycle-hooks`).
 #[must_use]
 pub fn refresh_after_provisioning(
     cfg: &Config,

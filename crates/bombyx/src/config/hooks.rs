@@ -11,8 +11,8 @@
 //! `crate::plan::refresh_secrets` say when each path runs it.
 //!
 //! The table is named for hooks in general, not for this one,
-//! because `provision-lifecycle-hooks` in `docs/todo.md` (#12)
-//! plans more of them beside it.
+//! because issue #12 (`provision-lifecycle-hooks`) plans more of
+//! them beside it.
 //!
 //! **The operator's config names the script, and the clone holds
 //! it.** The value is a path relative to the clone, like `script`,

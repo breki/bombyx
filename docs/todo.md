@@ -22,16 +22,6 @@ A body may be edited directly, as long as the heading, Summary
 and Depends-on lines are left intact and `records-check` still
 passes.
 
-### wire-vm-host
-
-**Summary:** the VM host is on WiFi; VLAN tagging needs it wired
-
-Prerequisite for the agent VLAN, GitHub issue #130.
-
-### packer-box
-
-**Summary:** bake a base box so `scratch` boots fast enough to use.
-
 ### host-network-isolation
 
 **Summary:** confirm the nftables rules survive a reboot
@@ -61,82 +51,6 @@ leave every check we ran still passing. The broadcast DHCP rule is
 exercised: issue #113 stranded a lease-less guest without it and leased the
 guest with it. This is a host-level stopgap for the agent VLAN (#130), not
 a replacement: enforcement sits on the machine being protected.
-
-### suspend-resume-commands
-
-**Summary:** save and restore VM RAM state mid-task
-
-Add `bombyx suspend` / `bombyx resume` subcommands wrapping `vagrant suspend`
-/ `vagrant resume`, so a VM's RAM state can be saved and restored mid-task.
-Context: `Action::Down` maps to `vagrant halt`, which is a graceful
-power-off -- the disk survives but running processes, tmux sessions and
-listening ports do not. There is currently no way to pick up mid-task after
-stopping a VM.
-
-### minimal-vagrantfile
-
-**Summary:** keep the generated file identical across hosts
-
-The first half of this landed with `generate-vagrantfile`: `vagrantfile.rs`
-renders infrastructure only -- box, provider block with cpus and memory, the
-disabled synced folder, and one shell provisioner pointing at account.sh.
-Nothing project-specific reaches it.
-
-What is left is the parity claim. The renderer emits one provider block
-chosen by `[vm] provider`, and only the libvirt spelling has ever been run.
-Whether the Hyper-V block boots anything, and whether the two need to
-diverge further than they do, is unanswered until somebody has a Windows VM
-host. `provider-configured-not-selected` closed the other half of this: the
-renderer's provider block is now the provider vagrant is actually told to
-use. What stays open here is `doctor-checks-hyperv-support`, and the Hyper-V
-block itself, which has never booted anything.
-
-### provision-lifecycle-hooks
-
-**Summary:** named hooks replace one bash provision script
-
-Provisioning is currently one bash script run by Vagrant at VM creation.
-Replace it with named lifecycle hooks a project declares in a small manifest:
-prepare, dependencies, agent, cleanup. Vagrant then only creates the VM and
-runs the bootstrap; bombyx runs the hooks inside the guest. Simple projects
-implement one hook, complex ones several, and bombyx stays generic. It also
-decouples the hooks from Vagrant, so the backend can change later without
-touching them.
-
-### per-host-resource-profiles
-
-**Summary:** detect host capacity, merge project minimums
-
-The same project run on a workstation and on a laptop should not get the same
-VM. Let the project declare its needs (minimum memory, minimum CPUs) and let
-each host contribute what it can provide. Detect RAM, CPU cores and hypervisor
-when a host is first used, apply a default policy such as half of RAM, and
-allow a per-host override file. Named profiles are the other half: a profile
-maps to a large allocation on the workstation and a smaller one on the laptop.
-
-### status-endpoint
-
-**Summary:** read-only per-host VM status over the network
-
-There is no overview of what is running across machines. Each bombyx
-installation could expose a small read-only endpoint reporting its VMs, their
-projects, state and resource usage. Read-only keeps the autonomy of the
-current design: no central registry, no service to keep alive, no single point
-of failure. Report two distinct roles per VM, since they differ in this setup:
-the controller, meaning the instance that launched it, and the executor,
-meaning the host it actually runs on. Bind it to the private network only.
-
-### status-all-aggregator
-
-**Summary:** bombyx status --all queries the known hosts
-**Depends on:** status-endpoint
-
-The consumer of the per-host status endpoints. The client initiates: no
-background chatter, no instances polling each other. Discovery starts as a
-static config file listing the other hosts, which is dull and reliable; keep
-the lookup behind an interface so a tailnet or Consul provider can be added
-later without changing callers. The CLI is the first consumer, a dashboard is
-possible afterwards.
 
 ### self-update-resolves-tar-late
 

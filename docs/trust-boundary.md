@@ -440,5 +440,5 @@ firewall service, or naming a bridge libvirt has since moved.
 
 | Problem | Why it is open | Tracked by |
 |---|---|---|
-| **Sizing** | bombyx cannot read a project's CPU and memory needs from its repository, because it cannot read the repository until the machine those numbers size has booted. So sizing lives in configuration, or the boot has to happen in two phases. | `per-host-resource-profiles` in `docs/todo.md` |
+| **Sizing** | bombyx cannot read a project's CPU and memory needs from its repository, because it cannot read the repository until the machine those numbers size has booted. So sizing lives in configuration, or the boot has to happen in two phases. | GitHub issue #13 (`per-host-resource-profiles`) |
 | **Egress** | The guest must reach the git host to clone. Both the host firewall (`docs/vm-host-firewall.md`) and the guest's own egress rule refuse private addresses, so a git host on a LAN or tailnet address cannot be cloned, and the failure shows at clone time as a refused connection rather than at boot. No setting lets a project allow one address. | `host-network-isolation` and `guest-egress-allow-list` in `docs/todo.md` |
