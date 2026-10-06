@@ -1329,7 +1329,11 @@ mod tests {
             run(&Action::Doctor),
             doctor::probe_commands(&doctor::host_probes(&cfg()))
         );
-        assert!(!run(&Action::Doctor).is_empty());
+        assert!(
+            !run(&Action::Doctor).is_empty(),
+            "{:?}",
+            run(&Action::Doctor)
+        );
     }
 
     /// The whole prefix on every vagrant call: the identity and
@@ -1736,7 +1740,11 @@ mod tests {
             let last = cmds.last().expect("the secrets command");
             let stdin = last.stdin.as_ref().expect("the file is on stdin");
             assert_eq!(stdin.bytes(), b"TOKEN=hunter2\n");
-            assert!(refresh_after_provisioning(&cfg, &staged).is_empty());
+            assert!(
+                refresh_after_provisioning(&cfg, &staged).is_empty(),
+                "{:?}",
+                refresh_after_provisioning(&cfg, &staged)
+            );
             cfg.hooks.secrets_refreshed = Some(
                 crate::config::HookPath::parse(".bombyx/refresh.ps1")
                     .expect("a valid hook path"),
@@ -1880,7 +1888,11 @@ mod tests {
         // with no hook to follow would repeat `account.sh` for the
         // price of one `vagrant ssh`.
         let (cfg, staged) = staged_project(true);
-        assert!(refresh_after_provisioning(&cfg, &staged).is_empty());
+        assert!(
+            refresh_after_provisioning(&cfg, &staged).is_empty(),
+            "{:?}",
+            refresh_after_provisioning(&cfg, &staged)
+        );
     }
 
     #[test]
@@ -1899,7 +1911,11 @@ mod tests {
         // A project without an `env_file`, or a
         // `shell --refresh-secrets` that could not read it, sends
         // nothing and costs no round trip.
-        assert!(refresh_secrets(&cfg(), &Staged::default()).is_empty());
+        assert!(
+            refresh_secrets(&cfg(), &Staged::default()).is_empty(),
+            "{:?}",
+            refresh_secrets(&cfg(), &Staged::default())
+        );
     }
 
     #[test]

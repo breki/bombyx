@@ -974,7 +974,11 @@ fn teardown_takes_a_tty_like_every_other_vagrant_call() {
     let with = destroy_vm_if_present(&cfg(), "~/vms/p", Tty::Allocate);
     assert_eq!(opts_before_host(&with), vec!["-t", "-o", "LogLevel=ERROR"]);
     let without = destroy_vm_if_present(&cfg(), "~/vms/p", Tty::NoPty);
-    assert!(opts_before_host(&without).is_empty());
+    assert!(
+        opts_before_host(&without).is_empty(),
+        "{:?}",
+        opts_before_host(&without)
+    );
     assert_eq!(remote_script(&with), remote_script(&without));
 }
 

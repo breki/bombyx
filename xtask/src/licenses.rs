@@ -719,7 +719,11 @@ mod tests {
         // came from in the first place.
         let mut json = metadata();
         json.as_object_mut().unwrap().remove("resolve");
-        assert!(attributions_from(&json).is_empty());
+        assert!(
+            attributions_from(&json).is_empty(),
+            "{:?}",
+            attributions_from(&json)
+        );
     }
 
     #[test]

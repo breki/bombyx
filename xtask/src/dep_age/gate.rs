@@ -356,7 +356,7 @@ mod tests {
             Ok(o) => (o, Vec::new()),
             Err(why) => (Vec::new(), vec![why]),
         };
-        assert!(outcomes.0.is_empty());
+        assert!(outcomes.0.is_empty(), "{:?}", outcomes.0);
         assert_eq!(outcomes.1.len(), 1, "{:?}", outcomes.1);
     }
 
@@ -427,7 +427,7 @@ dependencies = [
     fn classify_dep_age_empty_is_clean() {
         let r = classify_dep_age(&[]);
         assert!(r.error.is_none());
-        assert!(r.warnings.is_empty());
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
         assert_eq!(r.detail, "no dependency changes");
     }
 
