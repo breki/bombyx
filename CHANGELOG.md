@@ -14,6 +14,16 @@ and this project adheres to
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## [0.13.0] - 2026-10-07
+
+### Added
+
+### Changed
+
 - `bombyx shell` reads no secrets by default: it opens no `vault`, so it asks
   for no master password, sends nothing into the guest and runs no
   `secrets_refreshed` hook (#180). Pass `--refresh-secrets` to send them again
