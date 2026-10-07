@@ -157,6 +157,43 @@ Switching to `shallow` keeps the history the clone already has.
 it targets the project VM only; for a scratch VM the answer is
 `discard` then `scratch`.
 
+## Changing a VM's CPUs, memory or disk
+
+`up` and `provision` write the Vagrantfile afresh on every run, so
+an edit to `cpus`, `memory` or `disk` in `[vm]` reaches the VM
+host on the next one. When the VM itself takes the edit depends on
+the setting, because vagrant-libvirt reads each one at a different
+moment.
+
+`cpus` and `memory` take effect when the VM starts from halted.
+vagrant-libvirt compares them with the VM's libvirt definition as
+it starts the VM, and rewrites the definition when they differ. It
+does not restart a running VM: `up` finds the VM running and
+changes nothing, and `provision` does not restart it either. So
+halt the VM first:
+
+```bash
+bombyx down myproject
+bombyx up myproject
+```
+
+`disk` takes effect only when the VM is created. vagrant-libvirt
+sizes the disk while it copies the box image for a new VM, and
+never resizes an existing one. To give an existing VM a bigger
+disk, `destroy` it and `up` it again, which throws away everything
+in the guest -- see **destroy and discard** below. Growing the disk
+image in place and then the partition inside the guest is
+possible in principle, but bombyx does neither step and we have
+not tried it.
+
+bombyx prints nothing when the config and the VM disagree, so an
+`up` on a running VM reports success with the old size. Issue #187
+tracks a warning.
+
+Not verified: whether `reset` puts back the CPU and memory counts
+the `fresh-install` snapshot was taken with. A libvirt snapshot
+can hold the VM's definition as well as its disk.
+
 ## Rotating a secret
 
 To change a value in your `env_file`, such as an expired token, edit

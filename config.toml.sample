@@ -140,6 +140,10 @@ cpus = 4
 # `"512MB"`. The units are powers of two -- `MB` and `MiB` both
 # mean one MiB, `GB` and `GiB` both mean 1024 MiB -- so `"8GB"` is
 # exactly `8192`. Whole numbers only.
+#
+# An existing VM takes a new `cpus` or `memory` only after
+# `bombyx down` and then `bombyx up`. docs/usage.md, "Changing a
+# VM's CPUs, memory or disk", says why.
 memory = "8GB"
 
 # Optional. The virtual disk the machine gets. Left out, the guest
@@ -154,6 +158,10 @@ memory = "8GB"
 #
 # Only the libvirt provider takes a disk size. Setting `disk` with
 # `provider = "hyperv"` is refused when the config is read.
+#
+# The size applies only when the VM is created; an existing VM keeps
+# its disk. docs/usage.md, "Changing a VM's CPUs, memory or disk",
+# says how to get a bigger one.
 #
 # disk = "40GB"
 
