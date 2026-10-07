@@ -286,6 +286,15 @@ for tools that are not present:
     `ssh win "wsl -d D -- sh -c 'echo <b64> | base64 -d | sh'"`
     -- because base64 holds no character any of the three shells
     reads.
+
+    The same holds for PowerShell inside a Windows guest: pass
+    `powershell -NoProfile -EncodedCommand <b64>`, where the
+    base64 encodes the script as UTF-16LE, and start the script
+    with `$ProgressPreference = 'SilentlyContinue'` so its
+    progress records do not arrive as `#< CLIXML` noise. Encoding
+    roughly triples a script's length, and Windows refuses a
+    command line past a few thousand characters, so upload a
+    longer script with `vagrant upload` and run it with `-File`.
 - **Give a command that reads `/dev/tty` a terminal with
   `script`.** The session has no terminal, so a password prompt
   such as a `vault` unlock fails at once.
