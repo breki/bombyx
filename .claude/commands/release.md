@@ -100,14 +100,26 @@ step for a release to gate.
    the release gate. If it fails, abort and tell the
    user what failed; do not commit a broken release.
 
-9. **Cross-target check** -- run
+9. **Cross-target check** -- lint every installed target
+   other than the host. `rustc -vV` prints the host on its
+   `host:` line, and `rustup target list --installed` lists the
+   targets. On a Linux host that means
+   `x86_64-pc-windows-msvc`; on a Windows host,
+   `x86_64-unknown-linux-gnu`. For each one, run
 
    ```
    cargo clippy --workspace --all-targets \
-     --target x86_64-unknown-linux-gnu -- -D warnings
+     --target <target> -- -D warnings
    ```
 
-   Abort the release if it fails.
+   Linting the host's own target repeats what `validate` just
+   did and checks no other platform. If no target other than
+   the host is installed, add one with `rustup target add`
+   rather than skip the step. Say in the summary which targets
+   ran, and that macOS is left to CI unless a darwin target was
+   among them.
+
+   Abort the release if any of them fails.
 
    `validate` checks one platform: the one you are sitting at.
    This project claims Windows, Linux and macOS, and the gap
