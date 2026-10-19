@@ -71,6 +71,192 @@ removed subsystem leaves a description behind.
 
 ## Suggestions to flow back to the template
 
+### tf-2026-10-19-changelog-add-glues-a-heading-to-a-bullet -- changelog add glues a heading to a bullet
+
+`cargo xtask changelog add` can glue a new subsection heading onto the
+last bullet of the section above it. On rustbase `main` (last change
+2026-08-18) `insert_new_block` in `xtask/src/changelog.rs` line 213
+builds the block as `vec![kind.heading().to_owned(), String::new()]`.
+That assumes the line above the insertion point is blank. In a real
+file whose `[Unreleased]` block ends with a bullet, it is not, so the
+output is:
+
+    - an existing entry
+    ### Fixed
+
+A heading with no blank line above it renders as body text. The
+template's tests miss this because their skeleton has a blank line at
+that boundary. bombyx hit it on a real `CHANGELOG.md` the first time a
+`### Fixed` block went after a `### Changed` one.
+
+The fix in bombyx (commit f5685f5) pushes an empty line before the
+heading when `lines[at - 1]` is not blank. The test
+`a_new_heading_at_the_section_end_keeps_its_blank_line` uses the
+real-file shape, where `[Unreleased]` ends in a bullet.
+
+Suggested for the template: the same guard and test.
+
+### tf-2026-10-19-tagged-opening-summary-in-replies -- tagged opening summary in replies
+
+bombyx's `CLAUDE.md` asks that every reply open with a summary under
+forty words, wrapped in `[short]` and `[/short]` tags on their own lines,
+before the body (commit 6e2b0b8). The operator reads the summary first
+and the body only when the summary sends them there.
+
+The tags exist so that a tool can lift the summary out without parsing
+the reply around it. Here the tool is the operator's own Stop hook,
+which reads the tagged text aloud. Before the tags, the hook spoke a
+reply's first sentence or two, and an opening sentence is usually setup
+rather than the outcome.
+
+The speech hook is this operator's setup, not template material. Two
+parts generalize, argued rather than measured. First, a summary in a
+fixed, tagged place is a contract that any hook, notifier or log
+scraper can rely on, where "the first sentence" is not. Second, the
+forty-word budget is checkable, which "be brief" is not. That is the
+same reasoning as `/short` in
+`tf-2026-09-11-issue-rundown-and-short-are-worth-shipping`.
+
+If the summary may be spoken, the rule needs one more clause: no
+backticks, paths or symbols inside it. bombyx's synthesizer strips
+backticked spans, so a path in the summary was deleted rather than read.
+
+Suggested for the template: offer the tagged opening summary as an
+optional `CLAUDE.md` convention, with `/short` as its companion. Leave
+the speech hook to each operator.
+
+### tf-2026-10-19-ask-is-worth-shipping -- ask is worth shipping
+
+When the assistant lays out a decision or a set of options in the body
+of a reply instead of asking through `AskUserQuestion`, the operator has
+to type a free-text answer. That happens often, despite the
+Collaboration rules that ask for the tool.
+
+bombyx added `/ask` (`.claude/commands/ask.md`, 55 lines, commit
+5151297). It takes the most recent decision the assistant raised in
+prose and re-puts it as a structured `AskUserQuestion`: the assistant's
+recommendation first, labelled "(Recommended)", one-line trade-offs in
+the descriptions, and a preview only where a concrete artifact helps.
+Its `allowed-tools` is `AskUserQuestion` alone.
+
+The constraints make it safe to reach for without thinking. It reshapes
+and does not re-argue. It adds no option and no recommendation the
+assistant did not make. It refuses to invent a decision when the
+transcript raised none, and it never chooses for the operator.
+
+Suggested for the template: ship `ask.md` and list it in the
+`CLAUDE.md` Skills table. It needs no tooling. It sits beside
+`tf-2026-09-11-issue-rundown-and-short-are-worth-shipping`, which
+covers `/issue`, `/rundown` and `/short` but not `/ask`.
+
+### tf-2026-10-19-template-ships-no-doc-link-gate -- template ships no doc-link gate
+
+The template has no documentation gate. On rustbase `main` (last change
+2026-08-18) `xtask/src` holds no doc module, `validate` never runs
+rustdoc, and `.claude/hooks/stop-check.sh` runs fmt-check, clippy and
+tests only. rustdoc reports a broken intra-doc link as a warning, so the
+docs build clean and quietly stop navigating. When bombyx first ran
+`cargo doc` it found two broken links that had never failed anything: a
+module page linking a private `Config::validate`, and an `xtask` doc
+comment linking `test`, which is both a function and an attribute macro.
+
+bombyx added `cargo xtask doc` (`xtask/src/doc_cmd.rs`, commit f5685f5).
+It runs rustdoc twice with `RUSTDOCFLAGS=-D warnings`, once plain and
+once with `--document-private-items`, because neither pass sees both
+failure modes. A link inside a private module never reaches the public
+pass, which does not render private modules. A public page linking a
+private item is an error in the public pass and legal in the private
+one. This was measured: breaking one link in a private module gave 0
+errors in the public pass and 2 in the private.
+
+The gate runs in `validate` among the cheap static checks, and as a
+stage in `stop-check.sh` between clippy and tests. Warm, it costs about
+1.3 s, because both passes reuse the metadata clippy just produced.
+
+A rule follows from the public pass and belongs beside the gate: a doc
+comment on a public item names a private item in backticks, not as an
+intra-doc `[link]`.
+
+Suggested for the template: ship `doc_cmd.rs`, add it to `validate` and
+to the Stop hook, and add the backtick rule to `CLAUDE.md` under Coding
+Standards.
+
+### tf-2026-10-19-commit-finds-the-latest-tag-alphabetically -- commit finds the latest tag alphabetically
+
+`/commit` checks whether a change has shipped before it marks the change
+breaking or files it under `### Removed`. On rustbase `main` (last
+change 2026-08-18) the check says to run `git tag` and then use
+`git log <latest-tag>..HEAD`. But `git tag` sorts alphabetically, so
+`v0.9.0` sorts after `v0.11.0` and is read as the latest release.
+
+Once a project passes `v0.9.x` to `v0.10.0`, that misreading makes
+`<latest-tag>..HEAD` cover changes that did ship, so `/commit` can treat
+them as never released. It then corrects an `[Unreleased]` bullet
+instead of recording a real break, and `/release` infers too small a
+bump.
+
+The fix in bombyx (commit 57b49da) uses
+`git tag --list --sort=-v:refname` and says the first line is the latest
+tag.
+
+Suggested for the template: the same one-flag change in
+`.claude/commands/commit.md`, plus a scan of other commands and `xtask`
+code for a bare tag list used to find the latest release.
+
+### tf-2026-10-19-release-lints-the-host-target-on-linux -- release lints the host target on linux
+
+`/release` step 9 lints a second platform before the tag, which
+`tf-2026-08-18-nothing-checks-a-second-platform-before-release` asked
+for. On rustbase `main` (last change 2026-08-18) the step hardcodes the
+target:
+
+    rustup target add x86_64-unknown-linux-gnu
+    cargo clippy --workspace --all-targets \
+      --target x86_64-unknown-linux-gnu -- -D warnings
+
+On a Linux workstation that is the host's own target, so the step
+repeats what `validate` already checked and checks no other platform.
+The release still goes out with Windows and macOS unchecked, while the
+step reads as having done its job.
+
+The fix in bombyx (commit 96d8ae9) lints every installed target other
+than the host, says to add a target rather than skip the step when none
+is installed, and asks the release summary to name the targets that
+ran, so a skipped platform is visible.
+
+Suggested for the template: pick the targets relative to the host
+(`rustc -vV` gives the host triple) rather than naming one, and have the
+summary report which targets were linted.
+
+### tf-2026-10-19-new-clippy-lint-breaks-xtask-tests -- new clippy lint breaks xtask tests
+
+Rust 1.99's Clippy adds the `assert_is_empty` lint, which rejects
+`assert!(x.is_empty())` because a failure prints nothing about `x`. The
+template's own `xtask` tests use that form: on rustbase `main` (last
+change 2026-08-18) `xtask/src/coverage.rs` has six, `dep_age/gate.rs`
+five and `clippy_cmd.rs` two, measured with
+`grep -c 'assert!([^,]*is_empty())'`. In bombyx the same pattern
+appeared 35 times across the workspace.
+
+The template's `rust-toolchain.toml` sets `channel = "stable"`, so CI
+installs the newest stable. When 1.99 shipped,
+`cargo clippy --workspace --all-targets -D warnings` failed on every one
+of those asserts, with no change in the project. A generated project
+inherits a red Clippy gate.
+
+The fix in bombyx (commit c69e6c6) names the value in the failure
+message: `assert!(x.is_empty(), "{x:?}")` for a plain variable,
+`assert!(x.is_empty(), "{:?}", x)` otherwise. Clippy's own suggestion,
+`assert_eq!(x, [] as [T; 0])`, named private module paths and did not
+compile. Verified with `cargo +1.99.0 clippy --workspace --all-targets
+-D warnings`.
+
+Suggested for the template: apply the same rewrite to the `xtask`
+tests. The wider point, argued rather than measured: an unpinned
+`stable` channel means any new Clippy lint breaks a generated project's
+CI. Either pin the channel and bump it deliberately, or accept that and
+say so in the template docs.
+
 ### tf-2026-09-11-todo-md-unclassified-for-never-sync -- todo.md unclassified for never-sync
 
 `cargo xtask sync-candidates` drops a never-sync set before
