@@ -1,6 +1,6 @@
 ---
 description: Log feedback for the rustbase template, or sweep commits for it
-allowed-tools: Read, Write, Grep, AskUserQuestion, Bash(cargo xtask feedback-add:*), Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git show:*)
+allowed-tools: Read, Write, Grep, AskUserQuestion, Bash(cargo xtask feedback-add:*), Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git show:*), Bash(gh api:*)
 ---
 
 Log observations about the rustbase template in
@@ -97,6 +97,19 @@ candidate:
    dangling reference, the boilerplate every project
    deletes, the feature every project adds. A thing that
    behaved exactly as documented is not feedback.
+
+Then confirm the template still has it. Fetch the file from
+upstream `main` and look at the lines in question:
+
+```
+gh api repos/breki/rustbase/contents/<path> \
+  -H 'Accept: application/vnd.github.raw'
+```
+
+A defect bombyx fixed may be fixed upstream too, and a
+template file bombyx changed may no longer exist there. An
+entry should name what upstream holds now, so quote the file
+and line you read.
 
 Do not log: defects in project-specific code, anything
 already in the file, one-off environment quirks (a stale
