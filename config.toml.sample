@@ -111,7 +111,14 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 
 # The base image vagrant starts the machine from.
 #
-# It has to have `git` installed. The guest clones the project
+# The value below is a box you build yourself from Canonical's own
+# Ubuntu 24.04 image, once per VM host, with
+# `boxes/ubuntu-24.04/build.sh` from this repository and then
+# `vagrant box add`; docs/ubuntu-guest-box.md gives both commands.
+# Use a box only from the OS vendor, or one built from the vendor's
+# own image.
+#
+# Any box has to have `git` installed. The guest clones the project
 # itself, so the first thing bombyx's provisioning script does
 # inside the VM is look for `git`, and without it the script
 # stops there -- after the box download, the machine creation
@@ -132,8 +139,8 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 # needs `curl` as well as `git`. An `https` URL needs no `curl`,
 # because it opens no ssh connection at all, and neither does an
 # ssh URL on any other host, because bombyx fetches nothing for
-# it.
-box = "generic/ubuntu2204"
+# it. The box below carries both.
+box = "bombyx/ubuntu-24.04"
 cpus = 4
 
 # Memory the machine gets. A bare integer is MiB, so `8192` is

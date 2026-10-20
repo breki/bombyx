@@ -854,6 +854,11 @@ For any script that runs more than ~30 seconds
   failed, so `up` on an existing VM boots it and skips the
   scripts.
 
+  **Check a hand-written config before any background `up`.**
+  `bombyx list --offline --config <file>` parses it in a second,
+  where a bad one fails the `up` only after the notification
+  round-trip.
+
   **Wrap each such run in `timeout`**, sized from the box's
   measured first boot, because a provisioner that hangs sends no
   notification and no output. The generated Vagrantfile's

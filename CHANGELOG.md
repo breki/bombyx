@@ -12,14 +12,29 @@ and this project adheres to
 
 ### Added
 
+- A recipe that builds `bombyx/ubuntu-24.04`, a libvirt box of Ubuntu 24.04 LTS,
+  from Canonical's own cloud image: `boxes/ubuntu-24.04/build.sh` accepts the
+  image only when Canonical's checksum file carries a good signature by the
+  pinned cloud-image key, installs every update, and makes each VM get its own
+  SSH host keys and machine id, with a network config that works for any MAC
+  address. `docs/ubuntu-guest-box.md` describes it (#194).
+
 ### Changed
+
+- The sample config, README, quickstart, tutorial and usage guide name
+  `bombyx/ubuntu-24.04` instead of `generic/ubuntu2204`, a third-party box whose
+  systemd lacks the DNS root's new signing key, so every name lookup in its
+  guests fails (#193, #194).
 
 ### Fixed
 
 - A Linux guest cloning a GitHub repository over ssh no longer needs `jq` in the
   box. The guest reads GitHub's published ssh host keys with `tr`, `sed` and
-  `grep`, so a standard box such as `generic/ubuntu2204` is no longer refused
-  before the clone (#191).
+  `grep`, so a box without `jq` is no longer refused before the clone (#191).
+- The Windows box build, `boxes/windows-server-2025/build.sh`, stops when
+  interrupted with Ctrl-C instead of running on until its time limit, and on a
+  VM host without HashiCorp's vagrant package it names `VAGRANT_PUB` instead of
+  exiting silently (#194).
 
 ### Removed
 

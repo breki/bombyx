@@ -394,16 +394,37 @@ change the following:
 | Key | This tutorial uses |
 |-----|--------------------|
 | the table key | `myproject` -- names the VM and its directory on the host |
-| `vm.box` | `generic/ubuntu2204` -- it carries `git`; see below |
+| `vm.box` | `bombyx/ubuntu-24.04` -- a box you build once; see below |
 | `source.repo` | the URL you push this repository to |
 | `source.ref` | the branch you push, `main` here |
 
-Pick a box that carries `git`. `generic/ubuntu2204` does, and it
-is the value in `config.toml.sample`. A box without it --
-`debian/bookworm64`, say -- cannot finish the first `up`: the
-guest boots, and then the provisioner refuses at clone time and
-exits 1. Your own `provision.sh` cannot rescue such a box, since
-`git` is exactly what would fetch that file in the first place.
+The box is the disk image vagrant starts the machine from, and
+`bombyx/ubuntu-24.04`, the value in `config.toml.sample`, is one you
+build yourself. Canonical publishes no Vagrant box for libvirt, and
+this project uses a box only when it comes from the OS vendor or is
+built from the vendor's own image, so the bombyx repository carries
+a recipe that builds one from Canonical's signed cloud image. Run it
+once on the VM host, from a clone of the repository:
+
+```bash
+boxes/ubuntu-24.04/build.sh
+vagrant box add --name bombyx/ubuntu-24.04 \
+    ~/.cache/bombyx-box/ubuntu-24.04.box
+```
+
+The build downloads the image, checks it against Canonical's
+signature, installs every update and packs the result; it runs
+unattended. `docs/ubuntu-guest-box.md` lists what the build needs on
+the VM host -- `qemu`, `xorriso`, `gpg` and a few more, and membership
+of the `kvm` group -- and describes what the box holds.
+
+> **Note**
+> Whatever box you choose, it must carry `git`.
+> `bombyx/ubuntu-24.04` does. A box without it --
+> `debian/bookworm64`, say -- cannot finish the first `up`: the
+> guest boots, and then the provisioner refuses at clone time and
+> exits 1. Your own `provision.sh` cannot rescue such a box, since
+> `git` is exactly what would fetch that file in the first place.
 
 A GitHub or Bitbucket URL over ssh needs `curl` in the box as
 well. The reason is that, before it clones, bombyx has the guest
@@ -425,7 +446,7 @@ been cleaned up:
 bombyx: any uploaded deploy key and any git credential have been removed from this guest, and so has any secrets file at /home/agent/.bombyx-env.
 ```
 
-`generic/ubuntu2204` carries `curl`, so the value in the sample
+`bombyx/ubuntu-24.04` carries `curl`, so the value in the sample
 needs no extra program. An `https://` URL needs no `curl` at all,
 since it opens no ssh connection; neither does an ssh URL on a git
 host bombyx has no published keys for, such as a self-hosted one,

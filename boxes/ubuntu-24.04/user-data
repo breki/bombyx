@@ -1,0 +1,33 @@
+#cloud-config
+# cloud-init's instructions for the build's one boot, read from the seed
+# volume build.sh attaches. The work itself is in stage.sh, a plain
+# script that reports success or failure on the serial console, where
+# build.sh looks for it.
+
+# No account from cloud-init. stage.sh creates the vagrant account
+# itself, and without this cloud-init would also create Ubuntu's
+# default `ubuntu` account.
+users: []
+
+# No growpart key: cloud-init's defaults already grow the root
+# partition and its filesystem to fill the disk build.sh resized,
+# before runcmd runs.
+
+# A failed mount reports itself on the console in stage.sh's format,
+# because without the seed volume stage.sh never starts and so cannot
+# report anything. `>-` folds the three lines under it into one shell
+# command.
+runcmd:
+  - mkdir -p /mnt/seed
+  - >-
+    mount -o ro /dev/disk/by-label/CIDATA /mnt/seed ||
+    { printf '\nBOMBYX-FAILED: the seed volume did not mount\n'
+    >/dev/ttyS0; exit 1; }
+  - bash /mnt/seed/stage.sh
+
+# Power off once runcmd is done, whether stage.sh succeeded or not; its
+# line on the serial console says which.
+power_state:
+  mode: poweroff
+  condition: true
+  timeout: 60

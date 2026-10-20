@@ -461,29 +461,3 @@ check whether #170 or #172 removes a precondition it needs. Also decide whether
 docs/local-host.md should warn that a hypervisor escape on a local VM host lands
 on the workstation, the machine bombyx exists to protect; no doc says so today.
 
-### guest-dnssec-missing-key
-
-**Summary:** generic/ubuntu2204 guests fail every DNS lookup: DNSSEC missing-key
-
-Mechanism (likely, unproven): systemd-resolved checks DNSSEC signatures up from
-the DNS root, using a fixed copy of the root's signing key (its 'trust anchor')
-built into systemd. The root switched to a newer signing key (KSK-2024, key tag
-38696) in the rollover scheduled for 2026-10-11. A box whose systemd knows only
-the old key cannot validate anything, and resolved reports 'DNSSEC validation
-failed: missing-key' for every name. Observed 2026-10-20 during #191 on frosti
-(the VM host) in two guests of this box, jutro and vmtest: curl failed with
-'Could not resolve host: api.github.com', so a GitHub ssh clone stops at the
-host-key fetch, and https clones would fail too. Evidence: the box's
-/etc/systemd/resolved.conf forces DNSSEC=yes with DNS=4.2.2.1 4.2.2.2
-208.67.220.220; the guest clock is correct; dig against each resolver (and
-libvirt's 192.168.121.1) answers; restarting systemd-resolved does not help; the
-root DNSKEY set is now signed only by 38696; the box runs systemd
-249.11-0ubuntu3.11. Options to weigh: (1) account.sh drops a resolved.conf.d
-override before bootstrap -- DNSSEC=allow-downgrade or no, which gives up DNSSEC
-protection of name lookups; the clone's trust rests on HTTPS and the pinned ssh
-host keys rather than DNS, so the cost is small, but it is a box-wide setting
-change; (2) move off generic/ubuntu2204 to a box built from Canonical's own
-image, as boxes/windows-server-2025 is built from Microsoft's (CLAUDE.md
-requires an official source anyway, and generic/* is a community box); a fresh
-build would carry current packages.
-

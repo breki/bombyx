@@ -52,8 +52,12 @@ done
     die "/dev/kvm is not usable; join the kvm group"
 
 # vagrant's insecure public key, from the newest vagrant gem installed.
-vagrant_pub=${VAGRANT_PUB:-$(find /opt/vagrant/embedded/gems/gems \
-    -path '*/vagrant-*/keys/vagrant.pub' 2>/dev/null | sort -V | tail -n 1)}
+# `|| true` keeps a missing /opt/vagrant from failing the assignment,
+# which under `set -e` would end the script before the message below
+# could name VAGRANT_PUB.
+vagrant_pub=${VAGRANT_PUB:-$( { find /opt/vagrant/embedded/gems/gems \
+    -path '*/vagrant-*/keys/vagrant.pub' 2>/dev/null || true; } |
+    sort -V | tail -n 1)}
 [ -f "$vagrant_pub" ] ||
     die "vagrant's insecure key was not found; set VAGRANT_PUB to its path"
 
@@ -102,9 +106,12 @@ qemu-img create -q -f qcow2 "$build/disk.qcow2" "${DISK_GB}G"
 # because the monitor controls the VM. No VNC display: one on a TCP port
 # would let any account on the VM host reach the build VM's console,
 # where the vagrant account's password is the well-known one.
+# `--foreground` keeps qemu in the terminal's process group, so a
+# Ctrl-C reaches it; without it, `timeout` gives qemu a group of its
+# own and the install runs on until the time limit.
 say "installing Windows; this takes a while (log: $work/serial.log)"
 set +e
-timeout "$BUILD_TIMEOUT_S" qemu-system-x86_64 \
+timeout --foreground "$BUILD_TIMEOUT_S" qemu-system-x86_64 \
     -machine q35,accel=kvm -cpu host -smp 2 -m 4096 \
     -rtc base=utc \
     -drive "file=$build/disk.qcow2,if=none,id=disk,format=qcow2,discard=unmap" \

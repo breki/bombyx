@@ -213,7 +213,7 @@ pub struct Vm {
     /// [`Provider::Libvirt`] when the key is absent.
     pub provider: Provider,
     /// Vagrant box the VM boots from, e.g.
-    /// `generic/ubuntu2204`.
+    /// `bombyx/ubuntu-24.04`.
     ///
     /// Named `box_name` because `box` is a Rust keyword.
     pub box_name: BoxName,

@@ -1,0 +1,8 @@
+# The Vagrantfile inside the box, which vagrant reads before the
+# project's own. It says what the box is: a Linux guest reached over
+# SSH as the vagrant account, on the virtio hardware vagrant-libvirt
+# gives a VM by default, which is what build.sh built it on.
+
+Vagrant.configure("2") do |config|
+  config.vm.guest = :linux
+end
