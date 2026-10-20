@@ -5,7 +5,4 @@
 
 Vagrant.configure("2") do |config|
   config.vm.guest = :linux
-  # A first boot makes the VM's SSH host keys and machine id before
-  # sshd answers, which takes a few seconds more than a later boot.
-  config.vm.boot_timeout = 300
 end

@@ -9,12 +9,20 @@
 # default `ubuntu` account.
 users: []
 
-# cloud-init's defaults grow the root partition and its filesystem to
-# fill the disk build.sh resized, before runcmd runs.
+# No growpart key: cloud-init's defaults already grow the root
+# partition and its filesystem to fill the disk build.sh resized,
+# before runcmd runs.
 
+# A failed mount reports itself on the console in stage.sh's format,
+# because without the seed volume stage.sh never starts and so cannot
+# report anything. `>-` folds the three lines under it into one shell
+# command.
 runcmd:
   - mkdir -p /mnt/seed
-  - mount -o ro /dev/disk/by-label/CIDATA /mnt/seed
+  - >-
+    mount -o ro /dev/disk/by-label/CIDATA /mnt/seed ||
+    { printf '\nBOMBYX-FAILED: the seed volume did not mount\n'
+    >/dev/ttyS0; exit 1; }
   - bash /mnt/seed/stage.sh
 
 # Power off once runcmd is done, whether stage.sh succeeded or not; its

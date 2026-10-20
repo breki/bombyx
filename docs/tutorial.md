@@ -400,7 +400,7 @@ change the following:
 
 The box is the disk image vagrant starts the machine from, and
 `bombyx/ubuntu-24.04`, the value in `config.toml.sample`, is one you
-build yourself. Canonical publishes no Ubuntu box for libvirt, and
+build yourself. Canonical publishes no Vagrant box for libvirt, and
 this project uses a box only when it comes from the OS vendor or is
 built from the vendor's own image, so the bombyx repository carries
 a recipe that builds one from Canonical's signed cloud image. Run it
@@ -414,7 +414,9 @@ vagrant box add --name bombyx/ubuntu-24.04 \
 
 The build downloads the image, checks it against Canonical's
 signature, installs every update and packs the result; it runs
-unattended. `docs/ubuntu-guest-box.md` describes what the box holds.
+unattended. `docs/ubuntu-guest-box.md` lists what the build needs on
+the VM host -- `qemu`, `xorriso`, `gpg` and a few more, and membership
+of the `kvm` group -- and describes what the box holds.
 
 > **Note**
 > Whatever box you choose, it must carry `git`.

@@ -93,7 +93,8 @@ vagrant box add --name bombyx/ubuntu-24.04 \
     ~/.cache/bombyx-box/ubuntu-24.04.box
 ```
 
-`docs/ubuntu-guest-box.md` says what the box holds.
+`docs/ubuntu-guest-box.md` lists what the build needs on the VM host
+and what the box holds.
 
 `host` is the machine the VMs run on, usually an alias from your
 `~/.ssh/config`. Name the machine you are sitting at and bombyx

@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
-# Runs once, as root, inside the build VM that boxes/ubuntu-24.04/
-# build.sh boots, started by cloud-init from the seed volume mounted at
-# /mnt/seed. It updates Ubuntu, adds the vagrant account, and removes
-# what would otherwise make every VM made from the box a copy of this
-# one.
+# Runs once, as root, inside the build VM that
+# boxes/ubuntu-24.04/build.sh boots, started by cloud-init from the
+# seed volume mounted at /mnt/seed. It updates Ubuntu, adds the vagrant
+# account, and removes what would otherwise make every VM made from the
+# box a copy of this one.
 #
 # The last line it writes to the serial console is BOMBYX-DONE, or
 # BOMBYX-FAILED with the line that failed. build.sh reads that line,
 # because qemu exits the same way whether this script succeeded or not:
-# cloud-init powers the VM off either way.
+# cloud-init powers the VM off either way. Each marker starts with a
+# newline, because the kernel, systemd and cloud-init print to the same
+# console, and a line they left unfinished would otherwise push the
+# marker off the start of its line, where build.sh looks for it.
 
 set -euo pipefail
 
 readonly CONSOLE=/dev/ttyS0
 readonly SEED=/mnt/seed
 
-trap 'echo "BOMBYX-FAILED: stage.sh line $LINENO" >"$CONSOLE"' ERR
+trap 'printf "\nBOMBYX-FAILED: stage.sh line %s\n" "$LINENO" >"$CONSOLE"' ERR
 
 # Every update in Ubuntu's archive. `--force-confold` keeps the
 # image's configuration files where a package ships a new one, so the
@@ -38,8 +41,9 @@ visudo -cqf /etc/sudoers.d/vagrant.tmp
 install -m 0440 /etc/sudoers.d/vagrant.tmp /etc/sudoers.d/vagrant
 rm /etc/sudoers.d/vagrant.tmp
 
-# NETWORK. cloud-init wrote a netplan file that matches this VM's
-# network card by its MAC address. A VM made from the box has another
+# NETWORK. netplan is Ubuntu's network configuration layer, read from
+# /etc/netplan. cloud-init wrote a netplan file there that matches this
+# VM's network card by its MAC address. A VM made from the box has another
 # MAC, so that file would leave it with no network. This one matches
 # any wired card by name and asks for an address over DHCP, which is
 # what vagrant-libvirt's network hands out.
@@ -66,19 +70,27 @@ cloud-init clean --logs
 # ones on a boot that finds none, before sshd starts. Ubuntu's own
 # openssh package makes none at boot; cloud-init did that, and it is now
 # off.
+#
+# The unit runs before ssh.service, because sshd reads the keys when
+# that service starts. It must not also be ordered before ssh.socket:
+# with systemd's default dependencies that closes an ordering cycle,
+# which systemd breaks on every boot by dropping a job. It is wanted by
+# multi-user.target, so it runs on every boot and does nothing once the
+# keys exist, and by ssh.service, so starting sshd any other way still
+# makes the keys first.
 rm -f /etc/ssh/ssh_host_*
 cat >/etc/systemd/system/bombyx-ssh-hostkeys.service <<'EOF'
 [Unit]
 Description=Make SSH host keys on a VM's first boot
 ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
-Before=ssh.service ssh.socket
+Before=ssh.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/ssh-keygen -A
 
 [Install]
-WantedBy=multi-user.target ssh.service ssh.socket
+WantedBy=multi-user.target ssh.service
 EOF
 systemctl enable bombyx-ssh-hostkeys.service
 
@@ -98,4 +110,4 @@ journalctl --rotate --vacuum-time=1s >/dev/null 2>&1 || true
 fstrim -av >/dev/null
 sync
 
-echo BOMBYX-DONE >"$CONSOLE"
+printf '\nBOMBYX-DONE\n' >"$CONSOLE"

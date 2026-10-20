@@ -4,6 +4,21 @@ Security (Red Team) review findings. Newest first.
 
 ---
 
+### rt-2026-10-20-windows-build-skips-timeout-check
+
+**Category:** Missing prerequisite check
+
+`boxes/windows-server-2025/build.sh` checks for `curl`, `sha256sum`,
+`qemu-system-x86_64`, `qemu-img`, `xorriso` and `tar` before it
+starts, then runs qemu under `timeout`. A VM host without `timeout`
+fails only at the install step, after the ISO download and the config
+CD, with bash's "command not found" rather than the script's own
+"timeout is not installed". The Ubuntu build checks for it. Raised by
+fresh-reader in the #194 review, outside that stage's lane, so logged
+rather than fixed.
+
+---
+
 ### rt-2026-10-05-self-update-takes-an-unpublished-tag
 
 **Category:** Correctness
