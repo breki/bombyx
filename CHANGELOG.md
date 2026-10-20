@@ -16,6 +16,11 @@ and this project adheres to
 
 ### Fixed
 
+- A Linux guest cloning a GitHub repository over ssh no longer needs `jq` in the
+  box. The guest reads GitHub's published ssh host keys with `tr`, `sed` and
+  `grep`, so a standard box such as `generic/ubuntu2204` is no longer refused
+  before the clone (#191).
+
 ### Removed
 
 ## [0.13.0] - 2026-10-07

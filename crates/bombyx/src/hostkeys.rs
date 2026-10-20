@@ -35,7 +35,9 @@ pub enum KeyFormat {
     /// A JSON document with the keys in an `ssh_keys` array,
     /// each entry a bare `<type> <base64>` pair. The host name
     /// has to be put in front of each one to make a
-    /// `known_hosts` line, and reading the array needs `jq`.
+    /// `known_hosts` line. The guest reads the array with `tr`,
+    /// `sed` and `grep`, so it needs nothing from the box beyond
+    /// the `curl` that fetches it.
     Json,
     /// Finished `known_hosts` lines, host name included. The
     /// guest saves the response and needs nothing else.

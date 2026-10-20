@@ -34,12 +34,15 @@
 //! `points_the_provisioner_at_the_account_script` is a plain
 //! rendering test with no shell half at all.
 //!
-//! **A test here cannot run the script**, so every assertion is
-//! over text. `CLAUDE.md` under **Test-Driven Development**
-//! holds why that is accepted for the two guest scripts and
-//! refused for rendered output: `bootstrap.sh` and `account.sh`
-//! are artifacts bombyx ships, byte for byte, so their text is a
-//! contract. A rendered terminal report is not.
+//! **A test here cannot run the whole script**, so nearly every
+//! assertion is over text. `CLAUDE.md` under **Test-Driven
+//! Development** holds why that is accepted for the two guest
+//! scripts and refused for rendered output: `bootstrap.sh` and
+//! `account.sh` are artifacts bombyx ships, byte for byte, so
+//! their text is a contract. A rendered terminal report is not.
+//! The one exception is `github_known_hosts`, a function that
+//! reads stdin and writes stdout and nothing else, so the tests
+//! at the end of this file run it under `bash`.
 
 use super::{BOOTSTRAP, bootstrap_code};
 
@@ -578,22 +581,26 @@ fn a_fetch_that_came_back_wrong_is_refused_before_the_clone() {
 #[test]
 fn a_box_missing_the_fetch_tools_is_refused_by_name() {
     // A bare "command not found" from inside a VM says
-    // nothing about which box to go and fix. `jq` is asked
-    // for only by the JSON format, so a box carrying neither
-    // can still clone from a host that publishes finished
-    // lines.
+    // nothing about which box to go and fix.
     let flat = flat_bootstrap();
     for needle in [
         "command -v curl",
         "refuse \"curl is not installed in this box",
-        "command -v jq",
-        "refuse \"jq is not installed in this box",
     ] {
         assert!(flat.contains(needle), "missing: {needle}");
     }
+}
+
+#[test]
+fn reading_the_keys_asks_nothing_of_the_box_but_curl() {
+    // Most boxes carry no `jq`, and the guest cannot install it
+    // before the clone, so the script must not call it.
+    // `github_known_hosts` reads GitHub's document instead.
+    let code = bootstrap_code();
+    assert!(!code.contains("jq"), "bootstrap.sh must not use jq");
     assert!(
-        bootstrap_code().contains("= json ] && ! command -v jq"),
-        "jq must be required only by the json format"
+        flat_bootstrap().contains("| github_known_hosts \"$git_host\""),
+        "the json branch must read the keys with github_known_hosts"
     );
 }
 
@@ -1514,4 +1521,145 @@ fn a_secrets_file_no_upload_replaced_is_deleted() {
         branch < removal,
         "the removal must sit in the branch for no configured file"
     );
+}
+
+// Tests that run `github_known_hosts` itself rather than read it.
+//
+// That function reads stdin and writes stdout and touches nothing
+// else, so it is the one piece of the script a test can run on its
+// own. Unix only, because the tests need `bash`.
+#[cfg(unix)]
+mod github_known_hosts {
+    use super::BOOTSTRAP;
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    const ED25519: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0Sd";
+    const ECDSA: &str =
+        "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlz/y6v+Tpockg=";
+
+    // The text of `github_known_hosts` in `BOOTSTRAP`, from its
+    // opening line to the first line that is a bare `}`.
+    fn function_text() -> String {
+        let start = BOOTSTRAP
+            .find("\ngithub_known_hosts() {\n")
+            .expect("bootstrap.sh defines github_known_hosts");
+        let body = &BOOTSTRAP[start + 1..];
+        let end = body.find("\n}\n").expect("github_known_hosts ends");
+        body[..end + 2].to_owned()
+    }
+
+    // Runs `github_known_hosts github.com` with `meta` on stdin,
+    // under `bash` and the same `set -euo pipefail` bootstrap.sh
+    // starts with, and returns whether it succeeded and what it
+    // printed. Both halves matter: the caller refuses on a failed
+    // pipeline, and the host-line check after it refuses on an
+    // empty file, with a different message.
+    fn run(meta: &str) -> (bool, String) {
+        let script = format!(
+            "set -euo pipefail\n{}\ngithub_known_hosts github.com",
+            function_text()
+        );
+        let mut child = Command::new("bash")
+            .args(["-c", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("bash runs");
+        child
+            .stdin
+            .take()
+            .expect("a stdin")
+            .write_all(meta.as_bytes())
+            .expect("write the document");
+        let out = child.wait_with_output().expect("bash finishes");
+        let printed = String::from_utf8(out.stdout).expect("utf-8 output");
+        (out.status.success(), printed)
+    }
+
+    #[test]
+    fn keys_are_read_without_jq_from_either_layout() {
+        // GitHub serves the document pretty-printed today. The
+        // same document on one line is equally valid JSON, so
+        // both have to give the same lines. The real document
+        // opens a `ssh_key_fingerprints` object before the keys,
+        // so a closed object ahead of the member must not count
+        // against it being top-level.
+        let pretty = format!(
+            "{{\n  \"verifiable_password_authentication\": false,\n  \
+             \"ssh_key_fingerprints\": {{\n    \"SHA256_RSA\": \"uNi\"\n  \
+             }},\n  \
+             \"ssh_keys\": [\n    \"{ED25519}\",\n    \"{ECDSA}\"\n  \
+             ],\n  \"hooks\": [\n    \"9.234.106.48/28\"\n  ]\n}}\n"
+        );
+        let compact = format!(
+            "{{\"ssh_keys\" : [\"{ED25519}\",\"{ECDSA}\"],\"hooks\":[]}}"
+        );
+        let want = format!("github.com {ED25519}\ngithub.com {ECDSA}\n");
+        assert_eq!(run(&pretty), (true, want.clone()));
+        assert_eq!(run(&compact), (true, want));
+    }
+
+    #[test]
+    fn only_the_ssh_keys_array_is_read() {
+        // A key-shaped string anywhere else in the document is
+        // not one of the host's keys, so it must not reach the
+        // file.
+        let meta = format!(
+            "{{\"other\": [\"{ECDSA}\"],\n\"ssh_keys\": [\"{ED25519}\"],\n\
+             \"after\": [\"{ECDSA}\"]}}"
+        );
+        assert_eq!(run(&meta), (true, format!("github.com {ED25519}\n")));
+    }
+
+    #[test]
+    fn a_document_naming_ssh_keys_twice_is_refused() {
+        // A second `ssh_keys` anywhere -- a nested member, a longer
+        // key such as `"x\"ssh_keys"`, a string value -- leaves
+        // more than one place the keys might be read from. Picking
+        // one could pin the wrong keys, so the function fails and
+        // writes nothing.
+        let real = format!("\"ssh_keys\": [\"{ED25519}\"]");
+        let nested = format!("{{\"ssh_keys\": [\"{ECDSA}\"]}}");
+        let escaped = format!("\"x\\\"ssh_keys\": [\"{ECDSA}\"]");
+        for meta in [
+            format!("{{{real}, \"x\": {nested}}}"),
+            format!("{{\"x\": {nested}, {real}}}"),
+            format!("{{{escaped}, {real}}}"),
+            format!("{{{real}, {escaped}}}"),
+            format!("{{{real}, \"x\": {{\"y{escaped}}}}}"),
+            format!("{{{real}, \"note\": \"see ssh_keys\"}}"),
+        ] {
+            assert_eq!(run(&meta), (false, String::new()), "for {meta:?}");
+        }
+    }
+
+    #[test]
+    fn a_document_with_no_usable_key_succeeds_and_prints_nothing() {
+        // The function succeeds and prints nothing, so the
+        // caller's "could not read" refusal stays for a failed
+        // fetch, and the host-line check after it refuses with
+        // the message that fits: no line for the host. A key
+        // whose `/` arrives JSON-escaped as `\/` is dropped whole
+        // rather than cut at the backslash, because a truncated
+        // key would be written as a real one.
+        //
+        // An `ssh_keys` member that is not at the top level of the
+        // document holds some other section's keys, so it counts
+        // as no member at all. So does the `"ssh_keys"` inside the
+        // longer key `"x\"ssh_keys"`, where a `\` rather than a `{`
+        // or `,` stands in front of it.
+        let escaped = ECDSA.replace('/', "\\/");
+        for meta in [
+            String::new(),
+            "{\"ssh_keys\": []}".to_owned(),
+            format!("{{\"hooks\": [\"{ED25519}\"]}}"),
+            format!("{{\"ssh_keys\": [\"{escaped}\"]}}"),
+            format!("{{\"ghes\": {{\"ssh_keys\": [\"{ED25519}\"]}}}}"),
+            format!("{{\"a\": [{{\"ssh_keys\": [\"{ED25519}\"]}}]}}"),
+            format!("{{\"x\\\"ssh_keys\": [\"{ED25519}\"]}}"),
+        ] {
+            assert_eq!(run(&meta), (true, String::new()), "for {meta:?}");
+        }
+    }
 }

@@ -698,8 +698,8 @@ fi
 # The two formats differ because the two hosts differ. GitHub
 # serves a JSON document whose `ssh_keys` array holds bare
 # `<type> <base64>` pairs, so the host name has to be put in
-# front of each one and reading the array needs `jq`. Bitbucket
-# serves finished `known_hosts` lines and needs nothing.
+# front of each one; `github_known_hosts` below does that.
+# Bitbucket serves finished `known_hosts` lines and needs nothing.
 #
 # Read as `${VAR:-}` for the reason the deploy-key banner gives:
 # an unset value falls back to `accept-new` rather than aborting
@@ -729,6 +729,117 @@ git_host="${BOMBYX_GIT_HOST:-}"
 keys_url="${BOMBYX_HOST_KEYS_URL:-}"
 keys_format="${BOMBYX_HOST_KEYS_FORMAT:-}"
 
+# Reads GitHub's published document on stdin and prints one
+# `known_hosts` line per key, each starting with the host name
+# given as $1.
+#
+# The document is read with `tr`, `sed` and `grep` rather than
+# `jq`, because most boxes carry no `jq` and the guest cannot
+# install one before the clone: the project's own script, which
+# could, arrives with the clone. Three steps keep the hand
+# parsing narrow:
+#
+#   1. `tr` joins the lines, so the array reads the same whether
+#      the document is pretty-printed or on one line.
+#   2. `sed` keeps only the inside of the `ssh_keys` array. A
+#      key cannot contain `]`, so the first `]` closes it. A
+#      document naming `ssh_keys` more than once is refused
+#      before this step, and one whose only `ssh_keys` is not a
+#      top-level member yields nothing; the comments in the
+#      function say why.
+#   3. `grep -o` keeps only quoted strings shaped like one key:
+#      a type token, one space, and plain base64 up to the
+#      closing quote. A key with a JSON escape in it fails that
+#      shape and is dropped whole, rather than cut short at the
+#      backslash and written as if it were complete.
+#
+# The type token is a pattern rather than a list of today's key
+# types, so a type GitHub adds later still arrives. Either way a
+# line holds exactly one host, one type and one key, so nothing
+# the document says can widen what `ssh` accepts.
+#
+# The host name lands inside a `sed` replacement. That is safe
+# because a host name holds no `/`, `&` or `\`, the three
+# characters a replacement reads specially.
+#
+# A document with no usable key prints nothing and succeeds.
+# `grep` exits 1 when it matches nothing, and that 1 is turned
+# into success, so the caller's "could not read" refusal stays
+# for a failed fetch. The host-line check after the fetch then
+# refuses the empty file with the message that fits it. Any
+# other `grep` status is a real error and still fails.
+github_known_hosts() {
+    keys_doc="$(tr -d '\n')"
+    # The text `ssh_keys` must appear exactly once in the whole
+    # document, in any position: a member, a nested member, the
+    # tail of a longer key such as `"x\"ssh_keys"`, a string
+    # value. With one occurrence,
+    # the checks below and the `sed` that reads the array can only
+    # look at the same place, so no second array can be read in
+    # place of the one that was checked.
+    #
+    # The count ends in `|| true` because `grep` exits 1 on no
+    # match, and under `set -e` an assignment carrying that status
+    # would end the script with no message.
+    keys_names="$({ printf '%s' "$keys_doc" |
+        grep -o 'ssh_keys' | grep -c .; } || true)"
+    # Only a top-level member holds the host's keys; a nested one
+    # belongs to some other section. Two tests settle it.
+    #
+    # The occurrence is a member when a `{` or `,` stands in front
+    # of its name. The key `"x\"ssh_keys"` contains the text
+    # `"ssh_keys"` too, but a `\` stands in front of it, so it is
+    # not a member called `ssh_keys`.
+    #
+    # The member is top-level when the text before it, that `{` or
+    # `,` included, opens one more `{` than it closes. Counting
+    # both rather than `{` alone lets a closed object ahead of it
+    # pass, as GitHub's `ssh_key_fingerprints` does. A brace inside
+    # a string value ahead of the member would skew the count;
+    # GitHub's values there are fingerprints and hold none.
+    #
+    # `sed` keeps the text up to the `{` or `,` and prints nothing
+    # when no member matches. `tr -cd '{'` deletes every character
+    # except `{`, so `wc -c` counts the braces.
+    keys_before="$(printf '%s' "$keys_doc" |
+        sed -n 's/\([{,]\)[[:space:]]*"ssh_keys"[[:space:]]*:.*/\1/p')"
+    keys_depth=$(($(printf '%s' "$keys_before" | tr -cd '{' | wc -c) -
+        $(printf '%s' "$keys_before" | tr -cd '}' | wc -c)))
+    # With two occurrences, nothing says which one holds the host's
+    # keys, so the document is refused rather than guessed at.
+    #
+    # The refusal ends in `false`, which makes the function fail,
+    # so the caller's `if !` runs `refuse`. It is not `return 1`
+    # because this script allows no `exit` or `return` outside
+    # `refuse`, so that no way out can skip removing the uploaded
+    # credentials; `every_refusal_clears_every_uploaded_credential`
+    # in the tests enforces that.
+    #
+    # In the message, `'"'"'` puts an apostrophe inside the
+    # single-quoted format: it closes the quote, adds a
+    # double-quoted `'`, and opens the quote again.
+    #
+    # A document whose one occurrence is not a top-level member,
+    # or that has none, prints nothing and succeeds, for the
+    # reason given above this function.
+    if [ "$keys_names" -gt 1 ]; then
+        printf 'bombyx: the document names "ssh_keys" more' >&2
+        printf ' than once, so bombyx cannot tell which' >&2
+        printf ' holds %s'"'"'s keys.\n' "$1" >&2
+        false
+    elif [ "$keys_names" -eq 1 ] && [ "$keys_depth" -eq 1 ]; then
+        # `|| [ $? -eq 1 ]` accepts `grep`'s no-match status and
+        # nothing else.
+        printf '%s' "$keys_doc" |
+            sed -n 's/.*"ssh_keys"[[:space:]]*:[[:space:]]*\[//p' |
+            sed 's/\].*//' |
+            { grep -oE '"[a-z0-9][a-z0-9.@-]* [A-Za-z0-9+/]+={0,2}"' ||
+                [ $? -eq 1 ]; } |
+            tr -d '"' |
+            sed "s/^/$1 /"
+    fi
+}
+
 if [ -n "$keys_url" ]; then
     if [ -z "$git_host" ]; then
         refuse "bombyx published a URL for the git host's ssh" \
@@ -737,9 +848,7 @@ if [ -n "$keys_url" ]; then
             "different versions of bombyx."
     fi
 
-    # `curl` is needed either way. `jq` only for the JSON
-    # format, so a box carrying neither can still clone from
-    # Bitbucket.
+    # `curl` is needed for either format.
     #
     # Checking here rather than letting the pipeline fail: a
     # bare "command not found" from inside a VM says nothing
@@ -749,13 +858,6 @@ if [ -n "$keys_url" ]; then
             "needs it to fetch $git_host's ssh host keys" \
             "before cloning. Install curl in the box, or choose" \
             "one that has it."
-    fi
-    if [ "$keys_format" = json ] &&
-        ! command -v jq >/dev/null 2>&1; then
-        refuse "jq is not installed in this box, and bombyx" \
-            "needs it to read $git_host's published ssh" \
-            "host keys. Install jq in the box, or choose one" \
-            "that has it."
     fi
 
     # Both failures are reported here rather than left to the
@@ -796,8 +898,7 @@ if [ -n "$keys_url" ]; then
             if ! curl -fsSL --proto '=https' \
                 --proto-redir '=https' --max-time 30 \
                 -- "$keys_url" |
-                jq -r --arg host "$git_host" \
-                    '.ssh_keys[] | $host + " " + .' \
+                github_known_hosts "$git_host" \
                     >"$KNOWN_HOSTS"; then
                 refuse "bombyx could not read $git_host's" \
                     "ssh host keys from $keys_url." \
