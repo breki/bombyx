@@ -12,6 +12,16 @@ and this project adheres to
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.14.0] - 2026-10-20
+
+### Added
+
 - A recipe that builds `bombyx/ubuntu-24.04`, a libvirt box of Ubuntu 24.04 LTS,
   from Canonical's own cloud image: `boxes/ubuntu-24.04/build.sh` accepts the
   image only when Canonical's checksum file carries a good signature by the
