@@ -94,7 +94,7 @@ remote_root = "~/vms"
 
 [projects.myproject.vm]
 provider = "libvirt"
-box = "generic/ubuntu2204"
+box = "bombyx/ubuntu-24.04"
 cpus = 4
 memory = 8192
 

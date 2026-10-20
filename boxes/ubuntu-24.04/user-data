@@ -1,0 +1,25 @@
+#cloud-config
+# cloud-init's instructions for the build's one boot, read from the seed
+# volume build.sh attaches. The work itself is in stage.sh, a plain
+# script that reports success or failure on the serial console, where
+# build.sh looks for it.
+
+# No account from cloud-init. stage.sh creates the vagrant account
+# itself, and without this cloud-init would also create Ubuntu's
+# default `ubuntu` account.
+users: []
+
+# cloud-init's defaults grow the root partition and its filesystem to
+# fill the disk build.sh resized, before runcmd runs.
+
+runcmd:
+  - mkdir -p /mnt/seed
+  - mount -o ro /dev/disk/by-label/CIDATA /mnt/seed
+  - bash /mnt/seed/stage.sh
+
+# Power off once runcmd is done, whether stage.sh succeeded or not; its
+# line on the serial console says which.
+power_state:
+  mode: poweroff
+  condition: true
+  timeout: 60

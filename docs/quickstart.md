@@ -73,7 +73,7 @@ remote_root = "~/vms"
 
 [projects.myproject.vm]
 provider = "libvirt"
-box = "generic/ubuntu2204"
+box = "bombyx/ubuntu-24.04"
 cpus = 3
 memory = 6144
 
@@ -82,6 +82,18 @@ repo = "git@github.com:you/myproject.git"
 ref = "main"
 script = ".bombyx/provision.sh"
 ```
+
+`bombyx/ubuntu-24.04` is a box you build once on the VM host, from
+Canonical's own Ubuntu image, with two commands from a clone of
+this repository:
+
+```bash
+boxes/ubuntu-24.04/build.sh
+vagrant box add --name bombyx/ubuntu-24.04 \
+    ~/.cache/bombyx-box/ubuntu-24.04.box
+```
+
+`docs/ubuntu-guest-box.md` says what the box holds.
 
 `host` is the machine the VMs run on, usually an alias from your
 `~/.ssh/config`. Name the machine you are sitting at and bombyx
@@ -113,8 +125,8 @@ bombyx list --offline
 ```
 
 ```
-NAME       HOST    BOX                 CPUS   MEM
-myproject  vmhost  generic/ubuntu2204     3  6144
+NAME       HOST    BOX                  CPUS   MEM
+myproject  vmhost  bombyx/ubuntu-24.04     3  6144
 ```
 
 `--offline` contacts no machine. An error here names the line to

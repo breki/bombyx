@@ -6,22 +6,6 @@ no entry -- the comment it produced is the record.
 
 ---
 
-### fr-2026-10-20-community-box-in-sample
-
-**Category:** Docs disagree on a recommended value
-
-`config.toml.sample` and `docs/tutorial.md` recommend
-`generic/ubuntu2204`, and `CHANGELOG.md`'s #191 bullet calls it a
-standard box. `CLAUDE.md` under **Environment Constraints** says a
-community box does not qualify, and `generic/*` is one. A reader
-cannot tell whether the box bombyx was fixed and verified on is
-one the project allows. The repair is a decision rather than an
-edit -- note the exception, or switch the example to an
-official-source box -- and `guest-dnssec-missing-key` in
-`docs/todo.md` weighs building that box.
-
----
-
 ### fr-2026-10-20-tdd-pointer-finds-no-reason
 
 **Category:** Pointer to a reason that is not there

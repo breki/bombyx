@@ -423,11 +423,11 @@ state:
 
 ```console
 $ bombyx list
-NAME        HOST             BOX                 CPUS    MEM  STATE
-faraway     offsite.invalid  generic/ubuntu2204     4   8192  unknown
-jutro       vmhost           generic/ubuntu2404     8  16384  not created
-neverbuilt  vmhost           generic/ubuntu2204     4   8192  not created
-vmtest      vmhost           generic/ubuntu2204     2   4096  running
+NAME        HOST             BOX                  CPUS    MEM  STATE
+faraway     offsite.invalid  bombyx/ubuntu-24.04     4   8192  unknown
+jutro       vmhost           bombyx/ubuntu-24.04     8  16384  not created
+neverbuilt  vmhost           bombyx/ubuntu-24.04     4   8192  not created
+vmtest      vmhost           bombyx/ubuntu-24.04     2   4096  running
 ```
 
 Everything but `STATE` comes from your config; `STATE` comes from
