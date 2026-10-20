@@ -6,6 +6,50 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-20-community-box-in-sample
+
+**Category:** Docs disagree on a recommended value
+
+`config.toml.sample` and `docs/tutorial.md` recommend
+`generic/ubuntu2204`, and `CHANGELOG.md`'s #191 bullet calls it a
+standard box. `CLAUDE.md` under **Environment Constraints** says a
+community box does not qualify, and `generic/*` is one. A reader
+cannot tell whether the box bombyx was fixed and verified on is
+one the project allows. The repair is a decision rather than an
+edit -- note the exception, or switch the example to an
+official-source box -- and `guest-dnssec-missing-key` in
+`docs/todo.md` weighs building that box.
+
+---
+
+### fr-2026-10-20-tdd-pointer-finds-no-reason
+
+**Category:** Pointer to a reason that is not there
+
+The module doc of `crates/bombyx/src/vagrantfile/bootstrap_tests.rs`
+says `CLAUDE.md` under **Test-Driven Development** holds why text
+assertions are accepted for the two guest scripts. That section
+discusses the sample-config parser and rendered terminal output,
+not guest scripts or shipped text as a contract, so a reader sent
+there finds nothing. State the reason in the module doc, or add
+the guest-script case to `CLAUDE.md`.
+
+---
+
+### fr-2026-10-20-var-default-paragraph-repeats
+
+**Category:** Repeated paragraph with a dangling reference
+
+In `crates/bombyx/templates/bootstrap.sh`, the paragraph beginning
+"Read as `${VAR:-}` for the reason the deploy-key banner gives",
+in the host-keys section, repeats the paragraph above it on the
+`:-` default. It points at a "deploy-key banner" no heading
+carries, and leans on `accept-new`, which the file introduces
+much later. Cut it, or fold the `accept-new` fallback into the
+paragraph on empty variables.
+
+---
+
 ### fr-2026-10-03-snapshot-rule-stated-six-times
 
 **Category:** Duplicated rule deferred for its own commit

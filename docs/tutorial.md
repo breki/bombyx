@@ -418,10 +418,18 @@ way a missing `git` is:
 bombyx: curl is not installed in this box, and bombyx needs it to fetch github.com's ssh host keys before cloning. Install curl in the box, or choose one that has it.
 ```
 
-A second `bombyx:` line follows it, the same one the `git` passage
-above shows. `generic/ubuntu2204` carries `curl`, so the value in
-the sample needs nothing more. An `https://` URL needs no `curl`
-at all, since it opens no ssh connection.
+A second `bombyx:` line follows it, reporting that the guest has
+been cleaned up:
+
+```
+bombyx: any uploaded deploy key and any git credential have been removed from this guest, and so has any secrets file at /home/agent/.bombyx-env.
+```
+
+`generic/ubuntu2204` carries `curl`, so the value in the sample
+needs no extra program. An `https://` URL needs no `curl` at all,
+since it opens no ssh connection; neither does an ssh URL on a git
+host bombyx has no published keys for, such as a self-hosted one,
+because bombyx then fetches nothing.
 
 Keeping the Debian box would mean installing `git` into it and
 repackaging it, which this tutorial does not cover.

@@ -124,12 +124,15 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 # not are `cloud-image/debian-13` and `debian/bookworm64`; the
 # value below does. Booting the box is the only way to be sure.
 #
-# An ssh URL under `repo` below asks for more. Before cloning,
-# the guest fetches the git host's published ssh keys, so it can
-# tell the real server from an impostor -- see
+# An ssh URL on GitHub or Bitbucket under `repo` below asks for
+# more. Those are the git hosts bombyx knows the published ssh
+# keys of. Before cloning, the guest fetches those keys, so it
+# can tell the real server from an impostor -- see
 # docs/trust-boundary.md. That fetch runs `curl`, so the box
 # needs `curl` as well as `git`. An `https` URL needs no `curl`,
-# because it opens no ssh connection at all.
+# because it opens no ssh connection at all, and neither does an
+# ssh URL on any other host, because bombyx fetches nothing for
+# it.
 box = "generic/ubuntu2204"
 cpus = 4
 
