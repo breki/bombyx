@@ -53,6 +53,60 @@ jobs:
       - name: Test
         run: cargo xtask test
 
+  # The 14-day dependency cooldown (see "Supply-chain hygiene" in
+  # CLAUDE.md). `dep-age-check` diffs the lockfiles against a base
+  # commit; in CI the checkout *is* HEAD, so the base must be the
+  # commit this push or pull request started from, or the check
+  # sees no change. The standalone command fails, rather than
+  # warns, when the registry is unreachable or the base is missing;
+  # the step below picks a base that exists before calling it.
+  dep-age:
+    name: Dependency cooldown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the base commit must be present
+
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # A pull request is checked out as a merge commit, so diffing
+      # against the base branch's commit gives exactly the PR's
+      # changes. A push diffs against the previous tip. An all-zero
+      # `before` -- the first push of `main`, or a new tag, including
+      # one deleted and pushed again -- diffs against the parent. A
+      # previous tip no fetched ref reaches any more -- a force-push
+      # to `main`, or a release tag force-pushed through
+      # release.yml's `workflow_call` -- is fetched by hash. If that
+      # fails too, the step warns and checks the last commit only,
+      # since the pushed range is then unknown. Values go through
+      # `env`, never into the script.
+      - name: Cooldown on changed dependencies
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          # Maintainer-set repository variable; a pull request
+          # cannot approve its own fresh dependency.
+          BOMBYX_DEP_AGE_ALLOW: ${{ vars.BOMBYX_DEP_AGE_ALLOW }}
+        run: |
+          base="${PR_BASE:-$PUSH_BEFORE}"
+          case "$base" in
+            ""|0000000000000000000000000000000000000000) base="HEAD^" ;;
+            *)
+              git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+                || git fetch --quiet --no-tags origin "$base" 2>/dev/null \
+                || true
+              if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null
+              then
+                echo "::warning::base $base is unreachable; checking only HEAD^..HEAD"
+                base="HEAD^"
+              fi
+              ;;
+          esac
+          echo "Diffing lockfiles against $base"
+          cargo xtask dep-age-check --base "$base"
+
   fmt:
     name: Format
     runs-on: ubuntu-latest

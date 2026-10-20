@@ -1,12 +1,12 @@
 # The validate gates
 
-`cargo xtask validate` runs eleven gates. `CLAUDE.md` under
+`cargo xtask validate` runs twelve gates. `CLAUDE.md` under
 **Definition of Done** carries the short list -- each gate's name
 and the command that re-runs it alone. This page is the detail:
 what each gate checks, why they run in the order they do, and why
 the doc gate runs rustdoc twice.
 
-## The eleven gates
+## The twelve gates
 
 Listed in the order they execute, so the numbers match what the
 run prints:
@@ -43,25 +43,35 @@ run prints:
    the wrong shape, and a `Depends on` / `Supersedes` id that
    names no entry. Only ids in those two fields are resolved, so a
    durable id in prose stays unchecked provenance
-5. **Code duplication <= 6%** (production code, tests excluded)
-6. **Licences, bans and sources** (`cargo xtask deny`) -- runs
+5. **Executable scripts** (`cargo xtask scripts-check`) --
+   every file under `scripts/` that starts with `#!` must be
+   staged as mode `100755`, so it runs by bare path; a file with
+   no shebang is exempt
+6. **Code duplication <= 6% pooled, <= 12% in any one crate**
+   (production code, tests excluded; each crate is measured
+   alone, so a copy between crates is not counted)
+7. **No warnings**: `cargo clippy --all-targets -- -D warnings`,
+   then `xtask` again with every optional feature off and with
+   each one alone -- so the compiled-out `frontend` and `deploy`
+   modules are linted here, though nothing else builds them
+8. **Documentation builds and every doc link resolves**
+   (`cargo xtask doc`) -- see "Doc gate" below
+9. **Licences, bans and sources** (`cargo xtask deny`) -- runs
    offline against `deny.toml`; a licence outside the allow-list,
    a banned crate or a non-crates.io source fails, and a missing
    `cargo-deny` is an error rather than a warning because there
    is no network here to be down
-7. **No warnings**: `cargo clippy --all-targets -- -D warnings`
-8. **Documentation builds and every doc link resolves**
-   (`cargo xtask doc`) -- see "Doc gate" below
-9. **`xtask`'s own tests pass** -- this step runs `-p xtask`
+10. **`xtask`'s own tests pass** -- this step runs `-p xtask`
    only, which is why the run prints `Test (xtask only)`
-10. **Coverage >= 90% overall and >= 85% per module** -- one
-   file below the per-module floor fails the run even when the
-   workspace figure passes. `xtask/src/coverage.rs` owns both as
-   `OVERALL_THRESHOLD` and `MODULE_THRESHOLD`. This is also where
-   the *workspace* tests run, under
-   `llvm-cov --workspace --exclude xtask`, so the same tests are
-   not compiled and run twice
-11. **Security audit** (RUSTSEC; `cargo xtask audit`) -- a
+11. **Coverage >= 90% overall and >= 85% per file** -- one
+   file below the per-file floor fails the run even when the
+   workspace figure passes. Both are the `rustbase-xtask`
+   library's defaults (`coverage_overall` and `coverage_file` in
+   `Config::thresholds`), which `tasks_config()` in
+   `xtask/src/helpers.rs` can override. This is also where the
+   *workspace* tests run, under `llvm-cov --workspace --exclude
+   xtask`, so the same tests are not compiled and run twice
+12. **Security audit** (RUSTSEC; `cargo xtask audit`) -- a
    positive vulnerability fails; an unreachable advisory DB
    degrades to a warning
 

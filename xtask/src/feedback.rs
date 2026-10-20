@@ -1,9 +1,9 @@
 //! `cargo xtask feedback-add` -- the deterministic appender for
 //! `docs/developer/template-feedback.md`.
 //!
-//! Entry placement, date stamping and dedup are mechanical work
-//! that drifts when an LLM does it by hand, so this command
-//! owns them: it mints a stable `tf-<yyyy-mm-dd>-<slug>` ID
+//! Entry placement, date stamping and dedup are mechanical, so
+//! this command owns them rather than `/template-improve`'s
+//! prose: it mints a stable `tf-<yyyy-mm-dd>-<slug>` ID
 //! (mirroring the `rt-`/`aq-` log convention in
 //! `docs/developer/`), inserts the entry at the top of the
 //! chosen section, and skips a re-add of an ID already present.
@@ -13,23 +13,27 @@
 use std::fs;
 use std::io::Read as _;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::ValueEnum;
+use rustbase_xtask::markdown::rejoin_like;
 
-use crate::helpers::{FEEDBACK_REL, is_fence, today_iso, workspace_root};
+use crate::helpers::workspace_root;
+
+/// Repo-relative path of the template-feedback file. Single
+/// source of truth shared by the backfeed, feedback, and sync
+/// commands (the last via its never-sync set).
+pub const FEEDBACK_REL: &str = "docs/developer/template-feedback.md";
 
 /// Which lifecycle section of the feedback file an entry
-/// belongs in. clap renders these as `open` / `suggestion` and
-/// rejects anything else at the CLI boundary.
-///
-/// There is no `resolved` section: the feedback file holds live
-/// divergences and upstream suggestions only, so a divergence
-/// closed here is removed rather than filed, the way git history
-/// records what shipped.
+/// belongs in. clap renders these as `open` / `resolved` /
+/// `suggestion` and rejects anything else at the CLI boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum FeedbackSection {
     /// Known-suboptimal / pending template issues.
     Open,
+    /// Entries closed out by a fix.
+    Resolved,
     /// Ideas a derived project wants pushed upstream.
     Suggestion,
 }
@@ -40,6 +44,7 @@ impl FeedbackSection {
     fn header_keyword(self) -> &'static str {
         match self {
             FeedbackSection::Open => "open divergences",
+            FeedbackSection::Resolved => "resolved",
             FeedbackSection::Suggestion => "suggestions to flow back",
         }
     }
@@ -81,9 +86,13 @@ fn make_id(date: &str, title: &str) -> String {
 }
 
 /// Render an entry block: `### <id> -- <title>` header, a blank
-/// line, then the trimmed body.
-fn format_entry(id: &str, title: &str, body: &str) -> String {
-    format!("### {id} -- {title}\n\n{}", body.trim_end())
+/// line, then the trimmed body. Refused when `records-check` would
+/// reject it, e.g. a body opening with an unknown `**Label:**`.
+fn format_entry(id: &str, title: &str, body: &str) -> Result<String, String> {
+    let block = format!("### {id} -- {title}\n\n{}", body.trim_end());
+    rustbase_xtask::records::check_entry(&block)
+        .map_err(|e| format!("feedback-add: {e}"))?;
+    Ok(block)
 }
 
 /// True when `md` already contains an entry with exactly this
@@ -108,7 +117,10 @@ fn is_target_section(line: &str, kw: &str) -> bool {
 
 /// Index of the first section header matching `kw`, skipping
 /// any `## `-looking line inside a fenced code block so a code
-/// sample cannot be chosen as the insertion point.
+/// sample cannot be chosen as the insertion point. Feedback entries
+/// are written at column 0 (`### <id> -- <title>`, body unindented),
+/// so `rustbase_xtask::markdown::section_bounds`'s column-0-only rule
+/// does not hold here and fences must be tracked.
 fn find_section(lines: &[&str], kw: &str) -> Option<usize> {
     let mut in_fence = false;
     for (idx, l) in lines.iter().enumerate() {
@@ -124,27 +136,20 @@ fn find_section(lines: &[&str], kw: &str) -> Option<usize> {
 /// The line an empty section carries in place of entries.
 const PLACEHOLDER: &str = "_None yet._";
 
-/// Remove the `_None yet._` line from the section whose header
-/// is at `sec`, along with the blank line under it.
-///
-/// The placeholder can sit anywhere in the section, not only
-/// under the header: every insert puts its entry above the
-/// placeholder and pushes it further down. So the search runs to
-/// the next `## ` header or to the end of the file.
+/// Remove the `_None yet._` line from the section whose header is at
+/// `sec`, with the blank line under it -- only when it is the first
+/// non-blank line under the header. Anywhere else the same text is
+/// content (an entry quoting the empty-section format), not the
+/// placeholder.
 fn drop_placeholder(lines: &mut Vec<&str>, sec: usize) {
-    let end = lines[sec + 1..]
-        .iter()
-        .position(|l| l.starts_with("## "))
-        .map_or(lines.len(), |off| sec + 1 + off);
-
-    let Some(off) = lines[sec + 1..end]
-        .iter()
-        .position(|l| l.trim() == PLACEHOLDER)
+    let Some(at) =
+        (sec + 1..lines.len()).find(|&i| !lines[i].trim().is_empty())
     else {
         return;
     };
-    let at = sec + 1 + off;
-
+    if lines[at].trim() != PLACEHOLDER {
+        return;
+    }
     if lines.get(at + 1).is_some_and(|l| l.trim().is_empty()) {
         lines.remove(at + 1);
     }
@@ -155,10 +160,6 @@ fn drop_placeholder(lines: &mut Vec<&str>, sec: usize) {
 /// just below its header (past a single blank line if present)
 /// and above the section's existing entries. Pure. Errors when
 /// no matching section header is found.
-///
-/// The section's `_None yet._` placeholder is dropped on the way
-/// through, because the entry being inserted is what makes it
-/// false.
 fn insert_entry(md: &str, kw: &str, block: &str) -> Result<String, String> {
     let mut lines: Vec<&str> = md.lines().collect();
     let sec = find_section(&lines, kw).ok_or_else(|| {
@@ -176,7 +177,7 @@ fn insert_entry(md: &str, kw: &str, block: &str) -> Result<String, String> {
     out.extend(&block_lines);
     out.push("");
     out.extend(&lines[ins..]);
-    Ok(out.join("\n") + "\n")
+    Ok(rejoin_like(&out, md))
 }
 
 /// Absolute path of this template's feedback file.
@@ -198,7 +199,7 @@ fn read_body(body_file: Option<&str>) -> Result<String, String> {
     Ok(buf)
 }
 
-/// `cargo xtask feedback-add --section <open|suggestion>
+/// `cargo xtask feedback-add --section <open|resolved|suggestion>
 /// --title <title> [--body-file <path>]` -- append a
 /// feedback entry with a minted ID. Body comes from
 /// `--body-file` or stdin. Idempotent: an ID already present is
@@ -222,12 +223,55 @@ pub fn feedback_add(
         return Ok(());
     }
 
-    let block = format_entry(&id, title.trim(), &body);
+    let block = format_entry(&id, title.trim(), &body)?;
     let updated = insert_entry(&md, section.header_keyword(), &block)?;
     fs::write(&path, updated)
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     eprintln!("feedback-add: added {id}");
     Ok(())
+}
+
+/// Today's date as an ISO `YYYY-MM-DD` string (UTC).
+///
+/// Used to stamp `last-run` in the backfeed ledger and to
+/// mint `tf-<date>-<slug>` feedback IDs. A clock read before
+/// the Unix epoch (should never happen) degrades to day zero.
+pub fn today_iso() -> String {
+    let days = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs() / 86_400).ok())
+        .unwrap_or(0);
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Convert a count of days since the Unix epoch back into a
+/// civil `(year, month, day)`. Howard Hinnant's `civil_from_days`
+/// (the inverse of the private `days_from_civil` in
+/// `rustbase_xtask::dep_age`), valid for the whole proleptic
+/// Gregorian range. Pure, so it is
+/// unit-tested against known dates.
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    (y + i64::from(m <= 2), m, d)
+}
+
+/// True when `line` opens or closes a fenced code block (its
+/// first non-whitespace run is ```` ``` ```` or `~~~`). A copy of
+/// `rustbase_xtask::markdown::is_fence`, pending
+/// fr-2026-10-20-feedback-keeps-its-own-is-fence.
+pub fn is_fence(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("```") || t.starts_with("~~~")
 }
 
 #[cfg(test)]
@@ -262,7 +306,18 @@ mod tests {
     #[test]
     fn format_entry_has_header_and_trimmed_body() {
         let e = format_entry("tf-x", "Title", "body text\n\n\n");
-        assert_eq!(e, "### tf-x -- Title\n\nbody text");
+        assert_eq!(e, Ok("### tf-x -- Title\n\nbody text".to_owned()));
+    }
+
+    #[test]
+    fn format_entry_refuses_a_body_the_records_check_would_reject() {
+        // The body's first line sits where an entry's fields go.
+        let e =
+            format_entry("tf-x", "Title", "**Fix:** pinned it").unwrap_err();
+        assert!(e.contains("`Fix`"), "{e}");
+        let e =
+            format_entry("tf-x", "Title", "text\n\n### tf-y\n").unwrap_err();
+        assert!(e.contains("one entry"), "{e}");
     }
 
     const DOC: &str = "\
@@ -274,24 +329,78 @@ mod tests {
 
 Body.
 
-## Suggestions to flow back to the template
+## Resolved
 
-### existing-suggestion -- old suggestion entry
+### existing-resolved -- old resolved entry
 
 Body.
+
+## Suggestions to flow back to the template
+
+Nothing yet.
 ";
 
     #[test]
     fn insert_entry_places_at_section_top() {
         let block = "### tf-new -- New Entry\n\nNew body.";
-        let out = insert_entry(DOC, "suggestions to flow back", block).unwrap();
+        let out = insert_entry(DOC, "resolved", block).unwrap();
         let new_pos = out.find("tf-new").unwrap();
-        let old_pos = out.find("existing-suggestion").unwrap();
+        let old_pos = out.find("existing-resolved").unwrap();
         let open_pos = out.find("existing-open").unwrap();
-        // New entry precedes the existing Suggestions entry...
+        // New entry precedes the existing Resolved entry...
         assert!(new_pos < old_pos);
         // ...but comes after the (untouched) Open section.
         assert!(open_pos < new_pos);
+    }
+
+    #[test]
+    fn a_header_with_trailing_spaces_keeps_other_sections_placeholders() {
+        let doc = "## Open divergences \n\n### tf-x -- X\n\n## Resolved\n\n_None yet._\n";
+        let out = insert_entry(doc, "open", "### tf-a -- A").unwrap();
+        assert!(out.contains("_None yet._"), "{out}");
+    }
+
+    #[test]
+    fn an_unclosed_fence_in_an_entry_keeps_later_placeholders() {
+        let doc = "## Open divergences\n\n### tf-1 -- one\n\nRun:\n```sh\ncargo x\n\n\
+                   ## Resolved\n\n_None yet._\n";
+        let out = insert_entry(doc, "open", "### tf-a -- A").unwrap();
+        assert!(out.contains("_None yet._"), "{out}");
+    }
+
+    #[test]
+    fn a_placeholder_quoted_in_an_entry_or_a_fenced_header_copy_is_left_alone()
+    {
+        // A fenced copy of a header before the real one must not
+        // crash, and a placeholder quoted inside an entry is content.
+        let doc = "## Open divergences\n\n### tf-1 -- one\n\n```md\n## Resolved\n\n\
+                   _None yet._\n```\n\n## Resolved\n\n### tf-2 -- two\n\n```md\n\
+                   _None yet._\n```\n";
+        let out = insert_entry(doc, "resolved", "### tf-a -- A").unwrap();
+        assert_eq!(out.matches("_None yet._").count(), 2, "{out}");
+    }
+
+    #[test]
+    fn insert_entry_keeps_crlf_line_endings() {
+        let doc = "# F\r\n\r\n## Open divergences\r\n\r\n## Resolved\r\n";
+        let out = insert_entry(doc, "open", "### tf-a -- A").unwrap();
+        assert!(out.contains("### tf-a -- A\r\n"), "{out:?}");
+        assert!(!out.replace("\r\n", "").contains('\n'), "{out:?}");
+    }
+
+    #[test]
+    fn insert_entry_drops_the_empty_section_placeholder() {
+        // A section with no entries carries `_None yet._`; the first
+        // entry replaces it, and other sections keep theirs.
+        let doc = "# F\n\n## Open divergences\n\n_None yet._\n\n\
+                   ## Suggestions\n\n_None yet._\n";
+        let out = insert_entry(doc, "open", "### tf-a -- A\n\nBody.").unwrap();
+        let open = &out[..out.find("## Suggestions").unwrap()];
+        assert!(!open.contains("_None yet._"), "{out}");
+        assert!(open.contains("tf-a"), "{out}");
+        assert!(
+            out[out.find("## Suggestions").unwrap()..].contains("_None yet._")
+        );
     }
 
     #[test]
@@ -299,34 +408,32 @@ Body.
         let block = "### tf-new -- New Entry\n\nBody.";
         let out = insert_entry(DOC, "open divergences", block).unwrap();
         let new_pos = out.find("tf-new").unwrap();
-        let sugg_hdr = out
-            .find("## Suggestions to flow back to the template")
-            .unwrap();
-        // Inserted into Open, so it sits above the Suggestions header.
-        assert!(new_pos < sugg_hdr);
+        let resolved_hdr = out.find("## Resolved").unwrap();
+        // Inserted into Open, so it sits above the Resolved header.
+        assert!(new_pos < resolved_hdr);
     }
 
     #[test]
     fn find_section_skips_headers_in_code_fences() {
-        // A section header inside a code fence must not be chosen
-        // as the section.
+        // A `## Resolved` line inside a code fence must not be
+        // chosen as the section.
         let md = "\
 ## Open divergences
 
 ### existing -- entry
 
 ```
-## Suggestions to flow back to the template
+## Resolved
 ```
 
-## Suggestions to flow back to the template
+## Resolved
 
 ### real -- entry
 ";
         let lines: Vec<&str> = md.lines().collect();
-        let idx = find_section(&lines, "suggestions to flow back").unwrap();
+        let idx = find_section(&lines, "resolved").unwrap();
         // The real header, not the fenced one.
-        assert_eq!(lines[idx], "## Suggestions to flow back to the template");
+        assert_eq!(lines[idx], "## Resolved");
         assert!(idx > 5);
     }
 
@@ -343,37 +450,6 @@ Body.
     }
 
     #[test]
-    fn insert_entry_drops_the_empty_placeholder() {
-        // `_None yet._` states that the section is empty, so an
-        // insert has to take it out. Earlier inserts push it
-        // below the entries they add, which is where it stops
-        // being read and starts being wrong.
-        const MD: &str = "\
-# Template feedback
-
-## Open divergences
-
-### existing-open -- entry
-
-Body.
-
-_None yet._
-
-## Suggestions to flow back to the template
-
-_None yet._
-";
-        let out = insert_entry(MD, "open divergences", "### tf-new -- E\n\nB.")
-            .unwrap();
-        let sugg = out
-            .find("## Suggestions to flow back to the template")
-            .unwrap();
-        assert!(!out[..sugg].contains("_None yet._"));
-        // The section that is still empty keeps its placeholder.
-        assert!(out[sugg..].contains("_None yet._"));
-    }
-
-    #[test]
     fn insert_entry_errors_on_missing_section() {
         let err = insert_entry(DOC, "nonexistent", "x").unwrap_err();
         assert!(err.contains("nonexistent"));
@@ -382,25 +458,51 @@ _None yet._
     #[test]
     fn insert_entry_keeps_trailing_newline_and_is_idempotent_shape() {
         let block = "### tf-new -- E\n\nB.";
-        let out = insert_entry(DOC, "suggestions to flow back", block).unwrap();
+        let out = insert_entry(DOC, "resolved", block).unwrap();
         assert!(out.ends_with('\n'));
         // The header line is preserved exactly once.
-        assert_eq!(
-            out.matches("## Suggestions to flow back to the template")
-                .count(),
-            1
-        );
+        assert_eq!(out.matches("## Resolved").count(), 1);
     }
 
     #[test]
     fn is_target_section_matches_level_two_only() {
+        assert!(is_target_section("## Resolved", "resolved"));
         assert!(is_target_section("## Open divergences", "open"));
-        assert!(is_target_section(
-            "## Suggestions to flow back to the template",
-            "suggestions to flow back"
-        ));
         // Entry-level headers are not section headers.
-        assert!(!is_target_section("### tf-x -- open thing", "open"));
-        assert!(!is_target_section("plain text", "open"));
+        assert!(!is_target_section("### tf-x -- resolved thing", "resolved"));
+        assert!(!is_target_section("plain text", "resolved"));
+    }
+
+    #[test]
+    fn civil_from_days_epoch_and_known_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(31), (1970, 2, 1));
+        // 2026-07-16 is 20650 days after the epoch.
+        assert_eq!(civil_from_days(20650), (2026, 7, 16));
+    }
+
+    #[test]
+    fn today_iso_is_well_formed() {
+        // `dddd-dd-dd` shape, without depending on the
+        // ISO-date validator (`rustbase_xtask::text::is_iso_date`).
+        let s = today_iso();
+        let b = s.as_bytes();
+        assert_eq!(b.len(), 10);
+        assert_eq!(b[4], b'-');
+        assert_eq!(b[7], b'-');
+        assert!(
+            b.iter()
+                .enumerate()
+                .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+        );
+    }
+
+    #[test]
+    fn is_fence_detects_both_markers() {
+        assert!(is_fence("```"));
+        assert!(is_fence("```rust"));
+        assert!(is_fence("  ~~~"));
+        assert!(!is_fence("### heading"));
+        assert!(!is_fence("plain"));
     }
 }

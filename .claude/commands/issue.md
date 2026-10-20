@@ -153,7 +153,7 @@ then.
 
 ### 6. Verify, and know what you did not verify
 
-Run `cargo xtask validate`. It runs all eleven gates, and
+Run `cargo xtask validate`. It runs every gate, and
 `CLAUDE.md` under **Definition of Done** lists them in run
 order.
 

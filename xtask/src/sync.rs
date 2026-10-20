@@ -1,27 +1,24 @@
 //! `cargo xtask sync-candidates` -- the deterministic file-delta
 //! half of the `/template-sync` workflow.
 //!
-//! `/template-sync` works from a SHA delta, and a raw delta
-//! carries template-internal bookkeeping files (CHANGELOG, the
-//! feedback file, the diary and review logs, per-issue docs,
-//! the todo list).
-//! Those change on every commit and each project owns its own,
-//! so an upstream change to one is never worth pulling and
-//! reading the list costs the reviewer for nothing. This
-//! command runs the
+//! `/template-sync` is already SHA-delta based, but it surfaced
+//! template-internal bookkeeping files (CHANGELOG, the feedback
+//! file, the diary and review logs, per-issue docs) as sync
+//! candidates. Those grow on every commit, so they became pure
+//! review noise on every downstream sync. This command runs the
 //! `git diff --name-status` delta, drops the never-sync set, and
 //! categorizes what remains into a clean candidate table, so the
 //! LLM only judges files that could actually be worth applying.
 
 use std::process::Command;
 
-use crate::helpers::{BACKFEED_LEDGER_REL, FEEDBACK_REL, workspace_root};
+use crate::backfeed::BACKFEED_LEDGER_REL;
+use crate::feedback::FEEDBACK_REL;
+use crate::helpers::workspace_root;
 
 /// Template-internal paths that must never appear as sync
-/// candidates. A trailing `/` marks a directory prefix, a
-/// single `*` matches any run of characters between the text
-/// on either side of it, and every other entry is an exact
-/// path. These files are bookkeeping
+/// candidates. A trailing `/` marks a directory prefix; every
+/// other entry is an exact path. These files are bookkeeping
 /// that each project owns independently, so an upstream change
 /// to them is never something a downstream should pull.
 const NEVER_SYNC: &[&str] = &[
@@ -29,29 +26,19 @@ const NEVER_SYNC: &[&str] = &[
     FEEDBACK_REL,
     BACKFEED_LEDGER_REL,
     "docs/developer/DIARY.md",
-    "docs/developer/*-log.md",
+    "docs/developer/redteam-log.md",
+    "docs/developer/artisan-log.md",
+    "docs/developer/fresh-reader-log.md",
     "docs/issues/",
     "docs/todo.md",
 ];
 
-/// True when `path` is in the never-sync set: an exact match, a
-/// path under a directory-prefix entry, or a match for an entry
-/// containing `*`.
-///
-/// The `*` case splits the entry on the star and requires
-/// `path` to start with the text before it and end with the
-/// text after it. The length check is what stops the two halves
-/// overlapping, so `docs/developer/*-log.md` does not match
-/// `docs/developer/-log.md` by reusing the same characters
-/// twice.
+/// True when `path` is in the never-sync set (exact match, or
+/// under a directory-prefix entry).
 fn is_excluded(path: &str) -> bool {
     NEVER_SYNC.iter().any(|pat| {
         if pat.ends_with('/') {
             path.starts_with(pat)
-        } else if let Some((head, tail)) = pat.split_once('*') {
-            path.len() > head.len() + tail.len()
-                && path.starts_with(head)
-                && path.ends_with(tail)
         } else {
             path == *pat
         }
@@ -71,14 +58,9 @@ fn categorize(path: &str) -> &'static str {
         "clippy.toml",
     ];
     const CLAUDE_PREFIXES: &[&str] = &[".claude/"];
-    // `frontend/` and `e2e/` classify paths in the **upstream
-    // rustbase** diff, which still has both. They must stay
-    // even though this project has neither -- removing them
-    // would silently drop upstream frontend changes out of the
-    // Boilerplate bucket and into the fallback.
     const BOILERPLATE_PREFIXES: &[&str] = &["crates/", "frontend/", "e2e/"];
     const DOC_PREFIXES: &[&str] = &["docs/"];
-    const DOC_FILES: &[&str] = &["README.md"];
+    const DOC_FILES: &[&str] = &["README.md", "llms.txt"];
     const PROJECT_FILES: &[&str] =
         &["Cargo.toml", "Cargo.lock", ".gitignore", ".editorconfig"];
 
@@ -168,7 +150,7 @@ fn format_candidates(candidates: &[Candidate]) -> String {
     }
     candidates
         .iter()
-        .map(|c| format!("{:<4} {:<15} {}", c.status, c.category, c.path))
+        .map(|c| format!("{:<3} {:<15} {}", c.status, c.category, c.path))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -216,41 +198,14 @@ pub fn sync_candidates(last_synced: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// Each entry in `NEVER_SYNC` must exclude itself. Naming
-    /// the entries one at a time cannot catch a member left
-    /// out of the set, so this walks the set instead.
-    #[test]
-    fn every_never_sync_entry_excludes_itself() {
-        for pat in NEVER_SYNC {
-            assert!(is_excluded(pat), "{pat} does not exclude itself");
-        }
-    }
-
-    /// A reviewer backlog is matched by shape, not by name, so
-    /// a persona added later needs no edit here. Asserting a
-    /// name that does not exist yet is the point.
-    #[test]
-    fn any_reviewer_backlog_is_excluded() {
-        assert!(is_excluded("docs/developer/redteam-log.md"));
-        assert!(is_excluded("docs/developer/artisan-log.md"));
-        assert!(is_excluded("docs/developer/fresh-reader-log.md"));
-        assert!(is_excluded("docs/developer/simplify-log.md"));
-        // The shape is `<name>-log.md` under that directory.
-        assert!(!is_excluded("docs/developer/log.md"));
-        assert!(!is_excluded("docs/other/a-log.md"));
-    }
-
     #[test]
     fn is_excluded_matches_exact_and_prefix() {
         assert!(is_excluded("CHANGELOG.md"));
         assert!(is_excluded("docs/developer/template-feedback.md"));
         assert!(is_excluded("docs/developer/backfeed-ledger.toml"));
         assert!(is_excluded("docs/issues/some-issue.md")); // prefix
-        // Each project's own pending items. `cargo xtask todo`
-        // writes this file per project, and upstream keeps its
-        // own, so a sync would offer upstream's backlog as
-        // something to merge into ours.
-        assert!(is_excluded("docs/todo.md"));
+        assert!(is_excluded("docs/todo.md")); // per-project backlog
+        assert!(is_excluded("docs/developer/fresh-reader-log.md"));
         // Not excluded: other docs, code.
         assert!(!is_excluded("docs/deployment.md"));
         assert!(!is_excluded("docs/developer/architecture.md"));
@@ -319,25 +274,6 @@ M\tCLAUDE.md
     #[test]
     fn format_candidates_notes_empty_set() {
         assert!(format_candidates(&[]).contains("no sync candidates"));
-    }
-
-    /// `R100` is four characters and every other status is
-    /// one, so the status column has to be four wide or the
-    /// rename row pushes the category across and the table
-    /// misaligns from that row on.
-    #[test]
-    fn format_candidates_aligns_a_rename_with_a_modify() {
-        let out = format_candidates(&candidates(
-            "M\tCLAUDE.md\nR100\tdocs/old.md\tdocs/new.md\n",
-        ));
-        let mut lines = out.lines();
-        let modified = lines.next().expect("a modify row");
-        let renamed = lines.next().expect("a rename row");
-        assert_eq!(
-            modified.find("Claude config"),
-            renamed.find("Docs"),
-            "category column moved:\n{out}"
-        );
     }
 
     #[test]

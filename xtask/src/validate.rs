@@ -1,333 +1,192 @@
-use std::time::Instant;
+use std::path::Path;
 
-use crate::audit;
-use crate::canon;
-use crate::clippy_cmd;
-use crate::coverage;
-use crate::dep_age;
-use crate::doc_cmd;
-use crate::dupes;
-use crate::fmt_cmd;
-use crate::helpers::{elapsed_str, step_output};
-use crate::test_cmd;
+use rustbase_xtask::step::{self, Step};
+use rustbase_xtask::tee::{OpenError, Tee};
 
-/// One gate: its label, the standalone subcommand that re-runs
-/// just it, and the work.
+use crate::helpers::tasks_config;
+#[cfg(feature = "frontend")]
+use crate::{frontend_check, frontend_dupes, frontend_fmt, frontend_test};
+
+/// The library's standard gates (`step::standard`, which gives their
+/// order), with this project's frontend gates after Deny: three
+/// static ones, then the frontend tests, ahead of the Rust tests.
 ///
-/// The step numbers and the total are **derived** from the table's
-/// order and length; do not reintroduce literals. Hand-written
-/// indices plus a matching `TOTAL_STEPS` const had nothing checking
-/// the two, so inserting a gate and missing one call site printed
-/// `[5/9]` twice with every test still green.
-struct Step {
-    /// Label printed in the `[N/T]` line.
-    name: &'static str,
-    /// The `cargo xtask <cmd>` that runs this gate alone.
-    cmd: &'static str,
-    /// The gate itself, returning its detail string.
-    run: Box<dyn FnOnce() -> Result<String, String>>,
+/// The `[N/M]` numbering follows whichever gates are compiled in.
+// Without the frontend feature nothing is inserted, so nothing fails.
+#[cfg_attr(not(feature = "frontend"), allow(clippy::unnecessary_wraps))]
+fn steps(check: bool) -> Result<Vec<Step>, String> {
+    #[cfg_attr(not(feature = "frontend"), allow(unused_mut))]
+    let mut steps = step::standard(&tasks_config(), check);
+    #[cfg(feature = "frontend")]
+    step::insert_after(
+        &mut steps,
+        step::names::DENY,
+        [
+            frontend_fmt::step(check),
+            frontend_check::step(),
+            frontend_dupes::step(),
+            frontend_test::step(),
+        ],
+    )?;
+    Ok(steps)
 }
 
-/// Run all validation steps with concise stepwise
-/// output.
-///
-/// Dep-age runs first so a dependency adopted within the
-/// cooldown fails the gate *before* the compile steps
-/// (Clippy, Test, Coverage) build -- and run its build
-/// script -- on the too-new crate. It is free when the
-/// lockfile is unchanged (no network, ~0.1s), so on the
-/// common no-dep-change commit its early placement costs
-/// nothing; it only reaches the network on a commit that
-/// actually adopts a dependency, and even then a
-/// connectivity failure degrades to a warning (a genuine
-/// cooldown breach still fails; a transient outage does not),
-/// so it never blocks the local gates behind the network.
-///
-/// After Dep-age, steps run cheap static gates first and the
-/// expensive dynamic gates (Test, Coverage) last, so a fast
-/// check's failure is not gated behind the multi-minute
-/// instrumented Coverage run. Fmt leads the static gates
-/// because it rewrites whitespace that later checks read. Doc
-/// closes them: rustdoc reuses the metadata Clippy's check has
-/// just produced, so it costs about a second. The
-/// Audit step is network-dependent, so it runs last (after
-/// Coverage) with the same degrade-to-warning treatment as
-/// Dep-age -- a positive vulnerability finding still fails the
-/// gate, but a transient outage does not.
-///
-/// `check` selects fmt's mode: `false` (default) auto-fixes
-/// formatting in place; `true` runs the read-only
-/// `fmt --check` for CI or before partial staging, where
-/// an in-place rewrite would sweep unrelated drift into the
-/// working tree.
+/// Run every gate, printing one `[N/M]` line each. `check` makes the
+/// format gates read-only instead of fixing in place, for CI or
+/// before partial staging, where a rewrite would sweep unrelated
+/// drift into the working tree.
 pub fn validate(check: bool) -> Result<(), String> {
-    let overall_start = Instant::now();
-    let steps = steps(check);
-    let total = steps.len();
-    for (i, s) in steps.into_iter().enumerate() {
-        run_step(i + 1, total, s)?;
-    }
-
-    println!("Validate OK ({})", elapsed_str(overall_start));
-    Ok(())
+    // Opened first, so a failure at any later point reaches the log.
+    let tee = open_log(&tasks_config().root)?;
+    let result = (|| {
+        frontend_feature_check(
+            cfg!(feature = "frontend"),
+            Path::new("frontend/package.json").exists(),
+        )?;
+        step::run_all(steps(check)?, &tee)
+    })();
+    record_failure(&tee, &result);
+    result
 }
 
-/// The gate table, in the order they run.
-///
-/// A function rather than an expression inside [`validate`], so the
-/// table is data a test can look at. What that buys: the `cmd`
-/// strings are the `iterate with: cargo xtask <cmd>` hints, and
-/// nothing else ties them to the clap subcommands in
-/// [`crate::XCommand`] -- a renamed subcommand would leave a hint
-/// telling the operator to run a command that does not exist, with
-/// every test green. That is the same drift the derived step
-/// numbers were introduced to remove.
-fn steps(check: bool) -> Vec<Step> {
-    vec![
-        // Fail fast on a within-cooldown dependency before
-        // compiling it.
-        step("Dep-age", "dep-age-check", run_dep_age),
-        // Cheap static gates first ...
-        step("Fmt", "fmt", move || run_fmt(check)),
-        // Reads markdown only, so it needs no compilation and
-        // sits ahead of every gate that does.
-        step("Canon", "canon-check", run_canon),
-        // Also markdown-only -- keeps the record files' ids and
-        // cross-references sound.
-        step("Records", "records-check", run_records),
-        step("Duplication", "dupes", run_duplication),
-        step("Deny", "deny", run_deny),
-        step("Clippy", "clippy", run_clippy),
-        step("Doc", "doc", run_doc),
-        // ... expensive dynamic gates last.
-        step("Test (xtask only)", "test", run_test),
-        step("Coverage", "coverage", run_coverage),
-        step("Audit", "audit", run_audit),
-    ]
-}
-
-/// Builds one [`Step`], so the table reads as a list rather than as
-/// a column of `Box::new` calls.
-fn step<F>(name: &'static str, cmd: &'static str, run: F) -> Step
-where
-    F: FnOnce() -> Result<String, String> + 'static,
-{
-    Step {
-        name,
-        cmd,
-        run: Box::new(run),
-    }
-}
-
-/// Run a single step, printing the `[N/T]` result line.
-///
-/// `cmd` is the standalone xtask subcommand for this step;
-/// on failure it is printed as an iterate-with hint so the
-/// user re-runs the single failing gate (seconds) instead
-/// of the whole pipeline (minutes).
-fn run_step(index: usize, total: usize, s: Step) -> Result<(), String> {
-    let start = Instant::now();
-    match (s.run)() {
-        Ok(detail) => {
-            let time = elapsed_str(start);
-            let full = if detail.is_empty() {
-                time
-            } else {
-                format!("{detail}, {time}")
-            };
-            step_output(index, total, s.name, "OK", &full);
-            Ok(())
-        }
-        Err(e) => {
-            step_output(index, total, s.name, "FAILED", "");
-            eprintln!("  -> iterate with: cargo xtask {}", s.cmd);
-            Err(e)
-        }
-    }
-}
-
-/// Fmt step -- returns empty detail on success. Auto-fixes
-/// unless `check` selects the read-only path.
-fn run_fmt(check: bool) -> Result<String, String> {
-    if check {
-        fmt_cmd::fmt_check()?;
-    } else {
-        fmt_cmd::fmt()?;
-    }
-    Ok(String::new())
-}
-
-/// Clippy step -- returns empty detail on success.
-fn run_clippy() -> Result<String, String> {
-    let r = clippy_cmd::clippy_check()?;
-    match r.error {
-        None => Ok(String::new()),
-        Some(err) => {
-            for line in r.items.iter().take(5) {
-                eprintln!("  {line}");
-            }
-            Err(err)
-        }
-    }
-}
-
-/// Doc step -- returns empty detail on success.
-///
-/// Grouped with the cheap static gates: rustdoc reuses the
-/// metadata `cargo check` already produced, so both passes
-/// together cost about a second on a warm target directory.
-fn run_doc() -> Result<String, String> {
-    match doc_cmd::doc_check()? {
-        None => Ok(String::new()),
-        Some(failure) => {
-            for line in failure.items.iter().take(5) {
-                eprintln!("  {line}");
-            }
-            Err(failure.summary)
-        }
-    }
-}
-
-/// Test step -- runs xtask's own tests only.
-///
-/// The coverage step runs `--workspace --exclude xtask`
-/// under llvm-cov instrumentation, which executes every
-/// non-xtask test. Running the full workspace tests
-/// here too would duplicate that work. Restricting to
-/// `-p xtask` keeps validate a full quality gate
-/// without paying the duplication cost.
-fn run_test() -> Result<String, String> {
-    test_cmd::test_check_xtask()?;
-    Ok(String::new())
-}
-
-/// The licence, bans and sources gate -- see [`crate::deny`] for
-/// why it is offline and why a missing tool is an error here.
-fn run_deny() -> Result<String, String> {
-    crate::deny::deny().map(|()| String::from("licenses, bans, sources"))
-}
-
-/// Security-advisory step -- fails on any vulnerability
-/// (RUSTSEC). Advisory warnings are informational,
-/// and a connectivity / missing-tool failure degrades to a
-/// printed warning rather than failing the gate, so an
-/// offline machine or fresh CI run is not blocked by a
-/// transient outage.
-fn run_audit() -> Result<String, String> {
-    let r = audit::audit_check();
-    if let Some(err) = r.error {
-        return Err(err);
-    }
-    for w in &r.warnings {
-        eprintln!("  warning: {w}");
-    }
-    Ok(r.detail)
-}
-
-/// Dep-age step -- cooldown-checks only dependencies added or
-/// bumped in the working tree versus HEAD. A within-cooldown
-/// dependency fails the gate; a missing baseline or
-/// unreachable registry degrades to a printed warning (same
-/// treatment as Audit), so an offline run is not blocked.
-fn run_dep_age() -> Result<String, String> {
-    let r = dep_age::check_changed_deps();
-    if let Some(err) = r.error {
-        return Err(err);
-    }
-    for w in &r.warnings {
-        eprintln!("  warning: {w}");
-    }
-    Ok(r.detail)
-}
-
-/// Coverage step -- returns "N.N% >= 90%" detail.
-fn run_coverage() -> Result<String, String> {
-    let r = coverage::coverage_check()?;
-    match r.error {
-        None => Ok(format!(
-            "{:.1}% >= {}%",
-            r.line_pct,
-            coverage::OVERALL_THRESHOLD,
+/// `target/validate.log`. While a first run holds it, a second run is
+/// refused: it could not write the log, which would keep the first
+/// run's output, and a reader would take that as the second run's
+/// result. Any other failure to open it warns and falls back to
+/// terminal-only output, since the log is a side record.
+fn open_log(root: &Path) -> Result<Tee, String> {
+    match Tee::open(root, "validate") {
+        Ok(tee) => Ok(tee),
+        Err(OpenError::Held(path)) => Err(format!(
+            "another validate is running in this checkout ({} is held); \
+             wait for it to finish",
+            path.display()
         )),
-        Some(failure) => Err(coverage::format_failure(&failure)),
+        Err(e) => {
+            eprintln!("warning: {e}; this run is not logged");
+            Ok(Tee::terminal())
+        }
     }
 }
 
-/// Canon step -- returns detail string.
-fn run_canon() -> Result<String, String> {
-    canon::canon_check_detail()
-}
-
-/// Records step -- returns detail string.
-fn run_records() -> Result<String, String> {
-    crate::records::records_check_detail()
-}
-
-fn run_duplication() -> Result<String, String> {
-    let r = dupes::dupes_check()?;
-    if let Some(err) = r.error {
-        Err(err)
-    } else {
-        Ok(r.detail)
+/// Write a failure to the log as `main` prints it.
+fn record_failure(tee: &Tee, result: &Result<(), String>) {
+    if let Err(e) = result {
+        tee.record(&crate::error_line(e));
     }
+}
+
+/// Refuse a frontend on disk when the `frontend` feature is off:
+/// its gates are then compiled out, and a run with none of them
+/// would read as a pass.
+fn frontend_feature_check(
+    feature_on: bool,
+    has_frontend: bool,
+) -> Result<(), String> {
+    if has_frontend && !feature_on {
+        return Err("frontend/ exists but xtask's `frontend` feature is \
+             off, so validate would run none of its gates -- add \
+             \"frontend\" to `default` in xtask/Cargo.toml, or delete \
+             frontend/"
+            .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use clap::CommandFactory;
 
     use super::*;
 
     #[test]
-    fn every_iterate_hint_names_a_real_subcommand() {
-        // The hint printed on failure is `cargo xtask <cmd>`, and
-        // nothing else connects those strings to the clap surface.
-        // Renaming a subcommand would otherwise leave the gate
-        // advising a command that does not exist, with the whole
-        // suite green.
+    fn every_step_hint_resolves_to_a_subcommand() {
+        // Each Step's `cmd` is printed as the
+        // `iterate with: cargo xtask <cmd>` hint on failure.
+        // Resolve every one through the actual CLI so a renamed
+        // or removed subcommand cannot leave the hint pointing at
+        // a command that does not exist. `check` does not affect
+        // the cmd strings, so either value exercises them all.
         let cli = crate::Cli::command();
-        for s in steps(false) {
+        for step in steps(false).unwrap() {
             assert!(
-                cli.find_subcommand(s.cmd).is_some(),
-                "no `cargo xtask {}` subcommand for the {} gate",
-                s.cmd,
-                s.name
+                cli.find_subcommand(step.cmd()).is_some(),
+                "validate step {:?} hints `cargo xtask {}`, \
+                 which is not a real subcommand",
+                step.name(),
+                step.cmd(),
             );
         }
     }
 
     #[test]
-    fn the_gates_are_distinct_and_named() {
-        let steps = steps(false);
-        let names: BTreeSet<&str> = steps.iter().map(|s| s.name).collect();
-        assert_eq!(names.len(), steps.len(), "a gate label is repeated");
-        assert!(steps.iter().all(|s| !s.name.is_empty()));
+    fn frontend_steps_follow_the_feature_and_sit_after_deny() {
+        // The frontend gates are in the list exactly when the
+        // feature compiles them in, so the `[N/M]` total counts
+        // only gates that exist.
+        let all = steps(false).unwrap();
+        let names: Vec<&str> = all.iter().map(Step::name).collect();
+        let deny = names.iter().position(|n| *n == step::names::DENY).unwrap();
+        let first = names.iter().position(|n| n.starts_with("Frontend"));
+        if cfg!(feature = "frontend") {
+            assert_eq!(first, Some(deny + 1), "{names:?}");
+        } else {
+            assert_eq!(first, None, "{names:?}");
+        }
     }
 
     #[test]
-    fn the_order_is_the_documented_one() {
-        // Cheapest first, network last. Asserted rather than left to
-        // the prose above: the ordering is the reason a failing
-        // clippy run does not cost a coverage run first, and a
-        // reordering that undoes that is invisible otherwise.
-        let order: Vec<&str> = steps(false).iter().map(|s| s.name).collect();
-        assert_eq!(
-            order,
-            vec![
-                "Dep-age",
-                "Fmt",
-                "Canon",
-                "Records",
-                "Duplication",
-                "Deny",
-                "Clippy",
-                "Doc",
-                "Test (xtask only)",
-                "Coverage",
-                "Audit",
-            ]
-        );
+    fn the_help_carries_no_program_description() {
+        // `about = None` on `Cli` keeps the doc comments of `Cli`,
+        // `XCommand` and the flattened `LibCommand` out of `--help`.
+        assert!(crate::Cli::command().get_about().is_none());
+    }
+
+    #[test]
+    fn a_log_that_cannot_open_falls_back_to_the_terminal() {
+        let root = std::env::temp_dir()
+            .join(format!("xtask-validate-nolog-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("target"), "a file, not a dir").unwrap();
+        let tee = open_log(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(tee.unwrap().path(), None);
+    }
+
+    #[test]
+    fn a_second_run_while_one_holds_the_log_is_refused() {
+        // Its fallback would leave the first run's result in the log,
+        // read as this run's.
+        let root = std::env::temp_dir()
+            .join(format!("xtask-validate-held-{}", std::process::id()));
+        let first = Tee::open(&root, "validate").unwrap();
+        let e = open_log(&root).unwrap_err();
+        drop(first);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(e.contains("another validate is running"), "{e}");
+    }
+
+    #[test]
+    fn a_failure_is_logged_as_main_prints_it() {
+        let root = std::env::temp_dir()
+            .join(format!("xtask-validate-log-{}", std::process::id()));
+        let tee = Tee::open(&root, "validate").unwrap();
+        record_failure(&tee, &Ok(()));
+        record_failure(&tee, &Err("boom".into()));
+        drop(tee);
+        let log = std::fs::read_to_string(root.join("target/validate.log"));
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(log.unwrap(), format!("{}\n", crate::error_line("boom")));
+    }
+
+    #[test]
+    fn frontend_on_disk_needs_the_frontend_feature() {
+        // With the feature off its gates are compiled out, so a
+        // frontend on disk would pass validate unchecked.
+        let err = frontend_feature_check(false, true).unwrap_err();
+        assert!(err.contains("`frontend` feature"), "{err}");
+        assert!(frontend_feature_check(true, true).is_ok());
+        assert!(frontend_feature_check(true, false).is_ok());
+        assert!(frontend_feature_check(false, false).is_ok());
     }
 }
