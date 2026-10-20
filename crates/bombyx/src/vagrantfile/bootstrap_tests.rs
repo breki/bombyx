@@ -34,12 +34,15 @@
 //! `points_the_provisioner_at_the_account_script` is a plain
 //! rendering test with no shell half at all.
 //!
-//! **A test here cannot run the script**, so every assertion is
-//! over text. `CLAUDE.md` under **Test-Driven Development**
-//! holds why that is accepted for the two guest scripts and
-//! refused for rendered output: `bootstrap.sh` and `account.sh`
-//! are artifacts bombyx ships, byte for byte, so their text is a
-//! contract. A rendered terminal report is not.
+//! **A test here cannot run the whole script**, so nearly every
+//! assertion is over text. `CLAUDE.md` under **Test-Driven
+//! Development** holds why that is accepted for the two guest
+//! scripts and refused for rendered output: `bootstrap.sh` and
+//! `account.sh` are artifacts bombyx ships, byte for byte, so
+//! their text is a contract. A rendered terminal report is not.
+//! The one exception is `github_known_hosts`, a function that
+//! reads stdin and writes stdout and nothing else, so the tests
+//! at the end of this file run it under `sh`.
 
 use super::{BOOTSTRAP, bootstrap_code};
 
@@ -578,22 +581,26 @@ fn a_fetch_that_came_back_wrong_is_refused_before_the_clone() {
 #[test]
 fn a_box_missing_the_fetch_tools_is_refused_by_name() {
     // A bare "command not found" from inside a VM says
-    // nothing about which box to go and fix. `jq` is asked
-    // for only by the JSON format, so a box carrying neither
-    // can still clone from a host that publishes finished
-    // lines.
+    // nothing about which box to go and fix.
     let flat = flat_bootstrap();
     for needle in [
         "command -v curl",
         "refuse \"curl is not installed in this box",
-        "command -v jq",
-        "refuse \"jq is not installed in this box",
     ] {
         assert!(flat.contains(needle), "missing: {needle}");
     }
+}
+
+#[test]
+fn reading_the_keys_asks_nothing_of_the_box_but_curl() {
+    // Most boxes carry no `jq`, and the guest cannot install it
+    // before the clone, so the script must not call it.
+    // `github_known_hosts` reads GitHub's document instead.
+    let code = bootstrap_code();
+    assert!(!code.contains("jq"), "bootstrap.sh must not use jq");
     assert!(
-        bootstrap_code().contains("= json ] && ! command -v jq"),
-        "jq must be required only by the json format"
+        flat_bootstrap().contains("| github_known_hosts \"$git_host\""),
+        "the json branch must read the keys with github_known_hosts"
     );
 }
 
@@ -1514,4 +1521,94 @@ fn a_secrets_file_no_upload_replaced_is_deleted() {
         branch < removal,
         "the removal must sit in the branch for no configured file"
     );
+}
+
+// The text of `github_known_hosts` in `BOOTSTRAP`, from its
+// opening line to the first line that is a bare `}`.
+//
+// That function reads stdin and writes stdout and touches
+// nothing else, so it is the one piece of the script a test can
+// run on its own.
+fn github_known_hosts_fn() -> String {
+    let start = BOOTSTRAP
+        .find("\ngithub_known_hosts() {\n")
+        .expect("bootstrap.sh defines github_known_hosts");
+    let body = &BOOTSTRAP[start + 1..];
+    let end = body.find("\n}\n").expect("github_known_hosts ends");
+    body[..end + 2].to_owned()
+}
+
+// Runs `github_known_hosts github.com` under `sh` with `meta`
+// on stdin, and returns what it printed.
+#[cfg(unix)]
+fn known_hosts_from(meta: &str) -> String {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let script =
+        format!("{}\ngithub_known_hosts github.com", github_known_hosts_fn());
+    let mut child = Command::new("sh")
+        .args(["-c", &script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("sh runs");
+    child
+        .stdin
+        .take()
+        .expect("a stdin")
+        .write_all(meta.as_bytes())
+        .expect("write the document");
+    let out = child.wait_with_output().expect("sh finishes");
+    String::from_utf8(out.stdout).expect("utf-8 output")
+}
+
+const ED25519: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0Sd";
+const ECDSA: &str = "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlz/y6v+Tpockg=";
+
+#[cfg(unix)]
+#[test]
+fn github_keys_are_read_without_jq_from_either_layout() {
+    // GitHub serves the document pretty-printed today. The same
+    // document on one line is equally valid JSON, so both have
+    // to give the same lines.
+    let pretty = format!(
+        "{{\n  \"verifiable_password_authentication\": false,\n  \
+         \"ssh_keys\": [\n    \"{ED25519}\",\n    \"{ECDSA}\"\n  ],\n  \
+         \"hooks\": [\n    \"9.234.106.48/28\"\n  ]\n}}\n"
+    );
+    let compact =
+        format!("{{\"ssh_keys\" : [\"{ED25519}\",\"{ECDSA}\"],\"hooks\":[]}}");
+    let want = format!("github.com {ED25519}\ngithub.com {ECDSA}\n");
+    assert_eq!(known_hosts_from(&pretty), want);
+    assert_eq!(known_hosts_from(&compact), want);
+}
+
+#[cfg(unix)]
+#[test]
+fn only_the_ssh_keys_array_is_read() {
+    // A key-shaped string anywhere else in the document is not
+    // one of the host's keys, so it must not reach the file.
+    let meta = format!(
+        "{{\"other\": [\"{ECDSA}\"],\n\"ssh_keys\": [\"{ED25519}\"],\n\
+         \"after\": [\"{ECDSA}\"]}}"
+    );
+    assert_eq!(known_hosts_from(&meta), format!("github.com {ED25519}\n"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_document_with_no_usable_key_gives_no_line() {
+    // Nothing printed is what the host-line check after the
+    // fetch refuses on. A key whose `/` arrives JSON-escaped as
+    // `\/` is dropped whole rather than cut at the backslash,
+    // because a truncated key would be written as a real one.
+    let escaped = ECDSA.replace('/', "\\/");
+    for meta in [
+        String::new(),
+        "{\"ssh_keys\": []}".to_owned(),
+        format!("{{\"hooks\": [\"{ED25519}\"]}}"),
+        format!("{{\"ssh_keys\": [\"{escaped}\"]}}"),
+    ] {
+        assert_eq!(known_hosts_from(&meta), "", "for {meta:?}");
+    }
 }

@@ -405,31 +405,23 @@ guest boots, and then the provisioner refuses at clone time and
 exits 1. Your own `provision.sh` cannot rescue such a box, since
 `git` is exactly what would fetch that file in the first place.
 
-A GitHub or Bitbucket URL over ssh needs `curl` in the box, and
-`jq` as well for GitHub. The reason is that, before it clones,
-bombyx has the guest fetch that host's published ssh keys, so as
-to tell the real server from an impostor rather than trusting
-whatever answers on port 22; `docs/trust-boundary.md` explains
-why. The fetch runs `curl` for either host. Reading GitHub's
-answer needs `jq` on top of that, because GitHub publishes its
-keys as JSON while Bitbucket publishes finished `known_hosts`
-lines -- so a Bitbucket clone asks for no `jq` at all. A box
-missing a program it needs is refused by name, in the same way a
-missing `git` is:
+A GitHub or Bitbucket URL over ssh needs `curl` in the box as
+well. The reason is that, before it clones, bombyx has the guest
+fetch that host's published ssh keys, so as to tell the real
+server from an impostor rather than trusting whatever answers on
+port 22; `docs/trust-boundary.md` explains why. The fetch runs
+`curl`, and the guest reads the answer with tools every Linux box
+already has. A box without `curl` is refused by name, in the same
+way a missing `git` is:
 
 ```
-bombyx: jq is not installed in this box, and bombyx needs it to read github.com's published ssh host keys. Install jq in the box, or choose one that has it.
+bombyx: curl is not installed in this box, and bombyx needs it to fetch github.com's ssh host keys before cloning. Install curl in the box, or choose one that has it.
 ```
 
 A second `bombyx:` line follows it, the same one the `git` passage
-above shows.
-
-*(unverified)* We have not booted a guest to establish which of
-these boxes carries `jq`. Ubuntu and Debian cloud images generally
-do not, so expect to install it -- and note again that your own
-`provision.sh` cannot do so, for the reason the `git` passage
-gives. An `https://` URL needs neither program, since it opens no
-ssh connection at all.
+above shows. `generic/ubuntu2204` carries `curl`, so the value in
+the sample needs nothing more. An `https://` URL needs no `curl`
+at all, since it opens no ssh connection.
 
 Keeping the Debian box would mean installing `git` into it and
 repackaging it, which this tutorial does not cover.

@@ -127,11 +127,9 @@ provider = "libvirt"          # libvirt or hyperv; libvirt if absent
 # An ssh URL under `repo` below asks for more. Before cloning,
 # the guest fetches the git host's published ssh keys, so it can
 # tell the real server from an impostor -- see
-# docs/trust-boundary.md. That fetch runs `curl` for GitHub and
-# for Bitbucket alike, and reading GitHub's answer needs `jq` on
-# top, because GitHub publishes its keys as JSON where Bitbucket
-# publishes finished `known_hosts` lines. An `https` URL needs
-# neither, because it opens no ssh connection at all.
+# docs/trust-boundary.md. That fetch runs `curl`, so the box
+# needs `curl` as well as `git`. An `https` URL needs no `curl`,
+# because it opens no ssh connection at all.
 box = "generic/ubuntu2204"
 cpus = 4
 

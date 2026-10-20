@@ -698,8 +698,8 @@ fi
 # The two formats differ because the two hosts differ. GitHub
 # serves a JSON document whose `ssh_keys` array holds bare
 # `<type> <base64>` pairs, so the host name has to be put in
-# front of each one and reading the array needs `jq`. Bitbucket
-# serves finished `known_hosts` lines and needs nothing.
+# front of each one; `github_known_hosts` below does that.
+# Bitbucket serves finished `known_hosts` lines and needs nothing.
 #
 # Read as `${VAR:-}` for the reason the deploy-key banner gives:
 # an unset value falls back to `accept-new` rather than aborting
@@ -729,6 +729,45 @@ git_host="${BOMBYX_GIT_HOST:-}"
 keys_url="${BOMBYX_HOST_KEYS_URL:-}"
 keys_format="${BOMBYX_HOST_KEYS_FORMAT:-}"
 
+# Reads GitHub's published document on stdin and prints one
+# `known_hosts` line per key, each starting with the host name
+# given as $1.
+#
+# The document is read with `tr`, `sed` and `grep` rather than
+# `jq`, because most boxes carry no `jq` and the guest cannot
+# install one before the clone: the project's own script, which
+# could, arrives with the clone. Three steps keep the hand
+# parsing narrow:
+#
+#   1. `tr` joins the lines, so the array reads the same whether
+#      the document is pretty-printed or on one line.
+#   2. `sed` keeps only the inside of the `ssh_keys` array. A
+#      key cannot contain `]`, so the first `]` closes it.
+#   3. `grep -o` keeps only quoted strings shaped like one key:
+#      a type token, one space, and plain base64 up to the
+#      closing quote. A key with a JSON escape in it fails that
+#      shape and is dropped whole, rather than cut short at the
+#      backslash and written as if it were complete.
+#
+# The type token is a pattern rather than a list of today's key
+# types, so a type GitHub adds later still arrives. Either way a
+# line holds exactly one host, one type and one key, so nothing
+# the document says can widen what `ssh` accepts.
+#
+# The host name lands inside a `sed` replacement. That is safe
+# because a host name holds no `/`, `&` or `\`, the three
+# characters a replacement reads specially.
+#
+# A document with no usable key prints nothing, and `grep`
+# exits 1, which fails the caller's pipeline.
+github_known_hosts() {
+    tr -d '\n' |
+        sed -n 's/.*"ssh_keys"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' |
+        grep -oE '"[a-z0-9][a-z0-9.@-]* [A-Za-z0-9+/]+={0,2}"' |
+        tr -d '"' |
+        sed "s/^/$1 /"
+}
+
 if [ -n "$keys_url" ]; then
     if [ -z "$git_host" ]; then
         refuse "bombyx published a URL for the git host's ssh" \
@@ -737,9 +776,7 @@ if [ -n "$keys_url" ]; then
             "different versions of bombyx."
     fi
 
-    # `curl` is needed either way. `jq` only for the JSON
-    # format, so a box carrying neither can still clone from
-    # Bitbucket.
+    # `curl` is needed for either format.
     #
     # Checking here rather than letting the pipeline fail: a
     # bare "command not found" from inside a VM says nothing
@@ -749,13 +786,6 @@ if [ -n "$keys_url" ]; then
             "needs it to fetch $git_host's ssh host keys" \
             "before cloning. Install curl in the box, or choose" \
             "one that has it."
-    fi
-    if [ "$keys_format" = json ] &&
-        ! command -v jq >/dev/null 2>&1; then
-        refuse "jq is not installed in this box, and bombyx" \
-            "needs it to read $git_host's published ssh" \
-            "host keys. Install jq in the box, or choose one" \
-            "that has it."
     fi
 
     # Both failures are reported here rather than left to the
@@ -796,8 +826,7 @@ if [ -n "$keys_url" ]; then
             if ! curl -fsSL --proto '=https' \
                 --proto-redir '=https' --max-time 30 \
                 -- "$keys_url" |
-                jq -r --arg host "$git_host" \
-                    '.ssh_keys[] | $host + " " + .' \
+                github_known_hosts "$git_host" \
                     >"$KNOWN_HOSTS"; then
                 refuse "bombyx could not read $git_host's" \
                     "ssh host keys from $keys_url." \
