@@ -461,3 +461,21 @@ check whether #170 or #172 removes a precondition it needs. Also decide whether
 docs/local-host.md should warn that a hypervisor escape on a local VM host lands
 on the workstation, the machine bombyx exists to protect; no doc says so today.
 
+### guest-dnssec-missing-key
+
+**Summary:** generic/ubuntu2204 guests fail every DNS lookup: DNSSEC missing-key
+
+Every generic/ubuntu2204 guest on frosti (jutro, vmtest) now fails all DNS
+lookups through systemd-resolved with "DNSSEC validation failed: missing-key",
+so a GitHub ssh clone fails at the host-key fetch (curl: Could not resolve host:
+api.github.com) and https clones would fail too. Observed 2026-10-20 during
+#191. The box's /etc/systemd/resolved.conf forces DNSSEC=yes with DNS=4.2.2.1
+4.2.2.2 208.67.220.220; guest clock is correct; dig against each resolver (and
+192.168.121.1) answers; restarting systemd-resolved does not help. Root DNSKEY
+RRset is now signed only by key tag 38696 (KSK-2024, rollover scheduled
+2026-10-11) and the box runs systemd 249.11-0ubuntu3.11, so a stale built-in
+root trust anchor is the likely cause -- unproven. Options to weigh: account.sh
+drops a resolved.conf.d override (DNSSEC=allow-downgrade or no) before
+bootstrap; or move off generic/ubuntu2204 to a vendor box (CLAUDE.md requires an
+official source anyway, and generic/* is a community box).
+
