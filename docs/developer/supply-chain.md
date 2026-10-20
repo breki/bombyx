@@ -141,7 +141,11 @@ The other four are about vulnerabilities and freshness:
   standalone command** (the `dep-age` job in
   `.github/workflows/ci.yml`) with `--base` set to the commit the
   pull request or push started from -- in CI the checkout *is*
-  `HEAD`, so diffing against `HEAD` would always pass.
+  `HEAD`, so diffing against `HEAD` would always pass. Two cases
+  check the last commit only (`HEAD^..HEAD`): a push with no
+  start commit (the first push of `main`, or a new tag), and a
+  start commit that cannot be fetched even by hash, which the
+  job flags with a warning.
 - **`cargo xtask dep-preflight`** is the *pre-compile* twin of
   `dep-age-check`. Where the gate reports a cooldown breach
   *after* the fact, preflight *remediates* it *before* you

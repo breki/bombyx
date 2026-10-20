@@ -50,12 +50,12 @@ jobs:
   # "Validate OK" there would not mean the dependencies were
   # audited.
   #
-  # `dep-age-check` is absent here: it compares the lockfiles
-  # against a base commit, and at a tag the lockfile is unchanged,
-  # so it would be a guaranteed no-op. The cooldown is enforced
-  # where a dependency is actually adopted -- `validate` on the
+  # `dep-age-check` is not one of this job's gates. The cooldown
+  # is enforced where a dependency is adopted -- `validate` on the
   # commit that adds it, and ci.yml's `dep-age` job on its push or
-  # pull request.
+  # pull request. That job also runs here through the `ci` call,
+  # diffing the tagged commit against its parent, which at a
+  # release commit changes no registry dependency.
   #
   # Installed from crates.io rather than through a prebuilt-binary
   # action: crates.io is already a trust root for this build, so

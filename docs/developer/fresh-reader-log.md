@@ -6,6 +6,67 @@ no entry -- the comment it produced is the record.
 
 ---
 
+### fr-2026-10-20-ci-doc-gate-pointer-dangles
+
+**Category:** Pointer to a heading that is not there
+
+A comment in `.github/workflows/ci.yml`, on the doc job, says to
+see "Doc gate" in `CLAUDE.md`. That heading is in
+`docs/developer/validate-gates.md`; point the comment there.
+
+---
+
+### fr-2026-10-20-release-tag-reason-names-a-dead-guard
+
+**Category:** Reason that names code this project does not build
+
+`.claude/commands/release.md` step 12 justifies the annotated tag
+by the deploy guard's `git describe --exact-match`. bombyx has no
+deploy step and its deploy modules are compiled out. Use the
+reason `CLAUDE.md` gives (the tag carries a date and author and is
+what `git describe` finds).
+
+---
+
+### fr-2026-10-20-release-target-discovery-ungranted
+
+**Category:** Step its own frontmatter does not grant
+
+`.claude/commands/release.md` step 9 runs `rustc -vV`, `rustup
+target list --installed` and `rustup target add`, and its
+`allowed-tools` grants neither `rustc` nor `rustup`, so each run
+prompts. Add the two grants or have the operator run the commands.
+Logged, not fixed: `allowed-tools` is executable, outside a prose
+review's edits.
+
+---
+
+### fr-2026-10-20-gate-number-rule-states-no-reason
+
+**Category:** Rule whose reason does not parse
+
+`CLAUDE.md` says to refer to the supply-chain gates "by name, not
+number, so a list and a run order that disagree cannot drift". Say
+the reason once: gate numbers shift when a gate is added or a
+feature is switched, and a name does not.
+
+---
+
+### fr-2026-10-20-incident-narration-in-workflows-and-release
+
+**Category:** History narrated instead of the reason
+
+Several passages tell the incident rather than the rule, against
+`CLAUDE.md`'s writing rule: `ci.yml`'s licence-generator comment
+(the `v0.3.0` story), `release.yml`'s comments on the workflow-level
+permission, the per-target step, the force-updated tags and the
+edit branch, `release.md`'s `v0.3.0` and `v0.5.0` stories,
+`supply-chain.md`'s "Until this existed" and "Naming them in the
+file was not enough", and `validate-gates.md`'s "Both cases were
+live". Keep the one-clause reason in each and drop the incident.
+
+---
+
 ### fr-2026-10-20-tdd-pointer-finds-no-reason
 
 **Category:** Pointer to a reason that is not there

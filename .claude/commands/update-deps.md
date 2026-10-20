@@ -88,7 +88,10 @@ brand-new major), **do not** silently drop it:
   user-stated justification (or a security fix). When the
   user approves, record it in the commit and pass it through
   the gate via `BOMBYX_DEP_AGE_ALLOW=pkg@ver[,...]`. Never
-  add an allow entry without that stated reason.
+  add an allow entry without that stated reason. CI reads the
+  list only from the repository variable of the same name, so
+  tell the user to add the same entries there (Settings, then
+  Variables) before pushing, or the `dep-age` job fails.
 
 ### 6. Verify
 

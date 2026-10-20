@@ -12,14 +12,13 @@ pub fn workspace_root() -> PathBuf {
 }
 
 /// This project's settings for the shared `rustbase-xtask`
-/// gates. A derived project changes the name here (and with it
-/// the `<NAME>_DEP_AGE_ALLOW` and `<NAME>_DEP_AGE_STRICT` variables
-/// and the user agent), and
-/// overrides a limit on the returned value, e.g.
-/// `cfg.thresholds.coverage_file = 80.0;`. The canon check's
-/// exemptions are here too: paths canon names that are correct to
-/// be absent, each with its reason. All three exist in the
-/// template and are absent here.
+/// gates. The name "bombyx" gives the `BOMBYX_DEP_AGE_ALLOW` and
+/// `BOMBYX_DEP_AGE_STRICT` variables and the User-Agent the
+/// cooldown check sends to the registry. A limit is overridden on
+/// the returned value, e.g. `cfg.thresholds.coverage_file = 80.0;`.
+/// The canon check's exemptions are here too: paths canon names
+/// that are correct to be absent, each with its reason. All three
+/// exist in the template and are absent here.
 pub fn tasks_config() -> rustbase_xtask::Config {
     let mut cfg =
         rustbase_xtask::Config::for_project("bombyx", workspace_root());
@@ -30,8 +29,8 @@ pub fn tasks_config() -> rustbase_xtask::Config {
              and this project removed it",
         ),
         Exempt::new(
-            "crates/rustbase/",
-            "upstream template paths, quoted for `git show \
+            "crates/rustbase/Cargo.toml",
+            "the template's version file, quoted for `git show \
              template/main:<path>` in /template-sync",
         ),
         Exempt::new(
@@ -48,20 +47,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_canon_exemptions_are_valid_and_cover_the_template_paths() {
+    fn the_canon_exemptions_are_valid_and_name_absent_paths() {
+        // An exemption for a path that now exists would hide a
+        // finding rather than excuse a correct absence.
         let rules = tasks_config().canon;
         assert_eq!(rules.validate(), Ok(()));
-        let paths: Vec<&str> = rules
-            .absent_on_purpose
-            .iter()
-            .map(|e| e.path.as_str())
-            .collect();
-        for p in [
-            "scripts/e2e.sh",
-            "crates/rustbase/",
-            "docs/developer/backfeed-ledger.toml",
-        ] {
-            assert!(paths.contains(&p), "{p} not exempt: {paths:?}");
+        for e in &rules.absent_on_purpose {
+            assert!(
+                !workspace_root().join(&e.path).exists(),
+                "{} exists; drop its exemption",
+                e.path
+            );
         }
     }
 

@@ -47,8 +47,13 @@ run prints:
    every file under `scripts/` that starts with `#!` must be
    staged as mode `100755`, so it runs by bare path; a file with
    no shebang is exempt
-6. **Code duplication <= 6%** (production code, tests excluded)
-7. **No warnings**: `cargo clippy --all-targets -- -D warnings`
+6. **Code duplication <= 6% pooled, <= 12% in any one crate**
+   (production code, tests excluded; each crate is measured
+   alone, so a copy between crates is not counted)
+7. **No warnings**: `cargo clippy --all-targets -- -D warnings`,
+   then `xtask` again with every optional feature off and with
+   each one alone -- so the compiled-out `frontend` and `deploy`
+   modules are linted here, though nothing else builds them
 8. **Documentation builds and every doc link resolves**
    (`cargo xtask doc`) -- see "Doc gate" below
 9. **Licences, bans and sources** (`cargo xtask deny`) -- runs
@@ -58,14 +63,14 @@ run prints:
    is no network here to be down
 10. **`xtask`'s own tests pass** -- this step runs `-p xtask`
    only, which is why the run prints `Test (xtask only)`
-11. **Coverage >= 90% overall and >= 85% per module** -- one
-   file below the per-module floor fails the run even when the
+11. **Coverage >= 90% overall and >= 85% per file** -- one
+   file below the per-file floor fails the run even when the
    workspace figure passes. Both are the `rustbase-xtask`
-   library's defaults (`Config::thresholds`), which
-   `tasks_config()` in `xtask/src/helpers.rs` can override. This
-   is also where the *workspace* tests run, under
-   `llvm-cov --workspace --exclude xtask`, so the same tests are
-   not compiled and run twice
+   library's defaults (`coverage_overall` and `coverage_file` in
+   `Config::thresholds`), which `tasks_config()` in
+   `xtask/src/helpers.rs` can override. This is also where the
+   *workspace* tests run, under `llvm-cov --workspace --exclude
+   xtask`, so the same tests are not compiled and run twice
 12. **Security audit** (RUSTSEC; `cargo xtask audit`) -- a
    positive vulnerability fails; an unreachable advisory DB
    degrades to a warning

@@ -112,12 +112,26 @@ this project.
      without the other.
    - **`xtask/` syncs file by file.** The gates live in the
      `rustbase-xtask` crate, so the template's `xtask/` is
-     only its glue. Take each file as the template has it,
-     except three that are merged: `helpers.rs` (this
-     project's settings), `validate.rs`, and `main.rs`, whose
-     crate doc comment the workspace's `missing_docs` lint
-     requires. A newer library version is a dependency bump
-     in `xtask/Cargo.toml`, under the 14-day cooldown.
+     only its glue. Take each file under `xtask/src` as the
+     template has it -- the frontend and deploy modules too,
+     which stay compiled out, so the bullet below on
+     project-absent machinery does not apply to them. Three
+     files are merged instead:
+     - `xtask/Cargo.toml`: keep the crates.io requirement on
+       `rustbase-xtask` (the template depends on its own copy
+       of the crate by `path`, which does not exist here),
+       bombyx's `default` features (no `frontend`, no
+       `deploy`) and its dependency list.
+     - `helpers.rs`: this project's settings.
+     - `main.rs`: its crate doc comment, which the
+       workspace's `missing_docs` lint requires.
+
+     The template's glue tracks the library on its own
+     `main`, so synced files that do not compile against the
+     pinned version usually need the version
+     `template/main:crates/rustbase-xtask/Cargo.toml` names.
+     That is a dependency bump in `xtask/Cargo.toml`, and
+     waits until the version is past the 14-day cooldown.
    - **Cross-reference declared divergences.** Read
      `docs/developer/template-feedback.md` and parse
      its **Open divergences** section. For each

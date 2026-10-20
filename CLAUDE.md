@@ -88,12 +88,31 @@ repository; the guest clones the project itself.
 | Crate | Purpose |
 |-------|---------|
 | `crates/bombyx` | Core library and CLI binary |
-| `xtask` | Build automation |
+| `xtask` | Build automation: glue calling the `rustbase-xtask` crate |
 
 This is a CLI-only project: the template's optional web
-crate, frontend, E2E suite and deploy subsystem have been
-removed. `/template-sync` will default those paths to
-"skip" on future syncs since they no longer exist locally.
+crate, frontend and E2E suite have been removed, and
+`/template-sync` defaults those paths to "skip" since they no
+longer exist locally.
+
+**The gates live in a library.** Every `cargo xtask` gate is
+code in `rustbase-xtask`, a crates.io dependency of `xtask`
+(`0.1`, pinned in `xtask/Cargo.toml` and `Cargo.lock`), built
+from the rustbase template's library crate. Its source
+is on docs.rs and under `~/.cargo/registry/src/` after a build;
+`xtask/src` holds only the glue and this project's settings.
+
+**Optional xtask features.** `xtask` comes from the template
+with its optional command groups, each a Cargo feature in
+`xtask/Cargo.toml`. `template-tools` and `clean-cache` are on.
+`frontend` (the npm gates) and `deploy` (`deploy`,
+`deploy-setup`) are off: their modules are in `xtask/src` so
+the template's files sync unchanged, but they are written for
+the template's web crate. They are left out of the build, the
+tests and `validate` -- except `cargo xtask clippy`, which also
+lints `xtask` with every feature off and with each one alone,
+so a lint in one of those modules is a real failure. Do not
+turn them on.
 
 ## Build Commands
 
@@ -109,13 +128,14 @@ cargo xtask coverage          # coverage only (>=90%)
 cargo xtask fmt               # format code
 cargo xtask canon-check       # canon prose claims vs the tree
 cargo xtask records-check     # record files' ids and cross-refs
+cargo xtask scripts-check     # scripts/ files with a shebang staged executable
 cargo xtask dupes             # code duplication check
 cargo xtask audit             # security-advisory audit (RUSTSEC)
 cargo xtask deny              # licence/bans/sources gate (cargo-deny, offline)
 cargo xtask licenses [--out P] [--target T] [--max-missing N]
 cargo xtask dep-age cargo <pkg> [ver]  # one package's publish age
 cargo xtask dep-age cargo <pkg> --latest-aged  # newest ver past cooldown
-cargo xtask dep-age-check     # cooldown-gate changed deps (vs HEAD)
+cargo xtask dep-age-check [--base <ref>]  # cooldown-gate changed deps (vs HEAD or --base)
 cargo xtask dep-preflight     # pin changed deps past cooldown pre-build
 cargo xtask backfeed-diff <ds-path>      # downstream feedback since watermark
 cargo xtask backfeed-record <ds-path> --watermark <date>  # advance watermark
@@ -124,6 +144,7 @@ cargo xtask sync-candidates <last-synced>  # categorized sync delta, filtered
 cargo xtask changelog add --kind <k> [--breaking] "text"  # insert [Unreleased] bullet
 cargo xtask todo <list|add|done> ...       # mechanical docs/todo.md edits
 cargo xtask version-sync   # sync docs version sentinels from Cargo.toml (run by /release)
+cargo xtask clean-cache    # empty target/*/incremental/, keep the dirs
 ```
 
 Never use raw `cargo test` or `cargo clippy` -- always
@@ -171,10 +192,10 @@ Machine-level assumptions, so the assistant does not reach
 for tools that are not present:
 
 - **Node / npm / Playwright are not used.** This is a
-  CLI-only project; the frontend and E2E suite were removed
-  along with every piece of tooling that served them. There
-  are no `frontend-*` subcommands and nothing in `xtask` knows
-  about npm. Do not invoke `npm`, `npx` or `playwright`.
+  CLI-only project; the frontend and E2E suite were removed.
+  `xtask`'s `frontend-*` subcommands are compiled out (see
+  **Optional xtask features**). Do not invoke `npm`, `npx` or
+  `playwright`.
 - **`scripts/e2e.sh` does not exist.** The end-to-end check
   for this project is running bombyx against a real VM host
   (Definition of Done item 3), not a script.
@@ -607,20 +628,23 @@ re-runs it alone:
 3. **Canon claims** -- `cargo xtask canon-check`
 4. **Record files** -- `cargo xtask records-check`
 5. **Executable scripts** -- `cargo xtask scripts-check`
-6. **Code duplication (<= 6%)** -- `cargo xtask dupes`
+6. **Code duplication** (<= 6% pooled, <= 12% in any one
+   crate) -- `cargo xtask dupes`
 7. **No warnings** -- `cargo xtask clippy`
 8. **Docs build and doc links resolve** -- `cargo xtask doc`
 9. **Licences, bans and sources** -- `cargo xtask deny`
 10. **`xtask`'s own tests** -- runs `-p xtask`; the run prints
     `Test (xtask only)`
-11. **Coverage** (>= 90% overall, >= 85% per module) --
+11. **Coverage** (>= 90% overall, >= 85% per file) --
     `cargo xtask coverage`; this step also runs the workspace
     tests
 12. **Security audit** (RUSTSEC) -- `cargo xtask audit`
 
 The gates come from the `rustbase-xtask` library, which also
 fixes their order; `xtask/src/helpers.rs` holds this project's
-settings for them (`tasks_config()`).
+settings for them (`tasks_config()`), where a limit is
+overridden through `Config::thresholds` (`coverage_overall`,
+`coverage_file`, `dupes_workspace`, `dupes_crate`).
 
 **Dep-age, Deny and Audit are the supply-chain three** -- refer
 to them by name, not number, so a list and a run order that
@@ -819,7 +843,7 @@ file is not a wrapper.
 ## Long-running scripts
 
 For any script that runs more than ~30 seconds
-(`scripts/e2e.sh`, dogfood/deploy helpers):
+(a dogfood helper, a long build or test run):
 
 - **Author side** -- tee stdout to `target/<name>.log` so the
   output is durable (a captured caller, CI, or a closed terminal
@@ -828,7 +852,11 @@ For any script that runs more than ~30 seconds
   in the `EXIT` trap -- bash does not synchronize with `>(...)`
   process substitution on exit, so the trailing trap output
   (often the most important lines) is silently truncated without
-  the wait.
+  the wait. `cargo xtask validate` needs none of this: it
+  writes its step lines and any failure to
+  `target/validate.log` itself, rewritten each run, and refuses
+  a second `validate` in the same checkout while the first
+  holds that log.
 - **Caller side** -- **never pipe a long-running command through
   `tail -N` under a tight timeout.** `tail -N` says "give me the
   end"; the timeout says "there will be no end" -- it buffers
