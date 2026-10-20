@@ -852,7 +852,10 @@ For any script that runs more than ~30 seconds
   **Re-test a guest-script change with `provision`, not `up`.**
   Vagrant marks a VM provisioned even when its provisioning
   failed, so `up` on an existing VM boots it and skips the
-  scripts.
+  scripts. Check a hand-written config with
+  `bombyx list --offline --config <file>` first: it parses the
+  file in a second, where a bad one fails a background `up` only
+  after the notification round-trip.
 
   **Wrap each such run in `timeout`**, sized from the box's
   measured first boot, because a provisioner that hangs sends no
