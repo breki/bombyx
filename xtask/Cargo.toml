@@ -3,22 +3,43 @@ name = "xtask"
 version = "0.1.0"
 edition = "2024"
 publish = false
-# Build tooling, never published, but stating it keeps the licence
-# gate from having to make an exception for our own code.
+# Set even though `publish = false`: the `deny` licence gate does
+# not exempt unpublished crates (see the note in `deny.toml`), so an
+# unlicensed workspace member fails it. One line here is cheaper than
+# an exemption.
 license = "MIT"
 
 [lints]
 workspace = true
 
+# Optional command groups. A project that has no use for one drops
+# it from `default` -- no code edits. `cargo xtask clippy` lints
+# every feature off and each one alone, so a dropped group leaves
+# no dead code behind. See "Optional xtask features" in CLAUDE.md.
+[features]
+default = ["template-tools", "clean-cache"]
+# The four `frontend-*` gates and subcommands (Prettier, svelte-check,
+# jscpd, vitest).
+frontend = []
+# `deploy` and `deploy-setup`.
+deploy = []
+# The commands behind `/template-sync`, `/template-improve` and
+# `/template-backfeed`: `sync-candidates`, `feedback-add`,
+# `backfeed-diff`, `backfeed-record`. A derived project keeps it
+# to go on syncing and logging feedback.
+template-tools = []
+# `clean-cache`.
+clean-cache = ["dep:windows-sys"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rustbase-xtask = { version = "0.1", features = ["clap"] }
 
 # Used only for the canonical
 # `FILE_ATTRIBUTE_REPARSE_POINT` constant in
-# `clean_cache::is_reparse_or_symlink` -- pulling the
+# `clean_cache::is_reparse_or_symlink_meta` -- pulling the
 # value from windows-sys avoids a hand-typed Win32
 # magic number diverging from the OS header.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"], optional = true }

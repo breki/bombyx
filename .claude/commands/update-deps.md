@@ -87,7 +87,7 @@ brand-new major), **do not** silently drop it:
 - Adopt a still-fresh version **only** with an explicit,
   user-stated justification (or a security fix). When the
   user approves, record it in the commit and pass it through
-  the gate via `RUSTBASE_DEP_AGE_ALLOW=pkg@ver[,...]`. Never
+  the gate via `BOMBYX_DEP_AGE_ALLOW=pkg@ver[,...]`. Never
   add an allow entry without that stated reason.
 
 ### 6. Verify

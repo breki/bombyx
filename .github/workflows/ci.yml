@@ -53,6 +53,43 @@ jobs:
       - name: Test
         run: cargo xtask test
 
+  # The 14-day dependency cooldown (see "Supply-chain hygiene" in
+  # CLAUDE.md). `dep-age-check` diffs the lockfiles against a base
+  # commit; in CI the checkout *is* HEAD, so the base must be the
+  # commit this push or pull request started from, or the check
+  # sees no change. The standalone command fails, rather than
+  # warns, when the registry is unreachable or the base is missing.
+  dep-age:
+    name: Dependency cooldown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the base commit must be present
+
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # A pull request is checked out as a merge commit, so diffing
+      # against the base branch's commit gives exactly the PR's
+      # changes. A push diffs against the previous tip; a new
+      # branch (all-zero `before`) or `workflow_call` falls back to
+      # the parent. Values go through `env`, never into the script.
+      - name: Cooldown on changed dependencies
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          # Maintainer-set repository variable; a pull request
+          # cannot approve its own fresh dependency.
+          BOMBYX_DEP_AGE_ALLOW: ${{ vars.BOMBYX_DEP_AGE_ALLOW }}
+        run: |
+          base="${PR_BASE:-$PUSH_BEFORE}"
+          case "$base" in
+            ""|0000000000000000000000000000000000000000) base="HEAD^" ;;
+          esac
+          echo "Diffing lockfiles against $base"
+          cargo xtask dep-age-check --base "$base"
+
   fmt:
     name: Format
     runs-on: ubuntu-latest

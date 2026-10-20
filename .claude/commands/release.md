@@ -200,6 +200,9 @@ step for a release to gate.
       the tag is the release, so an unpushed one has
       shipped nothing
 
+    This command has no `git push` grant, deliberately: the
+    operator pushes.
+
     **Name the tag in that line; never the all-tags
     form.** Pushing every local tag at once is what this
     warns against, and a local tag is not always one this

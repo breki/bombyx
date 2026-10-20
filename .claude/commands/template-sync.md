@@ -110,6 +110,14 @@ this project.
      command rework and its backing `xtask` subcommand as
      **coupled** -- apply or skip them together, never one
      without the other.
+   - **`xtask/` syncs file by file.** The gates live in the
+     `rustbase-xtask` crate, so the template's `xtask/` is
+     only its glue. Take each file as the template has it,
+     except three that are merged: `helpers.rs` (this
+     project's settings), `validate.rs`, and `main.rs`, whose
+     crate doc comment the workspace's `missing_docs` lint
+     requires. A newer library version is a dependency bump
+     in `xtask/Cargo.toml`, under the 14-day cooldown.
    - **Cross-reference declared divergences.** Read
      `docs/developer/template-feedback.md` and parse
      its **Open divergences** section. For each

@@ -25,9 +25,13 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::helpers::{
-    BACKFEED_LEDGER_REL, FEEDBACK_REL, is_fence, today_iso, workspace_root,
-};
+use rustbase_xtask::text::is_iso_date;
+
+use crate::feedback::{FEEDBACK_REL, is_fence, today_iso};
+use crate::helpers::workspace_root;
+
+/// Repo-relative path of the machine-owned backfeed ledger.
+pub const BACKFEED_LEDGER_REL: &str = "docs/developer/backfeed-ledger.toml";
 
 /// Canonical header re-emitted on every ledger rewrite so the
 /// machine-owned file stays self-documenting.
@@ -173,32 +177,12 @@ fn unquote(s: &str) -> String {
         .to_string()
 }
 
-// The two ISO-date helpers below are consumed only by backfeed
-// (watermark validation + reading dates out of feedback
-// headers), so they live here rather than in `helpers`. That
-// keeps a downstream that adopts only the sync/feedback half --
-// and deletes this template-repo-only `backfeed` module -- from
-// tripping `warnings = deny` on now-dead helper code.
-
-/// True when `s` is a well-formed ISO `YYYY-MM-DD` date:
-/// exactly ten chars, `dddd-dd-dd`, with month `01..=12` and
-/// day `01..=31`. A shallow calendar check -- it does not
-/// reject Feb 30 -- which is enough for lexical watermark
-/// comparison (ISO dates sort lexically iff well-formed).
-fn is_iso_date(s: &str) -> bool {
-    let b = s.as_bytes();
-    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
-        return false;
-    }
-    let digits = |r: &[u8]| r.iter().all(u8::is_ascii_digit);
-    if !digits(&b[0..4]) || !digits(&b[5..7]) || !digits(&b[8..10]) {
-        return false;
-    }
-    let two = |a: u8, c: u8| (a - b'0') * 10 + (c - b'0');
-    let month = two(b[5], b[6]);
-    let day = two(b[8], b[9]);
-    (1..=12).contains(&month) && (1..=31).contains(&day)
-}
+// The ISO-date extraction below is consumed only by backfeed
+// (reading dates out of feedback headers), so it lives here
+// rather than in `helpers`. That keeps a downstream that adopts
+// only the sync/feedback half -- and deletes this
+// template-repo-only `backfeed` module -- from tripping
+// `warnings = deny` on now-dead helper code.
 
 /// Extract the first well-formed ISO `YYYY-MM-DD` date embedded
 /// anywhere in `line`, or `None`. Used to read the date out of
@@ -218,11 +202,15 @@ fn extract_iso_date(line: &str) -> Option<String> {
 }
 
 /// The markdown heading level (1..=3) of `line` when it is a
-/// section/entry header (`# `, `## `, or `### ` after trimming
-/// leading whitespace), else `None`. Level 4+ headers stay in
-/// an entry body rather than acting as block boundaries.
+/// section/entry header (`# `, `## `, or `### ` after up to three
+/// leading spaces, as in CommonMark), else `None`. Level 4+
+/// headers stay in an entry body rather than acting as block
+/// boundaries, and so does an indented code sample.
 fn hash_level(line: &str) -> Option<usize> {
-    let t = line.trim_start();
+    let t = line.trim_start_matches(' ');
+    if line.len() - t.len() > 3 || t.starts_with('\t') {
+        return None;
+    }
     let hashes = t.bytes().take_while(|&c| c == b'#').count();
     if (1..=3).contains(&hashes) && t.as_bytes().get(hashes) == Some(&b' ') {
         Some(hashes)
@@ -235,7 +223,7 @@ fn hash_level(line: &str) -> Option<usize> {
 /// blocks masked out: a line inside a ```` ``` ````/`~~~` fence
 /// (and the fence lines themselves) yields `None`, so a `###`
 /// that is really a code sample in an entry body is not
-/// mistaken for a new entry.
+/// mistaken for a new entry (RT-4).
 fn boundary_levels(lines: &[&str]) -> Vec<Option<usize>> {
     let mut in_fence = false;
     lines
@@ -334,7 +322,7 @@ fn downstream_name(path: &str, name_override: Option<&str>) -> String {
 /// A plausible git object id: 7..=64 lowercase/uppercase hex
 /// chars (SHA-1 or SHA-256, possibly abbreviated). Used to
 /// reject anything that is not a commit id before it is
-/// recorded to the committed ledger.
+/// recorded to the committed ledger (RT-2).
 fn is_hex_sha(s: &str) -> bool {
     (7..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -349,7 +337,7 @@ fn is_hex_sha(s: &str) -> bool {
 /// component so a hostile downstream `.git/HEAD` cannot make
 /// this read an arbitrary file via path traversal, and the
 /// resolved value must look like a git object id before it is
-/// accepted -- otherwise the traversed file's first
+/// accepted (RT-2) -- otherwise the traversed file's first
 /// line would be written verbatim into the committed ledger.
 fn read_git_head(ds_path: &str) -> Option<String> {
     let git = Path::new(ds_path).join(".git");
@@ -562,6 +550,11 @@ last-run = \"2026-07-16\"
         assert_eq!(hash_level("#### Sub"), None); // body, not a boundary
         assert_eq!(hash_level("no hash"), None);
         assert_eq!(hash_level("###no-space"), None);
+        // Up to three leading spaces still make a header; four or
+        // a tab make an indented code sample in an entry body.
+        assert_eq!(hash_level("   ### Entry"), Some(3));
+        assert_eq!(hash_level("    ### Fixed"), None);
+        assert_eq!(hash_level("\t### Fixed"), None);
     }
 
     const SAMPLE: &str = "\
@@ -642,7 +635,7 @@ Body of older.
     #[test]
     fn entry_blocks_ignores_headers_inside_code_fences() {
         // A `###` line inside a fenced code sample in an entry
-        // body must not split off a spurious entry.
+        // body must not split off a spurious entry (RT-4).
         let md = "\
 ## Open divergences
 
@@ -714,18 +707,6 @@ Back to prose.
     }
 
     #[test]
-    fn is_iso_date_accepts_valid_and_rejects_junk() {
-        assert!(is_iso_date("2026-07-16"));
-        assert!(is_iso_date("1999-12-31"));
-        assert!(!is_iso_date("2026-13-01")); // month 13
-        assert!(!is_iso_date("2026-07-32")); // day 32
-        assert!(!is_iso_date("2026-7-16")); // not zero-padded
-        assert!(!is_iso_date("2026/07/16")); // wrong separator
-        assert!(!is_iso_date("not a date"));
-        assert!(!is_iso_date("2026-07-16 "));
-    }
-
-    #[test]
     fn extract_iso_date_finds_embedded_date() {
         assert_eq!(
             extract_iso_date("### 2026-07-16 -- some title"),
@@ -742,7 +723,7 @@ Back to prose.
     #[test]
     fn extract_iso_date_handles_non_ascii_without_panic() {
         // Multibyte chars before/around the window must not
-        // panic on a non-char-boundary slice.
+        // panic on a non-char-boundary slice (RT-1).
         assert_eq!(extract_iso_date("### Café UI regression"), None);
         assert_eq!(
             extract_iso_date("### café then 2026-07-16"),

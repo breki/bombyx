@@ -2,61 +2,59 @@
 //! runs from here, so a gate is a Rust function with tests
 //! rather than a script that has to be written twice.
 
-mod audit;
+// The `#[cfg(feature)]` groups are the optional command groups
+// declared in `Cargo.toml`.
+#[cfg(feature = "template-tools")]
 mod backfeed;
-mod canon;
-mod changelog;
-mod check;
+#[cfg(feature = "clean-cache")]
 mod clean_cache;
-mod clippy_cmd;
-mod coverage;
-mod deny;
-mod dep_age;
-mod doc_cmd;
-mod dupes;
+#[cfg(feature = "deploy")]
+mod deploy;
+#[cfg(feature = "deploy")]
+mod deploy_config;
+#[cfg(feature = "deploy")]
+mod deploy_guard;
+#[cfg(feature = "deploy")]
+mod deploy_remote;
+#[cfg(feature = "deploy")]
+mod deploy_setup;
+#[cfg(feature = "template-tools")]
 mod feedback;
-mod fmt_cmd;
+#[cfg(feature = "frontend")]
+mod frontend;
+#[cfg(feature = "frontend")]
+mod frontend_check;
+#[cfg(feature = "frontend")]
+mod frontend_dupes;
+#[cfg(feature = "frontend")]
+mod frontend_fmt;
+#[cfg(feature = "frontend")]
+mod frontend_test;
 mod helpers;
-mod licenses;
-mod records;
+#[cfg(feature = "template-tools")]
 mod sync;
-mod test_cmd;
-mod todo;
 mod validate;
-mod version_sync;
 
 use clap::{Parser, Subcommand};
+use rustbase_xtask::cli::{self, LibCommand};
 
+use helpers::tasks_config;
+
+// No description: clap would otherwise print the doc comment of a
+// command enum, the library's included, as one.
 #[derive(Parser)]
-#[command(name = "xtask")]
+#[command(name = "xtask", about = None, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: XCommand,
 }
 
+/// The library's subcommands, then this project's own.
 #[derive(Subcommand)]
 enum XCommand {
-    /// Type-check all targets without running tests
-    Check,
-    /// Run clippy (deny warnings)
-    Clippy,
-    /// Check doc comments build and every doc link resolves
-    Doc,
-    /// Run all tests
-    Test {
-        /// Optional test filter
-        filter: Option<String>,
-        /// Show raw cargo test output
-        #[arg(long)]
-        verbose: bool,
-        /// Run `#[ignore]`-tagged tests (e.g. manual
-        /// tools). Off by default; not run by
-        /// `validate`.
-        #[arg(long)]
-        ignored: bool,
-    },
-    /// Run every quality gate in order (see `CLAUDE.md`
-    /// under Definition of Done)
+    #[command(flatten)]
+    Lib(LibCommand),
+    /// Run fmt + clippy + tests + coverage + duplication
     Validate {
         /// Check formatting read-only (`fmt --check`)
         /// instead of auto-fixing it in place. Use in CI
@@ -64,70 +62,42 @@ enum XCommand {
         #[arg(long)]
         check: bool,
     },
-    /// Format code
-    Fmt,
-    /// Run coverage check (requires cargo-llvm-cov)
-    Coverage,
-    /// Run code duplication check (requires code-dupes)
-    Dupes,
-    /// Check the claims canon prose makes about this repo:
-    /// cross-references, paths, `git` grants, width, backlog IDs
-    CanonCheck,
-    /// Check the record files' integrity: duplicate ids, unknown
-    /// field labels, malformed heading ids, and dangling
-    /// `Depends on` / `Supersedes` cross-references
-    RecordsCheck,
-    /// Rewrite the docs' `<!-- version: X -->` sentinels and their
-    /// `VERSION=` lines from `crates/bombyx/Cargo.toml` (run by
-    /// `/release`)
-    VersionSync,
-    /// Security-advisory audit (RUSTSEC); requires
-    /// cargo-audit
-    Audit,
-    /// Licence, bans and sources gate (cargo-deny); offline
-    Deny,
-    /// Generate THIRD-PARTY-LICENSES from the dependency tree
-    Licenses {
-        /// Where to write it (default: THIRD-PARTY-LICENSES)
+    /// Type-check the frontend (svelte-check); skips
+    /// cleanly when there is no frontend
+    #[cfg(feature = "frontend")]
+    FrontendCheck,
+    /// Format the frontend with Prettier; skips cleanly
+    /// when there is no frontend
+    #[cfg(feature = "frontend")]
+    FrontendFmt {
+        /// Check formatting read-only instead of
+        /// auto-fixing in place
         #[arg(long)]
-        out: Option<std::path::PathBuf>,
-        /// Target triple to attribute for (default: this host)
-        #[arg(long)]
-        target: Option<String>,
-        /// Crates allowed to ship no licence text
-        #[arg(long, default_value_t = 0)]
-        max_missing: usize,
+        check: bool,
     },
-    /// Report a dependency version's age and flag it if
-    /// within the publish cooldown (on-demand; requires curl)
-    DepAge {
-        /// Registry to query
-        #[arg(value_enum)]
-        ecosystem: dep_age::Ecosystem,
-        /// Package name
-        package: String,
-        /// Version to check (default: latest)
-        version: Option<String>,
-        /// Instead of checking a version's age, print the
-        /// newest version published before the cooldown (the
-        /// pin target for `/update-deps`). Ignores `version`.
-        #[arg(long)]
-        latest_aged: bool,
-    },
-    /// Cooldown-check only the dependencies added or bumped in
-    /// the working tree versus HEAD (the changed-deps gate that
-    /// `validate` runs; requires curl + git)
-    DepAgeCheck,
-    /// Pin any changed Rust dependency still within the cooldown
-    /// down to its newest aged version, before compiling
-    /// (front-door remediation; requires curl + git + cargo)
-    DepPreflight,
+    /// Check frontend code duplication (requires jscpd);
+    /// skips cleanly when there is no frontend
+    #[cfg(feature = "frontend")]
+    FrontendDupes,
+    /// Run the frontend unit suite (vitest); skips cleanly
+    /// when there is no frontend
+    #[cfg(feature = "frontend")]
+    FrontendTest,
+    /// Deploy to a remote Linux host (build frontend, sync,
+    /// build on remote, restart service)
+    #[cfg(feature = "deploy")]
+    Deploy,
+    /// One-time remote provisioning (user, dirs, service)
+    #[cfg(feature = "deploy")]
+    DeploySetup,
     /// Empty `target/{debug,release}/incremental/` while
     /// keeping the dirs themselves (manual invocation only)
+    #[cfg(feature = "clean-cache")]
     CleanCache,
     /// Print a downstream's template-feedback entries on or
     /// after its backfeed-ledger watermark (the `/template-
     /// backfeed` delta; requires the downstream path)
+    #[cfg(feature = "template-tools")]
     BackfeedDiff {
         /// Path to the downstream rustbase-derived project
         downstream_path: String,
@@ -139,6 +109,7 @@ enum XCommand {
     },
     /// Advance the backfeed-ledger watermark for a downstream
     /// after evaluating a batch of its feedback
+    #[cfg(feature = "template-tools")]
     BackfeedRecord {
         /// Path to the downstream rustbase-derived project
         downstream_path: String,
@@ -157,6 +128,7 @@ enum XCommand {
     /// Append an entry to `docs/developer/template-feedback.md`
     /// with a minted `tf-<date>-<slug>` ID (body from
     /// `--body-file` or stdin)
+    #[cfg(feature = "template-tools")]
     FeedbackAdd {
         /// Which lifecycle section to add the entry to
         #[arg(long, value_enum)]
@@ -171,21 +143,10 @@ enum XCommand {
     /// Print the categorized `/template-sync` file delta from
     /// `<last-synced>` to `template/main`, minus the never-sync
     /// bookkeeping set (requires git + a fetched `template/main`)
+    #[cfg(feature = "template-tools")]
     SyncCandidates {
         /// The `last-synced` SHA from `.template-sync.toml`
         last_synced: String,
-    },
-    /// Mechanically edit `CHANGELOG.md` (used by `/commit`) --
-    /// insert a bullet under the right `[Unreleased]` subsection
-    Changelog {
-        #[command(subcommand)]
-        action: changelog::ChangelogAction,
-    },
-    /// Mechanically read/edit `docs/todo.md` (used by `/todo` and
-    /// `/implement`) -- list, add, or complete a captured item
-    Todo {
-        #[command(subcommand)]
-        action: todo::TodoAction,
     },
 }
 
@@ -193,51 +154,30 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        XCommand::Check => check::check(),
-        XCommand::Clippy => clippy_cmd::clippy(),
-        XCommand::Doc => doc_cmd::doc(),
-        XCommand::Test {
-            filter,
-            verbose,
-            ignored,
-        } => test_cmd::test(test_cmd::TestOptions {
-            filter: filter.as_deref(),
-            verbose,
-            ignored,
-        }),
+        XCommand::Lib(cmd) => cli::run(cmd, &tasks_config()),
         XCommand::Validate { check } => validate::validate(check),
-        XCommand::Fmt => fmt_cmd::fmt(),
-        XCommand::Coverage => coverage::coverage(),
-        XCommand::Dupes => dupes::dupes(),
-        XCommand::CanonCheck => canon::canon_check(),
-        XCommand::RecordsCheck => records::records_check(),
-        XCommand::VersionSync => version_sync::version_sync(),
-        XCommand::Audit => audit::audit(),
-        XCommand::Deny => deny::deny(),
-        XCommand::Licenses {
-            out,
-            target,
-            max_missing,
-        } => licenses::licenses(out.as_deref(), target.as_deref(), max_missing),
-        XCommand::DepAge {
-            ecosystem,
-            package,
-            version,
-            latest_aged,
-        } => {
-            if latest_aged {
-                dep_age::dep_age_latest(ecosystem, &package)
-            } else {
-                dep_age::dep_age(ecosystem, &package, version.as_deref())
-            }
+        #[cfg(feature = "frontend")]
+        XCommand::FrontendCheck => frontend_check::frontend_check_cmd(),
+        #[cfg(feature = "frontend")]
+        XCommand::FrontendFmt { check } => {
+            frontend_fmt::frontend_fmt_cmd(check)
         }
-        XCommand::DepAgeCheck => dep_age::dep_age_check(),
-        XCommand::DepPreflight => dep_age::dep_preflight(),
+        #[cfg(feature = "frontend")]
+        XCommand::FrontendDupes => frontend_dupes::frontend_dupes_cmd(),
+        #[cfg(feature = "frontend")]
+        XCommand::FrontendTest => frontend_test::frontend_test_cmd(),
+        #[cfg(feature = "deploy")]
+        XCommand::Deploy => deploy::deploy(),
+        #[cfg(feature = "deploy")]
+        XCommand::DeploySetup => deploy_setup::deploy_setup(),
+        #[cfg(feature = "clean-cache")]
         XCommand::CleanCache => clean_cache::clean_cache(),
+        #[cfg(feature = "template-tools")]
         XCommand::BackfeedDiff {
             downstream_path,
             name,
         } => backfeed::backfeed_diff(&downstream_path, name.as_deref()),
+        #[cfg(feature = "template-tools")]
         XCommand::BackfeedRecord {
             downstream_path,
             watermark,
@@ -249,20 +189,26 @@ fn main() {
             head.as_deref(),
             name.as_deref(),
         ),
+        #[cfg(feature = "template-tools")]
         XCommand::FeedbackAdd {
             section,
             title,
             body_file,
         } => feedback::feedback_add(section, &title, body_file.as_deref()),
+        #[cfg(feature = "template-tools")]
         XCommand::SyncCandidates { last_synced } => {
             sync::sync_candidates(&last_synced)
         }
-        XCommand::Changelog { action } => changelog::changelog(action),
-        XCommand::Todo { action } => todo::todo(action),
     };
 
     if let Err(e) = result {
-        eprintln!("xtask error: {e}");
+        eprintln!("{}", error_line(&e));
         std::process::exit(1);
     }
+}
+
+/// The line a failed command ends with, which `validate` also writes
+/// to its log.
+fn error_line(e: &str) -> String {
+    format!("xtask error: {e}")
 }

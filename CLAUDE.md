@@ -597,7 +597,7 @@ just when the code compiles:
    does not replace reading your own diff either way.
 5. **`cargo xtask validate`** passes (the umbrella gate).
 
-`cargo xtask validate` runs eleven gates, in this order (the
+`cargo xtask validate` runs twelve gates, in this order (the
 numbers match what the run prints), each with the command that
 re-runs it alone:
 
@@ -606,16 +606,21 @@ re-runs it alone:
    pass `validate --check` for the read-only form)
 3. **Canon claims** -- `cargo xtask canon-check`
 4. **Record files** -- `cargo xtask records-check`
-5. **Code duplication (<= 6%)** -- `cargo xtask dupes`
-6. **Licences, bans and sources** -- `cargo xtask deny`
+5. **Executable scripts** -- `cargo xtask scripts-check`
+6. **Code duplication (<= 6%)** -- `cargo xtask dupes`
 7. **No warnings** -- `cargo xtask clippy`
 8. **Docs build and doc links resolve** -- `cargo xtask doc`
-9. **`xtask`'s own tests** -- runs `-p xtask`; the run prints
-   `Test (xtask only)`
-10. **Coverage** (>= 90% overall, >= 85% per module) --
+9. **Licences, bans and sources** -- `cargo xtask deny`
+10. **`xtask`'s own tests** -- runs `-p xtask`; the run prints
+    `Test (xtask only)`
+11. **Coverage** (>= 90% overall, >= 85% per module) --
     `cargo xtask coverage`; this step also runs the workspace
     tests
-11. **Security audit** (RUSTSEC) -- `cargo xtask audit`
+12. **Security audit** (RUSTSEC) -- `cargo xtask audit`
+
+The gates come from the `rustbase-xtask` library, which also
+fixes their order; `xtask/src/helpers.rs` holds this project's
+settings for them (`tasks_config()`).
 
 **Dep-age, Deny and Audit are the supply-chain three** -- refer
 to them by name, not number, so a list and a run order that
@@ -919,7 +924,7 @@ Hold these rules without opening that file:
   fixes are exempt. Check a candidate with
   `cargo xtask dep-age cargo <crate> <version>`; it exits
   non-zero inside the cooldown. When you adopt a fresh version
-  deliberately, name it in `RUSTBASE_DEP_AGE_ALLOW`
+  deliberately, name it in `BOMBYX_DEP_AGE_ALLOW`
   (`name@version`, comma-separated) so the gate passes and
   leaves a record of what was waved through.
 - **`Validate OK` does not mean the dependencies were audited.**
@@ -932,5 +937,5 @@ Hold these rules without opening that file:
   intended: a bulk update is exactly when a freshly published
   release slips in. Either wait the window out, bulk-approve the
   versions you reviewed by listing them in
-  `RUSTBASE_DEP_AGE_ALLOW`, or prefer `cargo update -p <crate>`
+  `BOMBYX_DEP_AGE_ALLOW`, or prefer `cargo update -p <crate>`
   so the flagged set stays small enough to read.

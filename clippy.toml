@@ -42,6 +42,7 @@ doc-valid-idents = [
     "rustfmt",
     "rustup",
     "Clippy",
+    "CommonMark",
     # bombyx's own domain: the VM host, Vagrant and SSH.
     "HashiCorp",
     "Vagrantfile",

@@ -133,9 +133,15 @@ The other four are about vulnerabilities and freshness:
   adopted and costs nothing -- no network -- on a commit that
   leaves `Cargo.lock` untouched. A *whole-tree* gate is
   deliberately avoided: it would flag every already-locked
-  version on every routine update. Like `audit`, an
-  unreachable registry / missing `HEAD` baseline degrades to a
-  warning, not a hard failure.
+  version on every routine update. Inside `validate`, like
+  `audit`, a check that cannot finish (unreachable registry,
+  missing `HEAD` baseline) degrades to a warning -- unless
+  `BOMBYX_DEP_AGE_STRICT=1` or `CI=true` makes it fail; the
+  standalone command always fails on it. **CI runs the
+  standalone command** (the `dep-age` job in
+  `.github/workflows/ci.yml`) with `--base` set to the commit the
+  pull request or push started from -- in CI the checkout *is*
+  `HEAD`, so diffing against `HEAD` would always pass.
 - **`cargo xtask dep-preflight`** is the *pre-compile* twin of
   `dep-age-check`. Where the gate reports a cooldown breach
   *after* the fact, preflight *remediates* it *before* you
@@ -181,11 +187,14 @@ non-zero when the version is within the cooldown.
 `validate` enforces this automatically for changed deps via
 the `dep-age-check` step above. When you *do* adopt a
 fresh version with justification (or a security fix), name it
-in the **`RUSTBASE_DEP_AGE_ALLOW`** env var
+in the **`BOMBYX_DEP_AGE_ALLOW`** env var
 (`name@version`, comma-separated) so the gate passes while
 leaving an auditable record of what was waved through --
-e.g. `RUSTBASE_DEP_AGE_ALLOW=serde@1.0.999 cargo xtask
-validate`.
+e.g. `BOMBYX_DEP_AGE_ALLOW=serde@1.0.999 cargo xtask
+validate`. In CI the same list comes from the repository
+variable `BOMBYX_DEP_AGE_ALLOW` (Settings, then Variables),
+which only a maintainer can set, so a pull request cannot wave
+through its own fresh dependency.
 
 **`cargo update` interaction.** The gate checks *every*
 newly-locked registry dependency, **transitive ones included**
@@ -199,7 +208,7 @@ compromised) transitive release slips in. The recommended
 workflow: run the update, then either wait out the cooldown
 before committing, or, once you've reviewed the flagged
 versions, bulk-approve them with
-`RUSTBASE_DEP_AGE_ALLOW=a@1.2.3,b@4.5.6,... cargo xtask
+`BOMBYX_DEP_AGE_ALLOW=a@1.2.3,b@4.5.6,... cargo xtask
 validate`. Prefer scoped updates (`cargo update -p <crate>`)
 over a blanket `cargo update` so the flagged set stays small
 and reviewable.
